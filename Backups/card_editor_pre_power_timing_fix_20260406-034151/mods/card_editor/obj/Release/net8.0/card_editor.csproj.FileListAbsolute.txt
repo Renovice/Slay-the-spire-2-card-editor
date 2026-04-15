@@ -1,5 +1,0 @@
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net8.0\card_editor.csproj.AssemblyReference.cache
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net8.0\card_editor.GeneratedMSBuildEditorConfig.editorconfig
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net8.0\card_editor.AssemblyInfoInputs.cache
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net8.0\card_editor.AssemblyInfo.cs
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net8.0\card_editor.csproj.CoreCompileInputs.cache
