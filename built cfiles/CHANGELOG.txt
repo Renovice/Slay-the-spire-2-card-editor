@@ -1,0 +1,19 @@
+Changelog (Card Editor / Creator)
+
+v2.0
+- External localization support: ship/edit `localization/<lang>/extensions.loc` + `settings_ui.loc` next to the mod (no .pck repack needed).
+- Added more Extra Effects (notably Discard / Exhaust / Evoke Orbs).
+- Added true X-cost support (Energy X + Star X).
+- Misc UI/wording/compat fixes.
+
+v1.4
+- Added Presets: Save / Load / Delete + "Revert to Vanilla".
+- Added Extra Effects library (trigger/target/timing/duration) + Scaling option.
+- Added hotkey to quick-open Editor (default F11, remappable).
+- Added Creator: custom card slots + optional custom art loading from a folder next to the mod.
+- Updated packaging to support the new/beta mod loader (manifest .json outside the .pck).
+
+v1.4+ (post-release fixes / improvements)
+- Custom portrait art now renders correctly on created cards (no "BETA" placeholder).
+- Ignore effects fixes: caps/negation behave correctly against common offenders (e.g., Hardened Shell / Buffer).
+- Added Extra Effect: "Ignore Enemy Damage Reductions" (bypasses target-owned damage reduction powers without disabling your Strength/Vigor buffs).

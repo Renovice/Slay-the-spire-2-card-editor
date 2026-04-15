@@ -1,0 +1,18 @@
+Put your custom card portrait images in this folder.
+
+- Supported: .png / .jpg / .jpeg / .webp
+
+NORMAL portrait (Full Art OFF):
+  - Aspect ratio: landscape 4:3 (wider than tall)
+  - Recommended size: 1000x760
+  - Best for: purpose-made card art, square-ish images
+  - Wallpapers / wide images will be heavily cropped
+
+FULL ART (Full Art ON, Ancient card layout):
+  - Aspect ratio: portrait 3:4 (taller than wide)
+  - Recommended size: 760x1000 or taller
+  - Best for: wallpapers and wide images (they fill the whole card face)
+  - Landscape wallpapers will be cropped on the sides
+
+After adding files:
+Creator -> Art dropdown -> pick "Custom: <filename>"

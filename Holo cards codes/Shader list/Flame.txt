@@ -1,0 +1,72 @@
+shader_type canvas_item;
+
+// Flame color gradients from bottom (base) to top (tip)
+uniform vec3 flame_color_base: source_color = vec3(1.0, 0.8, 0.1); 
+uniform vec3 flame_color_mid: source_color = vec3(1.0, 0.3, 0.0);  
+uniform vec3 flame_color_tip: source_color = vec3(0.8, 0.0, 0.0);  
+
+uniform int octave_count: hint_range(1, 20) = 6;
+uniform float amp_start = 0.5;
+uniform float amp_coeff = 0.5;
+uniform float freq_coeff = 2.0;
+uniform float speed = 1.2; // Slightly faster for fire
+
+vec2 hash22(vec2 uv) {
+    uv = vec2(dot(uv, vec2(127.1,311.7)),
+              dot(uv, vec2(269.5,183.3)));
+    return 2.0 * fract(sin(uv) * 43758.5453123) - 1.0;
+}
+
+float noise(vec2 uv) {
+    vec2 iuv = floor(uv);
+    vec2 fuv = fract(uv);
+    vec2 blur = smoothstep(0.0, 1.0, fuv);
+    return mix(mix(dot(hash22(iuv + vec2(0.0,0.0)), fuv - vec2(0.0,0.0)),
+                   dot(hash22(iuv + vec2(1.0,0.0)), fuv - vec2(1.0,0.0)), blur.x),
+               mix(dot(hash22(iuv + vec2(0.0,1.0)), fuv - vec2(0.0,1.0)),
+                   dot(hash22(iuv + vec2(1.0,1.0)), fuv - vec2(1.0,1.0)), blur.x), blur.y) + 0.5;
+}
+
+float fbm(vec2 uv, int octaves) {
+    float value = 0.0;
+    float amplitude = amp_start;
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * noise(uv);
+        uv *= freq_coeff;
+        amplitude *= amp_coeff;
+    }
+    return value;
+}
+
+void fragment() {
+    vec2 uv = UV;
+
+    // Scale the UVs so the noise looks more like vertical licks of flame
+    vec2 scroll_uv = uv * vec2(2.5, 2.0); 
+    
+    // Scroll the UV coordinates upwards over time
+    scroll_uv.y -= TIME * speed;
+
+    // Add a slight horizontal sine wave sway to make it feel "alive"
+    scroll_uv.x += sin(TIME * 1.5 + uv.y * 5.0) * 0.1;
+
+    // Generate the base fractal noise structure
+    float n = fbm(scroll_uv, octave_count);
+
+    // In Godot 2D, UV.y goes from 0.0 (top) to 1.0 (bottom).
+    // We combine the noise with the Y coordinate so the flame is solid at the bottom
+    // and gets eaten away by the noise as it reaches the top.
+    float flame_intensity = (n * 1.5) - (1.0 - uv.y) * 1.2;
+
+    // Clamp to prevent unexpected behavior with smoothstep
+    flame_intensity = clamp(flame_intensity, 0.0, 1.0);
+
+    // Map the colors based on how "intense" the flame is at the current pixel
+    vec3 color = mix(flame_color_tip, flame_color_mid, smoothstep(0.1, 0.5, flame_intensity));
+    color = mix(color, flame_color_base, smoothstep(0.5, 0.9, flame_intensity));
+
+    // Calculate alpha so the dark areas become completely transparent 
+    float alpha = smoothstep(0.0, 0.2, flame_intensity);
+
+    COLOR = vec4(color, alpha);
+}

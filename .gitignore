@@ -1,0 +1,4 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+Slay the spire 2 beta branch SOURCE/

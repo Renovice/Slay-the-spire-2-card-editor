@@ -1,0 +1,664 @@
+using System;
+using HarmonyLib;
+using Godot;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes.Cards;
+
+namespace SlayTheSpire2Mod.CardEditor;
+
+internal static class CardEditorCardFinishResolver
+{
+	public static CardEditorVisualFinish GetDesiredFinish(CardModel? model)
+	{
+		if (model?.Id == null)
+		{
+			return CardEditorVisualFinish.None;
+		}
+
+		if (CardEditorCreatedCardsStore.IsCreatedCardId(model.Id))
+		{
+			return CardEditorCreatedCardsStore.GetFinish(model.Id);
+		}
+
+		if (CardEditorOverrides.SuppressAllOverrides)
+		{
+			return CardEditorVisualFinish.None;
+		}
+
+		if (CardEditorUiState.IsActive && CardEditorUiState.TryGetDraftOverride(model.Id, out CardOverride draftOverride))
+		{
+			return draftOverride.Finish ?? CardEditorVisualFinish.None;
+		}
+
+		return CardEditorOverrides.TryGetEffectiveOverride(model.Id, out CardOverride overrideData)
+			? overrideData.Finish ?? CardEditorVisualFinish.None
+			: CardEditorVisualFinish.None;
+	}
+}
+
+internal sealed class CardEditorRainbowFoilOverlay : Control
+{
+	private const string ShaderCode = @"shader_type canvas_item;
+ render_mode blend_premul_alpha;
+
+ uniform float intensity = 1.0;
+ uniform float lower_fade_start = 0.58;
+ uniform float lower_fade_end = 0.96;
+ uniform float lower_mask_min = 0.2;
+ uniform vec2 rect_size = vec2(300.0, 422.0);
+ uniform float inset_px = 1.0;
+ uniform float corner_radius_px = 30.0;
+ uniform float corner_softness_px = 1.5;
+
+ float sd_round_rect(vec2 p, vec2 half_extents, float radius)
+ {
+ 	vec2 q = abs(p) - half_extents + vec2(radius);
+ 	return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+ }
+
+ float hash(vec2 p)
+ {
+ 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+ }
+
+ vec2 hash2(vec2 p)
+ {
+ 	vec2 q = vec2(
+ 		dot(p, vec2(127.1, 311.7)),
+ 		dot(p, vec2(269.5, 183.3)));
+ 	return -1.0 + 2.0 * fract(sin(q) * 43758.5453123);
+ }
+
+ float noise(vec2 p)
+ {
+ 	vec2 i = floor(p);
+ 	vec2 f = fract(p);
+ 	vec2 u = f * f * (3.0 - 2.0 * f);
+
+ 	float n00 = dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0));
+ 	float n10 = dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+ 	float n01 = dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+ 	float n11 = dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+
+ 	float n = mix(mix(n00, n10, u.x), mix(n01, n11, u.x), u.y);
+ 	return clamp(n * 0.5 + 0.5, 0.0, 1.0);
+ }
+
+ float fbm(vec2 p)
+ {
+ 	float value = 0.0;
+ 	float amplitude = 0.5;
+ 
+ 	for (int i = 0; i < 4; i++)
+ 	{
+ 		float footprint = max(fwidth(p).x, fwidth(p).y);
+ 		float octaveWeight = clamp(1.0 - footprint * 1.75, 0.0, 1.0);
+ 		value += noise(p) * amplitude * octaveWeight;
+ 		p *= 2.03;
+ 		p = vec2(0.80 * p.x - 0.60 * p.y, 0.60 * p.x + 0.80 * p.y) + vec2(17.1, 9.2);
+ 		amplitude *= 0.5;
+ 	}
+ 
+ 	return value;
+ }
+
+	void fragment()
+	{
+		vec2 uv = UV;
+		vec2 safeSize = max(rect_size, vec2(1.0));
+		vec2 inset = vec2(inset_px);
+		vec2 halfSize = (safeSize - inset * 2.0) * 0.5;
+		vec2 local = uv * safeSize - safeSize * 0.5;
+		float signedDistance = sd_round_rect(local, halfSize, corner_radius_px);
+		float cornerAA = max(corner_softness_px, fwidth(signedDistance));
+		float cornerMask = 1.0 - smoothstep(0.0, cornerAA, signedDistance);
+		if (cornerMask <= 0.001)
+		{
+			discard;
+		}
+
+		vec2 centered = uv - vec2(0.5);
+		float t = TIME * 0.33;
+		float diagonal = uv.x * 1.18 + uv.y * 0.82;
+		float sweepPhase = diagonal * 20.0 - t * 7.2;
+		float sweepAA = clamp(1.0 - fwidth(sweepPhase) * 0.35, 0.0, 1.0);
+		float sweepA = sin(sweepPhase) * 0.5 + 0.5;
+		float sweepB = sin((uv.x * -17.0 + uv.y * 13.0) + t * 9.0) * 0.5 + 0.5;
+
+		float mistScale = 7.2;
+		float mistFoot = max(fwidth(uv.x * mistScale), fwidth(uv.y * mistScale));
+		float mistLod = clamp(1.0 - mistFoot * 1.6, 0.0, 1.0);
+		float mist = fbm(uv * mix(4.8, mistScale, mistLod) + vec2(t * 0.18, -t * 0.16));
+
+		float shardScale = 19.0;
+		float shardFoot = max(fwidth(uv.x * shardScale), fwidth(uv.y * shardScale));
+		float shardLod = clamp(1.0 - shardFoot * 1.2, 0.0, 1.0);
+		float shards = fbm(uv * mix(11.0, shardScale, shardLod) + vec2(-t * 0.5, t * 0.38));
+		float crystal = smoothstep(0.56, 0.93, shards + sweepA * 0.34) * mix(0.55, 1.0, shardLod);
+
+		float prismaticLines = pow(smoothstep(0.18, 1.0, sweepA), 3.7) * sweepAA;
+		float centerGlow = 1.0 - smoothstep(0.16, 0.76, length(centered * vec2(1.0, 1.35)));
+		float edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+		float edgeGleam = 1.0 - smoothstep(0.02, 0.14, edgeDistance);
+		float border = smoothstep(0.0, 0.035, uv.x) * smoothstep(0.0, 0.035, uv.y) * smoothstep(0.0, 0.035, 1.0 - uv.x) * smoothstep(0.0, 0.035, 1.0 - uv.y);
+		border = 1.0 - border;
+
+		vec2 sparkleGrid = vec2(120.0, 196.0);
+		vec2 sparkleUv = uv * sparkleGrid;
+		vec2 sparkleCell = floor(sparkleUv);
+		vec2 sparkleFract = fract(sparkleUv);
+		float sparkles = 0.0;
+		for (int y = -1; y <= 1; y++)
+		{
+			for (int x = -1; x <= 1; x++)
+			{
+				vec2 neighbor = vec2(float(x), float(y));
+				vec2 cell = sparkleCell + neighbor;
+				vec2 rnd = vec2(hash(cell), hash(cell + vec2(5.7, 11.3)));
+				vec2 pos = neighbor + rnd - sparkleFract;
+
+				float dist2 = dot(pos, pos);
+				float core = exp(-dist2 * 55.0);
+				float envelope = exp(-dist2 * 14.0);
+
+				float angle = rnd.x * 6.28318;
+				float c = cos(angle);
+				float s = sin(angle);
+				vec2 p = vec2(c * pos.x - s * pos.y, s * pos.x + c * pos.y);
+
+				float rayWidth = 0.05;
+				float invW = 1.0 / max(rayWidth * rayWidth, 0.0001);
+				float rayLen = 7.5;
+				float rayH = exp(-p.y * p.y * invW) * exp(-p.x * p.x * rayLen);
+				float rayV = exp(-p.x * p.x * invW) * exp(-p.y * p.y * rayLen);
+				float rays = max(rayH, rayV) * envelope;
+
+				float shape = clamp(core + rays * 0.85, 0.0, 1.0);
+
+				float pulse = 0.35 + 0.65 * sin(t * 7.0 + hash(cell + vec2(2.1, 9.2)) * 6.28318);
+				float gate = smoothstep(0.84, 1.0, hash(cell + vec2(13.2, 3.4)));
+				float candidate = shape * pulse * gate;
+				sparkles = max(sparkles, candidate);
+			}
+		}
+		sparkles = clamp(pow(sparkles, 0.85) * (0.26 + 0.74 * sweepB), 0.0, 1.0);
+
+		vec3 rainbowA = 0.5 + 0.5 * cos(vec3(0.0, 2.0, 4.0) + (diagonal * 5.2 + mist * 1.4 + t * 1.1) * 6.28318);
+		vec3 rainbowB = 0.5 + 0.5 * cos(vec3(1.15, 3.15, 5.15) + ((uv.y * 4.0 - uv.x * 2.2) + sweepB * 0.55 - t * 0.82) * 6.28318);
+		vec3 rainbow = mix(rainbowA, rainbowB, 0.5 + crystal * 0.25);
+		float lowerMask = 1.0 - smoothstep(lower_fade_start, lower_fade_end, uv.y);
+		lowerMask = mix(lower_mask_min, 1.0, lowerMask);
+ 	float alpha = 0.02;
+ 	alpha += prismaticLines * 0.08;
+ 	alpha += crystal * 0.08;
+ 	alpha += centerGlow * 0.05;
+ 	alpha += edgeGleam * (0.07 + 0.05 * sweepA);
+ 	alpha += border * 0.08;
+		alpha += sparkles * 0.26;
+		alpha *= lowerMask * cornerMask;
+ 		alpha = clamp(alpha * intensity, 0.0, 0.22);
+		vec3 color = rainbow * (0.55 + prismaticLines * 0.55 + crystal * 0.35);
+		color += vec3(1.0, 0.99, 0.95) * sparkles * 1.05;
+		color += rainbowB * edgeGleam * 0.22;
+		color += mix(rainbowA, vec3(1.0, 0.95, 0.85), 0.4) * border * 0.18;
+ 		color = clamp(color, vec3(0.0), vec3(1.05));
+ 		COLOR = vec4(color * alpha, alpha);
+ 	}";
+
+	private static readonly Shader SharedShader = new Shader { Code = ShaderCode };
+	private readonly ShaderMaterial _material;
+	private readonly ColorRect _foilRect;
+	private Vector2 _lastKnownRectSize = Vector2.Zero;
+
+	public CardEditorRainbowFoilOverlay()
+	{
+		Name = "CardEditorFinishOverlay";
+		MouseFilter = MouseFilterEnum.Ignore;
+		LayoutMode = 3;
+		ZIndex = 0;
+		ClipContents = false;
+		_material = new ShaderMaterial { Shader = SharedShader };
+		_material.SetShaderParameter("rect_size", new Vector2(300.0f, 422.0f));
+		_foilRect = new ColorRect
+		{
+			Color = new Color(1, 1, 1, 0),
+			Material = _material,
+			MouseFilter = MouseFilterEnum.Ignore,
+			LayoutMode = 0,
+			OffsetLeft = -150.0f,
+			OffsetTop = -211.0f,
+			OffsetRight = 150.0f,
+			OffsetBottom = 211.0f
+		};
+		AddChild(_foilRect);
+		ApplyStyle(fullArt: false);
+	}
+
+	public override void _Ready()
+	{
+		base._Ready();
+		UpdateRectSize();
+	}
+
+	public override void _Notification(int what)
+	{
+		base._Notification(what);
+
+		if (what == NotificationResized)
+		{
+			UpdateRectSize();
+		}
+	}
+
+	public void ApplyStyle(bool fullArt)
+	{
+		_material.SetShaderParameter("intensity", fullArt ? 1.0f : 0.85f);
+		_material.SetShaderParameter("lower_fade_start", fullArt ? 0.86f : 0.72f);
+		_material.SetShaderParameter("lower_fade_end", fullArt ? 0.998f : 0.92f);
+		_material.SetShaderParameter("lower_mask_min", fullArt ? 0.35f : 0.22f);
+		_material.SetShaderParameter("inset_px", fullArt ? 1.0f : 1.5f);
+		_material.SetShaderParameter("corner_radius_px", 30.0f);
+		_material.SetShaderParameter("corner_softness_px", 1.5f);
+		UpdateRectSize();
+	}
+
+	private void UpdateRectSize()
+	{
+		Vector2 currentSize = Size;
+		if (currentSize.X <= 0.0f || currentSize.Y <= 0.0f)
+		{
+			currentSize = _foilRect.Size;
+		}
+
+		if (currentSize == _lastKnownRectSize || currentSize.X <= 0.0f || currentSize.Y <= 0.0f)
+		{
+			return;
+		}
+
+		_lastKnownRectSize = currentSize;
+		_material.SetShaderParameter("rect_size", currentSize);
+	}
+}
+
+internal static class CardEditorRainbowGlitterArtController
+{
+	private const string ShaderCode = @"shader_type canvas_item;
+
+uniform float strength = 0.95;
+uniform float saturation = 0.60;
+uniform float pastel = 0.35;
+uniform vec2 gradient_dir = vec2(-1.0, -1.0);
+uniform float gradient_scale = 0.82;
+uniform float gradient_offset = 0.52;
+uniform vec2 gradient_warp = vec2(0.03, 0.02);
+uniform float curvature = 0.06;
+uniform float swirl_strength = 0.018;
+uniform vec2 swirl_freq = vec2(0.7, 0.95);
+uniform float swirl_scale = 6.2831853;
+uniform float edge_px = 2.0;
+uniform vec2 edge_smooth = vec2(0.03, 0.12);
+uniform float shadow_strength = 0.90;
+uniform float shadow_gamma = 1.35;
+uniform float dark_value_min = 0.05;
+uniform float outline_strength = 0.85;
+uniform float outline_mul = 0.16;
+uniform float outline_pow = 1.15;
+uniform float grain_strength = 0.045;
+uniform float grain_cell_px = 2.4;
+uniform float grain_contrast = 1.12;
+uniform float speck_strength = 0.055;
+uniform float speck_density = 0.016;
+uniform float speck_cell_px = 5.6;
+uniform float sheen_strength = 0.45;
+uniform vec2 sheen_dir = vec2(-0.75, -1.0);
+uniform float sheen_width = 0.10;
+uniform float sheen_offset = 0.0;
+
+float hash12(vec2 p)
+{
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float value_noise(vec2 x)
+{
+	vec2 i = floor(x);
+	vec2 f = fract(x);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	float a = hash12(i);
+	float b = hash12(i + vec2(1.0, 0.0));
+	float c = hash12(i + vec2(0.0, 1.0));
+	float d = hash12(i + vec2(1.0, 1.0));
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+vec3 hsv2rgb(vec3 c)
+{
+	vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+	vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+	return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void fragment()
+{
+	vec4 tex = texture(TEXTURE, UV);
+	float a = tex.a;
+	if (a <= 0.001)
+	{
+		discard;
+	}
+
+	float luma = dot(tex.rgb, vec3(0.2126, 0.7152, 0.0722));
+	float shadow = pow(clamp(1.0 - luma, 0.0, 1.0), shadow_gamma);
+	float shade = 1.0 - shadow_strength * shadow;
+	shade = max(shade, dark_value_min);
+
+	vec2 dir = normalize(gradient_dir);
+	vec2 warp = vec2(
+		sin((UV.y - 0.5) * 6.2831853) * gradient_warp.x,
+		sin((UV.x - 0.5) * 3.1415926) * gradient_warp.y
+	);
+	vec2 uvw = UV + warp;
+	vec2 p2 = uvw - vec2(0.5);
+	float radial = length(p2);
+	float base = dot(p2, dir) * gradient_scale + gradient_offset;
+	float wobbleA = sin((p2.x * swirl_freq.x + p2.y * swirl_freq.y) * swirl_scale);
+	float wobbleB = sin((p2.x * -swirl_freq.y + p2.y * swirl_freq.x) * (swirl_scale * 0.85));
+	float wobble = (wobbleA + wobbleB * 0.6) * swirl_strength;
+	float t = clamp(base + wobble + (radial * radial) * (curvature * 0.25), 0.0, 1.0);
+	vec3 rainbow = hsv2rgb(vec3(t, saturation, 1.0));
+	rainbow = mix(rainbow, vec3(1.0), pastel);
+	vec3 recolor = rainbow * shade;
+
+	vec2 px = TEXTURE_PIXEL_SIZE * edge_px;
+	float lpx = dot(texture(TEXTURE, UV + vec2(px.x, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+	float lnx = dot(texture(TEXTURE, UV - vec2(px.x, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+	float lpy = dot(texture(TEXTURE, UV + vec2(0.0, px.y)).rgb, vec3(0.2126, 0.7152, 0.0722));
+	float lny = dot(texture(TEXTURE, UV - vec2(0.0, px.y)).rgb, vec3(0.2126, 0.7152, 0.0722));
+	float edge = abs(lpx - lnx) + abs(lpy - lny);
+	edge = smoothstep(edge_smooth.x, edge_smooth.y, edge);
+
+	vec3 outColor = mix(tex.rgb, recolor, strength);
+	float ink = pow(clamp(edge, 0.0, 1.0), outline_pow) * outline_strength;
+	outColor *= mix(vec3(1.0), vec3(outline_mul), ink);
+
+	vec2 pixel = UV / TEXTURE_PIXEL_SIZE;
+	float grain = value_noise(pixel / max(0.5, grain_cell_px)) - 0.5;
+	grain = sign(grain) * pow(abs(grain) * 2.0, grain_contrast) * 0.5;
+	outColor *= 1.0 + grain * grain_strength;
+
+	float speckNoise = value_noise(pixel / max(1.0, speck_cell_px));
+	float speck = smoothstep(1.0 - speck_density, 1.0, speckNoise);
+	outColor += vec3(1.0, 0.99, 0.96) * speck * speck_strength;
+
+	vec2 sdir = normalize(sheen_dir);
+	float sCoord = dot(UV - vec2(0.5), sdir);
+	float sheen = exp(-pow((sCoord - sheen_offset) / max(0.001, sheen_width), 2.0));
+	sheen = pow(sheen, 1.35);
+	outColor += (rainbow * 0.45 + vec3(1.0) * 0.30) * sheen * sheen_strength;
+
+	COLOR = vec4(outColor, a);
+}";
+
+	private static readonly Shader SharedShader = new Shader { Code = ShaderCode };
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> PortraitRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_portrait");
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> AncientPortraitRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_ancientPortrait");
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> TitleBannerRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_banner");
+
+	public static void Sync(NCard card, bool enabled, bool fullArt)
+	{
+		if (card == null)
+		{
+			return;
+		}
+
+		TextureRect? portrait = null;
+		TextureRect? ancientPortrait = null;
+		TextureRect? titleBanner = null;
+		try
+		{
+			portrait = PortraitRef(card);
+			ancientPortrait = AncientPortraitRef(card);
+			titleBanner = TitleBannerRef(card);
+		}
+		catch
+		{
+			return;
+		}
+
+		SyncPortrait(portrait, enabled, fullArt);
+		SyncPortrait(ancientPortrait, enabled, fullArt);
+		SyncTitleBanner(titleBanner, enabled, fullArt);
+	}
+
+	private static void SyncPortrait(TextureRect? portrait, bool enabled, bool fullArt)
+	{
+		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		{
+			return;
+		}
+
+		if (!enabled)
+		{
+			if (portrait.Material is ShaderMaterial existing && existing.Shader == SharedShader)
+			{
+				portrait.Material = null;
+			}
+			return;
+		}
+
+		ShaderMaterial material;
+		if (portrait.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == SharedShader)
+		{
+			material = existingMaterial;
+		}
+		else
+		{
+			material = new ShaderMaterial { Shader = SharedShader };
+			portrait.Material = material;
+		}
+
+		material.SetShaderParameter("strength", fullArt ? 0.96f : 0.94f);
+		material.SetShaderParameter("saturation", fullArt ? 0.60f : 0.55f);
+		material.SetShaderParameter("pastel", fullArt ? 0.35f : 0.40f);
+		material.SetShaderParameter("gradient_dir", fullArt ? new Vector2(-1.0f, -1.0f) : new Vector2(-1.0f, -1.0f));
+		material.SetShaderParameter("gradient_scale", fullArt ? 0.86f : 0.82f);
+		material.SetShaderParameter("gradient_offset", fullArt ? 0.52f : 0.52f);
+		material.SetShaderParameter("gradient_warp", fullArt ? new Vector2(0.028f, 0.018f) : new Vector2(0.025f, 0.016f));
+		material.SetShaderParameter("curvature", fullArt ? 0.07f : 0.06f);
+		material.SetShaderParameter("swirl_strength", fullArt ? 0.02f : 0.018f);
+		material.SetShaderParameter("swirl_freq", fullArt ? new Vector2(0.75f, 1.0f) : new Vector2(0.7f, 0.95f));
+		material.SetShaderParameter("swirl_scale", 6.2831853f);
+		material.SetShaderParameter("edge_px", fullArt ? 2.25f : 2.0f);
+		material.SetShaderParameter("edge_smooth", fullArt ? new Vector2(0.04f, 0.16f) : new Vector2(0.04f, 0.17f));
+		material.SetShaderParameter("shadow_strength", fullArt ? 0.95f : 0.90f);
+		material.SetShaderParameter("shadow_gamma", fullArt ? 1.4f : 1.3f);
+		material.SetShaderParameter("dark_value_min", fullArt ? 0.08f : 0.05f);
+		material.SetShaderParameter("outline_strength", fullArt ? 0.7f : 0.66f);
+		material.SetShaderParameter("outline_mul", fullArt ? 0.26f : 0.28f);
+		material.SetShaderParameter("outline_pow", fullArt ? 1.05f : 1.08f);
+		material.SetShaderParameter("grain_strength", fullArt ? 0.045f : 0.042f);
+		material.SetShaderParameter("grain_cell_px", fullArt ? 2.2f : 2.4f);
+		material.SetShaderParameter("grain_contrast", fullArt ? 1.13f : 1.12f);
+		material.SetShaderParameter("speck_strength", fullArt ? 0.065f : 0.06f);
+		material.SetShaderParameter("speck_density", fullArt ? 0.018f : 0.016f);
+		material.SetShaderParameter("speck_cell_px", fullArt ? 5.2f : 5.6f);
+		material.SetShaderParameter("sheen_strength", fullArt ? 0.50f : 0.45f);
+		material.SetShaderParameter("sheen_dir", fullArt ? new Vector2(-0.8f, -1.0f) : new Vector2(-0.75f, -1.0f));
+		material.SetShaderParameter("sheen_width", fullArt ? 0.095f : 0.10f);
+		material.SetShaderParameter("sheen_offset", fullArt ? -0.01f : 0.0f);
+	}
+
+	private static void SyncTitleBanner(TextureRect? titleBanner, bool enabled, bool fullArt)
+	{
+		if (titleBanner == null || !GodotObject.IsInstanceValid(titleBanner))
+		{
+			return;
+		}
+
+		if (!enabled)
+		{
+			if (titleBanner.Material is ShaderMaterial existing && existing.Shader == SharedShader)
+			{
+				titleBanner.Material = null;
+			}
+			return;
+		}
+
+		ShaderMaterial material;
+		if (titleBanner.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == SharedShader)
+		{
+			material = existingMaterial;
+		}
+		else
+		{
+			material = new ShaderMaterial { Shader = SharedShader };
+			titleBanner.Material = material;
+		}
+
+		material.SetShaderParameter("strength", fullArt ? 0.90f : 0.88f);
+		material.SetShaderParameter("saturation", fullArt ? 0.55f : 0.50f);
+		material.SetShaderParameter("pastel", fullArt ? 0.40f : 0.45f);
+		material.SetShaderParameter("gradient_dir", new Vector2(-1.0f, -1.0f));
+		material.SetShaderParameter("gradient_scale", fullArt ? 0.9f : 0.86f);
+		material.SetShaderParameter("gradient_offset", 0.54f);
+		material.SetShaderParameter("gradient_warp", Vector2.Zero);
+		material.SetShaderParameter("curvature", 0.0f);
+		material.SetShaderParameter("swirl_strength", 0.0f);
+		material.SetShaderParameter("swirl_freq", new Vector2(0.7f, 0.95f));
+		material.SetShaderParameter("swirl_scale", 6.2831853f);
+		material.SetShaderParameter("edge_px", 2.0f);
+		material.SetShaderParameter("edge_smooth", new Vector2(0.04f, 0.17f));
+		material.SetShaderParameter("shadow_strength", 0.0f);
+		material.SetShaderParameter("shadow_gamma", 1.0f);
+		material.SetShaderParameter("dark_value_min", 0.0f);
+		material.SetShaderParameter("outline_strength", 0.0f);
+		material.SetShaderParameter("outline_mul", 1.0f);
+		material.SetShaderParameter("outline_pow", 1.0f);
+		material.SetShaderParameter("grain_strength", fullArt ? 0.016f : 0.014f);
+		material.SetShaderParameter("grain_cell_px", 2.6f);
+		material.SetShaderParameter("grain_contrast", 1.1f);
+		material.SetShaderParameter("speck_strength", fullArt ? 0.02f : 0.018f);
+		material.SetShaderParameter("speck_density", fullArt ? 0.014f : 0.012f);
+		material.SetShaderParameter("speck_cell_px", 7.5f);
+		material.SetShaderParameter("sheen_strength", fullArt ? 0.25f : 0.22f);
+		material.SetShaderParameter("sheen_dir", new Vector2(-0.75f, -1.0f));
+		material.SetShaderParameter("sheen_width", 0.16f);
+		material.SetShaderParameter("sheen_offset", 0.01f);
+	}
+}
+
+internal static class CardEditorCardFinishOverlayController
+{
+	private static readonly AccessTools.FieldRef<NCard, Node> OverlayContainerRef =
+		AccessTools.FieldRefAccess<NCard, Node>("_overlayContainer");
+
+	public static void Sync(NCard card)
+	{
+		if (card == null)
+		{
+			return;
+		}
+
+		CardModel? model = card?.Model;
+		if (model == null)
+		{
+			return;
+		}
+
+		Node? overlayContainer = OverlayContainerRef(card!);
+		if (overlayContainer == null)
+		{
+			return;
+		}
+
+		CardEditorVisualFinish desiredFinish = CardEditorCardFinishResolver.GetDesiredFinish(model);
+		CardEditorRainbowFoilOverlay? overlay = FindOverlay(overlayContainer);
+		bool fullArt = CardEditorFullArtRefresh.ShouldBeFullArt(model);
+
+		CardEditorRainbowGlitterArtController.Sync(card, desiredFinish == CardEditorVisualFinish.RainbowGlitterArt, fullArt);
+
+		if (desiredFinish == CardEditorVisualFinish.None)
+		{
+			RemoveOverlay(overlayContainer, overlay);
+			return;
+		}
+
+		if (desiredFinish != CardEditorVisualFinish.RainbowRareFoil)
+		{
+			RemoveOverlay(overlayContainer, overlay);
+			return;
+		}
+
+		if (overlay == null)
+		{
+			overlay = new CardEditorRainbowFoilOverlay();
+			overlayContainer.AddChild(overlay);
+		}
+
+		overlay.ApplyStyle(fullArt);
+		overlay.Show();
+	}
+
+	private static CardEditorRainbowFoilOverlay? FindOverlay(Node overlayContainer)
+	{
+		for (int i = 0; i < overlayContainer.GetChildCount(); i++)
+		{
+			if (overlayContainer.GetChild(i) is CardEditorRainbowFoilOverlay overlay)
+			{
+				return overlay;
+			}
+		}
+
+		return null;
+	}
+
+	private static void RemoveOverlay(Node overlayContainer, CardEditorRainbowFoilOverlay? overlay)
+	{
+		if (overlay == null)
+		{
+			return;
+		}
+
+		if (overlay.GetParent() == overlayContainer)
+		{
+			overlayContainer.RemoveChild(overlay);
+		}
+
+		overlay.QueueFree();
+	}
+}
+
+[HarmonyPatch(typeof(NCard), "Reload")]
+internal static class NCard_Reload_CardFinishOverlay_Patch
+{
+	public static void Postfix(NCard __instance)
+	{
+		try
+		{
+			CardEditorCardFinishOverlayController.Sync(__instance);
+		}
+		catch
+		{
+		}
+	}
+}
+
+[HarmonyPatch(typeof(NCard), nameof(NCard.UpdateVisuals))]
+internal static class NCard_UpdateVisuals_CardFinishOverlay_Patch
+{
+	public static void Postfix(NCard __instance)
+	{
+		try
+		{
+			CardEditorCardFinishOverlayController.Sync(__instance);
+		}
+		catch
+		{
+		}
+	}
+}
+
+

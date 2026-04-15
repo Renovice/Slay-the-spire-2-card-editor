@@ -1,0 +1,73 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Shader" path="res://tools/shader_previews/sts2_card_base.gdshader" id="1_base"]
+[ext_resource type="Shader" path="res://tools/shader_previews/lightning.gdshader" id="2_fx"]
+
+[sub_resource type="ShaderMaterial" id="1_base_mat"]
+shader = ExtResource("1_base")
+shader_parameter/rect_size = Vector2(320, 446)
+shader_parameter/corner_radius_px = 32.0
+shader_parameter/corner_softness_px = 1.5
+shader_parameter/inset_px = 1.5
+shader_parameter/border_px = 6.0
+shader_parameter/border_color = Vector3(0.2, 0.16, 0.12)
+shader_parameter/base_color_top = Vector3(0.12, 0.1, 0.11)
+shader_parameter/base_color_bottom = Vector3(0.09, 0.07, 0.08)
+shader_parameter/vignette_strength = 0.35
+shader_parameter/highlight_strength = 0.18
+
+[sub_resource type="ShaderMaterial" id="2_fx_mat"]
+shader = ExtResource("2_fx")
+shader_parameter/rect_size = Vector2(320, 446)
+shader_parameter/corner_radius_px = 32.0
+shader_parameter/corner_softness_px = 1.5
+shader_parameter/inset_px = 1.5
+shader_parameter/effect_color = Vector3(0.55, 0.45, 1.0)
+shader_parameter/octave_count = 10
+shader_parameter/speed = 0.5
+shader_parameter/intensity = 1.0
+shader_parameter/opacity = 0.9
+
+[node name="PreviewLightning" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="BG" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.03, 0.03, 0.04, 1)
+
+[node name="Card" type="ColorRect" parent="."]
+material = SubResource("1_base_mat")
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -160.0
+offset_top = -223.0
+offset_right = 160.0
+offset_bottom = 223.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(1, 1, 1, 1)
+
+[node name="Effect" type="ColorRect" parent="Card"]
+material = SubResource("2_fx_mat")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(1, 1, 1, 1)
+

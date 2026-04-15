@@ -1,0 +1,7 @@
+{
+  "pck_name": "card_editor",
+  "name": "Card Editor",
+  "author": "Renovice",
+  "description": "In-game card editor + compendium-style browser. Edit costs, keywords, numbers, enchantments/afflictions, and add extra effects. Includes presets to save/load profiles.",
+  "version": "2.0"
+}
