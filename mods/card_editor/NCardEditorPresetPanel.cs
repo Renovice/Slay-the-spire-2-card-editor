@@ -15,23 +15,41 @@ public partial class NCardEditorPresetPanel : PanelContainer
 {
 	private static readonly string _headerFontPath = "res://themes/kreon_bold_glyph_space_one.tres";
 	private static readonly string _bodyFontPath = "res://themes/kreon_regular_glyph_space_one.tres";
-	private const float ExpandedOffsetLeft = -460f;
+	private static readonly string _actionButtonTexturePath = "res://images/packed/common_ui/settings_tab_selected.png";
+	private static readonly string _actionButtonOutlineTexturePath = "res://images/packed/common_ui/settings_tab_stroke.png";
+	private static readonly string _actionButtonFontPath = "res://themes/kreon_bold_glyph_space_two.tres";
+	private static readonly string _actionButtonThemePath = "res://themes/settings_screen_tab.tres";
+	private static readonly string _actionButtonOutlineMaterialPath = "res://themes/canvas_item_material_additive_shared.tres";
+	private static readonly string _actionButtonShaderPath = "res://shaders/hsv.gdshader";
+	private static readonly string _tickboxScenePath = "res://scenes/ui/tickbox.tscn";
+	private const float ExpandedOffsetLeft = -520f;
 	private const float ExpandedOffsetTop = 114f;
-	private const float ExpandedOffsetRight = -20f;
-	private const float ExpandedOffsetBottom = 494f;
+	private const float ExpandedOffsetRight = -24f;
+	private const float ExpandedOffsetBottom = 618f;
 	private const float CollapsedOffsetLeft = -92f;
 	private const float CollapsedOffsetTop = 20f;
 	private const float CollapsedOffsetRight = -20f;
 	private const float CollapsedOffsetBottom = 92f;
+	private static readonly Color LoadButtonTint = new(0.68f, 0.90f, 0.54f, 1f);
+	private static readonly Color DeleteButtonTint = new(0.94f, 0.53f, 0.47f, 1f);
+	private static readonly Color SaveButtonTint = new(0.68f, 0.90f, 0.54f, 1f);
+	private static readonly Color VanillaButtonTint = new(0.98f, 0.84f, 0.50f, 1f);
 
 	private static Font? _headerFont;
 	private static Font? _bodyFont;
+	private static Texture2D? _actionButtonTexture;
+	private static Texture2D? _actionButtonOutlineTexture;
+	private static Font? _actionButtonFont;
+	private static Theme? _actionButtonTheme;
+	private static Material? _actionButtonOutlineMaterial;
+	private static Shader? _actionButtonShader;
+	private static PackedScene? _tickboxScene;
 
 	private NCardLibrary _library = null!;
 	private OptionButton _presetSelect = null!;
 	private LineEdit _presetNameField = null!;
-	private CheckBox _startupCheckbox = null!;
-	private CheckBox? _sortByCharacterCheckbox;
+	private PresetVanillaTickbox _startupCheckbox = null!;
+	private PresetVanillaTickbox? _sortByCharacterCheckbox;
 	private HBoxContainer? _slotCountRow;
 	private LineEdit? _slotCountField;
 	private MarginContainer _margin = null!;
@@ -117,13 +135,20 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	{
 		_headerFont ??= TryLoadFont(_headerFontPath);
 		_bodyFont ??= TryLoadFont(_bodyFontPath);
+		_actionButtonTexture ??= GD.Load<Texture2D>(_actionButtonTexturePath);
+		_actionButtonOutlineTexture ??= GD.Load<Texture2D>(_actionButtonOutlineTexturePath);
+		_actionButtonFont ??= TryLoadFont(_actionButtonFontPath);
+		_actionButtonTheme ??= GD.Load<Theme>(_actionButtonThemePath);
+		_actionButtonOutlineMaterial ??= GD.Load<Material>(_actionButtonOutlineMaterialPath);
+		_actionButtonShader ??= GD.Load<Shader>(_actionButtonShaderPath);
+		_tickboxScene ??= GD.Load<PackedScene>(_tickboxScenePath);
 
 		_margin = new MarginContainer();
 		_margin.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-		_margin.AddThemeConstantOverride("margin_left", 14);
-		_margin.AddThemeConstantOverride("margin_top", 14);
-		_margin.AddThemeConstantOverride("margin_right", 14);
-		_margin.AddThemeConstantOverride("margin_bottom", 14);
+		_margin.AddThemeConstantOverride("margin_left", 16);
+		_margin.AddThemeConstantOverride("margin_top", 16);
+		_margin.AddThemeConstantOverride("margin_right", 16);
+		_margin.AddThemeConstantOverride("margin_bottom", 16);
 		AddChild(_margin);
 
 		VBoxContainer root = new VBoxContainer
@@ -131,11 +156,11 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 			SizeFlagsVertical = Control.SizeFlags.ExpandFill
 		};
-		root.AddThemeConstantOverride("separation", 10);
+		root.AddThemeConstantOverride("separation", 8);
 		_margin.AddChild(root);
 
 		_headerRow = new HBoxContainer();
-		_headerRow.AddThemeConstantOverride("separation", 10);
+		_headerRow.AddThemeConstantOverride("separation", 8);
 		_headerRow.Alignment = BoxContainer.AlignmentMode.Begin;
 		root.AddChild(_headerRow);
 
@@ -146,61 +171,56 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_headerSpacer = new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		_headerRow.AddChild(_headerSpacer);
 
+		root.AddChild(CreateDivider());
+
 		_content = new VBoxContainer();
 		_content.AddThemeConstantOverride("separation", 10);
 		root.AddChild(_content);
 
-		HBoxContainer loadRow = new HBoxContainer();
-		loadRow.AddThemeConstantOverride("separation", 10);
-		_content.AddChild(loadRow);
-
-		_presetSelect = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, CustomMinimumSize = new Vector2(0, 44) };
-		StyleInput(_presetSelect);
-		_presetSelect.ItemSelected += _ => OnPresetSelected();
-		loadRow.AddChild(_presetSelect);
-
-		Button load = new Button { Text = CardEditorLoc.T("button.load", "Load"), CustomMinimumSize = new Vector2(92, 44) };
-		load.Pressed += OnLoadPressed;
-		loadRow.AddChild(load);
-
-		Button delete = new Button { Text = CardEditorLoc.T("button.delete", "Delete"), CustomMinimumSize = new Vector2(92, 44) };
-		delete.Pressed += OnDeletePressed;
-		loadRow.AddChild(delete);
-
-		HBoxContainer startupRow = new HBoxContainer();
-		startupRow.AddThemeConstantOverride("separation", 10);
-		_content.AddChild(startupRow);
-
-		_startupCheckbox = new CheckBox
+		_presetSelect = new OptionButton
 		{
-			Text = CardEditorLoc.T("presets.runAtStartup", "Run at startup"),
-			FocusMode = FocusModeEnum.All,
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			CustomMinimumSize = new Vector2(0, 50),
+			FocusMode = FocusModeEnum.All,
 			MouseFilter = MouseFilterEnum.Stop
 		};
-		StyleInput(_startupCheckbox);
+		StyleInput(_presetSelect);
+		_presetSelect.ItemSelected += _ => OnPresetSelected();
+		_content.AddChild(_presetSelect);
+
+		HBoxContainer loadActions = new HBoxContainer();
+		loadActions.AddThemeConstantOverride("separation", 10);
+		_content.AddChild(loadActions);
+
+		loadActions.AddChild(CreateActionButton(
+			CardEditorLoc.T("button.load", "Load"),
+			LoadButtonTint,
+			OnLoadPressed,
+			193f,
+			54f,
+			18));
+		loadActions.AddChild(CreateActionButton(
+			CardEditorLoc.T("button.delete", "Delete"),
+			DeleteButtonTint,
+			OnDeletePressed,
+			193f,
+			54f,
+			18));
+
+		_startupCheckbox = CreateTickbox(CardEditorLoc.T("presets.runAtStartup", "Run at startup"));
 		_startupCheckbox.Toggled += OnStartupToggled;
-		startupRow.AddChild(_startupCheckbox);
+		_content.AddChild(_startupCheckbox);
 
 		_slotCountRow = BuildSlotCountRow();
 		_slotCountRow.Visible = _isCreatorMode;
 		_content.AddChild(_slotCountRow);
 
-		_sortByCharacterCheckbox = new CheckBox
-		{
-			Text = CardEditorLoc.T("presets.sortByCharacter", "Sort by Character"),
-			FocusMode = FocusModeEnum.All,
-			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-			MouseFilter = MouseFilterEnum.Stop,
-			Visible = _isCreatorMode
-		};
-		StyleInput(_sortByCharacterCheckbox);
+		_sortByCharacterCheckbox = CreateTickbox(CardEditorLoc.T("presets.sortByCharacter", "Sort by Character"));
 		_sortByCharacterCheckbox.Toggled += OnSortByCharacterToggled;
+		_sortByCharacterCheckbox.Visible = _isCreatorMode;
 		_content.AddChild(_sortByCharacterCheckbox);
 
-		HBoxContainer saveRow = new HBoxContainer();
-		saveRow.AddThemeConstantOverride("separation", 10);
-		_content.AddChild(saveRow);
+		_content.AddChild(CreateDivider());
 
 		_presetNameField = new NMegaLineEdit
 		{
@@ -209,15 +229,31 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			CustomMinimumSize = new Vector2(0, 44)
 		};
 		StyleInput(_presetNameField);
-		saveRow.AddChild(_presetNameField);
+		_presetNameField.PlaceholderText = CardEditorLoc.T("presets.namePlaceholder", "Preset name...");
+		_presetNameField.CustomMinimumSize = new Vector2(0, 50);
+		_content.AddChild(_presetNameField);
 
-		Button save = new Button { Text = CardEditorLoc.T("button.save", "Save"), CustomMinimumSize = new Vector2(92, 44) };
-		save.Pressed += OnSavePressed;
-		saveRow.AddChild(save);
+		HBoxContainer bottomActions = new HBoxContainer();
+		bottomActions.AddThemeConstantOverride("separation", 10);
+		_content.AddChild(bottomActions);
 
-		Button vanilla = new Button { Text = CardEditorLoc.T("button.revertToVanilla", "Revert to Vanilla"), CustomMinimumSize = new Vector2(0, 44) };
-		vanilla.Pressed += OnVanillaPressed;
-		_content.AddChild(vanilla);
+		bottomActions.AddChild(CreateActionButton(
+			CardEditorLoc.T("button.save", "Save"),
+			SaveButtonTint,
+			OnSavePressed,
+			118f,
+			54f,
+			18));
+
+		CardEditorBaseDeckActionButton revertButton = CreateActionButton(
+			CardEditorLoc.T("button.revertToVanilla", "Revert to Vanilla"),
+			VanillaButtonTint,
+			OnVanillaPressed,
+			276f,
+			54f,
+			15);
+		revertButton.TooltipText = CardEditorLoc.T("button.revertToVanilla", "Revert to Vanilla");
+		bottomActions.AddChild(revertButton);
 
 		SetCollapsed(collapsed: false);
 	}
@@ -226,7 +262,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	{
 		HBoxContainer row = new HBoxContainer();
 		row.AddThemeConstantOverride("separation", 10);
-		row.CustomMinimumSize = new Vector2(0, 44);
+		row.CustomMinimumSize = new Vector2(0, 48);
 
 		Label label = new Label
 		{
@@ -245,13 +281,13 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		HBoxContainer spinner = new HBoxContainer();
 		spinner.AddThemeConstantOverride("separation", 6);
-		spinner.CustomMinimumSize = new Vector2(160, 44);
+		spinner.CustomMinimumSize = new Vector2(164, 48);
 		row.AddChild(spinner);
 
 		_slotCountField = new NMegaLineEdit
 		{
 			Text = configured.ToString(CultureInfo.InvariantCulture),
-			CustomMinimumSize = new Vector2(90, 44),
+			CustomMinimumSize = new Vector2(98, 48),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 			FocusMode = FocusModeEnum.All,
 			MouseFilter = MouseFilterEnum.Stop
@@ -264,7 +300,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		VBoxContainer arrows = new VBoxContainer();
 		arrows.AddThemeConstantOverride("separation", 4);
-		arrows.CustomMinimumSize = new Vector2(44, 44);
+		arrows.CustomMinimumSize = new Vector2(50, 48);
 		spinner.AddChild(arrows);
 
 		Button up = CreateSpinnerButton("\u25B2");
@@ -283,9 +319,8 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		Button button = new Button
 		{
 			Text = text,
-			Flat = true,
 			FocusMode = FocusModeEnum.None,
-			CustomMinimumSize = new Vector2(44, 20),
+			CustomMinimumSize = new Vector2(50, 22),
 			MouseFilter = MouseFilterEnum.Stop
 		};
 		StyleSpinnerButton(button);
@@ -300,12 +335,13 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		}
 		button.AddThemeFontSizeOverride("font_size", 18);
 		button.AddThemeColorOverride("font_color", StsColors.gold);
-		button.AddThemeConstantOverride("outline_size", 0);
+		button.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
+		button.AddThemeConstantOverride("outline_size", 8);
 
-		StyleBoxFlat normal = new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) };
-		StyleBoxFlat hover = new StyleBoxFlat { BgColor = new Color(1, 1, 1, 0.06f) };
-		StyleBoxFlat pressed = new StyleBoxFlat { BgColor = new Color(1, 1, 1, 0.10f) };
-		StyleBoxFlat disabled = new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) };
+		StyleBoxFlat normal = CreateFieldStyle(new Color(0.40f, 0.33f, 0.14f, 1f));
+		StyleBoxFlat hover = CreateFieldStyle(StsColors.gold);
+		StyleBoxFlat pressed = CreateFieldStyle(new Color(0.3648f, 0.9104f, 0.96f, 0.752941f));
+		StyleBoxFlat disabled = CreateFieldStyle(StsColors.gray);
 		button.AddThemeStyleboxOverride("normal", normal);
 		button.AddThemeStyleboxOverride("hover", hover);
 		button.AddThemeStyleboxOverride("pressed", pressed);
@@ -625,10 +661,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		}
 
 		string? selected = GetSelectedPresetName();
-		_startupCheckbox.Disabled = string.IsNullOrWhiteSpace(selected);
-		_startupCheckbox.TooltipText = _startupCheckbox.Disabled
-			? CardEditorLoc.T("tooltip.selectPresetFirst", "Select a preset first.")
-			: string.Empty;
+		bool hasSelection = !string.IsNullOrWhiteSpace(selected);
+		_startupCheckbox.SetInteractable(
+			hasSelection,
+			hasSelection ? string.Empty : CardEditorLoc.T("tooltip.selectPresetFirst", "Select a preset first."));
 
 		string? startup = _isCreatorMode
 			? CardEditorCreatorPresetStore.GetStartupPresetName()
@@ -638,7 +674,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			&& !string.IsNullOrWhiteSpace(startup)
 			&& string.Equals(selected, startup, StringComparison.OrdinalIgnoreCase);
 
-		_startupCheckbox.SetPressedNoSignal(isStartup);
+		_startupCheckbox.SetTickedSilent(isStartup);
 	}
 
 	private void OnSortByCharacterToggled(bool enabled)
@@ -656,7 +692,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			return;
 		}
-		_sortByCharacterCheckbox.SetPressedNoSignal(CardEditorCreatorPresetStore.GetSortByCharacter());
+		_sortByCharacterCheckbox.SetTickedSilent(CardEditorCreatorPresetStore.GetSortByCharacter());
 	}
 
 	private void OnStartupToggled(bool enabled)
@@ -666,7 +702,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			if (_startupCheckbox != null && GodotObject.IsInstanceValid(_startupCheckbox))
 			{
-				_startupCheckbox.SetPressedNoSignal(false);
+				_startupCheckbox.SetTickedSilent(false);
 			}
 			return;
 		}
@@ -782,7 +818,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			label.AddThemeFontOverride("font", _headerFont);
 		}
-		label.AddThemeFontSizeOverride("font_size", 26);
+		label.AddThemeFontSizeOverride("font_size", 28);
 		label.AddThemeColorOverride("font_color", StsColors.cream);
 		label.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
 		label.AddThemeConstantOverride("outline_size", 12);
@@ -796,7 +832,76 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		}
 		control.AddThemeFontSizeOverride("font_size", 20);
 		control.AddThemeColorOverride("font_color", StsColors.cream);
-		control.AddThemeConstantOverride("outline_size", 0);
+		control.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
+		control.AddThemeConstantOverride("outline_size", 8);
+
+		if (control is Label label)
+		{
+			label.AddThemeColorOverride("font_color", StsColors.cream);
+			return;
+		}
+
+		StyleBoxFlat normal = CreateFieldStyle(new Color(0.40f, 0.33f, 0.14f, 1f));
+		StyleBoxFlat hover = CreateFieldStyle(StsColors.gold);
+		StyleBoxFlat focus = CreateFieldStyle(new Color(0.3648f, 0.9104f, 0.96f, 0.752941f));
+
+		control.AddThemeStyleboxOverride("normal", normal);
+		control.AddThemeStyleboxOverride("hover", hover);
+		control.AddThemeStyleboxOverride("focus", focus);
+
+		if (control is LineEdit lineEdit)
+		{
+			lineEdit.AddThemeStyleboxOverride("read_only", normal.Duplicate() as StyleBoxFlat ?? normal);
+			lineEdit.AddThemeColorOverride("font_placeholder_color", StsColors.halfTransparentCream);
+			lineEdit.CaretBlink = true;
+		}
+	}
+
+	private static StyleBoxFlat CreateFieldStyle(Color borderColor)
+	{
+		return new StyleBoxFlat
+		{
+			BgColor = new Color(0.08f, 0.07f, 0.06f, 0.96f),
+			BorderColor = borderColor,
+			BorderWidthLeft = 2,
+			BorderWidthTop = 2,
+			BorderWidthRight = 2,
+			BorderWidthBottom = 2,
+			CornerRadiusTopLeft = 10,
+			CornerRadiusTopRight = 10,
+			CornerRadiusBottomLeft = 10,
+			CornerRadiusBottomRight = 10,
+			ContentMarginLeft = 14,
+			ContentMarginTop = 10,
+			ContentMarginRight = 14,
+			ContentMarginBottom = 10
+		};
+	}
+
+	private Control CreateDivider()
+	{
+		return new ColorRect
+		{
+			Color = new Color(0.71f, 0.63f, 0.46f, 0.55f),
+			CustomMinimumSize = new Vector2(0f, 2f),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+	}
+
+	private CardEditorBaseDeckActionButton CreateActionButton(string text, Color tint, Action onTriggered, float width, float height, int fontSize)
+	{
+		CardEditorBaseDeckActionButton button = new CardEditorBaseDeckActionButton();
+		button.Initialize(text, tint, _actionButtonTexture!, _actionButtonOutlineTexture!, _actionButtonFont, _actionButtonTheme, _actionButtonOutlineMaterial, _actionButtonShader);
+		button.SetButtonSize(width, height);
+		button.SetTextSize(fontSize);
+		button.SetTextOffsets(0f, 10f, 0f, 0f);
+		button.Triggered += onTriggered;
+		return button;
+	}
+
+	private PresetVanillaTickbox CreateTickbox(string text)
+	{
+		return new PresetVanillaTickbox(_tickboxScene!, _bodyFont, text);
 	}
 
 	private void StyleToggleButton(Button button)
@@ -855,7 +960,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		if (_margin != null && GodotObject.IsInstanceValid(_margin))
 		{
-			int m = collapsed ? 8 : 14;
+			int m = collapsed ? 8 : 16;
 			_margin.AddThemeConstantOverride("margin_left", m);
 			_margin.AddThemeConstantOverride("margin_top", m);
 			_margin.AddThemeConstantOverride("margin_right", m);
@@ -890,6 +995,99 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			OffsetTop = ExpandedOffsetTop;
 			OffsetRight = ExpandedOffsetRight + _scrollbarAlignOffsetX;
 			OffsetBottom = ExpandedOffsetBottom;
+		}
+	}
+}
+
+internal sealed class PresetVanillaTickbox : HBoxContainer
+{
+	private readonly Control _tickedImage;
+	private readonly Control _notTickedImage;
+	private bool _interactive = true;
+
+	public bool IsTicked { get; private set; }
+
+	public event Action<bool>? Toggled;
+
+	public PresetVanillaTickbox(PackedScene tickboxScene, Font? bodyFont, string text)
+	{
+		MouseFilter = MouseFilterEnum.Stop;
+		FocusMode = FocusModeEnum.None;
+		SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		CustomMinimumSize = new Vector2(0f, 42f);
+		AddThemeConstantOverride("separation", 8);
+
+		Control tickboxVisuals = tickboxScene.Instantiate<Control>(PackedScene.GenEditState.Disabled);
+		tickboxVisuals.MouseFilter = MouseFilterEnum.Ignore;
+		tickboxVisuals.CustomMinimumSize = new Vector2(48f, 48f);
+		tickboxVisuals.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+		tickboxVisuals.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
+		tickboxVisuals.Scale = Vector2.One * 0.72f;
+		tickboxVisuals.PivotOffset = new Vector2(24f, 24f);
+
+		Label label = new Label
+		{
+			Text = text,
+			VerticalAlignment = VerticalAlignment.Center,
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			MouseFilter = MouseFilterEnum.Ignore
+		};
+		if (bodyFont != null)
+		{
+			label.AddThemeFontOverride("font", bodyFont);
+		}
+		label.AddThemeFontSizeOverride("font_size", 20);
+		label.AddThemeColorOverride("font_color", StsColors.cream);
+		label.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
+		label.AddThemeConstantOverride("outline_size", 8);
+
+		AddChild(tickboxVisuals);
+		AddChild(label);
+
+		_tickedImage = tickboxVisuals.GetNode<Control>("Ticked");
+		_notTickedImage = tickboxVisuals.GetNode<Control>("NotTicked");
+		SetTicked(false, notify: false);
+
+		GuiInput += OnGuiInput;
+	}
+
+	public void SetTickedSilent(bool value)
+	{
+		SetTicked(value, notify: false);
+	}
+
+	public void SetInteractable(bool interactive, string tooltipText)
+	{
+		_interactive = interactive;
+		TooltipText = tooltipText;
+		MouseFilter = interactive ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore;
+		SelfModulate = interactive ? Colors.White : StsColors.gray;
+	}
+
+	private void OnGuiInput(InputEvent inputEvent)
+	{
+		if (!_interactive)
+		{
+			return;
+		}
+
+		if (inputEvent is InputEventMouseButton mouseButton
+			&& mouseButton.ButtonIndex == MouseButton.Left
+			&& mouseButton.Pressed)
+		{
+			SetTicked(!IsTicked, notify: true);
+			AcceptEvent();
+		}
+	}
+
+	private void SetTicked(bool value, bool notify)
+	{
+		IsTicked = value;
+		_tickedImage.Visible = value;
+		_notTickedImage.Visible = !value;
+		if (notify)
+		{
+			Toggled?.Invoke(value);
 		}
 	}
 }
