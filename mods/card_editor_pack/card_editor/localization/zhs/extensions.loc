@@ -1225,5 +1225,14 @@
   "CARD_EDITOR.row.powerFilter": "威能筛选",
   "CARD_EDITOR.row.grantFilter": "赋予筛选",
   "CARD_EDITOR.row.grantDuration": "赋予时长",
-  "CARD_EDITOR.ui.enchantment": "附魔"
+  "CARD_EDITOR.ui.enchantment": "附魔",
+  "CARD_EDITOR.row.statusIcon": "状态图标",
+  "CARD_EDITOR.row.statusBigIcon": "状态大图标",
+  "CARD_EDITOR.statusIcon.mode.auto": "自动",
+  "CARD_EDITOR.statusIcon.mode.baseGame": "原版",
+  "CARD_EDITOR.statusIcon.mode.custom": "自定义",
+  "CARD_EDITOR.tooltip.statusIconMode": "这个常驻效果要如何显示在原版威能栏上。",
+  "CARD_EDITOR.tooltip.statusIconPower": "为这个常驻效果复用一个原版威能图标。",
+  "CARD_EDITOR.tooltip.statusCustomPackedIcon": "威能栏使用的小图标路径（res://...）。",
+  "CARD_EDITOR.tooltip.statusCustomBigIcon": "提示/闪光使用的大图标路径（res://...）。"
 }

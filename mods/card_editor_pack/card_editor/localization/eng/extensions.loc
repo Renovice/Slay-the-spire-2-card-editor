@@ -1348,7 +1348,16 @@
   "CARD_EDITOR.effectMode.apply": "Apply",
   "CARD_EDITOR.effectMode.lose": "Lose",
   "CARD_EDITOR.effectMode.cleanse": "Cleanse All",
-  "CARD_EDITOR.tooltip.effectSubtype": "Choose the specific effect inside this grouped family."
+  "CARD_EDITOR.tooltip.effectSubtype": "Choose the specific effect inside this grouped family.",
+  "CARD_EDITOR.row.statusIcon": "Status Icon",
+  "CARD_EDITOR.row.statusBigIcon": "Status Big Icon",
+  "CARD_EDITOR.statusIcon.mode.auto": "Auto",
+  "CARD_EDITOR.statusIcon.mode.baseGame": "Base Game",
+  "CARD_EDITOR.statusIcon.mode.custom": "Custom",
+  "CARD_EDITOR.tooltip.statusIconMode": "How this persistent effect should appear on the vanilla power bar.",
+  "CARD_EDITOR.tooltip.statusIconPower": "Reuse this vanilla power icon for the persistent effect.",
+  "CARD_EDITOR.tooltip.statusCustomPackedIcon": "Packed/small icon path for the power bar (res://...).",
+  "CARD_EDITOR.tooltip.statusCustomBigIcon": "Large icon path for tooltip/flash use (res://...)."
 }
 
 

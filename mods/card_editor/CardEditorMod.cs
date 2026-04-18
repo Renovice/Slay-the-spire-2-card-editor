@@ -1591,7 +1591,12 @@ public static class MainMenu_Ready_Patch
 		{
 			library.Initialize(runState);
 		}
-		Callable.From(() => menu.SubmenuStack.Push(library)).CallDeferred();
+		Callable.From(() =>
+		{
+			menu.SubmenuStack.Push(library);
+			CardEditorUiState.SetLastLibrary(library);
+			Callable.From(() => CardEditorBaseDeckBookmarkHooks.Sync(library)).CallDeferred();
+		}).CallDeferred();
 	}
 
 	private static void TryAddCreatorButton(NMainMenu menu)
@@ -1650,6 +1655,11 @@ public static class CardLibrary_ShowCardDetail_Patch
 		{
 			return false;
 		}
+		if (CardEditorUiState.IsBaseDeckAddActive)
+		{
+			CardEditorBaseDeckUiState.QueueCard(holder.CardModel.Id);
+			return false;
+		}
 		CardModel canonical = ModelDb.GetById<CardModel>(holder.CardModel.Id);
 		CardModel preview = CardEditorOverrides.BuildPreview(canonical);
 		NCardEditorPopup popup = NCardEditorPopup.Create(preview, () => CardEditorUiState.RefreshLibrary(__instance));
@@ -1670,6 +1680,7 @@ public static class CardLibrary_Ready_Patch
 	public static void Postfix(NCardLibrary __instance)
 	{
 		CardEditorPresetPanelHooks.Sync(__instance);
+		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
 	}
 }
 
@@ -1679,6 +1690,7 @@ public static class CardLibrary_OnSubmenuOpened_Patch
 	public static void Postfix(NCardLibrary __instance)
 	{
 		CardEditorPresetPanelHooks.Sync(__instance);
+		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
 	}
 }
 
@@ -1717,10 +1729,14 @@ public static class CardLibrary_OnSubmenuClosed_Patch
 {
 	public static void Postfix(NCardLibrary __instance)
 	{
+		CardEditorBaseDeckBookmarkHooks.LogLibraryLifecycle("Library.OnSubmenuClosed:modeResetPatch:start", __instance);
 		Log.Info($"[CardEditor] OnSubmenuClosed: Resetting Mode from {CardEditorUiState.Mode} to None");
+		CardEditorBaseDeckBookmarkHooks.ForceReset(__instance);
 		CardEditorUiState.Mode = CardEditorLibraryMode.None;
 		CardEditorUiState.SetLastLibrary(null);
 		CardEditorPresetPanelHooks.Sync(__instance);
+		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
+		CardEditorBaseDeckBookmarkHooks.LogLibraryLifecycle("Library.OnSubmenuClosed:modeResetPatch:end", __instance);
 	}
 }
 
@@ -1729,6 +1745,22 @@ public static class CardLibraryGrid_FilterCards_Patch
 {
 	private static readonly FieldInfo? _allCardsField =
 		typeof(NCardLibraryGrid).GetField("_allCards", BindingFlags.Instance | BindingFlags.NonPublic);
+
+	private static NCardLibrary? FindOwningLibrary(Node? node)
+	{
+		Node? current = node;
+		while (current != null)
+		{
+			if (current is NCardLibrary library)
+			{
+				return library;
+			}
+
+			current = current.GetParent();
+		}
+
+		return null;
+	}
 
 	private static void TryInjectCreatedCardSlot(int slot)
 	{
@@ -1757,6 +1789,16 @@ public static class CardLibraryGrid_FilterCards_Patch
 		CardEditorLibraryMode mode = CardEditorUiState.Mode;
 		Log.Info($"[CardEditor] FilterCards Prefix: mode={mode}");
 
+		if (mode == CardEditorLibraryMode.Editor || mode == CardEditorLibraryMode.BaseDeck || mode == CardEditorLibraryMode.BaseDeckAdd)
+		{
+			NCardLibrary? library = FindOwningLibrary(__instance);
+			if (library != null)
+			{
+				CardEditorUiState.SetLastLibrary(library);
+				CardEditorBaseDeckBookmarkHooks.Sync(library);
+			}
+		}
+
 		if (mode == CardEditorLibraryMode.Creator)
 		{
 			List<CardModel> creatorCards = BuildCreatorCards();
@@ -1782,53 +1824,18 @@ public static class CardLibraryGrid_FilterCards_Patch
 			return true;
 		}
 
-		if (mode == CardEditorLibraryMode.Editor)
+		if (mode == CardEditorLibraryMode.BaseDeck)
 		{
-			// Build preview cards first, then apply the active library filter so pool/type/rarity
-			// overrides and created-card classifications are respected by the editor tabs.
-			List<CardModel> editCards = allCards
-				.Where(c => !CardEditorCreatedCardsStore.IsCreatedCardId(c.Id))
-				.Select(CardEditorOverrides.BuildPreview)
+			List<CardModel> deckCards = CardEditorBaseDeckStore.GetDeckPreviewCards(CardEditorBaseDeckUiState.EditingCharacterId)
 				.Where(filter)
 				.ToList();
+			__instance.SetCards(deckCards, PileType.None, sortingPriority, Task.CompletedTask);
+			return false;
+		}
 
-			CardEditorCreatedCardsStore.EnsureLoaded();
-			IReadOnlyList<ModelId> ids = CardEditorCreatedCardsStore.GetAllCreatedCardIds();
-			for (int i = 0; i < ids.Count; i++)
-			{
-				ModelId id = ids[i];
-				if (!CardEditorCreatedCardsStore.IsEnabled(id))
-				{
-					continue;
-				}
-				CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(id);
-				if (canonical == null)
-				{
-					TryInjectCreatedCardSlot(i + 1);
-					canonical = ModelDb.GetByIdOrNull<CardModel>(id);
-				}
-				if (canonical == null)
-				{
-					continue;
-				}
-
-				CardModel preview;
-				try
-				{
-					preview = CardEditorOverrides.BuildPreview(canonical);
-				}
-				catch (Exception ex)
-				{
-					Log.Warn($"[CardEditor] Editor mode: preview failed for created card {id}: {ex.Message}");
-					preview = canonical;
-				}
-
-				if (filter(preview))
-				{
-					editCards.Add(preview);
-				}
-			}
-
+		if (mode == CardEditorLibraryMode.Editor || mode == CardEditorLibraryMode.BaseDeckAdd)
+		{
+			List<CardModel> editCards = BuildEditableLibraryCards(allCards, filter);
 			__instance.SetCards(editCards, PileType.None, sortingPriority, Task.CompletedTask);
 			return false;
 		}
@@ -1879,6 +1886,54 @@ public static class CardLibraryGrid_FilterCards_Patch
 		}
 		Log.Info($"[CardEditor] BuildCreatorCards: returning {cards.Count} cards");
 		return cards;
+	}
+
+	private static List<CardModel> BuildEditableLibraryCards(List<CardModel> allCards, Func<CardModel, bool> filter)
+	{
+		List<CardModel> editCards = allCards
+			.Where(c => !CardEditorCreatedCardsStore.IsCreatedCardId(c.Id))
+			.Select(CardEditorOverrides.BuildPreview)
+			.Where(filter)
+			.ToList();
+
+		CardEditorCreatedCardsStore.EnsureLoaded();
+		IReadOnlyList<ModelId> ids = CardEditorCreatedCardsStore.GetAllCreatedCardIds();
+		for (int i = 0; i < ids.Count; i++)
+		{
+			ModelId id = ids[i];
+			if (!CardEditorCreatedCardsStore.IsEnabled(id))
+			{
+				continue;
+			}
+			CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(id);
+			if (canonical == null)
+			{
+				TryInjectCreatedCardSlot(i + 1);
+				canonical = ModelDb.GetByIdOrNull<CardModel>(id);
+			}
+			if (canonical == null)
+			{
+				continue;
+			}
+
+			CardModel preview;
+			try
+			{
+				preview = CardEditorOverrides.BuildPreview(canonical);
+			}
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor] Editor mode: preview failed for created card {id}: {ex.Message}");
+				preview = canonical;
+			}
+
+			if (filter(preview))
+			{
+				editCards.Add(preview);
+			}
+		}
+
+		return editCards;
 	}
 }
 
@@ -2078,31 +2133,7 @@ internal static class CardEditorCreatedCards_OnPlay_RunExtraEffects_Patch
 		await original;
 		try
 		{
-			if (choiceContext == null || cardPlay?.Card == null)
-			{
-				return;
-			}
-
-			using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
-
-			bool hasInlineEffectSources = CardEditorExtraEffects.GetEffectsForDescription(cardPlay.Card, isUpgradePreview: false)
-				.Any(e => e != null && e.Kind == CardExtraEffectKind.RunEffectSourceCard);
-			if (hasInlineEffectSources)
-			{
-				await CardEditorExtraEffects.RunCreatedCardOnPlayDuringCardPlay(combatState, choiceContext, cardPlay);
-				return;
-			}
-
-			if (CardEditorCreatedCardsStore.GetEffectSourcePlacement(createdCard.Id) == CardEditorEffectSourcePlacement.AfterCustomEffects)
-			{
-				await CardEditorExtraEffects.RunCreatedCardOnPlayDuringCardPlay(combatState, choiceContext, cardPlay);
-				await CardEditorCreatedCardEffectSourceSupport.RunEffectSourceOnPlay(createdCard, choiceContext, cardPlay);
-			}
-			else
-			{
-				await CardEditorCreatedCardEffectSourceSupport.RunEffectSourceOnPlay(createdCard, choiceContext, cardPlay);
-				await CardEditorExtraEffects.RunCreatedCardOnPlayDuringCardPlay(combatState, choiceContext, cardPlay);
-			}
+			await CardEditorCreatedCardEffectSourceSupport.RunResolvedCreatedCardOnPlay(createdCard, combatState, choiceContext, cardPlay);
 		}
 		catch (Exception ex)
 		{
@@ -2136,6 +2167,7 @@ public static class Hook_AfterPlayerTurnStart_Patch
 				CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
 				if (power != null)
 				{
+					await power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.YourTurn);
 					await power.RunStartOfTurn(choiceContext);
 				}
 			}
@@ -2143,6 +2175,43 @@ public static class Hook_AfterPlayerTurnStart_Patch
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Scheduled start-of-turn effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeHandDraw))]
+public static class Hook_BeforeHandDraw_CardEditorTurnBoundaryPower_Patch
+{
+	public static void Postfix(CombatState combatState, Player player, PlayerChoiceContext playerChoiceContext, ref Task __result)
+	{
+		if (__result == null)
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, player, playerChoiceContext);
+	}
+
+	private static async Task RunAfter(Task original, Player player, PlayerChoiceContext choiceContext)
+	{
+		await original;
+		try
+		{
+			Creature? creature = player?.Creature;
+			if (creature == null)
+			{
+				return;
+			}
+
+			CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
+			if (power != null)
+			{
+				await power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.YourTurn);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Turn-boundary before-draw power effects failed: {ex}");
 		}
 	}
 }
@@ -2192,6 +2261,7 @@ public static class Hook_AfterSideTurnStart_Patch
 					if (power != null)
 					{
 						HookPlayerChoiceContext powerCtx = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+						await power.RunTurnBoundary(powerCtx, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.EnemyTurn);
 						Task powerTask = power.RunStartOfEnemyTurn(powerCtx);
 						bool powerCompleted = await powerCtx.AssignTaskAndWaitForPauseOrCompletion(powerTask);
 						if (!powerCompleted && powerCtx.GameAction != null)
@@ -2205,6 +2275,118 @@ public static class Hook_AfterSideTurnStart_Patch
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Scheduled enemy-start-of-turn effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeSideTurnStart))]
+public static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryPower_Patch
+{
+	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	{
+		if (__result == null || side != CombatSide.Enemy)
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, combatState);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState)
+	{
+		await original;
+		try
+		{
+			ulong? netId = LocalContext.NetId;
+			if (!netId.HasValue)
+			{
+				return;
+			}
+
+			foreach (Player player in combatState.Players)
+			{
+				Creature? creature = player?.Creature;
+				if (creature == null)
+				{
+					continue;
+				}
+
+				CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
+				if (power == null)
+				{
+					continue;
+				}
+
+				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+				Task powerTask = power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.EnemyTurn);
+				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
+				if (!completed && choiceContext.GameAction != null)
+				{
+					await choiceContext.GameAction.CompletionTask;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Turn-boundary enemy-before-start power effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeTurnEnd))]
+public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
+{
+	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	{
+		if (__result == null)
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, combatState, side);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState, CombatSide side)
+	{
+		await original;
+		try
+		{
+			ulong? netId = LocalContext.NetId;
+			if (!netId.HasValue)
+			{
+				return;
+			}
+
+			CardExtraEffectTurnBoundarySide boundarySide = side == CombatSide.Enemy
+				? CardExtraEffectTurnBoundarySide.EnemyTurn
+				: CardExtraEffectTurnBoundarySide.YourTurn;
+
+			foreach (Player player in combatState.Players)
+			{
+				Creature? creature = player?.Creature;
+				if (creature == null)
+				{
+					continue;
+				}
+
+				CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
+				if (power == null)
+				{
+					continue;
+				}
+
+				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+				Task powerTask = power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.End, boundarySide);
+				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
+				if (!completed && choiceContext.GameAction != null)
+				{
+					await choiceContext.GameAction.CompletionTask;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Turn-boundary before-end power effects failed: {ex}");
 		}
 	}
 }
@@ -2227,6 +2409,36 @@ public static class Hook_AfterTurnEnd_Patch
 		try
 		{
 			await CardEditorExtraEffectScheduler.RunAfterTurnEnd(combatState, side);
+			ulong? netId = LocalContext.NetId;
+			if (netId.HasValue)
+			{
+				CardExtraEffectTurnBoundarySide boundarySide = side == CombatSide.Enemy
+					? CardExtraEffectTurnBoundarySide.EnemyTurn
+					: CardExtraEffectTurnBoundarySide.YourTurn;
+
+				foreach (Player player in combatState.Players)
+				{
+					Creature? creature = player?.Creature;
+					if (creature == null)
+					{
+						continue;
+					}
+
+					CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
+					if (power == null)
+					{
+						continue;
+					}
+
+					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+					Task powerTask = power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.EndAfterDiscard, boundarySide);
+					bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
+					if (!completed && choiceContext.GameAction != null)
+					{
+						await choiceContext.GameAction.CompletionTask;
+					}
+				}
+			}
 			if (side == CombatSide.Player)
 			{
 				CardEditorTemporaryKeywordController.OnAfterPlayerTurnEnd(combatState);

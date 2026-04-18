@@ -1,0 +1,123 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Texture2D" path="res://mods/card_editor/dev/assets/ui_atlas_1.png" id="1_uiatlas"]
+[ext_resource type="Shader" path="res://mods/card_editor/dev/assets/hsv.gdshader" id="2_hsv"]
+[ext_resource type="FontFile" path="res://mods/card_editor/dev/assets/kreon_bold.ttf" id="3_font"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_back_button"]
+atlas = ExtResource("1_uiatlas")
+region = Rect2(630, 801, 256, 131)
+margin = Rect2(0, 26, 44, 71)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_bookmark_image"]
+shader = ExtResource("2_hsv")
+shader_parameter/h = 0.44
+shader_parameter/s = 1.1
+shader_parameter/v = 0.92
+
+[sub_resource type="FontVariation" id="FontVariation_bookmark_label"]
+base_font = ExtResource("3_font")
+spacing_glyph = 2
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_frame"]
+bg_color = Color(0.1, 0.085, 0.07, 1)
+border_color = Color(0.42, 0.34, 0.22, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[node name="BaseDeckButtonAsset" type="Control"]
+custom_minimum_size = Vector2(520, 260)
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Frame" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -220.0
+offset_top = -100.0
+offset_right = 220.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_frame")
+
+[node name="Bookmark" type="Control" parent="Frame"]
+custom_minimum_size = Vector2(210, 86)
+layout_mode = 0
+offset_left = 108.0
+offset_top = 55.0
+offset_right = 318.0
+offset_bottom = 141.0
+
+[node name="Shadow" type="TextureRect" parent="Frame/Bookmark"]
+modulate = Color(0, 0, 0, 0.25)
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -9.0
+offset_top = -1.0
+offset_right = 58.0
+offset_bottom = 39.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("AtlasTexture_back_button")
+expand_mode = 2
+stretch_mode = 5
+
+[node name="Image" type="TextureRect" parent="Frame/Bookmark"]
+material = SubResource("ShaderMaterial_bookmark_image")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -21.0
+offset_top = -13.0
+offset_right = 46.0
+offset_bottom = 27.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("AtlasTexture_back_button")
+expand_mode = 2
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Frame/Bookmark"]
+layout_mode = 0
+offset_left = 29.0
+offset_top = 13.0
+offset_right = 161.0
+offset_bottom = 71.0
+theme_override_colors/font_color = Color(0.98, 0.92, 0.82, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7)
+theme_override_constants/outline_size = 10
+theme_override_fonts/font = SubResource("FontVariation_bookmark_label")
+theme_override_font_sizes/font_size = 22
+text = "Base Deck"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Hint" type="Label" parent="Frame"]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 152.0
+offset_right = 414.0
+offset_bottom = 184.0
+theme_override_colors/font_color = Color(0.86, 0.8, 0.7, 1)
+text = "Open this scene in the root Godot project and extend the green bookmark art here."
+autowrap_mode = 3

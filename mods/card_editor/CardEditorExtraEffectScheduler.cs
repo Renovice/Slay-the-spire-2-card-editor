@@ -26,6 +26,7 @@ internal static class CardEditorExtraEffectScheduler
 		public required PileType ResultPile { get; init; }
 
 		public Creature? LockedTarget { get; init; }
+		public Creature? ExecutionHost { get; init; }
 		public int RemainingTriggers { get; set; }
 		public int SkipTriggers { get; set; }
 		public int TriggerCounter { get; set; }
@@ -38,7 +39,7 @@ internal static class CardEditorExtraEffectScheduler
 
 	private static readonly ConditionalWeakTable<CombatState, CombatSchedule> _schedules = new ConditionalWeakTable<CombatState, CombatSchedule>();
 
-	public static void Schedule(CombatState combatState, CardPlay sourcePlay, CardExtraEffect effect, Creature? lockedTarget)
+	public static void Schedule(CombatState combatState, CardPlay sourcePlay, CardExtraEffect effect, Creature? lockedTarget, Creature? executionHost = null)
 	{
 		if (combatState == null || sourcePlay == null || effect == null)
 		{
@@ -77,6 +78,7 @@ internal static class CardEditorExtraEffectScheduler
 			Owner = owner,
 			Effect = CardEditorExtraEffects.CloneEffect(effect),
 			LockedTarget = effect.Target == CardExtraEffectTarget.Target ? lockedTarget : null,
+			ExecutionHost = executionHost,
 			RemainingTriggers = remaining,
 			SkipTriggers = skip,
 			Resources = sourcePlay.Resources,
@@ -303,6 +305,7 @@ internal static class CardEditorExtraEffectScheduler
 		{
 			using IDisposable _ = CardEditorCardPlayContext.PushScoped(play);
 			using IDisposable __ = CardEditorEffectSourceContext.PushScoped(scheduled.Card);
+			using IDisposable ___ = CardEditorPowerExecutionHostContext.PushScoped(scheduled.ExecutionHost);
 			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, scheduled.Effect);
 		}
 		catch (Exception ex)

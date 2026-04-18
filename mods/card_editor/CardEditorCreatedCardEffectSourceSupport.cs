@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -28,6 +29,13 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 	private static readonly ThreadLocal<HashSet<ModelId>> _dynamicVarSyncGuard = new(() => new HashSet<ModelId>());
 	private static readonly ThreadLocal<HashSet<ModelId>> _keywordGuard = new(() => new HashSet<ModelId>());
 	private static readonly ConcurrentDictionary<Type, MethodInfo?> _onPlayMethodCache = new();
+	private static readonly ConditionalWeakTable<CardModel, Dictionary<string, RuntimeVanillaEffectSourceState>> _runtimeVanillaEffectSourceStates = new();
+
+	private sealed class RuntimeVanillaEffectSourceState
+	{
+		public required CardModel SourceCard { get; init; }
+		public required CombatState? CombatState { get; init; }
+	}
 
 	private static MethodInfo? ResolveOnPlayMethod(Type type)
 	{
@@ -205,11 +213,16 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		return GetUnifiedEffectSourceIds(createdCard, isUpgradePreview);
 	}
 
-	internal static CardModel? BuildRuntimeEffectSourceCard(CardModel createdCard, ModelId effectSourceId, bool isUpgradePreview = false)
+	internal static CardModel? BuildRuntimeEffectSourceCard(CardModel createdCard, ModelId effectSourceId, bool isUpgradePreview = false, string? runtimeSourceInstanceKey = null)
 	{
 		if (createdCard == null)
 		{
 			return null;
+		}
+
+		if (!isUpgradePreview && TryGetPersistentVanillaEffectSourceCard(createdCard, effectSourceId, runtimeSourceInstanceKey, out CardModel? persistentSourceCard))
+		{
+			return persistentSourceCard;
 		}
 
 		return BuildEffectSourceCard(createdCard, effectSourceId, isUpgradePreview);
@@ -285,15 +298,14 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 	public static List<string> GetEffectSourceDescriptions(CardModel createdCard, Creature? target, bool isUpgradePreview)
 	{
 		List<string> descriptions = new();
-		List<CardModel> effectSourceCards = BuildEffectSourceCards(createdCard, isUpgradePreview);
-
-		foreach (CardModel effectSourceCard in effectSourceCards)
+		Dictionary<ModelId, int> sourceCounts = new();
+		foreach (ModelId effectSourceId in GetRuntimeEffectSourceIds(createdCard, isUpgradePreview))
 		{
 			try
 			{
-				string desc = isUpgradePreview
-					? effectSourceCard.GetDescriptionForUpgradePreview()
-					: effectSourceCard.GetDescriptionForPile(PileType.None, target);
+				int occurrence = sourceCounts.TryGetValue(effectSourceId, out int seen) ? seen : 0;
+				sourceCounts[effectSourceId] = occurrence + 1;
+				string? desc = GetSingleEffectSourceDescription(createdCard, target, isUpgradePreview, effectSourceId, CreateRuntimeSourceInstanceKey(effectSourceId, occurrence, "placement"));
 				if (!string.IsNullOrWhiteSpace(desc))
 				{
 					descriptions.Add(desc);
@@ -310,44 +322,16 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 	public static async Task RunEffectSourceOnPlay(CardEditorCreatedCardBase createdCard, PlayerChoiceContext choiceContext, CardPlay cardPlay)
 	{
-		List<CardModel> effectSourceCards = BuildEffectSourceCards(createdCard, isUpgradePreview: false);
-
-		foreach (CardModel effectSourceCard in effectSourceCards)
+		Dictionary<ModelId, int> sourceCounts = new();
+		foreach (ModelId effectSourceId in GetRuntimeEffectSourceIds(createdCard, isUpgradePreview: false))
 		{
-			MethodInfo? onPlay = _onPlayMethodCache.GetOrAdd(
-				effectSourceCard.GetType(),
-				ResolveOnPlayMethod);
-			if (onPlay == null)
-			{
-				continue;
-			}
-
-			CardPlay proxyPlay = new CardPlay
-			{
-				Card = effectSourceCard,
-				Target = cardPlay.Target,
-				ResultPile = cardPlay.ResultPile,
-				Resources = cardPlay.Resources,
-				IsAutoPlay = cardPlay.IsAutoPlay,
-				PlayIndex = cardPlay.PlayIndex,
-				PlayCount = cardPlay.PlayCount
-			};
-
-			try
-			{
-				if (onPlay.Invoke(effectSourceCard, new object[] { choiceContext, proxyPlay }) is Task task)
-				{
-					await task;
-				}
-			}
-			catch (Exception ex)
-			{
-				Log.Warn($"[CardEditor] Borrowed effect source OnPlay failed for {createdCard.Id} (source {effectSourceCard.Id}): {ex}");
-			}
+			int occurrence = sourceCounts.TryGetValue(effectSourceId, out int seen) ? seen : 0;
+			sourceCounts[effectSourceId] = occurrence + 1;
+			await RunSingleEffectSourceOnPlay(createdCard, choiceContext, cardPlay, effectSourceId, CreateRuntimeSourceInstanceKey(effectSourceId, occurrence, "placement"));
 		}
 	}
 
-	public static async Task RunSingleEffectSourceOnPlay(CardModel createdCard, PlayerChoiceContext choiceContext, CardPlay cardPlay, ModelId effectSourceId)
+	public static async Task RunSingleEffectSourceOnPlay(CardModel createdCard, PlayerChoiceContext choiceContext, CardPlay cardPlay, ModelId effectSourceId, string? runtimeSourceInstanceKey = null)
 	{
 		if (createdCard == null || choiceContext == null || cardPlay == null)
 		{
@@ -364,28 +348,36 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			return;
 		}
 
-		MethodInfo? onPlay = _onPlayMethodCache.GetOrAdd(
-			effectSourceCard.GetType(),
-			ResolveOnPlayMethod);
-		if (onPlay == null)
-		{
-			return;
-		}
-
-		CardPlay proxyPlay = new CardPlay
-		{
-			Card = effectSourceCard,
-			Target = cardPlay.Target,
-			ResultPile = cardPlay.ResultPile,
-			Resources = cardPlay.Resources,
-			IsAutoPlay = cardPlay.IsAutoPlay,
-			PlayIndex = cardPlay.PlayIndex,
-			PlayCount = cardPlay.PlayCount
-		};
-
 		try
 		{
-			if (onPlay.Invoke(effectSourceCard, new object[] { choiceContext, proxyPlay }) is Task task)
+			CombatState? combatState = createdCard.CombatState ?? cardPlay?.Card?.CombatState;
+			if (combatState != null)
+			{
+				IReadOnlyList<CardExtraEffect> borrowedEffects = CardEditorExtraEffects.GetRuntimeEffectsForBorrowedSource(combatState, createdCard, effectSourceId);
+				if (borrowedEffects.Count > 0)
+				{
+					using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
+					await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(combatState, choiceContext, cardPlay, borrowedEffects);
+				}
+			}
+
+			if (effectSourceCard is CardEditorCreatedCardBase)
+			{
+				return;
+			}
+
+			effectSourceCard = GetOrCreatePersistentVanillaEffectSourceCard(createdCard, effectSourceId, runtimeSourceInstanceKey) ?? effectSourceCard;
+			BindVanillaEffectSourceCardToRuntimePlay(effectSourceCard, cardPlay);
+
+			MethodInfo? onPlay = _onPlayMethodCache.GetOrAdd(
+				effectSourceCard.GetType(),
+				ResolveOnPlayMethod);
+			if (onPlay == null)
+			{
+				return;
+			}
+
+			if (onPlay.Invoke(effectSourceCard, new object[] { choiceContext, cardPlay }) is Task task)
 			{
 				await task;
 			}
@@ -396,14 +388,14 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 	}
 
-	public static string? GetSingleEffectSourceDescription(CardModel createdCard, Creature? target, bool isUpgradePreview, ModelId effectSourceId)
+	public static string? GetSingleEffectSourceDescription(CardModel createdCard, Creature? target, bool isUpgradePreview, ModelId effectSourceId, string? runtimeSourceInstanceKey = null)
 	{
 		if (createdCard == null || effectSourceId == null || effectSourceId == ModelId.none)
 		{
 			return null;
 		}
 
-		CardModel? effectSourceCard = BuildEffectSourceCard(createdCard, effectSourceId, isUpgradePreview);
+		CardModel? effectSourceCard = BuildRuntimeEffectSourceCard(createdCard, effectSourceId, isUpgradePreview, runtimeSourceInstanceKey);
 		if (effectSourceCard == null)
 		{
 			return null;
@@ -419,6 +411,35 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		{
 			Log.Warn($"[CardEditor] Failed building effect source description for {createdCard.Id} (source {effectSourceCard.Id}): {ex}");
 			return null;
+		}
+	}
+
+	internal static async Task RunResolvedCreatedCardOnPlay(CardEditorCreatedCardBase createdCard, CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay)
+	{
+		if (createdCard == null || combatState == null || choiceContext == null || cardPlay?.Card == null)
+		{
+			return;
+		}
+
+		using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
+
+		bool hasInlineEffectSources = CardEditorExtraEffects.GetEffectsForDescription(cardPlay.Card, isUpgradePreview: false)
+			.Any(e => e != null && e.Kind == CardExtraEffectKind.RunEffectSourceCard);
+		if (hasInlineEffectSources)
+		{
+			await CardEditorExtraEffects.RunCreatedCardOnPlayDuringCardPlay(combatState, choiceContext, cardPlay);
+			return;
+		}
+
+		if (CardEditorCreatedCardsStore.GetEffectSourcePlacement(createdCard.Id) == CardEditorEffectSourcePlacement.AfterCustomEffects)
+		{
+			await CardEditorExtraEffects.RunCreatedCardOnPlayDuringCardPlay(combatState, choiceContext, cardPlay);
+			await RunEffectSourceOnPlay(createdCard, choiceContext, cardPlay);
+		}
+		else
+		{
+			await RunEffectSourceOnPlay(createdCard, choiceContext, cardPlay);
+			await CardEditorExtraEffects.RunCreatedCardOnPlayDuringCardPlay(combatState, choiceContext, cardPlay);
 		}
 	}
 
@@ -551,6 +572,141 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Failed recalculating effect source dynamic vars: {ex}");
+		}
+	}
+
+	internal static string CreateRuntimeSourceInstanceKey(ModelId effectSourceId, int occurrenceIndex, string scope)
+	{
+		string source = effectSourceId?.ToString() ?? ModelId.none.ToString();
+		return $"{scope}:{source}:{Math.Max(0, occurrenceIndex)}";
+	}
+
+	private static CardModel? GetOrCreatePersistentVanillaEffectSourceCard(CardModel createdCard, ModelId effectSourceId, string? runtimeSourceInstanceKey)
+	{
+		if (createdCard == null || effectSourceId == null || effectSourceId == ModelId.none)
+		{
+			return null;
+		}
+
+		CombatState? hostCombatState = createdCard.CombatState ?? createdCard.Owner?.Creature?.CombatState;
+		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
+		Dictionary<string, RuntimeVanillaEffectSourceState> states = _runtimeVanillaEffectSourceStates.GetOrCreateValue(createdCard);
+		if (states.TryGetValue(stateKey, out RuntimeVanillaEffectSourceState? state)
+			&& state?.SourceCard != null
+			&& state.CombatState == hostCombatState)
+		{
+			return state.SourceCard;
+		}
+
+		CardModel? sourceCard = BuildEffectSourceCard(createdCard, effectSourceId, isUpgradePreview: false);
+		if (sourceCard == null || sourceCard is CardEditorCreatedCardBase)
+		{
+			return sourceCard;
+		}
+
+		states[stateKey] = new RuntimeVanillaEffectSourceState
+		{
+			SourceCard = sourceCard,
+			CombatState = hostCombatState
+		};
+		return sourceCard;
+	}
+
+	private static bool TryGetPersistentVanillaEffectSourceCard(CardModel createdCard, ModelId effectSourceId, string? runtimeSourceInstanceKey, out CardModel? sourceCard)
+	{
+		sourceCard = null;
+		if (createdCard == null || effectSourceId == null || effectSourceId == ModelId.none)
+		{
+			return false;
+		}
+
+		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
+		CombatState? hostCombatState = createdCard.CombatState ?? createdCard.Owner?.Creature?.CombatState;
+		if (!_runtimeVanillaEffectSourceStates.TryGetValue(createdCard, out Dictionary<string, RuntimeVanillaEffectSourceState>? states))
+		{
+			return false;
+		}
+
+		if (!states.TryGetValue(stateKey, out RuntimeVanillaEffectSourceState? state) || state?.SourceCard == null)
+		{
+			return false;
+		}
+
+		if (state.CombatState != hostCombatState)
+		{
+			states.Remove(stateKey);
+			return false;
+		}
+
+		sourceCard = state.SourceCard;
+		return true;
+	}
+
+	private static void BindVanillaEffectSourceCardToRuntimePlay(CardModel effectSourceCard, CardPlay cardPlay)
+	{
+		if (effectSourceCard == null || cardPlay?.Card == null)
+		{
+			return;
+		}
+
+		CardModel hostCard = cardPlay.Card;
+		try
+		{
+			if (hostCard.Owner != null && effectSourceCard.Owner == null)
+			{
+				effectSourceCard.Owner = hostCard.Owner;
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed binding Owner to borrowed vanilla source card {effectSourceCard.Id}: {ex}");
+		}
+
+		try
+		{
+			if ((hostCard.CombatState != null || hostCard.Owner?.Creature?.CombatState != null)
+				&& effectSourceCard.UpgradePreviewType != CardUpgradePreviewType.Combat)
+			{
+				effectSourceCard.UpgradePreviewType = CardUpgradePreviewType.Combat;
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed binding combat preview state to borrowed vanilla source card {effectSourceCard.Id}: {ex}");
+		}
+
+		try
+		{
+			if (effectSourceCard.EnergyCost.CostsX)
+			{
+				int capturedX = Math.Max(0, cardPlay.Resources.EnergySpent);
+				if (capturedX == 0 && hostCard.EnergyCost.CostsX)
+				{
+					capturedX = Math.Max(0, hostCard.EnergyCost.CapturedXValue);
+				}
+				effectSourceCard.EnergyCost.CapturedXValue = capturedX;
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed binding X energy state to borrowed vanilla source card {effectSourceCard.Id}: {ex}");
+		}
+
+		try
+		{
+			if (effectSourceCard.HasStarCostX)
+			{
+				int capturedStars = Math.Max(0, cardPlay.Resources.StarsSpent);
+				if (capturedStars == 0 && hostCard.HasStarCostX)
+				{
+					capturedStars = Math.Max(0, hostCard.LastStarsSpent);
+				}
+				effectSourceCard.LastStarsSpent = capturedStars;
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed binding X star state to borrowed vanilla source card {effectSourceCard.Id}: {ex}");
 		}
 	}
 

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 
 namespace SlayTheSpire2Mod.CardEditor;
@@ -43,6 +44,14 @@ internal static class CardEditorTemporaryExtraEffectController
 			for (int i = 0; i < 8 && cursor != null; i++)
 			{
 				if (!cursor.IsClone || cursor.CloneOf == null)
+				{
+					return cursor;
+				}
+
+				// Some runtime cards are mutable combat instances whose CloneOf chain eventually points at an immutable
+				// canonical/template card. We must key timed grants off the live mutable instance, otherwise the grant
+				// can be stored against the template instead of the card that actually stayed in hand.
+				if (!cursor.CloneOf.IsMutable)
 				{
 					return cursor;
 				}
@@ -186,7 +195,7 @@ internal static class CardEditorTemporaryExtraEffectController
 
 	public static void Grant(CombatState combatState, CardModel card, CardExtraEffect effect, CardExtraEffectCardGrantDuration duration, int turns)
 	{
-		if (combatState == null || card == null || effect == null)
+		if (combatState == null || card == null || !card.IsMutable || effect == null)
 		{
 			return;
 		}
@@ -223,6 +232,8 @@ internal static class CardEditorTemporaryExtraEffectController
 			RemainingTurns = remainingTurns
 		});
 		state.Effects.Add(stored);
+
+		Log.Info($"[CardEditor][TempCostGrant] card={card.Id} key={key?.Id} sameKey={ReferenceEquals(card, key)} pile={card.Pile?.Type} mutableCard={card.IsMutable} mutableKey={key?.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration={duration} turns={remainingTurns} amount={stored.Amount} modifier={stored.CardCostsLessModifier}");
 	}
 
 	public static void OnAfterCardPlayed(CombatState combatState, CardModel card)
@@ -285,8 +296,9 @@ internal static class CardEditorTemporaryExtraEffectController
 				schedule.States.Remove(card);
 				continue;
 			}
-			if (card.HasBeenRemovedFromState)
+			if (!card.IsMutable || card.HasBeenRemovedFromState)
 			{
+				Log.Info($"[CardEditor][TempCostGrantCleanup] dropping key={card?.Id} mutable={card?.IsMutable} removed={card?.HasBeenRemovedFromState} grants={state.Grants.Count}");
 				schedule.States.Remove(card);
 				continue;
 			}

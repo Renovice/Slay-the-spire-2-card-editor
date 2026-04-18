@@ -9,7 +9,9 @@ public enum CardEditorLibraryMode
 {
 	None = 0,
 	Editor = 1,
-	Creator = 2
+	Creator = 2,
+	BaseDeck = 3,
+	BaseDeckAdd = 4
 }
 
 public static class CardEditorUiState
@@ -25,6 +27,10 @@ public static class CardEditorUiState
 	public static bool IsEditorActive => Mode == CardEditorLibraryMode.Editor;
 
 	public static bool IsCreatorActive => Mode == CardEditorLibraryMode.Creator;
+
+	public static bool IsBaseDeckActive => Mode == CardEditorLibraryMode.BaseDeck;
+
+	public static bool IsBaseDeckAddActive => Mode == CardEditorLibraryMode.BaseDeckAdd;
 
 	public static void SetDraftOverride(ModelId cardId, CardOverride overrideData)
 	{

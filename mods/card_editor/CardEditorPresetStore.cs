@@ -1169,6 +1169,12 @@ private const int CurrentVersion = 7;
 		public string? OstyAction { get; set; }
 		public string? MultiplierStat { get; set; }
 		public string? GrantedKeyword { get; set; }
+		public string? StatusIconMode { get; set; }
+		public string? StatusIconPowerId { get; set; }
+		public string? StatusCustomPackedIconPath { get; set; }
+		public string? StatusCustomBigIconPath { get; set; }
+		public string? PowerHost { get; set; }
+		public string? PowerTargeting { get; set; }
 		public string? CardMatchMode { get; set; }
 		public string? MatchCardId { get; set; }
 		public string? MatchTagKind { get; set; }
@@ -1177,6 +1183,11 @@ private const int CurrentVersion = 7;
 		public string? CustomKeywordName { get; set; }
 		public bool CostFilterEnabled { get; set; }
 		public int CostFilterMax { get; set; }
+		public string? EffectId { get; set; }
+		public string? SelfScalingOperation { get; set; }
+		public string? SelfScalingTargetType { get; set; }
+		public string? SelfScalingField { get; set; }
+		public string? SelfScalingTargetEffectId { get; set; }
 
 		public static CardExtraEffectDto FromEffect(CardExtraEffect effect)
 		{
@@ -1289,6 +1300,12 @@ private const int CurrentVersion = 7;
 				OstyAction = effect.OstyAction.ToString(),
 				MultiplierStat = effect.MultiplierStat.ToString(),
 				GrantedKeyword = effect.GrantedKeyword.ToString(),
+				StatusIconMode = effect.StatusIconMode.ToString(),
+				StatusIconPowerId = effect.StatusIconPowerId,
+				StatusCustomPackedIconPath = effect.StatusCustomPackedIconPath,
+				StatusCustomBigIconPath = effect.StatusCustomBigIconPath,
+				PowerHost = effect.PowerHost.ToString(),
+				PowerTargeting = effect.PowerTargeting.ToString(),
 				CardMatchMode = effect.CardMatchMode.ToString(),
 				MatchCardId = effect.MatchCardId,
 				MatchTagKind = effect.MatchTagKind.ToString(),
@@ -1296,7 +1313,12 @@ private const int CurrentVersion = 7;
 				MatchCustomTag = effect.MatchCustomTag,
 				CustomKeywordName = effect.CustomKeywordName,
 				CostFilterEnabled = effect.CostFilterEnabled,
-				CostFilterMax = effect.CostFilterMax
+				CostFilterMax = effect.CostFilterMax,
+				EffectId = effect.EffectId,
+				SelfScalingOperation = effect.SelfScalingOperation.ToString(),
+				SelfScalingTargetType = effect.SelfScalingTargetType.ToString(),
+				SelfScalingField = effect.SelfScalingField.ToString(),
+				SelfScalingTargetEffectId = effect.SelfScalingTargetEffectId
 			};
 		}
 
@@ -1552,7 +1574,16 @@ private const int CurrentVersion = 7;
 
 			effect.GrantToCard = GrantToCard;
 			effect.RepeatIsX = RepeatIsX;
-			effect.RepeatCount = numericFieldsAreDeltas ? RepeatCount : (RepeatCount <= 0 ? 1 : RepeatCount);
+			if (numericFieldsAreDeltas)
+			{
+				effect.RepeatCount = RepeatCount;
+			}
+			else
+			{
+				effect.RepeatCount = RepeatIsX
+					? Math.Clamp(RepeatCount, 0, 99)
+					: (RepeatCount <= 0 ? 1 : RepeatCount);
+			}
 
 			CardExtraEffectCardSelectionMode selectionMode = CardExtraEffectCardSelectionMode.Choose;
 			if (!string.IsNullOrWhiteSpace(CardSelectionMode) && Enum.TryParse(CardSelectionMode, out CardExtraEffectCardSelectionMode parsedSelectionMode))
@@ -1905,6 +1936,50 @@ private const int CurrentVersion = 7;
 				grantedKeyword = parsedGrantedKeyword;
 			}
 			effect.GrantedKeyword = grantedKeyword;
+			if (!string.IsNullOrWhiteSpace(StatusIconMode) && Enum.TryParse(StatusIconMode, out CardExtraEffectStatusIconMode parsedStatusIconMode))
+			{
+				effect.StatusIconMode = parsedStatusIconMode;
+			}
+			if (!string.IsNullOrWhiteSpace(StatusIconPowerId))
+			{
+				effect.StatusIconPowerId = StatusIconPowerId.Trim();
+			}
+			if (!string.IsNullOrWhiteSpace(StatusCustomPackedIconPath))
+			{
+				effect.StatusCustomPackedIconPath = StatusCustomPackedIconPath.Trim();
+			}
+			if (!string.IsNullOrWhiteSpace(StatusCustomBigIconPath))
+			{
+				effect.StatusCustomBigIconPath = StatusCustomBigIconPath.Trim();
+			}
+			if (!string.IsNullOrWhiteSpace(PowerHost) && Enum.TryParse(PowerHost, out CardExtraEffectPowerHost parsedPowerHost))
+			{
+				effect.PowerHost = parsedPowerHost;
+			}
+			if (!string.IsNullOrWhiteSpace(PowerTargeting) && Enum.TryParse(PowerTargeting, out CardExtraEffectPowerTargeting parsedPowerTargeting))
+			{
+				effect.PowerTargeting = parsedPowerTargeting;
+			}
+
+			effect.EffectId = string.IsNullOrWhiteSpace(EffectId) ? null : EffectId.Trim();
+			if (!string.IsNullOrWhiteSpace(SelfScalingOperation)
+				&& Enum.TryParse(SelfScalingOperation, out CardExtraEffectSelfScalingOperation parsedSelfScalingOperation))
+			{
+				effect.SelfScalingOperation = parsedSelfScalingOperation;
+			}
+			if (!string.IsNullOrWhiteSpace(SelfScalingTargetType)
+				&& Enum.TryParse(SelfScalingTargetType, out CardExtraEffectSelfScalingTargetType parsedSelfScalingTargetType))
+			{
+				effect.SelfScalingTargetType = parsedSelfScalingTargetType;
+			}
+			if (!string.IsNullOrWhiteSpace(SelfScalingField)
+				&& Enum.TryParse(SelfScalingField, out CardExtraEffectSelfScalingField parsedSelfScalingField))
+			{
+				effect.SelfScalingField = parsedSelfScalingField;
+			}
+			effect.SelfScalingTargetEffectId = string.IsNullOrWhiteSpace(SelfScalingTargetEffectId)
+				? null
+				: SelfScalingTargetEffectId.Trim();
 
 			effect.CostFilterEnabled = CostFilterEnabled;
 			effect.CostFilterMax = CostFilterMax;

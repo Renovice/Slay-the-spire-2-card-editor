@@ -211,6 +211,7 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 						continue;
 					}
 
+					Log.Info($"[CardEditor][EndOfTurnInHandHook] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id}");
 					CardEditorEndOfTurnInHandTracker.Mark(combatState, card);
 
 					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
@@ -911,6 +912,234 @@ internal static class Hook_AfterCardPlayed_AutoPlayDrawSelfFromPile_Patch
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] AfterCardPlayed auto-play/draw-self failed: {ex}");
+		}
+	}
+}
+
+internal static class CardEditorTurnBoundaryTriggerRunner
+{
+	public static IEnumerable<CardModel> SnapshotAllCards(Player player)
+	{
+		if (player == null)
+		{
+			yield break;
+		}
+
+		CardPile? hand = player.PlayerCombatState?.Hand;
+		CardPile? drawPile = player.PlayerCombatState?.DrawPile;
+		CardPile? discardPile = player.PlayerCombatState?.DiscardPile;
+		CardPile? exhaustPile = player.PlayerCombatState?.ExhaustPile;
+
+		foreach (CardPile? pile in new[] { hand, drawPile, discardPile, exhaustPile })
+		{
+			if (pile?.Cards == null || pile.Cards.Count == 0)
+			{
+				continue;
+			}
+
+			foreach (CardModel card in pile.Cards.Where(c => c != null).ToList())
+			{
+				yield return card;
+			}
+		}
+	}
+
+	public static async Task RunForPlayer(CombatState combatState, Player player, PlayerChoiceContext choiceContext, CardExtraEffectTurnBoundary boundary, CardExtraEffectTurnBoundarySide side)
+	{
+		foreach (CardModel card in SnapshotAllCards(player))
+		{
+			await CardEditorExtraEffects.RunTurnBoundary(combatState, choiceContext, card, boundary, side);
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterPlayerTurnStart))]
+internal static class Hook_AfterPlayerTurnStart_CardEditorTurnBoundaryAfterDraw_Patch
+{
+	public static void Postfix(CombatState combatState, PlayerChoiceContext choiceContext, Player player, ref Task __result)
+	{
+		if (__result == null || combatState == null || player == null)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, combatState, choiceContext, player);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState, PlayerChoiceContext choiceContext, Player player)
+	{
+		await original;
+		try
+		{
+			await CardEditorTurnBoundaryTriggerRunner.RunForPlayer(combatState, player, choiceContext, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.YourTurn);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Turn-boundary after-draw extra effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeSideTurnStart))]
+internal static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryEnemyBeforeStart_Patch
+{
+	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	{
+		if (__result == null || combatState == null || side != CombatSide.Enemy)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, combatState);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState)
+	{
+		await original;
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (Player player in combatState.Players)
+			{
+				if (player == null)
+				{
+					continue;
+				}
+
+				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+				Task task = CardEditorTurnBoundaryTriggerRunner.RunForPlayer(combatState, player, choiceContext, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.EnemyTurn);
+				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+				if (!completed && choiceContext.GameAction != null)
+				{
+					await choiceContext.GameAction.CompletionTask;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Turn-boundary enemy-before-start extra effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterSideTurnStart))]
+internal static class Hook_AfterSideTurnStart_CardEditorTurnBoundaryEnemyAfterStart_Patch
+{
+	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	{
+		if (__result == null || combatState == null || side != CombatSide.Enemy)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, combatState);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState)
+	{
+		await original;
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (Player player in combatState.Players)
+			{
+				if (player == null)
+				{
+					continue;
+				}
+
+				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+				Task task = CardEditorTurnBoundaryTriggerRunner.RunForPlayer(combatState, player, choiceContext, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.EnemyTurn);
+				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+				if (!completed && choiceContext.GameAction != null)
+				{
+					await choiceContext.GameAction.CompletionTask;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Turn-boundary enemy-after-start extra effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterTurnEnd))]
+internal static class Hook_AfterTurnEnd_CardEditorTurnBoundaryAfterDiscard_Patch
+{
+	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	{
+		if (__result == null || combatState == null || side == CombatSide.None)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, combatState, side);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState, CombatSide side)
+	{
+		await original;
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		CardExtraEffectTurnBoundarySide boundarySide = side == CombatSide.Enemy
+			? CardExtraEffectTurnBoundarySide.EnemyTurn
+			: CardExtraEffectTurnBoundarySide.YourTurn;
+
+		try
+		{
+			foreach (Player player in combatState.Players)
+			{
+				if (player == null)
+				{
+					continue;
+				}
+
+				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+				Task task = CardEditorTurnBoundaryTriggerRunner.RunForPlayer(combatState, player, choiceContext, CardExtraEffectTurnBoundary.EndAfterDiscard, boundarySide);
+				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+				if (!completed && choiceContext.GameAction != null)
+				{
+					await choiceContext.GameAction.CompletionTask;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Turn-boundary after-discard extra effects failed: {ex}");
 		}
 	}
 }
