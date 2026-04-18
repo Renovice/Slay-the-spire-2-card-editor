@@ -12,7 +12,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorPresetStore
 {
-private const int CurrentVersion = 7;
+	private const int CurrentVersion = 8;
 	private const string PresetExtension = ".json";
 	private const string SettingsPath = "user://card_editor/presets_settings.json";
 
@@ -36,7 +36,13 @@ private const int CurrentVersion = 7;
 
 	public static bool TryLoadPreset(string presetName, out Dictionary<ModelId, CardOverride> overrides)
 	{
+		return TryLoadPreset(presetName, out overrides, out _);
+	}
+
+	public static bool TryLoadPreset(string presetName, out Dictionary<ModelId, CardOverride> overrides, out Dictionary<ModelId, List<ModelId>> baseDecks)
+	{
 		overrides = new Dictionary<ModelId, CardOverride>();
+		baseDecks = new Dictionary<ModelId, List<ModelId>>();
 		string safeName = SanitizePresetName(presetName);
 		if (string.IsNullOrWhiteSpace(safeName))
 		{
@@ -82,6 +88,11 @@ private const int CurrentVersion = 7;
 				}
 			}
 
+			if (data.BaseDecks != null)
+			{
+				baseDecks = DeserializeBaseDecks(data.BaseDecks);
+			}
+
 			return true;
 		}
 		catch (Exception ex)
@@ -92,6 +103,11 @@ private const int CurrentVersion = 7;
 	}
 
 	public static bool TrySavePreset(string presetName, IReadOnlyDictionary<ModelId, CardOverride> overrides)
+	{
+		return TrySavePreset(presetName, overrides, null);
+	}
+
+	public static bool TrySavePreset(string presetName, IReadOnlyDictionary<ModelId, CardOverride> overrides, IReadOnlyDictionary<ModelId, List<ModelId>>? baseDecks)
 	{
 		string safeName = SanitizePresetName(presetName);
 		if (string.IsNullOrWhiteSpace(safeName))
@@ -111,7 +127,8 @@ private const int CurrentVersion = 7;
 				Overrides = overrides.ToDictionary(
 					kvp => kvp.Key.ToString(),
 					kvp => CardOverrideDto.FromOverride(kvp.Value),
-					StringComparer.Ordinal)
+					StringComparer.Ordinal),
+				BaseDecks = SerializeBaseDecks(baseDecks)
 			};
 
 			string json = JsonSerializer.Serialize(data, CreateJsonOptions());
@@ -203,13 +220,19 @@ private const int CurrentVersion = 7;
 
 	public static bool TryLoadStartupPreset(out string presetName, out Dictionary<ModelId, CardOverride> overrides)
 	{
+		return TryLoadStartupPreset(out presetName, out overrides, out _);
+	}
+
+	public static bool TryLoadStartupPreset(out string presetName, out Dictionary<ModelId, CardOverride> overrides, out Dictionary<ModelId, List<ModelId>> baseDecks)
+	{
 		overrides = new Dictionary<ModelId, CardOverride>();
+		baseDecks = new Dictionary<ModelId, List<ModelId>>();
 		presetName = GetStartupPresetName() ?? string.Empty;
 		if (string.IsNullOrWhiteSpace(presetName))
 		{
 			return false;
 		}
-		return TryLoadPreset(presetName, out overrides);
+		return TryLoadPreset(presetName, out overrides, out baseDecks);
 	}
 
 	private static string EnsurePresetDirectory()
@@ -255,6 +278,60 @@ private const int CurrentVersion = 7;
 			id = ModelId.none;
 			return false;
 		}
+	}
+
+	private static Dictionary<string, List<string>> SerializeBaseDecks(IReadOnlyDictionary<ModelId, List<ModelId>>? baseDecks)
+	{
+		if (baseDecks == null || baseDecks.Count == 0)
+		{
+			return new Dictionary<string, List<string>>(StringComparer.Ordinal);
+		}
+
+		Dictionary<string, List<string>> serialized = new(StringComparer.Ordinal);
+		foreach ((ModelId characterId, List<ModelId> cardIds) in baseDecks)
+		{
+			if (!CardEditorBaseDeckStore.IsSupportedCharacterId(characterId))
+			{
+				continue;
+			}
+
+			serialized[characterId.ToString()] = (cardIds ?? new List<ModelId>())
+				.Where(cardId => cardId != null && cardId != ModelId.none && ModelDb.GetByIdOrNull<CardModel>(cardId) != null)
+				.Select(cardId => cardId.ToString())
+				.ToList();
+		}
+
+		return serialized;
+	}
+
+	private static Dictionary<ModelId, List<ModelId>> DeserializeBaseDecks(Dictionary<string, List<string>>? serialized)
+	{
+		Dictionary<ModelId, List<ModelId>> baseDecks = new();
+		if (serialized == null)
+		{
+			return baseDecks;
+		}
+
+		foreach ((string rawCharacterId, List<string> rawCards) in serialized)
+		{
+			if (!TryParseModelId(rawCharacterId, out ModelId characterId) || !CardEditorBaseDeckStore.IsSupportedCharacterId(characterId))
+			{
+				continue;
+			}
+
+			List<ModelId> cards = new();
+			foreach (string rawCardId in rawCards ?? new List<string>())
+			{
+				if (TryParseModelId(rawCardId, out ModelId cardId) && cardId != ModelId.none && ModelDb.GetByIdOrNull<CardModel>(cardId) != null)
+				{
+					cards.Add(cardId);
+				}
+			}
+
+			baseDecks[characterId] = cards;
+		}
+
+		return baseDecks;
 	}
 
 	private static JsonSerializerOptions CreateJsonOptions()
@@ -497,6 +574,7 @@ private const int CurrentVersion = 7;
 		public int Version { get; set; } = CurrentVersion;
 		public DateTime SavedAtUtc { get; set; }
 		public Dictionary<string, CardOverrideDto> Overrides { get; set; } = new Dictionary<string, CardOverrideDto>(StringComparer.Ordinal);
+		public Dictionary<string, List<string>> BaseDecks { get; set; } = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 	}
 
 	private sealed class PresetSettingsDto
@@ -1091,6 +1169,7 @@ private const int CurrentVersion = 7;
 		public string? CardCostsLessModifier { get; set; }
 		public string? GeneratedCardPool { get; set; }
 		public string? GeneratedCardType { get; set; }
+		public string? GeneratedCardCustomTag { get; set; }
 		public string? ScaleMode { get; set; }
 		public string? CountEvent { get; set; }
 		public string? CountWindow { get; set; }
@@ -1126,8 +1205,11 @@ private const int CurrentVersion = 7;
 		public string? AdditionalMoveToPiles { get; set; }
 		public string? DrawnFromPile { get; set; }
 		public string? SpecificCardId { get; set; }
+		public string? SpecificCardId2 { get; set; }
+		public string? SpecificCardId3 { get; set; }
 		public string? TransformMode { get; set; }
 		public int ConditionalBonusAmount { get; set; }
+		public string? ConditionalBonusConditionType { get; set; }
 		public string? ConditionalBonusCondition { get; set; }
 		public string? ConditionalBonusEnemyStatus { get; set; }
 		public string? ConditionalBonusEnemyIntent { get; set; }
@@ -1223,6 +1305,7 @@ private const int CurrentVersion = 7;
 				CardCostsLessModifier = effect.CardCostsLessModifier.ToString(),
 				GeneratedCardPool = effect.GeneratedCardPool.ToString(),
 				GeneratedCardType = effect.GeneratedCardType.ToString(),
+				GeneratedCardCustomTag = effect.GeneratedCardCustomTag,
 				ScaleMode = effect.ScaleMode.ToString(),
 				CountEvent = effect.CountEvent.ToString(),
 				CountWindow = effect.CountWindow.ToString(),
@@ -1257,8 +1340,11 @@ private const int CurrentVersion = 7;
 				AdditionalMoveToPiles = effect.AdditionalMoveToPiles.ToString(),
 				DrawnFromPile = effect.DrawnFromPile.ToString(),
 				SpecificCardId = effect.SpecificCardId,
+				SpecificCardId2 = effect.SpecificCardId2,
+				SpecificCardId3 = effect.SpecificCardId3,
 				TransformMode = effect.TransformMode.ToString(),
 				ConditionalBonusAmount = effect.ConditionalBonusAmount,
+				ConditionalBonusConditionType = effect.ConditionalBonusConditionType.ToString(),
 				ConditionalBonusCondition = effect.ConditionalBonusCondition.ToString(),
 				ConditionalBonusEnemyStatus = effect.ConditionalBonusEnemyStatus.ToString(),
 				ConditionalBonusEnemyIntent = effect.ConditionalBonusEnemyIntent.ToString(),
@@ -1505,6 +1591,9 @@ private const int CurrentVersion = 7;
 				generatedType = parsedType;
 			}
 			effect.GeneratedCardType = generatedType;
+			effect.GeneratedCardCustomTag = string.IsNullOrWhiteSpace(GeneratedCardCustomTag)
+				? null
+				: GeneratedCardCustomTag.Trim();
 
 			CardExtraEffectScaleMode scaleMode = CardExtraEffectScaleMode.None;
 			if (!string.IsNullOrWhiteSpace(ScaleMode) && Enum.TryParse(ScaleMode, out CardExtraEffectScaleMode parsedScaleMode))
@@ -1692,6 +1781,14 @@ private const int CurrentVersion = 7;
 			{
 				effect.SpecificCardId = SpecificCardId.Trim();
 			}
+			if (!string.IsNullOrWhiteSpace(SpecificCardId2))
+			{
+				effect.SpecificCardId2 = SpecificCardId2.Trim();
+			}
+			if (!string.IsNullOrWhiteSpace(SpecificCardId3))
+			{
+				effect.SpecificCardId3 = SpecificCardId3.Trim();
+			}
 
 			effect.TransformMode = CardExtraEffectTransformMode.Random;
 			if (!string.IsNullOrWhiteSpace(TransformMode) && Enum.TryParse(TransformMode, out CardExtraEffectTransformMode parsedTransformMode))
@@ -1700,10 +1797,20 @@ private const int CurrentVersion = 7;
 			}
 
 			effect.ConditionalBonusAmount = ConditionalBonusAmount;
+			effect.ConditionalBonusConditionType = CardExtraEffectBranchConditionType.None;
+			if (!string.IsNullOrWhiteSpace(ConditionalBonusConditionType) && Enum.TryParse(ConditionalBonusConditionType, out CardExtraEffectBranchConditionType parsedConditionalBonusConditionType))
+			{
+				effect.ConditionalBonusConditionType = parsedConditionalBonusConditionType;
+			}
 			effect.ConditionalBonusCondition = CardExtraEffectConditionalBonusCondition.None;
 			if (!string.IsNullOrWhiteSpace(ConditionalBonusCondition) && Enum.TryParse(ConditionalBonusCondition, out CardExtraEffectConditionalBonusCondition parsedConditionalBonusCondition))
 			{
 				effect.ConditionalBonusCondition = parsedConditionalBonusCondition;
+			}
+			if (effect.ConditionalBonusConditionType == CardExtraEffectBranchConditionType.None
+				&& effect.ConditionalBonusCondition != CardExtraEffectConditionalBonusCondition.None)
+			{
+				effect.ConditionalBonusConditionType = CardExtraEffectBranchConditionType.TargetCheck;
 			}
 			effect.ConditionalBonusEnemyStatus = CardExtraEffectEnemyStatus.Weak;
 			if (!string.IsNullOrWhiteSpace(ConditionalBonusEnemyStatus) && Enum.TryParse(ConditionalBonusEnemyStatus, out CardExtraEffectEnemyStatus parsedConditionalBonusEnemyStatus))

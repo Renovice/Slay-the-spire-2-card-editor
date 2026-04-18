@@ -17,6 +17,18 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorBaseDeckLibraryHelper
 {
+	private enum PendingCardDetailAction
+	{
+		None,
+		LeftClick,
+		RightClick
+	}
+
+	private static ulong _suppressShowCardDetailUntilMs;
+	private static ulong _pendingCardDetailActionUntilMs;
+	private static NCardHolder? _pendingCardDetailHolder;
+	private static PendingCardDetailAction _pendingCardDetailAction;
+
 	private static readonly MethodInfo? _showCardDetailMethod =
 		typeof(NCardLibrary).GetMethod("ShowCardDetail", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -34,6 +46,22 @@ internal static class CardEditorBaseDeckLibraryHelper
 		return Callable.From<NCardHolder>(holder => HandleAltPressed(library, holder));
 	}
 
+	public static Callable CreatePressedCallable(NCardLibrary library)
+	{
+		return Callable.From<NCardHolder>(holder => HandlePressed(library, holder));
+	}
+
+	public static void HandlePressed(NCardLibrary library, NCardHolder holder)
+	{
+		if (holder?.CardModel == null)
+		{
+			return;
+		}
+
+		RecordPendingCardDetailAction(holder, isRightClick: false);
+		_showCardDetailMethod?.Invoke(library, new object[] { holder });
+	}
+
 	public static void HandleAltPressed(NCardLibrary library, NCardHolder holder)
 	{
 		if (holder?.CardModel == null)
@@ -41,20 +69,65 @@ internal static class CardEditorBaseDeckLibraryHelper
 			return;
 		}
 
-		if (CardEditorUiState.IsBaseDeckActive)
-		{
-			CardEditorBaseDeckStore.RemoveOne(CardEditorBaseDeckUiState.EditingCharacterId, holder.CardModel.Id);
-			CardEditorBaseDeckUiState.RefreshAll();
-			return;
-		}
-
-		if (CardEditorUiState.IsBaseDeckAddActive)
-		{
-			CardEditorBaseDeckUiState.DequeueCard(holder.CardModel.Id);
-			return;
-		}
-
+		RecordPendingCardDetailAction(holder, isRightClick: true);
 		_showCardDetailMethod?.Invoke(library, new object[] { holder });
+	}
+
+	public static void RecordPendingCardDetailAction(NCardHolder holder, bool isRightClick)
+	{
+		if (holder?.CardModel == null)
+		{
+			return;
+		}
+
+		_pendingCardDetailHolder = holder;
+		_pendingCardDetailAction = isRightClick ? PendingCardDetailAction.RightClick : PendingCardDetailAction.LeftClick;
+		_pendingCardDetailActionUntilMs = Time.GetTicksMsec() + 250;
+	}
+
+	public static bool TryConsumePendingCardDetailAction(NCardHolder holder, out bool isRightClick)
+	{
+		isRightClick = false;
+		if (_pendingCardDetailAction == PendingCardDetailAction.None || _pendingCardDetailHolder != holder)
+		{
+			return false;
+		}
+
+		ulong now = Time.GetTicksMsec();
+		if (now > _pendingCardDetailActionUntilMs)
+		{
+			ClearPendingCardDetailAction();
+			return false;
+		}
+
+		isRightClick = _pendingCardDetailAction == PendingCardDetailAction.RightClick;
+		ClearPendingCardDetailAction();
+		return true;
+	}
+
+	private static void ClearPendingCardDetailAction()
+	{
+		_pendingCardDetailActionUntilMs = 0;
+		_pendingCardDetailHolder = null;
+		_pendingCardDetailAction = PendingCardDetailAction.None;
+	}
+
+	public static void ArmShowCardDetailSuppression(ulong durationMs = 250)
+	{
+		_suppressShowCardDetailUntilMs = Time.GetTicksMsec() + durationMs;
+	}
+
+	public static bool ShouldSuppressShowCardDetailPopup()
+	{
+		if (_suppressShowCardDetailUntilMs == 0)
+		{
+			return false;
+		}
+
+		ulong now = Time.GetTicksMsec();
+		bool shouldSuppress = now <= _suppressShowCardDetailUntilMs;
+		_suppressShowCardDetailUntilMs = 0;
+		return shouldSuppress;
 	}
 
 	public static void SyncSelectedCharacterFromLibrary(NCardLibrary library)
@@ -113,6 +186,30 @@ internal static class CardEditorBaseDeckLibraryHelper
 	}
 }
 
+[HarmonyPatch(typeof(NCardGrid), "OnHolderAltPressed")]
+internal static class CardGrid_BaseDeck_ArmShowCardDetailSuppression_Patch
+{
+	public static void Prefix(NCardHolder holder)
+	{
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) && holder?.CardModel != null)
+		{
+			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: true);
+		}
+	}
+}
+
+[HarmonyPatch(typeof(NCardGrid), "OnHolderPressed")]
+internal static class CardGrid_BaseDeck_ArmShowCardDetailSuppression_OnPressed_Patch
+{
+	public static void Prefix(NCardHolder holder)
+	{
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) && holder?.CardModel != null)
+		{
+			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: false);
+		}
+	}
+}
+
 [HarmonyPatch(typeof(NCardLibrary), "_Ready")]
 internal static class CardLibrary_AltPressedOverride_Patch
 {
@@ -126,12 +223,24 @@ internal static class CardLibrary_AltPressedOverride_Patch
 				return;
 			}
 
+			Callable vanillaPressedCallable = new Callable(__instance, "ShowCardDetail");
 			Callable vanillaCallable = new Callable(__instance, "ShowCardDetail");
+			Callable replacementPressedCallable = CardEditorBaseDeckLibraryHelper.CreatePressedCallable(__instance);
 			Callable replacementCallable = CardEditorBaseDeckLibraryHelper.CreateAltPressedCallable(__instance);
+
+			if (grid.IsConnected(NCardGrid.SignalName.HolderPressed, vanillaPressedCallable))
+			{
+				grid.Disconnect(NCardGrid.SignalName.HolderPressed, vanillaPressedCallable);
+			}
 
 			if (grid.IsConnected(NCardGrid.SignalName.HolderAltPressed, vanillaCallable))
 			{
 				grid.Disconnect(NCardGrid.SignalName.HolderAltPressed, vanillaCallable);
+			}
+
+			if (!grid.IsConnected(NCardGrid.SignalName.HolderPressed, replacementPressedCallable))
+			{
+				grid.Connect(NCardGrid.SignalName.HolderPressed, replacementPressedCallable);
 			}
 
 			if (!grid.IsConnected(NCardGrid.SignalName.HolderAltPressed, replacementCallable))
@@ -161,6 +270,7 @@ internal static class CardLibrary_BaseDeck_OnOpened_Patch
 		CardEditorBaseDeckPanelHooks.Sync(__instance);
 		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
 		CardEditorBaseDeckBookmarkHooks.SyncDeferred(__instance);
+		CardEditorBaseDeckUiState.RefreshVisibleHighlights(__instance);
 		CardEditorBaseDeckBookmarkHooks.LogLibraryLifecycle("Library.OnSubmenuOpened:postfix:end", __instance);
 	}
 }
@@ -183,9 +293,29 @@ internal static class CardLibrary_BaseDeck_UpdateCardPoolFilter_Patch
 {
 	public static void Postfix(NCardLibrary __instance)
 	{
+		if (CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive)
+		{
+			CardEditorBaseDeckUiState.ClearSelections(__instance);
+		}
+
 		CardEditorBaseDeckLibraryHelper.SyncSelectedCharacterFromLibrary(__instance);
 		CardEditorBaseDeckPanelHooks.Sync(__instance);
 		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
+		CardEditorBaseDeckUiState.RefreshVisibleHighlights(__instance);
+	}
+}
+
+[HarmonyPatch(typeof(NCardHolder), nameof(NCardHolder.ReassignToCard))]
+internal static class CardHolder_BaseDeck_ReassignHighlight_Patch
+{
+	public static void Postfix(NCardHolder __instance)
+	{
+		if (!CardEditorUiState.IsBaseDeckActive && !CardEditorUiState.IsBaseDeckAddActive)
+		{
+			return;
+		}
+
+		CardEditorBaseDeckUiState.ApplySelectionHighlight(__instance);
 	}
 }
 

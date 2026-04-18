@@ -1682,6 +1682,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public OptionButton TransformModeSelect { get; init; } = null!;
 
 		public Control ConditionalBonusRow { get; init; } = null!;
+		public OptionButton ConditionalBonusConditionTypeSelect { get; init; } = null!;
 		public OptionButton ConditionalBonusConditionSelect { get; init; } = null!;
 		public OptionButton ConditionalBonusEnemyStatusSelect { get; init; } = null!;
 		public OptionButton ConditionalBonusEnemyIntentSelect { get; init; } = null!;
@@ -1761,6 +1762,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public Control GeneratedCardRow { get; init; } = null!;
 		public OptionButton GeneratedPoolSelect { get; init; } = null!;
 		public OptionButton GeneratedTypeSelect { get; init; } = null!;
+		public OptionButton GeneratedCustomTagSelect { get; init; } = null!;
+		public List<string> GeneratedCustomTagOptions { get; set; } = new();
 
 		public KeywordTickbox ScalingTickbox { get; init; } = null!;
 		public KeywordTickbox PowerTickbox { get; init; } = null!;
@@ -2350,31 +2353,58 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		List<string> tags = GetAllKnownCustomTags();
 		foreach (ExtraEffectRow row in _extraEffectRows)
 		{
-			if (row?.MatchCustomTagSelect == null || !GodotObject.IsInstanceValid(row.MatchCustomTagSelect))
+			if (row == null)
 			{
 				continue;
 			}
 
-			string? previousSelection = GetSelectedMatchCustomTag(row);
-			row.MatchCustomTagOptions = tags;
-
-			row.MatchCustomTagSelect.Clear();
-			row.MatchCustomTagSelect.AddItem(CardEditorLoc.T("cardMatch.tag.any", "Any Tag"), 0);
-			for (int i = 0; i < tags.Count; i++)
+			if (row.MatchCustomTagSelect != null && GodotObject.IsInstanceValid(row.MatchCustomTagSelect))
 			{
-				row.MatchCustomTagSelect.AddItem(tags[i], i + 1);
-			}
+				string? previousSelection = GetSelectedMatchCustomTag(row);
+				row.MatchCustomTagOptions = tags;
 
-			int desiredIndex = 0;
-			if (!string.IsNullOrWhiteSpace(previousSelection))
-			{
-				int idx = tags.FindIndex(t => string.Equals(t, previousSelection, StringComparison.OrdinalIgnoreCase));
-				if (idx >= 0)
+				row.MatchCustomTagSelect.Clear();
+				row.MatchCustomTagSelect.AddItem(CardEditorLoc.T("cardMatch.tag.any", "Any Tag"), 0);
+				for (int i = 0; i < tags.Count; i++)
 				{
-					desiredIndex = row.MatchCustomTagSelect.GetItemIndex(idx + 1);
+					row.MatchCustomTagSelect.AddItem(tags[i], i + 1);
 				}
+
+				int desiredIndex = 0;
+				if (!string.IsNullOrWhiteSpace(previousSelection))
+				{
+					int idx = tags.FindIndex(t => string.Equals(t, previousSelection, StringComparison.OrdinalIgnoreCase));
+					if (idx >= 0)
+					{
+						desiredIndex = row.MatchCustomTagSelect.GetItemIndex(idx + 1);
+					}
+				}
+				row.MatchCustomTagSelect.Select(Math.Max(0, desiredIndex));
 			}
-			row.MatchCustomTagSelect.Select(Math.Max(0, desiredIndex));
+
+			if (row.GeneratedCustomTagSelect != null && GodotObject.IsInstanceValid(row.GeneratedCustomTagSelect))
+			{
+				string? previousGeneratedSelection = GetSelectedGeneratedCustomTag(row);
+				row.GeneratedCustomTagOptions = tags;
+
+				row.GeneratedCustomTagSelect.Clear();
+				row.GeneratedCustomTagSelect.AddItem(CardEditorLoc.T("cardMatch.tag.any", "Any Tag"), 0);
+				for (int i = 0; i < tags.Count; i++)
+				{
+					row.GeneratedCustomTagSelect.AddItem(tags[i], i + 1);
+				}
+
+				int desiredGeneratedIndex = 0;
+				if (!string.IsNullOrWhiteSpace(previousGeneratedSelection))
+				{
+					int idx = tags.FindIndex(t => string.Equals(t, previousGeneratedSelection, StringComparison.OrdinalIgnoreCase));
+					if (idx >= 0)
+					{
+						desiredGeneratedIndex = row.GeneratedCustomTagSelect.GetItemIndex(idx + 1);
+					}
+				}
+				row.GeneratedCustomTagSelect.Select(Math.Max(0, desiredGeneratedIndex));
+			}
 		}
 	}
 
@@ -4267,29 +4297,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return row;
 	}
 
-	private static bool IsSupportedVanillaTargetType(TargetType targetType)
-	{
-		return targetType == TargetType.AnyEnemy
-			|| targetType == TargetType.RandomEnemy
-			|| targetType == TargetType.AllEnemies;
-	}
-
 	private bool ShouldShowVanillaTargetTypeRow()
 	{
-		if (_isCreatedCard || _isUpgradeEditor)
-		{
-			return false;
-		}
-
-		try
-		{
-			CardModel canonical = ModelDb.GetById<CardModel>(_cardId);
-			return IsSupportedVanillaTargetType(canonical.TargetType);
-		}
-		catch
-		{
-			return false;
-		}
+		return !_isCreatedCard && !_isUpgradeEditor;
 	}
 
 	private HBoxContainer CreateTargetTypeRow()
@@ -4320,12 +4330,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		select.AddItem(CardEditorLoc.T("targetType.Default", "Default"));
 		_targetTypeOptions.Add(null);
 
-		TargetType[] supportedTargets =
-		{
-			TargetType.AnyEnemy,
-			TargetType.RandomEnemy,
-			TargetType.AllEnemies
-		};
+		TargetType[] supportedTargets = Enum.GetValues<TargetType>()
+			.Where(target => target != TargetType.None)
+			.ToArray();
 
 		foreach (TargetType target in supportedTargets)
 		{
@@ -4817,7 +4824,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 
 		// Custom text override — checkbox + text area
-		bool hasCustomText = def.CustomText != null;
+		bool hasCustomText = def.CustomTextEnabled || def.CustomText != null;
 		rightColumn.AddChild(CreateTickboxRow(
 			CardEditorLoc.T("field.customText", "Custom Card Text"),
 			hasCustomText,
@@ -4857,10 +4864,6 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		if (_createdCustomTextField != null)
 		{
 			_createdCustomTextField.Visible = enabled;
-			if (!enabled)
-			{
-				_createdCustomTextField.Text = string.Empty;
-			}
 		}
 		OnCreatedCardMetaChanged();
 	}
@@ -4877,8 +4880,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
-		string? existing = CardEditorCreatedCardsStore.GetCustomTextUpgraded(_cardId);
-		bool hasCustomText = existing != null;
+		string? existing = CardEditorCreatedCardsStore.GetStoredCustomTextUpgraded(_cardId);
+		bool hasCustomText = CardEditorCreatedCardsStore.IsCustomTextUpgradedEnabled(_cardId) || existing != null;
 
 		rightColumn.AddChild(CreateTickboxRow(
 			CardEditorLoc.T("field.customTextUpgraded", "Custom Card Text (Upgraded)"),
@@ -4912,14 +4915,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		if (_createdCustomTextUpgradedField != null)
 		{
 			_createdCustomTextUpgradedField.Visible = enabled;
-			if (!enabled)
-			{
-				_createdCustomTextUpgradedField.Text = string.Empty;
-			}
 		}
 
-		string? customText = enabled ? _createdCustomTextUpgradedField?.Text : null;
-		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, customText);
+		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, enabled);
 		QueuePreviewUpdate();
 	}
 
@@ -4930,8 +4928,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
-		string? customText = (_createdCustomTextUpgradedTickbox?.IsTicked ?? false) ? _createdCustomTextUpgradedField?.Text : null;
-		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, customText);
+		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, _createdCustomTextUpgradedTickbox?.IsTicked ?? false);
 		QueuePreviewUpdate();
 	}
 
@@ -5237,11 +5234,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		bool fullArt = _createdFullArtTickbox?.IsTicked ?? false;
 		CardEditorVisualFinish finish = GetSelectedCreatedFinish();
-		string? customText = (_createdCustomTextTickbox?.IsTicked ?? false) ? _createdCustomTextField?.Text : null;
+		string? customText = _createdCustomTextField?.Text;
+		bool customTextEnabled = _createdCustomTextTickbox?.IsTicked ?? false;
 
 		Dictionary<string, float>? fp = _createdFinishParams.Count > 0 ? new Dictionary<string, float>(_createdFinishParams) : null;
 
-		CardEditorCreatedCardsStore.SetDraftMeta(_cardId, enabled, title, pool, rarity, type, target, effectSourceIds, placement, portraitSourceId, customPortraitFile, fullArt, finish, customText, fp);
+		CardEditorCreatedCardsStore.SetDraftMeta(_cardId, enabled, title, pool, rarity, type, target, effectSourceIds, placement, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp);
 		if (_cardNameLabel != null && GodotObject.IsInstanceValid(_cardNameLabel))
 		{
 			_cardNameLabel.Text = CardEditorCreatedCardsStore.GetTitleForCard(_cardId);
@@ -6496,6 +6494,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			moveToIndex = moveToPileSelect.GetItemIndex((int)CardExtraEffectCardPile.DrawPile);
 		}
 		moveToPileSelect.Select(Math.Max(0, moveToIndex));
+		if (effect != null)
+		{
+			moveToPileSelect.SetMeta("card_editor_default_specific_to_hand", true);
+		}
 
 		OptionButton moveToPositionSelect = new OptionButton
 		{
@@ -7261,7 +7263,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardExtraEffectDefinition def = defs[kindIndex];
 
 		row.AllowedTargets.Clear();
-		IReadOnlyList<CardExtraEffectTarget> allowed = def.AllowedTargets;
+		IReadOnlyList<CardExtraEffectTarget> allowed = ExpandMultiplayerTargets(def.AllowedTargets);
 		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay)
 		{
 			allowed = allowed.Where(t => t != CardExtraEffectTarget.Target).ToArray();
@@ -7293,6 +7295,36 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool enabled = row.AllowedTargets.Count > 1;
 		row.TargetSelect.Disabled = !enabled;
 		row.TargetSelect.SelfModulate = enabled ? Colors.White : StsColors.gray;
+	}
+
+	private static IReadOnlyList<CardExtraEffectTarget> ExpandMultiplayerTargets(IReadOnlyList<CardExtraEffectTarget> allowed)
+	{
+		List<CardExtraEffectTarget> expanded = allowed?.ToList() ?? new List<CardExtraEffectTarget>();
+		if (expanded.Count == 0)
+		{
+			return expanded;
+		}
+
+		bool supportsSingleTarget = expanded.Contains(CardExtraEffectTarget.Target) || expanded.Contains(CardExtraEffectTarget.Self);
+		if (supportsSingleTarget)
+		{
+			if (!expanded.Contains(CardExtraEffectTarget.AnyPlayer))
+			{
+				expanded.Add(CardExtraEffectTarget.AnyPlayer);
+			}
+
+			if (!expanded.Contains(CardExtraEffectTarget.AnyAlly))
+			{
+				expanded.Add(CardExtraEffectTarget.AnyAlly);
+			}
+		}
+
+		if (expanded.Contains(CardExtraEffectTarget.AllEnemies) && !expanded.Contains(CardExtraEffectTarget.AllAllies))
+		{
+			expanded.Add(CardExtraEffectTarget.AllAllies);
+		}
+
+		return expanded;
 	}
 
 	private static int GetValidEnumIndex<TEnum>(TEnum selectedValue, TEnum fallbackValue)
@@ -7399,9 +7431,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			display.AmountXPlus = amountDelta;
 		}
+		display.RepeatIsX = upgradeEffect?.RepeatIsX ?? baseEffect.RepeatIsX;
 
 		display.Turns = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.Turns, numericFieldsAreDeltas);
-		display.RepeatCount = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.RepeatCount, numericFieldsAreDeltas);
+		display.RepeatCount = upgradeEffect != null && display.RepeatIsX != baseEffect.RepeatIsX
+			? upgradeEffect.RepeatCount
+			: GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.RepeatCount, numericFieldsAreDeltas);
 		display.TriggerEveryN = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.TriggerEveryN, numericFieldsAreDeltas);
 		display.TriggerMaxFires = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.TriggerMaxFires, numericFieldsAreDeltas);
 		display.TriggerMaxTurns = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.TriggerMaxTurns, numericFieldsAreDeltas);
@@ -7775,6 +7810,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			moveToIndex = moveToPileSelect.GetItemIndex((int)CardExtraEffectCardPile.DrawPile);
 		}
 		moveToPileSelect.Select(Math.Max(0, moveToIndex));
+		if (effect != null)
+		{
+			moveToPileSelect.SetMeta("card_editor_default_specific_to_hand", true);
+		}
 
 		OptionButton moveToPositionSelect = new OptionButton
 		{
@@ -8835,9 +8874,38 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			typeIndex = 0;
 		}
 		generatedTypeSelect.Select(typeIndex);
+		generatedTypeSelect.ItemSelected += _ => QueuePreviewUpdate();
+
+		List<string> generatedCustomTagOptions = GetAllKnownCustomTags();
+		OptionButton generatedCustomTagSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(170, _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		StyleInput(generatedCustomTagSelect);
+		ConstrainOptionButtonPopup(generatedCustomTagSelect);
+		generatedCustomTagSelect.TooltipText = CardEditorLoc.T("tooltip.generatedCustomTag", "Only generate cards that have this custom tag.");
+		generatedCustomTagSelect.AddItem(CardEditorLoc.T("cardMatch.tag.any", "Any Tag"), 0);
+		for (int i = 0; i < generatedCustomTagOptions.Count; i++)
+		{
+			generatedCustomTagSelect.AddItem(generatedCustomTagOptions[i], i + 1);
+		}
+		string initialGeneratedCustomTag = effect?.GeneratedCardCustomTag?.Trim() ?? string.Empty;
+		int initialGeneratedCustomTagIndex = 0;
+		if (!string.IsNullOrWhiteSpace(initialGeneratedCustomTag))
+		{
+			int idx = generatedCustomTagOptions.FindIndex(t => string.Equals(t, initialGeneratedCustomTag, StringComparison.OrdinalIgnoreCase));
+			if (idx >= 0)
+			{
+				initialGeneratedCustomTagIndex = generatedCustomTagSelect.GetItemIndex(idx + 1);
+			}
+		}
+		generatedCustomTagSelect.Select(Math.Max(0, initialGeneratedCustomTagIndex));
+		generatedCustomTagSelect.ItemSelected += _ => QueuePreviewUpdate();
 
 		generatedCardRow.AddChild(generatedPoolSelect);
 		generatedCardRow.AddChild(generatedTypeSelect);
+		generatedCardRow.AddChild(generatedCustomTagSelect);
 		generatedCardRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
 		HBoxContainer specificCardRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -9325,6 +9393,25 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		conditionalBonusConditionSelect.Select(conditionalBonusConditionIndex);
 
+		OptionButton conditionalBonusConditionTypeSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(240, _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		StyleInput(conditionalBonusConditionTypeSelect);
+		ConstrainOptionButtonPopup(conditionalBonusConditionTypeSelect);
+		conditionalBonusConditionTypeSelect.TooltipText = CardEditorLoc.T(
+			"tooltip.conditionalBonusConditionType",
+			"Choose whether this bonus uses a direct target/self check, or the main history/count logic from this effect.");
+		conditionalBonusConditionTypeSelect.AddItem(CardEditorExtraEffects.BranchConditionTypeLabel(CardExtraEffectBranchConditionType.TargetCheck));
+		conditionalBonusConditionTypeSelect.AddItem(CardEditorExtraEffects.BranchConditionTypeLabel(CardExtraEffectBranchConditionType.HistoryCount));
+		CardExtraEffectBranchConditionType initialConditionalBonusConditionType = effect != null && effect.ConditionalBonusConditionType != CardExtraEffectBranchConditionType.None
+			? effect.ConditionalBonusConditionType
+			: effect != null && effect.ConditionalBonusCondition != CardExtraEffectConditionalBonusCondition.None
+				? CardExtraEffectBranchConditionType.TargetCheck
+				: CardExtraEffectBranchConditionType.TargetCheck;
+		conditionalBonusConditionTypeSelect.Select(initialConditionalBonusConditionType == CardExtraEffectBranchConditionType.HistoryCount ? 1 : 0);
+
 		OptionButton conditionalBonusEnemyStatusSelect = new OptionButton
 		{
 			CustomMinimumSize = new Vector2(_effectFormColumnWidths[1], _fieldMinSize.Y),
@@ -9387,6 +9474,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		conditionalBonusRow = CreateEffectFormRow(
 			CardEditorLoc.T("ui.conditionalBonus", "Condition Bonus"),
+			conditionalBonusConditionTypeSelect,
 			conditionalBonusConditionSelect,
 			conditionalBonusTargetSelectRow,
 			CreateEffectCompactValuePair(conditionalBonusSpin, conditionalBonusAmountField));
@@ -10783,6 +10871,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			GeneratedCardRow = generatedCardRow,
 			GeneratedPoolSelect = generatedPoolSelect,
 			GeneratedTypeSelect = generatedTypeSelect,
+			GeneratedCustomTagSelect = generatedCustomTagSelect,
+			GeneratedCustomTagOptions = generatedCustomTagOptions,
 			ScalingTickbox = scalingTickbox,
 			PowerTickbox = powerTickbox,
 			GrantTickbox = grantTickbox,
@@ -10918,6 +11008,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			MultiplyStatRow = multiplyStatRow,
 			MultiplyStatSelect = multiplyStatSelect,
 			ConditionalBonusRow = conditionalBonusRow,
+			ConditionalBonusConditionTypeSelect = conditionalBonusConditionTypeSelect,
 			ConditionalBonusConditionSelect = conditionalBonusConditionSelect,
 			ConditionalBonusEnemyStatusSelect = conditionalBonusEnemyStatusSelect,
 			ConditionalBonusEnemyIntentSelect = conditionalBonusEnemyIntentSelect,
@@ -12838,6 +12929,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		DisableOptionButton(row.GeneratedPoolSelect);
 		DisableOptionButton(row.GeneratedTypeSelect);
+		DisableOptionButton(row.GeneratedCustomTagSelect);
 
 		DisableOptionButton(row.CountEventSelect);
 		DisableOptionButton(row.CountModeSelect);
@@ -13176,20 +13268,35 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			bool showRow = !isAmountlessEffect && row.AmountField != null && GodotObject.IsInstanceValid(row.AmountField) && row.AmountField.Visible;
 			row.ConditionalBonusRow.Visible = showRow;
 
+			CardExtraEffectBranchConditionType conditionalBonusConditionType = GetSelectedConditionalBonusConditionType(row);
 			CardExtraEffectConditionalBonusCondition cond = GetSelectedConditionalBonusCondition(row);
-			bool needsStatus = cond is CardExtraEffectConditionalBonusCondition.TargetHasStatus or CardExtraEffectConditionalBonusCondition.SelfHasStatus;
-			bool needsIntent = cond == CardExtraEffectConditionalBonusCondition.TargetHasIntent;
+			bool usesTargetCheck = conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck;
+			bool usesHistoryCount = conditionalBonusConditionType == CardExtraEffectBranchConditionType.HistoryCount;
+			bool needsStatus = usesTargetCheck && (cond is CardExtraEffectConditionalBonusCondition.TargetHasStatus
+				or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+				or CardExtraEffectConditionalBonusCondition.TargetLacksStatus
+				or CardExtraEffectConditionalBonusCondition.SelfLacksStatus);
+			bool needsIntent = usesTargetCheck && (cond is CardExtraEffectConditionalBonusCondition.TargetHasIntent
+				or CardExtraEffectConditionalBonusCondition.TargetIntentIsNot);
 
+			if (row.ConditionalBonusConditionTypeSelect != null && GodotObject.IsInstanceValid(row.ConditionalBonusConditionTypeSelect))
+			{
+				row.ConditionalBonusConditionTypeSelect.Visible = showRow;
+			}
+			if (row.ConditionalBonusConditionSelect != null && GodotObject.IsInstanceValid(row.ConditionalBonusConditionSelect))
+			{
+				row.ConditionalBonusConditionSelect.Visible = showRow && usesTargetCheck;
+			}
 			if (row.ConditionalBonusEnemyStatusSelect != null && GodotObject.IsInstanceValid(row.ConditionalBonusEnemyStatusSelect))
 			{
-				row.ConditionalBonusEnemyStatusSelect.Visible = showRow && needsStatus;
+				row.ConditionalBonusEnemyStatusSelect.Visible = showRow && usesTargetCheck && needsStatus;
 			}
 			if (row.ConditionalBonusEnemyIntentSelect != null && GodotObject.IsInstanceValid(row.ConditionalBonusEnemyIntentSelect))
 			{
-				row.ConditionalBonusEnemyIntentSelect.Visible = showRow && needsIntent;
+				row.ConditionalBonusEnemyIntentSelect.Visible = showRow && usesTargetCheck && needsIntent;
 			}
 
-			bool showBonusAmount = showRow && cond != CardExtraEffectConditionalBonusCondition.None;
+			bool showBonusAmount = showRow && (usesHistoryCount || cond != CardExtraEffectConditionalBonusCondition.None);
 			Control? bonusSpin = null;
 			if (row.ConditionalBonusAmountField != null && GodotObject.IsInstanceValid(row.ConditionalBonusAmountField))
 			{
@@ -13767,8 +13874,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			and not CardExtraEffectKind.MultiplyStatStatus
 			and not CardExtraEffectKind.RunEffectSourceCard
 			and not CardExtraEffectKind.ChooseOneEffectSource;
+		bool conditionalBonusUsesHistoryCount = row.ConditionalBonusRow != null
+			&& GodotObject.IsInstanceValid(row.ConditionalBonusRow)
+			&& row.ConditionalBonusRow.Visible
+			&& GetSelectedConditionalBonusConditionType(row) == CardExtraEffectBranchConditionType.HistoryCount;
 
 		bool showHeaderRow = supportsScaling
+			|| conditionalBonusUsesHistoryCount
 			|| (row.PowerTickbox != null && GodotObject.IsInstanceValid(row.PowerTickbox) && row.PowerTickbox.Visible)
 			|| (row.GrantTickbox != null && GodotObject.IsInstanceValid(row.GrantTickbox) && row.GrantTickbox.Visible)
 			|| (row.BranchTickbox != null && GodotObject.IsInstanceValid(row.BranchTickbox) && row.BranchTickbox.Visible)
@@ -13776,13 +13888,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			|| (row.KeywordGroupRow != null && GodotObject.IsInstanceValid(row.KeywordGroupRow) && row.KeywordGroupRow.Visible);
 		row.ScalingTickbox.Visible = supportsScaling;
 		row.ScalingToggleRow.Visible = showHeaderRow;
-		row.ScalingRow.Visible = supportsScaling && row.ScalingTickbox.IsTicked;
+		row.ScalingRow.Visible = (supportsScaling && row.ScalingTickbox.IsTicked) || conditionalBonusUsesHistoryCount;
 		if (row.CountModeSelect != null && GodotObject.IsInstanceValid(row.CountModeSelect))
 		{
-			row.CountModeSelect.Visible = row.ScalingRow.Visible && !isConditionalAutoFromPile;
+			row.CountModeSelect.Visible = row.ScalingRow.Visible && !isConditionalAutoFromPile && supportsScaling && row.ScalingTickbox.IsTicked;
 		}
 
 		bool showScalingBase = row.ScalingRow.Visible
+			&& row.ScalingTickbox.IsTicked
 			&& GetSelectedScaleMode(row, kind) == CardExtraEffectScaleMode.PerHistoryCount
 			&& kind is CardExtraEffectKind.DealDamage or CardExtraEffectKind.GainBlock;
 		row.ScalingBaseTickbox.Visible = showScalingBase;
@@ -13931,8 +14044,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			row.BranchConditionRow.Visible = useTargetCheck;
 			CardExtraEffectConditionalBonusCondition branchCondition = GetSelectedBranchCondition(row);
-			bool needsBranchStatus = branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus or CardExtraEffectConditionalBonusCondition.SelfHasStatus;
-			bool needsBranchIntent = branchCondition == CardExtraEffectConditionalBonusCondition.TargetHasIntent;
+			bool needsBranchStatus = branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus
+				or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+				or CardExtraEffectConditionalBonusCondition.TargetLacksStatus
+				or CardExtraEffectConditionalBonusCondition.SelfLacksStatus;
+			bool needsBranchIntent = branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasIntent
+				or CardExtraEffectConditionalBonusCondition.TargetIntentIsNot;
 
 			if (row.BranchEnemyStatusSelect != null && GodotObject.IsInstanceValid(row.BranchEnemyStatusSelect))
 			{
@@ -14830,6 +14947,31 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return (CardGeneratedCardType)selected;
 	}
 
+	private static string? GetSelectedGeneratedCustomTag(ExtraEffectRow row)
+	{
+		if (row.GeneratedCustomTagSelect == null
+			|| !GodotObject.IsInstanceValid(row.GeneratedCustomTagSelect)
+			|| row.GeneratedCustomTagOptions == null)
+		{
+			return null;
+		}
+
+		int selected = row.GeneratedCustomTagSelect.Selected;
+		if (selected <= 0)
+		{
+			return null;
+		}
+
+		int optionIndex = selected - 1;
+		if (optionIndex < 0 || optionIndex >= row.GeneratedCustomTagOptions.Count)
+		{
+			return null;
+		}
+
+		string tag = row.GeneratedCustomTagOptions[optionIndex]?.Trim() ?? string.Empty;
+		return string.IsNullOrWhiteSpace(tag) ? null : tag;
+	}
+
 	private static CardGeneratedCardPool GetSelectedTriggerCardPool(ExtraEffectRow row)
 	{
 		int selected = row.TriggerCardPoolSelect.Selected;
@@ -14958,6 +15100,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return CardExtraEffectConditionalBonusCondition.None;
 		}
 		return (CardExtraEffectConditionalBonusCondition)selected;
+	}
+
+	private static CardExtraEffectBranchConditionType GetSelectedConditionalBonusConditionType(ExtraEffectRow row)
+	{
+		if (row.ConditionalBonusConditionTypeSelect == null || !GodotObject.IsInstanceValid(row.ConditionalBonusConditionTypeSelect))
+		{
+			return CardExtraEffectBranchConditionType.TargetCheck;
+		}
+
+		int selected = row.ConditionalBonusConditionTypeSelect.Selected;
+		return selected switch
+		{
+			1 => CardExtraEffectBranchConditionType.HistoryCount,
+			_ => CardExtraEffectBranchConditionType.TargetCheck
+		};
 	}
 
 	private static CardExtraEffectBranchMode GetSelectedBranchMode(ExtraEffectRow row)
@@ -15576,7 +15733,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardExtraEffectDefinition def = GetEffectDefinition(resolvedKind);
 
 		row.AllowedTargets.Clear();
-		IReadOnlyList<CardExtraEffectTarget> allowed = def.AllowedTargets;
+		IReadOnlyList<CardExtraEffectTarget> allowed = ExpandMultiplayerTargets(def.AllowedTargets);
 		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay)
 		{
 			allowed = allowed.Where(t => t != CardExtraEffectTarget.Target).ToArray();
@@ -17360,20 +17517,31 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					: CardExtraEffectTransformMode.Random;
 
 				bool allowConditionalBonus = row.ConditionalBonusRow != null && GodotObject.IsInstanceValid(row.ConditionalBonusRow) && row.ConditionalBonusRow.Visible;
+				CardExtraEffectBranchConditionType conditionalBonusConditionType = allowConditionalBonus
+					? GetSelectedConditionalBonusConditionType(row)
+					: CardExtraEffectBranchConditionType.None;
 				CardExtraEffectConditionalBonusCondition conditionalBonusCondition = allowConditionalBonus
+					&& conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
 					? GetSelectedConditionalBonusCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				int conditionalBonusAmount = allowConditionalBonus && row.ConditionalBonusAmountField != null && GodotObject.IsInstanceValid(row.ConditionalBonusAmountField)
 					? ParseIntOrDefault(row.ConditionalBonusAmountField.Text, 0)
 					: 0;
-				if (conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
+				if (conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
 				{
 					conditionalBonusAmount = 0;
 				}
-				CardExtraEffectEnemyStatus conditionalBonusEnemyStatus = conditionalBonusCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+				CardExtraEffectEnemyStatus conditionalBonusEnemyStatus = conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& (conditionalBonusCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus
+					or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+					or CardExtraEffectConditionalBonusCondition.TargetLacksStatus
+					or CardExtraEffectConditionalBonusCondition.SelfLacksStatus)
 					? GetSelectedConditionalBonusEnemyStatus(row)
 					: CardExtraEffectEnemyStatus.Weak;
-				CardExtraEffectEnemyIntent conditionalBonusEnemyIntent = conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.TargetHasIntent
+				CardExtraEffectEnemyIntent conditionalBonusEnemyIntent = conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& (conditionalBonusCondition is CardExtraEffectConditionalBonusCondition.TargetHasIntent
+					or CardExtraEffectConditionalBonusCondition.TargetIntentIsNot)
 					? GetSelectedConditionalBonusEnemyIntent(row)
 					: CardExtraEffectEnemyIntent.Attack;
 				bool allowBranch = row.BranchTickbox != null
@@ -17390,11 +17558,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					? GetSelectedBranchCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				CardExtraEffectEnemyStatus branchEnemyStatus = branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
-					&& branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+					&& (branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus
+						or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+						or CardExtraEffectConditionalBonusCondition.TargetLacksStatus
+						or CardExtraEffectConditionalBonusCondition.SelfLacksStatus)
 					? GetSelectedBranchEnemyStatus(row)
 					: CardExtraEffectEnemyStatus.Weak;
 				CardExtraEffectEnemyIntent branchEnemyIntent = branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
-					&& branchCondition == CardExtraEffectConditionalBonusCondition.TargetHasIntent
+					&& (branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasIntent
+						or CardExtraEffectConditionalBonusCondition.TargetIntentIsNot)
 					? GetSelectedBranchEnemyIntent(row)
 					: CardExtraEffectEnemyIntent.Attack;
 				CardExtraEffectCountEvent branchCountEvent = branchConditionType == CardExtraEffectBranchConditionType.HistoryCount
@@ -17516,6 +17688,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CardCostsLessModifier = GetSelectedCardCostsLessModifier(row),
 					GeneratedCardPool = GetSelectedGeneratedCardPool(row),
 					GeneratedCardType = GetSelectedGeneratedCardType(row),
+					GeneratedCardCustomTag = GetSelectedGeneratedCustomTag(row),
 					ScaleMode = GetSelectedScaleMode(row, resolvedKind),
 					CountEvent = GetSelectedCountEvent(row),
 					CountWindow = GetSelectedCountWindow(row),
@@ -17619,6 +17792,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						: null,
 					TransformMode = transformMode,
 					ConditionalBonusAmount = conditionalBonusAmount,
+					ConditionalBonusConditionType = conditionalBonusConditionType,
 					ConditionalBonusCondition = conditionalBonusCondition,
 					ConditionalBonusEnemyStatus = conditionalBonusEnemyStatus,
 					ConditionalBonusEnemyIntent = conditionalBonusEnemyIntent,
@@ -18279,20 +18453,31 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					: CardExtraEffectTransformMode.Random;
 
 				bool allowConditionalBonus = row.ConditionalBonusRow != null && GodotObject.IsInstanceValid(row.ConditionalBonusRow) && row.ConditionalBonusRow.Visible;
+				CardExtraEffectBranchConditionType conditionalBonusConditionType = allowConditionalBonus
+					? GetSelectedConditionalBonusConditionType(row)
+					: CardExtraEffectBranchConditionType.None;
 				CardExtraEffectConditionalBonusCondition conditionalBonusCondition = allowConditionalBonus
+					&& conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
 					? GetSelectedConditionalBonusCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				int conditionalBonusAmount = allowConditionalBonus && row.ConditionalBonusAmountField != null && GodotObject.IsInstanceValid(row.ConditionalBonusAmountField)
 					? ParseIntOrDefault(row.ConditionalBonusAmountField.Text, 0)
 					: 0;
-				if (conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
+				if (conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
 				{
 					conditionalBonusAmount = 0;
 				}
-				CardExtraEffectEnemyStatus conditionalBonusEnemyStatus = conditionalBonusCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+				CardExtraEffectEnemyStatus conditionalBonusEnemyStatus = conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& (conditionalBonusCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus
+					or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+					or CardExtraEffectConditionalBonusCondition.TargetLacksStatus
+					or CardExtraEffectConditionalBonusCondition.SelfLacksStatus)
 					? GetSelectedConditionalBonusEnemyStatus(row)
 					: CardExtraEffectEnemyStatus.Weak;
-				CardExtraEffectEnemyIntent conditionalBonusEnemyIntent = conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.TargetHasIntent
+				CardExtraEffectEnemyIntent conditionalBonusEnemyIntent = conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& (conditionalBonusCondition is CardExtraEffectConditionalBonusCondition.TargetHasIntent
+					or CardExtraEffectConditionalBonusCondition.TargetIntentIsNot)
 					? GetSelectedConditionalBonusEnemyIntent(row)
 					: CardExtraEffectEnemyIntent.Attack;
 				bool allowBranch = row.BranchTickbox != null
@@ -18309,11 +18494,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					? GetSelectedBranchCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				CardExtraEffectEnemyStatus branchEnemyStatus = branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
-					&& branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+					&& (branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus
+						or CardExtraEffectConditionalBonusCondition.SelfHasStatus
+						or CardExtraEffectConditionalBonusCondition.TargetLacksStatus
+						or CardExtraEffectConditionalBonusCondition.SelfLacksStatus)
 					? GetSelectedBranchEnemyStatus(row)
 					: CardExtraEffectEnemyStatus.Weak;
 				CardExtraEffectEnemyIntent branchEnemyIntent = branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
-					&& branchCondition == CardExtraEffectConditionalBonusCondition.TargetHasIntent
+					&& (branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasIntent
+						or CardExtraEffectConditionalBonusCondition.TargetIntentIsNot)
 					? GetSelectedBranchEnemyIntent(row)
 					: CardExtraEffectEnemyIntent.Attack;
 				CardExtraEffectCountEvent branchCountEvent = branchConditionType == CardExtraEffectBranchConditionType.HistoryCount
@@ -18457,6 +18646,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CardCostsLessModifier = GetSelectedCardCostsLessModifier(row),
 					GeneratedCardPool = GetSelectedGeneratedCardPool(row),
 					GeneratedCardType = GetSelectedGeneratedCardType(row),
+					GeneratedCardCustomTag = GetSelectedGeneratedCustomTag(row),
 					ScaleMode = scaleMode,
 					CountEvent = GetSelectedCountEvent(row),
 					CountWindow = GetSelectedCountWindow(row),
@@ -18562,6 +18752,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						: null,
 					TransformMode = transformMode,
 					ConditionalBonusAmount = conditionalBonusAmount,
+					ConditionalBonusConditionType = conditionalBonusConditionType,
 					ConditionalBonusCondition = conditionalBonusCondition,
 					ConditionalBonusEnemyStatus = conditionalBonusEnemyStatus,
 					ConditionalBonusEnemyIntent = conditionalBonusEnemyIntent,
@@ -18903,6 +19094,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void OnApplyPressed()
 	{
+		if (!CardEditorMultiplayerSync.CanEditSharedState())
+		{
+			Log.Info("[CardEditor][MultiplayerSync] Blocked popup apply because shared-state editing is host-controlled.");
+			return;
+		}
+
 		if (_isCreatedCard && !_isUpgradeEditor)
 		{
 			CommitCreatedCardMetaFromUi();
@@ -18912,8 +19109,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			if (_isCreatedCard)
 			{
-				string? customTextUpgraded = (_createdCustomTextUpgradedTickbox?.IsTicked ?? false) ? _createdCustomTextUpgradedField?.Text : null;
-				CardEditorCreatedCardsStore.SetCustomTextUpgraded(_cardId, customTextUpgraded);
+				CardEditorCreatedCardsStore.SetCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, _createdCustomTextUpgradedTickbox?.IsTicked ?? false);
 			}
 
 			UpgradeBaseline baseline = GetUpgradeBaseline();
@@ -18956,12 +19152,19 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CardEditorCreatedCardsStore.ClearDraftMeta(_cardId);
 		}
 		CardEditorOverrides.ApplyToExistingCards(_cardId);
+		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		_onApplied?.Invoke();
 		Close();
 	}
 
 	private void OnResetPressed()
 	{
+		if (!CardEditorMultiplayerSync.CanEditSharedState())
+		{
+			Log.Info("[CardEditor][MultiplayerSync] Blocked popup reset because shared-state editing is host-controlled.");
+			return;
+		}
+
 		if (_isUpgradeEditor)
 		{
 			CardOverride? existing = CardEditorOverrides.Get(_cardId);
@@ -19001,6 +19204,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			CardEditorCreatedCardsStore.ClearDraftMeta(_cardId);
 		}
+		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		_onApplied?.Invoke();
 		Close();
 	}
@@ -19070,12 +19274,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		if (_useModalContainer)
 		{
 			NModalContainer.Instance?.Add(popup);
+			CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
+			Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
 			popup.ForceLayoutRefreshNow();
 			Callable.From(popup.ForceLayoutRefreshNow).CallDeferred();
 			return;
 		}
 
 		NGame.Instance?.AddChildSafely(popup);
+		CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
+		Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
 		popup.ForceLayoutRefreshNow();
 		Callable.From(popup.ForceLayoutRefreshNow).CallDeferred();
 	}
@@ -19100,6 +19308,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			this.QueueFreeSafely();
 		}
+		CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
+		Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
 	}
 
 	private void OpenSpecificCardPicker(Action<ModelId> onPicked)
@@ -19406,11 +19616,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		bool fullArt = _createdFullArtTickbox?.IsTicked ?? false;
 		CardEditorVisualFinish finish = GetSelectedCreatedFinish();
-		string? customText = (_createdCustomTextTickbox?.IsTicked ?? false) ? _createdCustomTextField?.Text : null;
+		string? customText = _createdCustomTextField?.Text;
+		bool customTextEnabled = _createdCustomTextTickbox?.IsTicked ?? false;
 
 		Dictionary<string, float>? fp = _createdFinishParams.Count > 0 ? new Dictionary<string, float>(_createdFinishParams) : null;
 
-		CardEditorCreatedCardsStore.SetMeta(_cardId, title, pool, rarity, type, targetType, effectSourceIds, portraitSourceId, customPortraitFile, fullArt, finish, customText, fp);
+		CardEditorCreatedCardsStore.SetMeta(_cardId, title, pool, rarity, type, targetType, effectSourceIds, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp);
 		CardEditorCreatedCardsStore.SetEnabled(_cardId, enabled);
 	}
 

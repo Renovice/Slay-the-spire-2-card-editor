@@ -24,8 +24,14 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		public string? EffectSourceIdsKey { get; set; }
 	}
 
+	private sealed class RuntimeEffectSourceInvocationState
+	{
+		public HashSet<string> InvocationKeys { get; } = new(StringComparer.Ordinal);
+	}
+
 	private static readonly FieldInfo? _dynamicVarsField = typeof(CardModel).GetField("_dynamicVars", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static readonly ConditionalWeakTable<CardModel, DynamicVarSyncState> _dynamicVarSyncStates = new();
+	private static readonly ConditionalWeakTable<CardPlay, RuntimeEffectSourceInvocationState> _runtimeEffectSourceInvocations = new();
 	private static readonly ThreadLocal<HashSet<ModelId>> _dynamicVarSyncGuard = new(() => new HashSet<ModelId>());
 	private static readonly ThreadLocal<HashSet<ModelId>> _keywordGuard = new(() => new HashSet<ModelId>());
 	private static readonly ConcurrentDictionary<Type, MethodInfo?> _onPlayMethodCache = new();
@@ -342,6 +348,12 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			return;
 		}
 
+		string invocationKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
+		if (!TryRegisterInvocation(cardPlay, invocationKey))
+		{
+			return;
+		}
+
 		CardModel? effectSourceCard = BuildEffectSourceCard(createdCard, effectSourceId, isUpgradePreview: false);
 		if (effectSourceCard == null)
 		{
@@ -385,6 +397,20 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Borrowed effect source OnPlay failed for {createdCard.Id} (source {effectSourceCard.Id}): {ex}");
+		}
+	}
+
+	private static bool TryRegisterInvocation(CardPlay? cardPlay, string invocationKey)
+	{
+		if (cardPlay == null || string.IsNullOrWhiteSpace(invocationKey))
+		{
+			return true;
+		}
+
+		RuntimeEffectSourceInvocationState state = _runtimeEffectSourceInvocations.GetOrCreateValue(cardPlay);
+		lock (state.InvocationKeys)
+		{
+			return state.InvocationKeys.Add(invocationKey);
 		}
 	}
 

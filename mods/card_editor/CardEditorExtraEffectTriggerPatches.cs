@@ -1268,6 +1268,21 @@ internal static class Hook_AfterCombatVictory_CardEditorExtraEffects_Patch
 			{
 				if (player == null) continue;
 
+				if (player.Deck?.Cards != null && player.Deck.Cards.Count > 0)
+				{
+					List<CardModel> deckSnapshot = player.Deck.Cards.Where(card => card != null).ToList();
+					foreach (CardModel card in deckSnapshot)
+					{
+						HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+						Task task = CardEditorExtraEffects.RunDeckPassiveCombatEnd(combatState, choiceContext, card);
+						bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+						if (!completed && choiceContext.GameAction != null)
+						{
+							await choiceContext.GameAction.CompletionTask;
+						}
+					}
+				}
+
 				HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
 				List<CardModel> cards = new List<CardModel>();
 				foreach (PileType pileType in new[] { PileType.Draw, PileType.Discard, PileType.Hand, PileType.Exhaust })

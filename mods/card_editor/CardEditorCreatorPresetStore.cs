@@ -334,7 +334,9 @@ internal static class CardEditorCreatorPresetStore
 		public string? EffectSourcePlacement { get; set; }
 		public string? PortraitSourceCardId { get; set; }
 		public string? CustomPortraitFile { get; set; }
+		public bool? CustomTextEnabled { get; set; }
 		public string? CustomText { get; set; }
+		public bool? CustomTextUpgradedEnabled { get; set; }
 		public string? CustomTextUpgraded { get; set; }
 		public CardEditorPresetStore.CardOverrideDto? Override { get; set; }
 
@@ -359,7 +361,9 @@ internal static class CardEditorCreatorPresetStore
 				EffectSourcePlacement = def.EffectSourcePlacement.ToString(),
 				PortraitSourceCardId = def.PortraitSourceCardId?.ToString(),
 				CustomPortraitFile = def.CustomPortraitFile,
+				CustomTextEnabled = def.CustomTextEnabled,
 				CustomText = def.CustomText,
+				CustomTextUpgradedEnabled = def.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = def.CustomTextUpgraded,
 				Override = CardEditorPresetStore.CardOverrideDto.FromOverride(def.Override ?? new CardOverride())
 			};
@@ -431,6 +435,8 @@ internal static class CardEditorCreatorPresetStore
 			}
 
 			def.CustomPortraitFile = string.IsNullOrWhiteSpace(CustomPortraitFile) ? null : CustomPortraitFile.Trim();
+			def.CustomTextEnabled = CustomTextEnabled ?? (CustomText != null);
+			def.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? (CustomTextUpgraded != null);
 
 			if (CustomText != null)
 			{

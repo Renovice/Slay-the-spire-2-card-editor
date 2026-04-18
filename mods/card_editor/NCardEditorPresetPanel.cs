@@ -16,9 +16,9 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private static readonly string _headerFontPath = "res://themes/kreon_bold_glyph_space_one.tres";
 	private static readonly string _bodyFontPath = "res://themes/kreon_regular_glyph_space_one.tres";
 	private const float ExpandedOffsetLeft = -460f;
-	private const float ExpandedOffsetTop = 20f;
+	private const float ExpandedOffsetTop = 114f;
 	private const float ExpandedOffsetRight = -20f;
-	private const float ExpandedOffsetBottom = 400f;
+	private const float ExpandedOffsetBottom = 494f;
 	private const float CollapsedOffsetLeft = -92f;
 	private const float CollapsedOffsetTop = 20f;
 	private const float CollapsedOffsetRight = -20f;
@@ -146,18 +146,6 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_headerSpacer = new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		_headerRow.AddChild(_headerSpacer);
 
-		_toggleButton = new Button
-		{
-			Text = "\u25B2",
-			Flat = true,
-			FocusMode = FocusModeEnum.None,
-			CustomMinimumSize = new Vector2(40, 40),
-			MouseFilter = MouseFilterEnum.Stop
-		};
-		StyleToggleButton(_toggleButton);
-		_toggleButton.Pressed += ToggleCollapsed;
-		_headerRow.AddChild(_toggleButton);
-
 		_content = new VBoxContainer();
 		_content.AddThemeConstantOverride("separation", 10);
 		root.AddChild(_content);
@@ -231,7 +219,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		vanilla.Pressed += OnVanillaPressed;
 		_content.AddChild(vanilla);
 
-		SetCollapsed(collapsed: true);
+		SetCollapsed(collapsed: false);
 	}
 
 	private HBoxContainer BuildSlotCountRow()
@@ -496,9 +484,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		else
 		{
 			Dictionary<ModelId, CardOverride> snapshot = CardEditorOverrides.ExportSnapshot();
-			bool ok = CardEditorPresetStore.TrySavePreset(name, snapshot);
+			Dictionary<ModelId, List<ModelId>> baseDeckSnapshot = CardEditorBaseDeckStore.ExportSnapshot();
+			bool ok = CardEditorPresetStore.TrySavePreset(name, snapshot, baseDeckSnapshot);
 			Log.Info(ok
-				? $"[CardEditor] Saved preset '{name}' ({snapshot.Count.ToString(CultureInfo.InvariantCulture)} cards)"
+				? $"[CardEditor] Saved preset '{name}' ({snapshot.Count.ToString(CultureInfo.InvariantCulture)} cards, {baseDeckSnapshot.Count.ToString(CultureInfo.InvariantCulture)} base decks)"
 				: $"[CardEditor] Failed saving preset '{name}'");
 		}
 
@@ -508,6 +497,12 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 	private void OnLoadPressed()
 	{
+		if (!CardEditorMultiplayerSync.CanEditSharedState())
+		{
+			Log.Info("[CardEditor][MultiplayerSync] Blocked preset load because shared-state editing is host-controlled.");
+			return;
+		}
+
 		string name = GetSelectedPresetName() ?? (_presetNameField?.Text?.Trim() ?? string.Empty);
 		if (string.IsNullOrWhiteSpace(name))
 		{
@@ -526,17 +521,21 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			CardEditorCreatedCardsStore.ImportSnapshot(loaded);
 			CardEditorUiState.RefreshLibrary(_library);
 			Log.Info($"[CardEditor] Loaded creator preset '{name}' ({loaded.Count.ToString(CultureInfo.InvariantCulture)} cards)");
+			CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		}
 		else
 		{
 			HashSet<ModelId> previousIds = CardEditorOverrides.AllOverrides.Keys.ToHashSet();
-			if (!CardEditorPresetStore.TryLoadPreset(name, out Dictionary<ModelId, CardOverride> loaded))
+			if (!CardEditorPresetStore.TryLoadPreset(name, out Dictionary<ModelId, CardOverride> loaded, out Dictionary<ModelId, List<ModelId>> loadedBaseDecks))
 			{
 				Log.Info($"[CardEditor] Failed loading preset '{name}'");
 				return;
 			}
 
 			CardEditorOverrides.ReplaceAll(loaded);
+			CardEditorBaseDeckStore.ImportSnapshot(loadedBaseDecks);
+			CardEditorBaseDeckUiState.ClearTransientState();
+			CardEditorBaseDeckUiState.EnsureValidCharacter();
 
 			HashSet<ModelId> loadedIds = loaded.Keys.ToHashSet();
 			HashSet<ModelId> idsToReset = previousIds;
@@ -545,16 +544,29 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			CardEditorOverrides.ApplyAllToExistingCards();
 
 			CardEditorUiState.RefreshLibrary(_library);
-			Log.Info($"[CardEditor] Loaded preset '{name}' ({loaded.Count.ToString(CultureInfo.InvariantCulture)} cards)");
+			CardEditorBaseDeckUiState.RefreshAll();
+			Log.Info($"[CardEditor] Loaded preset '{name}' ({loaded.Count.ToString(CultureInfo.InvariantCulture)} cards, {loadedBaseDecks.Count.ToString(CultureInfo.InvariantCulture)} base decks)");
+			CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		}
 	}
 
-	private void OnDeletePressed()
+	private async void OnDeletePressed()
 	{
 		string name = GetSelectedPresetName() ?? (_presetNameField?.Text?.Trim() ?? string.Empty);
 		if (string.IsNullOrWhiteSpace(name))
 		{
 			Log.Info("[CardEditor] Delete preset: no selection");
+			return;
+		}
+
+		Log.Info($"[CardEditor][ConfirmPopup] Delete preset requested for '{name}'");
+		bool confirmed = await CardEditorConfirmPopup.ShowConfirmation(
+			"Delete Preset?",
+			$"Delete preset \"{name}\"?\n\nThis cannot be undone.");
+		Log.Info($"[CardEditor][ConfirmPopup] Delete preset confirmation result={confirmed} preset='{name}'");
+		if (!confirmed)
+		{
+			Log.Info($"[CardEditor] Delete preset cancelled for '{name}'");
 			return;
 		}
 
@@ -578,6 +590,12 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 	private void OnVanillaPressed()
 	{
+		if (!CardEditorMultiplayerSync.CanEditSharedState())
+		{
+			Log.Info("[CardEditor][MultiplayerSync] Blocked revert-to-vanilla because shared-state editing is host-controlled.");
+			return;
+		}
+
 		if (_isCreatorMode)
 		{
 			CardEditorCreatedCardsStore.ResetAllToDefaults();
@@ -588,10 +606,15 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			HashSet<ModelId> idsToReset = CardEditorOverrides.AllOverrides.Keys.ToHashSet();
 			CardEditorOverrides.ClearAll();
+			CardEditorBaseDeckStore.ClearAllOverrides();
+			CardEditorBaseDeckUiState.ClearTransientState();
 			CardEditorOverrides.ResetExistingCardsForIds(idsToReset);
 			CardEditorUiState.RefreshLibrary(_library);
+			CardEditorBaseDeckUiState.RefreshAll();
 			Log.Info("[CardEditor] Reverted to vanilla (overrides cleared)");
 		}
+
+		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 	}
 
 	private void RefreshStartupCheckbox()

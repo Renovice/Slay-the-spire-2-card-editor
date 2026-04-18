@@ -149,7 +149,10 @@ public enum CardExtraEffectKind
 	CleanseDebuffs = 103,
 	CleanseBuffs = 104,
 	ChooseOneEffectSource = 105,
-	SelfScaling = 106
+	SelfScaling = 106,
+	LoseEnergy = 107,
+	LoseStars = 108,
+	LoseGold = 109
 }
 
 public enum CardExtraEffectSelfScalingOperation
@@ -222,7 +225,24 @@ public enum CardExtraEffectConditionalBonusCondition
 	TargetHasStatus = 2,
 	TargetHasIntent = 3,
 	SelfHasBlock = 4,
-	SelfHasStatus = 5
+	SelfHasStatus = 5,
+	TargetHasNoBlock = 6,
+	SelfHasNoBlock = 7,
+	TargetLacksStatus = 8,
+	SelfLacksStatus = 9,
+	TargetIntentIsNot = 10,
+	TargetIsDamaged = 11,
+	SelfIsDamaged = 12,
+	TargetIsBloodied = 13,
+	SelfIsBloodied = 14,
+	TargetIsFullHp = 15,
+	SelfIsFullHp = 16,
+	TargetIsNotBloodied = 17,
+	SelfIsNotBloodied = 18,
+	TargetHasLessHpThanYou = 19,
+	TargetHasMoreHpThanYou = 20,
+	TargetHasLessBlockThanYou = 21,
+	TargetHasMoreBlockThanYou = 22
 }
 
 public enum CardExtraEffectBranchMode
@@ -322,7 +342,10 @@ public enum CardExtraEffectTarget
 	Self = 0,
 	Target = 1,
 	RandomEnemy = 2,
-	AllEnemies = 3
+	AllEnemies = 3,
+	AnyPlayer = 4,
+	AnyAlly = 5,
+	AllAllies = 6
 }
 
 public enum CardExtraEffectTrigger
@@ -343,7 +366,8 @@ public enum CardExtraEffectTrigger
 	OnEvoke = 13,
 	TurnBoundary = 14,
 	OnCountEvent = 15,
-	DeckPassiveCombatStart = 16
+	DeckPassiveCombatStart = 16,
+	DeckPassiveCombatEnd = 17
 }
 
 public enum CardExtraEffectTurnBoundary
@@ -474,7 +498,8 @@ public enum CardExtraEffectCountEvent
 	ThisCardPlayed = 32,
 	ThisCardDrawn = 33,
 	ThisCardDiscarded = 34,
-	ThisCardExhausted = 35
+	ThisCardExhausted = 35,
+	ThisCardDamageDealt = 36
 }
 
 public enum CardExtraEffectCountWindow
@@ -676,6 +701,7 @@ public sealed class CardExtraEffect
 	public int ConditionalBonusAmount { get; set; }
 
 	// Optional: conditional that gates ConditionalBonusAmount.
+	public CardExtraEffectBranchConditionType ConditionalBonusConditionType { get; set; } = CardExtraEffectBranchConditionType.None;
 	public CardExtraEffectConditionalBonusCondition ConditionalBonusCondition { get; set; } = CardExtraEffectConditionalBonusCondition.None;
 	public CardExtraEffectEnemyStatus ConditionalBonusEnemyStatus { get; set; }
 	public CardExtraEffectEnemyIntent ConditionalBonusEnemyIntent { get; set; }
@@ -765,6 +791,7 @@ public sealed class CardExtraEffect
 
 	public CardGeneratedCardPool GeneratedCardPool { get; set; }
 	public CardGeneratedCardType GeneratedCardType { get; set; }
+	public string? GeneratedCardCustomTag { get; set; }
 
 	public CardExtraEffectScaleMode ScaleMode { get; set; }
 	public CardExtraEffectCountEvent CountEvent { get; set; }
@@ -967,6 +994,14 @@ internal static class CardEditorExtraEffects
 		},
 		new()
 		{
+			Kind = CardExtraEffectKind.RemoveBlock,
+			Label = "Remove Block",
+			AllowedTargets = new [] { CardExtraEffectTarget.Self, CardExtraEffectTarget.Target, CardExtraEffectTarget.AllEnemies, CardExtraEffectTarget.RandomEnemy },
+			DefaultAmount = 5,
+			DefaultTarget = CardExtraEffectTarget.Target
+		},
+		new()
+		{
 			Kind = CardExtraEffectKind.MultiplyStatStatus,
 			Label = "Multiply Stat / Status",
 			AllowedTargets = new [] { CardExtraEffectTarget.Self, CardExtraEffectTarget.Target, CardExtraEffectTarget.AllEnemies, CardExtraEffectTarget.RandomEnemy },
@@ -991,8 +1026,24 @@ internal static class CardEditorExtraEffects
 		},
 		new()
 		{
+			Kind = CardExtraEffectKind.LoseEnergy,
+			Label = "Lose Energy",
+			AllowedTargets = new [] { CardExtraEffectTarget.Self },
+			DefaultAmount = 1,
+			DefaultTarget = CardExtraEffectTarget.Self
+		},
+		new()
+		{
 			Kind = CardExtraEffectKind.GainStars,
 			Label = "Gain Stars",
+			AllowedTargets = new [] { CardExtraEffectTarget.Self },
+			DefaultAmount = 1,
+			DefaultTarget = CardExtraEffectTarget.Self
+		},
+		new()
+		{
+			Kind = CardExtraEffectKind.LoseStars,
+			Label = "Lose Stars",
 			AllowedTargets = new [] { CardExtraEffectTarget.Self },
 			DefaultAmount = 1,
 			DefaultTarget = CardExtraEffectTarget.Self
@@ -1615,6 +1666,14 @@ internal static class CardEditorExtraEffects
 		},
 		new()
 		{
+			Kind = CardExtraEffectKind.UpgradeDeckCards,
+			Label = "Upgrade Deck Cards",
+			AllowedTargets = new [] { CardExtraEffectTarget.Self },
+			DefaultAmount = 1,
+			DefaultTarget = CardExtraEffectTarget.Self
+		},
+		new()
+		{
 			Kind = CardExtraEffectKind.AddCopyOfThisCard,
 			Label = "Add Copy of This Card",
 			AllowedTargets = new [] { CardExtraEffectTarget.Self },
@@ -1788,6 +1847,14 @@ internal static class CardEditorExtraEffects
 			AllowedTargets = new [] { CardExtraEffectTarget.Self },
 			DefaultAmount = 1,
 			DefaultTarget = CardExtraEffectTarget.Self
+		},
+		new()
+		{
+			Kind = CardExtraEffectKind.LoseGold,
+			Label = "Lose Gold",
+			AllowedTargets = new [] { CardExtraEffectTarget.Self },
+			DefaultAmount = 1,
+			DefaultTarget = CardExtraEffectTarget.Self
 		}
 	};
 
@@ -1928,6 +1995,9 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectTarget.Target => "Target",
 			CardExtraEffectTarget.RandomEnemy => "Random Enemy",
 			CardExtraEffectTarget.AllEnemies => "All Enemies",
+			CardExtraEffectTarget.AnyPlayer => "Any Player",
+			CardExtraEffectTarget.AnyAlly => "Any Ally",
+			CardExtraEffectTarget.AllAllies => "All Allies",
 			_ => target.ToString()
 		};
 		return CardEditorLoc.Enum("extraEffectTarget", target, fallback);
@@ -1949,6 +2019,7 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectTrigger.TurnBoundary => "Turn Boundary",
 			CardExtraEffectTrigger.OnCountEvent => "Whenever (Event)",
 			CardExtraEffectTrigger.DeckPassiveCombatStart => "Deck Passive: Combat Start",
+			CardExtraEffectTrigger.DeckPassiveCombatEnd => "Deck Passive: Combat End",
 			CardExtraEffectTrigger.Fatal => "Fatal",
 			CardExtraEffectTrigger.OstyDealDamage => "Osty Deals Damage",
 			CardExtraEffectTrigger.AfterCombat => "End of Combat",
@@ -2008,6 +2079,7 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectCountEvent.ThisCardDrawn => "This Card: Drawn",
 			CardExtraEffectCountEvent.ThisCardDiscarded => "This Card: Discarded",
 			CardExtraEffectCountEvent.ThisCardExhausted => "This Card: Exhausted",
+			CardExtraEffectCountEvent.ThisCardDamageDealt => "This Card: Damage Dealt",
 			_ => ev.ToString()
 		};
 		return CardEditorLoc.Enum("countEvent", ev, fallback);
@@ -2162,6 +2234,7 @@ internal static class CardEditorExtraEffects
 				perfectVerb = simplePastVerb;
 				return true;
 			case CardExtraEffectCountEvent.DamageDealt:
+			case CardExtraEffectCountEvent.ThisCardDamageDealt:
 				singularResource = CardEditorLoc.T("cardText.resource.damage", "damage");
 				pluralResource = singularResource;
 				presentVerb = CardEditorLoc.Enum("historyVerbPresent", ev, "deal");
@@ -2517,6 +2590,23 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectConditionalBonusCondition.TargetHasIntent => "Target Has Intent",
 			CardExtraEffectConditionalBonusCondition.SelfHasBlock => "You Have Block",
 			CardExtraEffectConditionalBonusCondition.SelfHasStatus => "You Have Status",
+			CardExtraEffectConditionalBonusCondition.TargetHasNoBlock => "Target Has No Block",
+			CardExtraEffectConditionalBonusCondition.SelfHasNoBlock => "You Have No Block",
+			CardExtraEffectConditionalBonusCondition.TargetLacksStatus => "Target Lacks Status",
+			CardExtraEffectConditionalBonusCondition.SelfLacksStatus => "You Lack Status",
+			CardExtraEffectConditionalBonusCondition.TargetIntentIsNot => "Target Intent Is Not",
+			CardExtraEffectConditionalBonusCondition.TargetIsDamaged => "Target Is Damaged",
+			CardExtraEffectConditionalBonusCondition.SelfIsDamaged => "You Are Damaged",
+			CardExtraEffectConditionalBonusCondition.TargetIsBloodied => "Target Is Bloodied",
+			CardExtraEffectConditionalBonusCondition.SelfIsBloodied => "You Are Bloodied",
+			CardExtraEffectConditionalBonusCondition.TargetIsFullHp => "Target Is At Full HP",
+			CardExtraEffectConditionalBonusCondition.SelfIsFullHp => "You Are At Full HP",
+			CardExtraEffectConditionalBonusCondition.TargetIsNotBloodied => "Target Is Not Bloodied",
+			CardExtraEffectConditionalBonusCondition.SelfIsNotBloodied => "You Are Not Bloodied",
+			CardExtraEffectConditionalBonusCondition.TargetHasLessHpThanYou => "Target Has Less HP Than You",
+			CardExtraEffectConditionalBonusCondition.TargetHasMoreHpThanYou => "Target Has More HP Than You",
+			CardExtraEffectConditionalBonusCondition.TargetHasLessBlockThanYou => "Target Has Less Block Than You",
+			CardExtraEffectConditionalBonusCondition.TargetHasMoreBlockThanYou => "Target Has More Block Than You",
 			_ => condition.ToString()
 		};
 		return CardEditorLoc.Enum("conditionalBonusCondition", condition, fallback);
@@ -2938,6 +3028,7 @@ internal static class CardEditorExtraEffects
 		}
 
 		return effect.Turns != 0
+			|| effect.RepeatIsX
 			|| effect.RepeatCount != 0
 			|| effect.TriggerEveryN != 0
 			|| effect.TriggerMaxFires != 0
@@ -2951,6 +3042,7 @@ internal static class CardEditorExtraEffects
 			|| effect.CardSelectionCount != 0
 			|| effect.EnchantmentTurns != 0
 			|| effect.ConditionalBonusAmount != 0
+			|| effect.ConditionalBonusConditionType != CardExtraEffectBranchConditionType.None
 			|| effect.ConditionalBonusCondition != CardExtraEffectConditionalBonusCondition.None
 			|| effect.BranchMode != CardExtraEffectBranchMode.None
 			|| effect.BranchConditionType != CardExtraEffectBranchConditionType.None
@@ -3005,6 +3097,7 @@ internal static class CardEditorExtraEffects
 				|| upgradeEffect.CardSelectionCount != 0
 				|| upgradeEffect.EnchantmentTurns != 0
 				|| upgradeEffect.ConditionalBonusAmount != 0
+				|| upgradeEffect.ConditionalBonusConditionType != CardExtraEffectBranchConditionType.None
 				|| upgradeEffect.BranchMode != CardExtraEffectBranchMode.None
 				|| upgradeEffect.BranchConditionType != CardExtraEffectBranchConditionType.None
 				|| upgradeEffect.BranchCondition != CardExtraEffectConditionalBonusCondition.None
@@ -3031,6 +3124,7 @@ internal static class CardEditorExtraEffects
 				|| upgradeEffect.CardSelectionCount != 0
 				|| upgradeEffect.EnchantmentTurns != 0
 				|| upgradeEffect.ConditionalBonusAmount != 0
+				|| upgradeEffect.ConditionalBonusConditionType != CardExtraEffectBranchConditionType.None
 				|| upgradeEffect.ConditionalBonusCondition != CardExtraEffectConditionalBonusCondition.None
 				|| upgradeEffect.BranchMode != CardExtraEffectBranchMode.None
 				|| upgradeEffect.BranchConditionType != CardExtraEffectBranchConditionType.None
@@ -3054,6 +3148,11 @@ internal static class CardEditorExtraEffects
 
 		if (baseEffect != null)
 		{
+			if (baseEffect.RepeatIsX != upgradeEffect.RepeatIsX)
+			{
+				return true;
+			}
+
 			if (baseEffect.CountExcludeSourceCard != upgradeEffect.CountExcludeSourceCard)
 			{
 				return true;
@@ -3082,7 +3181,8 @@ internal static class CardEditorExtraEffects
 				return true;
 			}
 
-			if (baseEffect.ConditionalBonusCondition != upgradeEffect.ConditionalBonusCondition
+			if (baseEffect.ConditionalBonusConditionType != upgradeEffect.ConditionalBonusConditionType
+				|| baseEffect.ConditionalBonusCondition != upgradeEffect.ConditionalBonusCondition
 				|| baseEffect.ConditionalBonusEnemyStatus != upgradeEffect.ConditionalBonusEnemyStatus
 				|| baseEffect.ConditionalBonusEnemyIntent != upgradeEffect.ConditionalBonusEnemyIntent)
 			{
@@ -3174,6 +3274,106 @@ internal static class CardEditorExtraEffects
 		combined.AddRange(baseEffects);
 		combined.AddRange(temporaryEffects);
 		return combined;
+	}
+
+	internal static bool ShouldGlowGoldForConditionalEffects(CardModel card)
+	{
+		if (card == null)
+		{
+			return false;
+		}
+
+		CombatState? combatState = card.CombatState;
+		Creature? ownerCreature = card.Owner?.Creature;
+		if (combatState == null || ownerCreature == null)
+		{
+			return false;
+		}
+
+		CardPlay playForConditions = GetPreviewConditionCardPlay(card);
+		foreach (CardExtraEffect effect in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
+		{
+			if (ShouldGlowGoldForConditionalEffect(card, combatState, ownerCreature, playForConditions, effect))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static CardPlay GetPreviewConditionCardPlay(CardModel card)
+	{
+		CardPlay? currentPlay = CardEditorCardPlayContext.Current;
+		if (currentPlay != null && ReferenceEquals(currentPlay.Card, card))
+		{
+			return currentPlay;
+		}
+
+		return new CardPlay
+		{
+			Card = card,
+			Target = null,
+			ResultPile = card.Pile?.Type ?? PileType.None,
+			Resources = new ResourceInfo
+			{
+				EnergySpent = 0,
+				EnergyValue = 0,
+				StarsSpent = 0,
+				StarValue = 0
+			},
+			IsAutoPlay = true,
+			PlayIndex = 0,
+			PlayCount = 1
+		};
+	}
+
+	private static bool ShouldGlowGoldForConditionalEffect(
+		CardModel card,
+		CombatState combatState,
+		Creature ownerCreature,
+		CardPlay playForConditions,
+		CardExtraEffect effect)
+	{
+		if (card == null || effect == null)
+		{
+			return false;
+		}
+
+		if (effect.ScaleMode != CardExtraEffectScaleMode.None)
+		{
+			int count = GetHistoryCountMultiplier(combatState, ownerCreature, playForConditions, effect, card);
+			if (DoesCountConditionPass(count, effect))
+			{
+				if (effect.ScaleMode == CardExtraEffectScaleMode.ConditionOnly)
+				{
+					return true;
+				}
+
+				if (effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount)
+				{
+					if (effect.CountComparison != CardExtraEffectCountComparison.None)
+					{
+						return true;
+					}
+
+					if (count > 0)
+					{
+						return true;
+					}
+				}
+			}
+		}
+
+		if (GetEffectiveConditionalBonusConditionType(effect) != CardExtraEffectBranchConditionType.None
+			&& effect.ConditionalBonusAmount != 0
+			&& DoesConditionalBonusPass(combatState, ownerCreature, playForConditions, effect))
+		{
+			return true;
+		}
+
+		return GetUsableBranchEffect(effect) != null
+			&& DoesBranchConditionPass(combatState, ownerCreature, playForConditions, effect);
 	}
 
 	private static CardOverride CreateSelfScalingSnapshot(CardModel card)
@@ -3648,36 +3848,41 @@ internal static class CardEditorExtraEffects
 		}
 
 		string trimmed = line.Trim();
-		int suffixIndex = trimmed.IndexOf(" for each ", StringComparison.Ordinal);
-		if (suffixIndex > 0)
+		foreach (string marker in GetMergeSuffixMarkers())
 		{
-			mode = DescriptionLineMergeMode.SharedSuffix;
-			sharedText = trimmed[suffixIndex..];
-			payload = TrimTrailingPeriod(trimmed[..suffixIndex]);
-			return !string.IsNullOrWhiteSpace(payload);
+			int suffixIndex = trimmed.IndexOf(marker, StringComparison.Ordinal);
+			if (suffixIndex > 0)
+			{
+				mode = DescriptionLineMergeMode.SharedSuffix;
+				sharedText = trimmed[suffixIndex..];
+				payload = TrimTrailingPeriod(trimmed[..suffixIndex]);
+				return !string.IsNullOrWhiteSpace(payload);
+			}
 		}
 
-		if (trimmed.StartsWith("[gold]Start Of Combat[/gold]: ", StringComparison.Ordinal))
+		foreach (string startOfCombatPrefix in GetCombatStartPrefixes())
 		{
-			mode = DescriptionLineMergeMode.SharedPrefix;
-			sharedText = "[gold]Start Of Combat[/gold]: ";
-			payload = TrimTrailingPeriod(trimmed[sharedText.Length..]);
-			return !string.IsNullOrWhiteSpace(payload);
-		}
-
-		if (trimmed.StartsWith("If ", StringComparison.Ordinal)
-			|| trimmed.StartsWith("Whenever ", StringComparison.Ordinal)
-			|| trimmed.StartsWith("At the ", StringComparison.Ordinal)
-			|| trimmed.StartsWith("After ", StringComparison.Ordinal)
-			|| trimmed.StartsWith("Every ", StringComparison.Ordinal))
-		{
-			int separatorIndex = trimmed.IndexOf(", ", StringComparison.Ordinal);
-			if (separatorIndex > 0)
+			if (trimmed.StartsWith(startOfCombatPrefix, StringComparison.Ordinal))
 			{
 				mode = DescriptionLineMergeMode.SharedPrefix;
-				sharedText = trimmed[..(separatorIndex + 2)];
-				payload = TrimTrailingPeriod(trimmed[(separatorIndex + 2)..]);
+				sharedText = startOfCombatPrefix;
+				payload = TrimTrailingPeriod(trimmed[sharedText.Length..]);
 				return !string.IsNullOrWhiteSpace(payload);
+			}
+		}
+
+		if (StartsWithAny(trimmed, GetPrefixMergeMarkers()))
+		{
+			foreach (string separator in GetPrefixMergeSeparators())
+			{
+				int separatorIndex = trimmed.IndexOf(separator, StringComparison.Ordinal);
+				if (separatorIndex > 0)
+				{
+					mode = DescriptionLineMergeMode.SharedPrefix;
+					sharedText = trimmed[..(separatorIndex + separator.Length)];
+					payload = TrimTrailingPeriod(trimmed[(separatorIndex + separator.Length)..]);
+					return !string.IsNullOrWhiteSpace(payload);
+				}
 			}
 		}
 
@@ -3696,7 +3901,18 @@ internal static class CardEditorExtraEffects
 		}
 		if (payloads.Count == 2)
 		{
+			if (IsChineseLocalizationActive())
+			{
+				return payloads[0] + "和" + payloads[1];
+			}
 			return payloads[0] + " and " + LowercaseFirst(payloads[1]);
+		}
+
+		if (IsChineseLocalizationActive())
+		{
+			return string.Join("、", payloads.Take(payloads.Count - 1))
+				+ "和"
+				+ payloads[^1];
 		}
 
 		return string.Join(", ", payloads.Take(payloads.Count - 1))
@@ -3707,9 +3923,59 @@ internal static class CardEditorExtraEffects
 	private static string TrimTrailingPeriod(string text)
 	{
 		string trimmed = text?.Trim() ?? string.Empty;
-		return trimmed.EndsWith(".", StringComparison.Ordinal)
-			? trimmed[..^1]
-			: trimmed;
+		if (trimmed.EndsWith(".", StringComparison.Ordinal) || trimmed.EndsWith("。", StringComparison.Ordinal))
+		{
+			return trimmed[..^1];
+		}
+
+		return trimmed;
+	}
+
+	private static bool IsChineseLocalizationActive()
+	{
+		string language = LocManager.Instance?.Language ?? string.Empty;
+		return language.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool StartsWithAny(string text, IReadOnlyList<string> prefixes)
+	{
+		foreach (string prefix in prefixes)
+		{
+			if (text.StartsWith(prefix, StringComparison.Ordinal))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static IReadOnlyList<string> GetMergeSuffixMarkers()
+	{
+		return IsChineseLocalizationActive()
+			? new[] { "。你在", "（你在", "，你在" }
+			: new[] { " for each " };
+	}
+
+	private static IReadOnlyList<string> GetCombatStartPrefixes()
+	{
+		return IsChineseLocalizationActive()
+			? new[] { "[gold]战斗开始时[/gold]：" }
+			: new[] { "[gold]Start Of Combat[/gold]: " };
+	}
+
+	private static IReadOnlyList<string> GetPrefixMergeMarkers()
+	{
+		return IsChineseLocalizationActive()
+			? new[] { "如果", "每当", "在", "每", "本场战斗中", "从下个", "从你的下个", "战斗开始时" }
+			: new[] { "If ", "Whenever ", "At the ", "After ", "Every " };
+	}
+
+	private static IReadOnlyList<string> GetPrefixMergeSeparators()
+	{
+		return IsChineseLocalizationActive()
+			? new[] { "，", "：" }
+			: new[] { ", ", ": " };
 	}
 
 	internal static IReadOnlyList<CardExtraEffectKeywordSummary> GetCustomKeywordSummaries(CardModel card, Creature? target = null, bool isUpgradePreview = false)
@@ -3766,6 +4032,15 @@ internal static class CardEditorExtraEffects
 			{
 				Name = GetDeckPassiveCombatStartKeywordTitle(),
 				Description = GetDeckPassiveCombatStartKeywordDescription()
+			});
+		}
+
+		if (lines.Any(line => line.Trigger == CardExtraEffectTrigger.DeckPassiveCombatEnd))
+		{
+			summaries.Add(new CardExtraEffectKeywordSummary
+			{
+				Name = GetDeckPassiveCombatEndKeywordTitle(),
+				Description = GetDeckPassiveCombatEndKeywordDescription()
 			});
 		}
 
@@ -4284,6 +4559,7 @@ internal static class CardEditorExtraEffects
 			&& baseEffect.DrawnFromPile == upgradeEffect.DrawnFromPile
 			&& string.Equals(baseEffect.SpecificCardId ?? string.Empty, upgradeEffect.SpecificCardId ?? string.Empty, StringComparison.Ordinal)
 			&& baseEffect.TransformMode == upgradeEffect.TransformMode
+			&& baseEffect.ConditionalBonusConditionType == upgradeEffect.ConditionalBonusConditionType
 			&& baseEffect.ConditionalBonusCondition == upgradeEffect.ConditionalBonusCondition
 			&& baseEffect.ConditionalBonusEnemyStatus == upgradeEffect.ConditionalBonusEnemyStatus
 			&& baseEffect.ConditionalBonusEnemyIntent == upgradeEffect.ConditionalBonusEnemyIntent
@@ -4771,6 +5047,11 @@ internal static class CardEditorExtraEffects
 	public static Task RunDeckPassiveCombatStart(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card)
 	{
 		return RunForTrigger(combatState, choiceContext, card, CardExtraEffectTrigger.DeckPassiveCombatStart);
+	}
+
+	public static Task RunDeckPassiveCombatEnd(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card)
+	{
+		return RunForTrigger(combatState, choiceContext, card, CardExtraEffectTrigger.DeckPassiveCombatEnd);
 	}
 
 	public static Task RunAfterOrbChanneled(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card)
@@ -5665,7 +5946,9 @@ internal static class CardEditorExtraEffects
 				CardExtraEffectKind.DealDamage => FormatDealDamage(effect.Target, amountText),
 				CardExtraEffectKind.DrawCards => FormatDrawCards(effect, grammarAmount, amountText),
 				CardExtraEffectKind.GainEnergy => CardEditorLoc.F("cardText.gainEnergy", $"Gain {energyText}.", ("Amount", energyText)),
+				CardExtraEffectKind.LoseEnergy => CardEditorLoc.F("cardText.loseEnergy", $"Lose {energyText}.", ("Amount", energyText)),
 				CardExtraEffectKind.GainStars => CardEditorLoc.F("cardText.gainStars", $"Gain {starText}.", ("Amount", starText)),
+				CardExtraEffectKind.LoseStars => CardEditorLoc.F("cardText.loseStars", $"Lose {starText}.", ("Amount", starText)),
 				CardExtraEffectKind.Heal => effect.Target switch
 				{
 					CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.heal.allEnemies", $"ALL enemies heal {amountText} HP.", ("Amount", amountText)),
@@ -5799,6 +6082,7 @@ internal static class CardEditorExtraEffects
 				CardExtraEffectKind.ConditionalAutoDrawFromPile => FormatAutoDrawSelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
 				CardExtraEffectKind.GrantKeywordToPile => FormatGrantKeywordToPile(effect, grammarAmount, amountText),
 				CardExtraEffectKind.GainGold => $"Gain {amountText} Gold.",
+				CardExtraEffectKind.LoseGold => $"Lose {amountText} Gold.",
 				CardExtraEffectKind.UpgradeDeckCards => FormatUpgradeDeckCards(effect, grammarAmount, amountText),
 				CardExtraEffectKind.FetchSpecificCardToHand => FormatFetchSpecificCardToHand(effect, grammarAmount, amountText),
 				_ => null
@@ -6424,6 +6708,16 @@ internal static class CardEditorExtraEffects
 				("Window", summonWindowText));
 		}
 
+		if (effect.CountEvent == CardExtraEffectCountEvent.ThisCardDamageDealt)
+		{
+			string thisCardDamageWindowText = GetCountWindowText(effect);
+			return CardEditorLoc.F(
+				"cardText.thisCardDamageScalingSuffix",
+				$"{trimmed} for each damage this card dealt {thisCardDamageWindowText}.",
+				("Effect", trimmed),
+				("Window", thisCardDamageWindowText));
+		}
+
 		if (TryGetAmountCountText(card, effect.CountEvent, out string singularResource, out _, out _, out string pastResourceVerb, out _))
 		{
 			string resourceWindowText = GetCountWindowText(effect);
@@ -6772,6 +7066,25 @@ internal static class CardEditorExtraEffects
 
 		if (TryGetAmountCountText(card, effect.CountEvent, out string singularResource, out string pluralResource, out string presentResourceVerb, out _, out string perfectResourceVerb))
 		{
+			if (effect.CountEvent == CardExtraEffectCountEvent.ThisCardDamageDealt)
+			{
+				string thisCardDamageWindowText = GetCountWindowText(effect);
+				if (!explicitComparison)
+				{
+					return CardEditorLoc.F(
+						"cardText.condition.thisCardDamageSingle",
+						$"this card has dealt damage {thisCardDamageWindowText}",
+						("Window", thisCardDamageWindowText));
+				}
+
+				return CardEditorLoc.F(
+					"cardText.condition.thisCardDamageCount",
+					$"this card has dealt {FormatComparisonPhrase(effect.CountComparison, threshold)} {pluralResource} {thisCardDamageWindowText}",
+					("Comparison", FormatComparisonPhrase(effect.CountComparison, threshold)),
+					("Resource", pluralResource),
+					("Window", thisCardDamageWindowText));
+			}
+
 			string resourceWindowText = GetCountWindowText(effect);
 			if (!explicitComparison)
 			{
@@ -7274,6 +7587,7 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectTrigger.OnDiscard => "When discarded: ",
 			CardExtraEffectTrigger.OnExhaust => "When exhausted: ",
 			CardExtraEffectTrigger.DeckPassiveCombatStart => $"[gold]{GetDeckPassiveCombatStartKeywordTitle()}[/gold]: ",
+			CardExtraEffectTrigger.DeckPassiveCombatEnd => $"[gold]{GetDeckPassiveCombatEndKeywordTitle()}[/gold]: ",
 			CardExtraEffectTrigger.Fatal => "Fatal: ",
 			CardExtraEffectTrigger.EndOfTurnInHand => "End of your turn (in hand): ",
 			CardExtraEffectTrigger.EndOfTurn => string.Empty,
@@ -7296,6 +7610,18 @@ internal static class CardEditorExtraEffects
 		return CardEditorLoc.T(
 			"cardText.deckPassiveCombatStart.description",
 			"If this card is in your deck when combat starts, this effect triggers automatically.");
+	}
+
+	private static string GetDeckPassiveCombatEndKeywordTitle()
+	{
+		return CardEditorLoc.T("cardText.deckPassiveCombatEnd.title", "End Of Combat");
+	}
+
+	private static string GetDeckPassiveCombatEndKeywordDescription()
+	{
+		return CardEditorLoc.T(
+			"cardText.deckPassiveCombatEnd.description",
+			"If this card is in your deck when combat ends, this effect triggers automatically.");
 	}
 
 	private static string WrapGrantToCard(string line, CardExtraEffect effect)
@@ -7597,6 +7923,7 @@ internal static class CardEditorExtraEffects
 		string filter = BuildGeneratedCardFilter(effect, plural: baseAmount != 1);
 		string filterTrim = filter.Trim();
 		string suffix = BuildGeneratedCardPoolSuffix(effect.GeneratedCardPool);
+		string tagSuffix = BuildGeneratedCardCustomTagSuffix(effect);
 		string destination = GetGeneratedCardDestination(effect);
 		bool goesToHand = GeneratedCardsGoToHand(effect);
 
@@ -7604,20 +7931,20 @@ internal static class CardEditorExtraEffects
 		{
 			return string.IsNullOrEmpty(filterTrim)
 				? (goesToHand
-					? CardEditorLoc.F("cardText.generate.addRandomCard", $"Add a random card{suffix} to your hand.", ("PoolSuffix", suffix))
-					: CardEditorLoc.F("cardText.generate.addRandomCardToPile", $"Add a random card{suffix} to {destination}.", ("PoolSuffix", suffix), ("To", destination)))
+					? CardEditorLoc.F("cardText.generate.addRandomCard", $"Add a random card{suffix}{tagSuffix} to your hand.", ("PoolSuffix", suffix), ("TagSuffix", tagSuffix))
+					: CardEditorLoc.F("cardText.generate.addRandomCardToPile", $"Add a random card{suffix}{tagSuffix} to {destination}.", ("PoolSuffix", suffix), ("TagSuffix", tagSuffix), ("To", destination)))
 				: (goesToHand
-					? CardEditorLoc.F("cardText.generate.addRandomFilteredCard", $"Add a random {filterTrim} card{suffix} to your hand.", ("Filter", filterTrim), ("PoolSuffix", suffix))
-					: CardEditorLoc.F("cardText.generate.addRandomFilteredCardToPile", $"Add a random {filterTrim} card{suffix} to {destination}.", ("Filter", filterTrim), ("PoolSuffix", suffix), ("To", destination)));
+					? CardEditorLoc.F("cardText.generate.addRandomFilteredCard", $"Add a random {filterTrim} card{suffix}{tagSuffix} to your hand.", ("Filter", filterTrim), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix))
+					: CardEditorLoc.F("cardText.generate.addRandomFilteredCardToPile", $"Add a random {filterTrim} card{suffix}{tagSuffix} to {destination}.", ("Filter", filterTrim), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix), ("To", destination)));
 		}
 
 		return string.IsNullOrEmpty(filterTrim)
 			? (goesToHand
-				? CardEditorLoc.F("cardText.generate.addRandomCards", $"Add {amountText} random cards{suffix} to your hand.", ("Amount", amountText), ("PoolSuffix", suffix))
-				: CardEditorLoc.F("cardText.generate.addRandomCardsToPile", $"Add {amountText} random cards{suffix} to {destination}.", ("Amount", amountText), ("PoolSuffix", suffix), ("To", destination)))
+				? CardEditorLoc.F("cardText.generate.addRandomCards", $"Add {amountText} random cards{suffix}{tagSuffix} to your hand.", ("Amount", amountText), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix))
+				: CardEditorLoc.F("cardText.generate.addRandomCardsToPile", $"Add {amountText} random cards{suffix}{tagSuffix} to {destination}.", ("Amount", amountText), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix), ("To", destination)))
 			: (goesToHand
-				? CardEditorLoc.F("cardText.generate.addRandomFilteredCards", $"Add {amountText} random {filterTrim} cards{suffix} to your hand.", ("Amount", amountText), ("Filter", filterTrim), ("PoolSuffix", suffix))
-				: CardEditorLoc.F("cardText.generate.addRandomFilteredCardsToPile", $"Add {amountText} random {filterTrim} cards{suffix} to {destination}.", ("Amount", amountText), ("Filter", filterTrim), ("PoolSuffix", suffix), ("To", destination)));
+				? CardEditorLoc.F("cardText.generate.addRandomFilteredCards", $"Add {amountText} random {filterTrim} cards{suffix}{tagSuffix} to your hand.", ("Amount", amountText), ("Filter", filterTrim), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix))
+				: CardEditorLoc.F("cardText.generate.addRandomFilteredCardsToPile", $"Add {amountText} random {filterTrim} cards{suffix}{tagSuffix} to {destination}.", ("Amount", amountText), ("Filter", filterTrim), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix), ("To", destination)));
 	}
 
 	private static string FormatChooseOneOfThreeToHand(CardExtraEffect effect, int baseAmount, string amountText)
@@ -7625,15 +7952,16 @@ internal static class CardEditorExtraEffects
 		string filter = BuildGeneratedCardFilter(effect, plural: true);
 		string filterTrim = filter.Trim();
 		string suffix = BuildGeneratedCardPoolSuffix(effect.GeneratedCardPool);
+		string tagSuffix = BuildGeneratedCardCustomTagSuffix(effect);
 		string destination = GetGeneratedCardDestination(effect);
 		bool goesToHand = GeneratedCardsGoToHand(effect);
 		string line = string.IsNullOrEmpty(filterTrim)
 			? (goesToHand
-				? CardEditorLoc.F("cardText.generate.chooseOneOfThree", $"Choose 1 of 3 random cards{suffix} to add to your hand.", ("PoolSuffix", suffix))
-				: CardEditorLoc.F("cardText.generate.chooseOneOfThreeToPile", $"Choose 1 of 3 random cards{suffix} to add to {destination}.", ("PoolSuffix", suffix), ("To", destination)))
+				? CardEditorLoc.F("cardText.generate.chooseOneOfThree", $"Choose 1 of 3 random cards{suffix}{tagSuffix} to add to your hand.", ("PoolSuffix", suffix), ("TagSuffix", tagSuffix))
+				: CardEditorLoc.F("cardText.generate.chooseOneOfThreeToPile", $"Choose 1 of 3 random cards{suffix}{tagSuffix} to add to {destination}.", ("PoolSuffix", suffix), ("TagSuffix", tagSuffix), ("To", destination)))
 			: (goesToHand
-				? CardEditorLoc.F("cardText.generate.chooseOneOfThreeFiltered", $"Choose 1 of 3 random {filterTrim} cards{suffix} to add to your hand.", ("Filter", filterTrim), ("PoolSuffix", suffix))
-				: CardEditorLoc.F("cardText.generate.chooseOneOfThreeFilteredToPile", $"Choose 1 of 3 random {filterTrim} cards{suffix} to add to {destination}.", ("Filter", filterTrim), ("PoolSuffix", suffix), ("To", destination)));
+				? CardEditorLoc.F("cardText.generate.chooseOneOfThreeFiltered", $"Choose 1 of 3 random {filterTrim} cards{suffix}{tagSuffix} to add to your hand.", ("Filter", filterTrim), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix))
+				: CardEditorLoc.F("cardText.generate.chooseOneOfThreeFilteredToPile", $"Choose 1 of 3 random {filterTrim} cards{suffix}{tagSuffix} to add to {destination}.", ("Filter", filterTrim), ("PoolSuffix", suffix), ("TagSuffix", tagSuffix), ("To", destination)));
 
 		if (baseAmount == 1)
 		{
@@ -9479,6 +9807,14 @@ internal static class CardEditorExtraEffects
 		return string.IsNullOrEmpty(prefix) ? string.Empty : prefix + " ";
 	}
 
+	private static string BuildGeneratedCardCustomTagSuffix(CardExtraEffect effect)
+	{
+		string tag = effect.GeneratedCardCustomTag?.Trim() ?? string.Empty;
+		return string.IsNullOrWhiteSpace(tag)
+			? string.Empty
+			: CardEditorLoc.F("cardText.generate.customTagSuffix", " with \"{Tag}\" tag", ("Tag", tag));
+	}
+
 	private static string BuildGeneratedCardPoolSuffix(CardGeneratedCardPool pool)
 	{
 		return pool switch
@@ -10216,15 +10552,12 @@ internal static class CardEditorExtraEffects
 		}
 
 		int bonus = effect.ConditionalBonusAmount;
-		if (bonus == 0 || effect.ConditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
+		if (bonus == 0)
 		{
 			return baseLine;
 		}
 
-		string conditionText = BuildConditionalConditionText(
-			effect.ConditionalBonusCondition,
-			effect.ConditionalBonusEnemyStatus,
-			effect.ConditionalBonusEnemyIntent);
+		string conditionText = BuildConditionalBonusConditionText(null, effect);
 		if (string.IsNullOrWhiteSpace(conditionText))
 		{
 			return baseLine;
@@ -10244,6 +10577,54 @@ internal static class CardEditorExtraEffects
 		string first = split[0].TrimEnd();
 		first = first.EndsWith('.') ? first + " " + suffix : first + ". " + suffix;
 		return split.Length == 2 ? first + "\n" + split[1] : first;
+	}
+
+	private static CardExtraEffectBranchConditionType GetEffectiveConditionalBonusConditionType(CardExtraEffect? effect)
+	{
+		if (effect == null)
+		{
+			return CardExtraEffectBranchConditionType.None;
+		}
+
+		if (effect.ConditionalBonusConditionType != CardExtraEffectBranchConditionType.None)
+		{
+			return effect.ConditionalBonusConditionType;
+		}
+
+		return effect.ConditionalBonusCondition != CardExtraEffectConditionalBonusCondition.None
+			? CardExtraEffectBranchConditionType.TargetCheck
+			: CardExtraEffectBranchConditionType.None;
+	}
+
+	private static string BuildConditionalBonusConditionText(CardModel? card, CardExtraEffect effect)
+	{
+		return GetEffectiveConditionalBonusConditionType(effect) switch
+		{
+			CardExtraEffectBranchConditionType.TargetCheck => BuildConditionalConditionText(
+				effect.ConditionalBonusCondition,
+				effect.ConditionalBonusEnemyStatus,
+				effect.ConditionalBonusEnemyIntent),
+			CardExtraEffectBranchConditionType.HistoryCount => BuildCountConditionClause(card, effect),
+			_ => string.Empty
+		};
+	}
+
+	private static bool DoesConditionalBonusPass(CombatState combatState, Creature ownerCreature, CardPlay cardPlay, CardExtraEffect effect)
+	{
+		return GetEffectiveConditionalBonusConditionType(effect) switch
+		{
+			CardExtraEffectBranchConditionType.TargetCheck => DoesConditionalConditionPass(
+				combatState,
+				ownerCreature,
+				cardPlay,
+				effect.ConditionalBonusCondition,
+				effect.ConditionalBonusEnemyStatus,
+				effect.ConditionalBonusEnemyIntent),
+			CardExtraEffectBranchConditionType.HistoryCount => DoesCountConditionPass(
+				GetHistoryCountMultiplier(combatState, ownerCreature, cardPlay, effect),
+				effect),
+			_ => false
+		};
 	}
 
 	private static string ApplyConditionalBranchSuffix(CardModel card, Creature? target, string baseLine, CardExtraEffect effect, int upgradeHighlightComparison, bool isUpgradePreview)
@@ -10352,6 +10733,32 @@ internal static class CardEditorExtraEffects
 				"cardText.conditional.selfHasStatus",
 				$"you have {EnemyStatusLabel(enemyStatus)}",
 				("Status", EnemyStatusLabel(enemyStatus))),
+			CardExtraEffectConditionalBonusCondition.TargetHasNoBlock => CardEditorLoc.T("cardText.conditional.targetHasNoBlock", "the target has no Block"),
+			CardExtraEffectConditionalBonusCondition.SelfHasNoBlock => CardEditorLoc.T("cardText.conditional.selfHasNoBlock", "you have no Block"),
+			CardExtraEffectConditionalBonusCondition.TargetLacksStatus => CardEditorLoc.F(
+				"cardText.conditional.targetLacksStatus",
+				$"the target does not have {EnemyStatusLabel(enemyStatus)}",
+				("Status", EnemyStatusLabel(enemyStatus))),
+			CardExtraEffectConditionalBonusCondition.SelfLacksStatus => CardEditorLoc.F(
+				"cardText.conditional.selfLacksStatus",
+				$"you do not have {EnemyStatusLabel(enemyStatus)}",
+				("Status", EnemyStatusLabel(enemyStatus))),
+			CardExtraEffectConditionalBonusCondition.TargetIntentIsNot => CardEditorLoc.F(
+				"cardText.conditional.targetIntentIsNot",
+				$"the target does not intend to {EnemyIntentLabel(enemyIntent)}",
+				("Intent", EnemyIntentLabel(enemyIntent))),
+			CardExtraEffectConditionalBonusCondition.TargetIsDamaged => CardEditorLoc.T("cardText.conditional.targetIsDamaged", "the target is damaged"),
+			CardExtraEffectConditionalBonusCondition.SelfIsDamaged => CardEditorLoc.T("cardText.conditional.selfIsDamaged", "you are damaged"),
+			CardExtraEffectConditionalBonusCondition.TargetIsBloodied => CardEditorLoc.T("cardText.conditional.targetIsBloodied", "the target is bloodied"),
+			CardExtraEffectConditionalBonusCondition.SelfIsBloodied => CardEditorLoc.T("cardText.conditional.selfIsBloodied", "you are bloodied"),
+			CardExtraEffectConditionalBonusCondition.TargetIsFullHp => CardEditorLoc.T("cardText.conditional.targetIsFullHp", "the target is at full HP"),
+			CardExtraEffectConditionalBonusCondition.SelfIsFullHp => CardEditorLoc.T("cardText.conditional.selfIsFullHp", "you are at full HP"),
+			CardExtraEffectConditionalBonusCondition.TargetIsNotBloodied => CardEditorLoc.T("cardText.conditional.targetIsNotBloodied", "the target is not bloodied"),
+			CardExtraEffectConditionalBonusCondition.SelfIsNotBloodied => CardEditorLoc.T("cardText.conditional.selfIsNotBloodied", "you are not bloodied"),
+			CardExtraEffectConditionalBonusCondition.TargetHasLessHpThanYou => CardEditorLoc.T("cardText.conditional.targetHasLessHpThanYou", "the target has less HP than you"),
+			CardExtraEffectConditionalBonusCondition.TargetHasMoreHpThanYou => CardEditorLoc.T("cardText.conditional.targetHasMoreHpThanYou", "the target has more HP than you"),
+			CardExtraEffectConditionalBonusCondition.TargetHasLessBlockThanYou => CardEditorLoc.T("cardText.conditional.targetHasLessBlockThanYou", "the target has less Block than you"),
+			CardExtraEffectConditionalBonusCondition.TargetHasMoreBlockThanYou => CardEditorLoc.T("cardText.conditional.targetHasMoreBlockThanYou", "the target has more Block than you"),
 			_ => string.Empty
 		};
 	}
@@ -10426,6 +10833,34 @@ internal static class CardEditorExtraEffects
 				.Any(enemy => enemy != null && enemy.IsAlive && EnemyHasIntent(enemy, enemyIntent)),
 			CardExtraEffectConditionalBonusCondition.SelfHasBlock => ownerCreature.Block > 0,
 			CardExtraEffectConditionalBonusCondition.SelfHasStatus => CreatureHasStatus(ownerCreature, enemyStatus),
+			CardExtraEffectConditionalBonusCondition.TargetHasNoBlock => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.Block <= 0),
+			CardExtraEffectConditionalBonusCondition.SelfHasNoBlock => ownerCreature.Block <= 0,
+			CardExtraEffectConditionalBonusCondition.TargetLacksStatus => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && !EnemyHasStatus(enemy, enemyStatus)),
+			CardExtraEffectConditionalBonusCondition.SelfLacksStatus => !CreatureHasStatus(ownerCreature, enemyStatus),
+			CardExtraEffectConditionalBonusCondition.TargetIntentIsNot => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && !EnemyHasIntent(enemy, enemyIntent)),
+			CardExtraEffectConditionalBonusCondition.TargetIsDamaged => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.CurrentHp < enemy.MaxHp),
+			CardExtraEffectConditionalBonusCondition.SelfIsDamaged => ownerCreature.CurrentHp < ownerCreature.MaxHp,
+			CardExtraEffectConditionalBonusCondition.TargetIsBloodied => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.CurrentHp * 2 <= enemy.MaxHp),
+			CardExtraEffectConditionalBonusCondition.SelfIsBloodied => ownerCreature.CurrentHp * 2 <= ownerCreature.MaxHp,
+			CardExtraEffectConditionalBonusCondition.TargetIsFullHp => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.CurrentHp >= enemy.MaxHp),
+			CardExtraEffectConditionalBonusCondition.SelfIsFullHp => ownerCreature.CurrentHp >= ownerCreature.MaxHp,
+			CardExtraEffectConditionalBonusCondition.TargetIsNotBloodied => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.CurrentHp * 2 > enemy.MaxHp),
+			CardExtraEffectConditionalBonusCondition.SelfIsNotBloodied => ownerCreature.CurrentHp * 2 > ownerCreature.MaxHp,
+			CardExtraEffectConditionalBonusCondition.TargetHasLessHpThanYou => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.CurrentHp < ownerCreature.CurrentHp),
+			CardExtraEffectConditionalBonusCondition.TargetHasMoreHpThanYou => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.CurrentHp > ownerCreature.CurrentHp),
+			CardExtraEffectConditionalBonusCondition.TargetHasLessBlockThanYou => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.Block < ownerCreature.Block),
+			CardExtraEffectConditionalBonusCondition.TargetHasMoreBlockThanYou => GetRelevantEnemyConditionTargets(combatState, cardPlay)
+				.Any(enemy => enemy != null && enemy.IsAlive && enemy.Block > ownerCreature.Block),
 			_ => false
 		};
 	}
@@ -11082,9 +11517,19 @@ internal static class CardEditorExtraEffects
 				await PlayerCmd.GainEnergy(amount, owner);
 				break;
 			}
+			case CardExtraEffectKind.LoseEnergy:
+			{
+				await PlayerCmd.LoseEnergy(amount, owner);
+				break;
+			}
 			case CardExtraEffectKind.GainStars:
 			{
 				await PlayerCmd.GainStars(amount, owner);
+				break;
+			}
+			case CardExtraEffectKind.LoseStars:
+			{
+				await PlayerCmd.LoseStars(amount, owner);
 				break;
 			}
 			case CardExtraEffectKind.Heal:
@@ -11672,6 +12117,7 @@ internal static class CardEditorExtraEffects
 			case CardExtraEffectKind.IgnoreDamageModifiers:
 			case CardExtraEffectKind.IgnoreDamageCaps:
 			case CardExtraEffectKind.IgnoreDamageNegation:
+			case CardExtraEffectKind.IgnoreEnemyDamageReductions:
 			{
 				break;
 			}
@@ -11683,6 +12129,11 @@ internal static class CardEditorExtraEffects
 			case CardExtraEffectKind.GainGold:
 			{
 				PlayerCmd.GainGold(amount, owner);
+				break;
+			}
+			case CardExtraEffectKind.LoseGold:
+			{
+				await PlayerCmd.LoseGold(amount, owner);
 				break;
 			}
 			case CardExtraEffectKind.UpgradeDeckCards:
@@ -14067,18 +14518,12 @@ internal static class CardEditorExtraEffects
 		}
 
 		int bonus = effect.ConditionalBonusAmount;
-		if (bonus == 0 || effect.ConditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
+		if (bonus == 0)
 		{
 			return amount;
 		}
 
-		bool pass = DoesConditionalConditionPass(
-			combatState,
-			ownerCreature,
-			cardPlay,
-			effect.ConditionalBonusCondition,
-			effect.ConditionalBonusEnemyStatus,
-			effect.ConditionalBonusEnemyIntent);
+		bool pass = DoesConditionalBonusPass(combatState, ownerCreature, cardPlay, effect);
 
 		if (!pass)
 		{
@@ -14882,6 +15327,23 @@ internal static class CardEditorExtraEffects
 				return 0;
 			}
 
+			if (effect.CountEvent == CardExtraEffectCountEvent.ThisCardDamageDealt)
+			{
+				CardModel? sourceCard = sourceCardOverride ?? cardPlay?.Card;
+				if (sourceCard == null)
+				{
+					return 0;
+				}
+
+				long thisCardDamage = history.Entries
+					.OfType<DamageReceivedEntry>()
+					.Where(e => e != null
+						&& MatchesCountWindow(e, combatState, effect)
+						&& ReferenceEquals(e.CardSource, sourceCard))
+					.Sum(e => (long)Math.Max(0, e.Result.UnblockedDamage));
+				return ClampLongToInt(thisCardDamage);
+			}
+
 			if (IsThisCardHistoryCountEvent(effect.CountEvent))
 			{
 				CardModel? sourceCard = sourceCardOverride ?? cardPlay?.Card;
@@ -15067,7 +15529,7 @@ internal static class CardEditorExtraEffects
 					.Where(e => e != null
 						&& ReferenceEquals(e.Actor, ownerCreature)
 						&& MatchesCountWindow(e, combatState, effect))
-					.Sum(e => (long)Math.Max(0, e.Result.TotalDamage));
+					.Sum(e => (long)Math.Max(0, e.Result.UnblockedDamage));
 				multiplier = ClampLongToInt(takenDamage);
 				return true;
 			}
@@ -15078,7 +15540,7 @@ internal static class CardEditorExtraEffects
 					.Count(e => e != null
 						&& ReferenceEquals(e.Actor, ownerCreature)
 						&& MatchesCountWindow(e, combatState, effect)
-						&& e.Result.TotalDamage > 0);
+						&& e.Result.UnblockedDamage > 0);
 				multiplier = ClampLongToInt(timesHit);
 				return true;
 			}
@@ -16049,7 +16511,7 @@ internal static class CardEditorExtraEffects
 			return;
 		}
 
-		List<CardModel> candidates = GetCardGenerationCandidates(owner, pool, type);
+		List<CardModel> candidates = GetCardGenerationCandidates(owner, pool, type, effect.GeneratedCardCustomTag);
 		if (candidates.Count == 0)
 		{
 			return;
@@ -16078,7 +16540,7 @@ internal static class CardEditorExtraEffects
 		}
 		times = Math.Max(1, times);
 
-		List<CardModel> candidates = GetCardGenerationCandidates(owner, pool, type);
+		List<CardModel> candidates = GetCardGenerationCandidates(owner, pool, type, effect.GeneratedCardCustomTag);
 		if (candidates.Count == 0)
 		{
 			return;
@@ -16268,7 +16730,7 @@ internal static class CardEditorExtraEffects
 		}
 	}
 
-	private static List<CardModel> GetCardGenerationCandidates(Player owner, CardGeneratedCardPool pool, CardGeneratedCardType type)
+	private static List<CardModel> GetCardGenerationCandidates(Player owner, CardGeneratedCardPool pool, CardGeneratedCardType type, string? customTag)
 	{
 		if (owner == null)
 		{
@@ -16319,6 +16781,15 @@ internal static class CardEditorExtraEffects
 				};
 				filtered = filtered.Where(c => c.Type == desired);
 			}
+		}
+
+		string requiredCustomTag = customTag?.Trim() ?? string.Empty;
+		if (!string.IsNullOrWhiteSpace(requiredCustomTag))
+		{
+			filtered = filtered.Where(card =>
+				CardEditorOverrides.TryGetEffectiveOverride(card.Id, out CardOverride overrideData)
+				&& overrideData.CustomTags != null
+				&& overrideData.CustomTags.Contains(requiredCustomTag));
 		}
 
 		return filtered.Distinct().ToList();
@@ -16374,6 +16845,18 @@ internal static class CardEditorExtraEffects
 		{
 			case CardExtraEffectTarget.Self:
 				return new[] { ownerCreature };
+			case CardExtraEffectTarget.AllAllies:
+				return ResolveFriendlyGroupTargets(combatState, ownerCreature, includeSelf: true);
+			case CardExtraEffectTarget.AnyPlayer:
+			{
+				Creature? picked = ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: true);
+				return picked != null ? new[] { picked } : Array.Empty<Creature>();
+			}
+			case CardExtraEffectTarget.AnyAlly:
+			{
+				Creature? picked = ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: false);
+				return picked != null ? new[] { picked } : Array.Empty<Creature>();
+			}
 			case CardExtraEffectTarget.AllEnemies:
 				return combatState.GetOpponentsOf(ownerCreature).Where(c => c.IsAlive);
 			case CardExtraEffectTarget.RandomEnemy:
@@ -16387,6 +16870,57 @@ internal static class CardEditorExtraEffects
 				return picked != null ? new[] { picked } : Array.Empty<Creature>();
 			}
 		}
+	}
+
+	private static IEnumerable<Creature> ResolveFriendlyGroupTargets(CombatState combatState, Creature ownerCreature, bool includeSelf)
+	{
+		IEnumerable<Creature> source = ownerCreature.IsPlayer
+			? combatState.PlayerCreatures
+			: combatState.GetTeammatesOf(ownerCreature);
+		return source.Where(creature => creature != null && creature.IsAlive && (includeSelf || creature != ownerCreature));
+	}
+
+	private static Creature? ResolveFriendlySingleTarget(CombatState combatState, Creature ownerCreature, CardPlay cardPlay, bool includeSelf)
+	{
+		if (cardPlay.Target != null && cardPlay.Target.IsAlive && IsFriendlyTarget(ownerCreature, cardPlay.Target, includeSelf))
+		{
+			return cardPlay.Target;
+		}
+
+		if (TryGetManualTarget(cardPlay.Card, out Creature? manualTarget)
+			&& manualTarget != null
+			&& manualTarget.IsAlive
+			&& IsFriendlyTarget(ownerCreature, manualTarget, includeSelf))
+		{
+			return manualTarget;
+		}
+
+		if (includeSelf && ownerCreature.IsAlive)
+		{
+			return ownerCreature;
+		}
+
+		return ResolveFriendlyGroupTargets(combatState, ownerCreature, includeSelf).FirstOrDefault();
+	}
+
+	private static bool IsFriendlyTarget(Creature ownerCreature, Creature candidate, bool includeSelf)
+	{
+		if (candidate == null || !candidate.IsAlive)
+		{
+			return false;
+		}
+
+		if (!includeSelf && candidate == ownerCreature)
+		{
+			return false;
+		}
+
+		if (ownerCreature.IsPlayer)
+		{
+			return candidate.IsPlayer;
+		}
+
+		return candidate == ownerCreature || candidate.PetOwner == ownerCreature.PetOwner || candidate.IsPlayer == ownerCreature.IsPlayer;
 	}
 
 	private static Creature? ResolveSingleTarget(CombatState combatState, Creature ownerCreature, CardPlay cardPlay)
@@ -16492,6 +17026,7 @@ internal static class CardEditorExtraEffects
 	private static CardExtraEffect MergeUpgradeBaseSlotEffect(CardExtraEffect baseEffect, CardExtraEffect upgradeEffect, bool numericFieldsAreDeltas)
 	{
 		CardExtraEffect fused = CloneEffect(baseEffect);
+		bool repeatModeChanged = baseEffect.RepeatIsX != upgradeEffect.RepeatIsX;
 
 		if (baseEffect.AmountIsX)
 		{
@@ -16510,10 +17045,23 @@ internal static class CardEditorExtraEffects
 			fused.Amount = IsValidEffectAmount(baseEffect.Kind, mergedAmount) ? mergedAmount : 0;
 		}
 
+		fused.RepeatIsX = upgradeEffect.RepeatIsX;
+
 		if (numericFieldsAreDeltas)
 		{
 			fused.Turns = AddUpgradeDelta(baseEffect.Turns, upgradeEffect.Turns, 0, 99);
-			fused.RepeatCount = AddUpgradeDelta(baseEffect.RepeatCount, upgradeEffect.RepeatCount, 1, 99);
+			if (fused.RepeatIsX)
+			{
+				fused.RepeatCount = repeatModeChanged
+					? Math.Clamp(upgradeEffect.RepeatCount, 0, 99)
+					: Math.Clamp(baseEffect.RepeatCount + upgradeEffect.RepeatCount, 0, 99);
+			}
+			else
+			{
+				fused.RepeatCount = repeatModeChanged
+					? Math.Clamp(upgradeEffect.RepeatCount <= 0 ? 1 : upgradeEffect.RepeatCount, 1, 99)
+					: AddUpgradeDelta(baseEffect.RepeatCount, upgradeEffect.RepeatCount, 1, 99);
+			}
 			fused.TriggerEveryN = AddUpgradeDelta(baseEffect.TriggerEveryN, upgradeEffect.TriggerEveryN, 1, 999);
 			fused.TriggerMaxFires = AddUpgradeDelta(baseEffect.TriggerMaxFires, upgradeEffect.TriggerMaxFires, 0, 999);
 			fused.TriggerMaxTurns = AddUpgradeDelta(baseEffect.TriggerMaxTurns, upgradeEffect.TriggerMaxTurns, 0, 999);
@@ -16529,7 +17077,7 @@ internal static class CardEditorExtraEffects
 		else
 		{
 			fused.Turns = upgradeEffect.Turns;
-			fused.RepeatCount = upgradeEffect.RepeatCount;
+			fused.RepeatCount = Math.Clamp(upgradeEffect.RepeatCount, fused.RepeatIsX ? 0 : 1, 99);
 			fused.TriggerEveryN = upgradeEffect.TriggerEveryN;
 			fused.TriggerMaxFires = upgradeEffect.TriggerMaxFires;
 			fused.TriggerMaxTurns = upgradeEffect.TriggerMaxTurns;
@@ -16560,6 +17108,7 @@ internal static class CardEditorExtraEffects
 		fused.UseMoveDestinationForGeneratedCards = upgradeEffect.UseMoveDestinationForGeneratedCards;
 		fused.AdditionalMoveToPiles = upgradeEffect.AdditionalMoveToPiles;
 		fused.PowerTriggerEnemyStatus = upgradeEffect.PowerTriggerEnemyStatus;
+		fused.ConditionalBonusConditionType = upgradeEffect.ConditionalBonusConditionType;
 		fused.ConditionalBonusCondition = upgradeEffect.ConditionalBonusCondition;
 		fused.ConditionalBonusEnemyStatus = upgradeEffect.ConditionalBonusEnemyStatus;
 		fused.ConditionalBonusEnemyIntent = upgradeEffect.ConditionalBonusEnemyIntent;
@@ -16655,6 +17204,7 @@ internal static class CardEditorExtraEffects
 			&& a.CardCostsLessModifier == b.CardCostsLessModifier
 			&& a.GeneratedCardPool == b.GeneratedCardPool
 			&& a.GeneratedCardType == b.GeneratedCardType
+			&& string.Equals(a.GeneratedCardCustomTag ?? string.Empty, b.GeneratedCardCustomTag ?? string.Empty, StringComparison.Ordinal)
 			&& a.ScaleMode == b.ScaleMode
 			&& a.CountEvent == b.CountEvent
 			&& a.CountWindow == b.CountWindow
@@ -16702,6 +17252,7 @@ internal static class CardEditorExtraEffects
 			&& string.Equals(a.SpecificCardId3 ?? string.Empty, b.SpecificCardId3 ?? string.Empty, StringComparison.Ordinal)
 			&& a.TransformMode == b.TransformMode
 			&& a.ConditionalBonusAmount == b.ConditionalBonusAmount
+			&& a.ConditionalBonusConditionType == b.ConditionalBonusConditionType
 			&& a.ConditionalBonusCondition == b.ConditionalBonusCondition
 			&& a.ConditionalBonusEnemyStatus == b.ConditionalBonusEnemyStatus
 			&& a.ConditionalBonusEnemyIntent == b.ConditionalBonusEnemyIntent
@@ -16759,6 +17310,7 @@ internal static class CardEditorExtraEffects
 			AmountIsX = source.AmountIsX,
 			AmountXPlus = source.AmountXPlus,
 			ConditionalBonusAmount = source.ConditionalBonusAmount,
+			ConditionalBonusConditionType = source.ConditionalBonusConditionType,
 			ConditionalBonusCondition = source.ConditionalBonusCondition,
 			ConditionalBonusEnemyStatus = source.ConditionalBonusEnemyStatus,
 			ConditionalBonusEnemyIntent = source.ConditionalBonusEnemyIntent,
@@ -16813,6 +17365,7 @@ internal static class CardEditorExtraEffects
 			CardCostsLessModifier = source.CardCostsLessModifier,
 			GeneratedCardPool = source.GeneratedCardPool,
 			GeneratedCardType = source.GeneratedCardType,
+			GeneratedCardCustomTag = source.GeneratedCardCustomTag,
 			ScaleMode = source.ScaleMode,
 			CountEvent = source.CountEvent,
 			CountWindow = source.CountWindow,

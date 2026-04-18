@@ -49,7 +49,9 @@ internal sealed class CardEditorCreatedCardDefinition
 	public CardEditorEffectSourcePlacement EffectSourcePlacement { get; set; } = CardEditorEffectSourcePlacement.BeforeCustomEffects;
 	public ModelId? PortraitSourceCardId { get; set; }
 	public string? CustomPortraitFile { get; set; }
+	public bool CustomTextEnabled { get; set; }
 	public string? CustomText { get; set; }
+	public bool CustomTextUpgradedEnabled { get; set; }
 	public string? CustomTextUpgraded { get; set; }
 	public CardOverride Override { get; set; } = new CardOverride();
 }
@@ -68,7 +70,10 @@ internal static class CardEditorCreatedCardsStore
 	private static bool _loaded;
 	private static readonly object _lock = new();
 
-	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, Dictionary<string, float>? finishParams = null)
+	public static int Revision { get; private set; }
+	internal static bool PersistenceSuspended { get; set; }
+
+	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? persistent))
@@ -93,7 +98,9 @@ internal static class CardEditorCreatedCardsStore
 				EffectSourcePlacement = persistent.EffectSourcePlacement,
 				PortraitSourceCardId = persistent.PortraitSourceCardId,
 				CustomPortraitFile = persistent.CustomPortraitFile,
+				CustomTextEnabled = persistent.CustomTextEnabled,
 				CustomText = persistent.CustomText,
+				CustomTextUpgradedEnabled = persistent.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = persistent.CustomTextUpgraded,
 				Override = persistent.Override
 			};
@@ -113,6 +120,7 @@ internal static class CardEditorCreatedCardsStore
 		draft.FullArt = fullArt;
 		draft.Finish = finish;
 		draft.FinishParams = finishParams != null ? new Dictionary<string, float>(finishParams) : null;
+		draft.CustomTextEnabled = customTextEnabled;
 		draft.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
 	}
 
@@ -427,10 +435,11 @@ internal static class CardEditorCreatedCardsStore
 			_definitions[cardId] = def;
 		}
 		def.Enabled = enabled;
+		Revision++;
 		Save();
 	}
 
-	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, Dictionary<string, float>? finishParams = null)
+	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? def))
@@ -449,11 +458,23 @@ internal static class CardEditorCreatedCardsStore
 		def.FullArt = fullArt;
 		def.Finish = finish;
 		def.FinishParams = finishParams != null ? new Dictionary<string, float>(finishParams) : null;
+		def.CustomTextEnabled = customTextEnabled;
 		def.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
+		Revision++;
 		Save();
 	}
 
 	public static string? GetCustomText(ModelId cardId)
+	{
+		EnsureLoaded();
+		if (TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def))
+		{
+			return def.CustomTextEnabled ? def.CustomText : null;
+		}
+		return null;
+	}
+
+	public static string? GetStoredCustomText(ModelId cardId)
 	{
 		EnsureLoaded();
 		if (TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def))
@@ -463,7 +484,23 @@ internal static class CardEditorCreatedCardsStore
 		return null;
 	}
 
+	public static bool IsCustomTextEnabled(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) && def.CustomTextEnabled;
+	}
+
 	public static string? GetCustomTextUpgraded(ModelId cardId)
+	{
+		EnsureLoaded();
+		if (TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def))
+		{
+			return def.CustomTextUpgradedEnabled ? def.CustomTextUpgraded : null;
+		}
+		return null;
+	}
+
+	public static string? GetStoredCustomTextUpgraded(ModelId cardId)
 	{
 		EnsureLoaded();
 		if (TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def))
@@ -473,7 +510,13 @@ internal static class CardEditorCreatedCardsStore
 		return null;
 	}
 
-	public static void SetDraftCustomTextUpgraded(ModelId cardId, string? customTextUpgraded)
+	public static bool IsCustomTextUpgradedEnabled(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) && def.CustomTextUpgradedEnabled;
+	}
+
+	public static void SetDraftCustomTextUpgraded(ModelId cardId, string? customTextUpgraded, bool enabled)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? persistent))
@@ -498,17 +541,20 @@ internal static class CardEditorCreatedCardsStore
 				EffectSourcePlacement = persistent.EffectSourcePlacement,
 				PortraitSourceCardId = persistent.PortraitSourceCardId,
 				CustomPortraitFile = persistent.CustomPortraitFile,
+				CustomTextEnabled = persistent.CustomTextEnabled,
 				CustomText = persistent.CustomText,
+				CustomTextUpgradedEnabled = persistent.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = persistent.CustomTextUpgraded,
 				Override = persistent.Override
 			};
 			_draftDefinitions[cardId] = draft;
 		}
 
+		draft.CustomTextUpgradedEnabled = enabled;
 		draft.CustomTextUpgraded = customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded);
 	}
 
-	public static void SetCustomTextUpgraded(ModelId cardId, string? customTextUpgraded)
+	public static void SetCustomTextUpgraded(ModelId cardId, string? customTextUpgraded, bool enabled)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? def))
@@ -517,7 +563,9 @@ internal static class CardEditorCreatedCardsStore
 			_definitions[cardId] = def;
 		}
 
+		def.CustomTextUpgradedEnabled = enabled;
 		def.CustomTextUpgraded = customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded);
+		Revision++;
 		Save();
 	}
 
@@ -531,6 +579,7 @@ internal static class CardEditorCreatedCardsStore
 		}
 		def.Override = overrideData ?? new CardOverride();
 		CardEditorOverrides.Set(cardId, def.Override);
+		Revision++;
 		Save();
 	}
 
@@ -627,6 +676,7 @@ internal static class CardEditorCreatedCardsStore
 		}
 
 		EnsureDefaultDefinitions();
+		Revision++;
 		Save();
 	}
 
@@ -642,6 +692,7 @@ internal static class CardEditorCreatedCardsStore
 		_definitions.Clear();
 		_draftDefinitions.Clear();
 		EnsureDefaultDefinitions();
+		Revision++;
 		Save();
 	}
 
@@ -695,6 +746,11 @@ internal static class CardEditorCreatedCardsStore
 
 	private static void Save()
 	{
+		if (PersistenceSuspended)
+		{
+			return;
+		}
+
 		try
 		{
 			string path = GetStorePath();
@@ -722,6 +778,7 @@ internal static class CardEditorCreatedCardsStore
 	{
 		EnsureLoaded();
 		ConfiguredSlotCount = Math.Clamp(desiredSlotCount, 1, MaxSlotCount);
+		Revision++;
 		Save();
 	}
 
@@ -846,7 +903,9 @@ internal static class CardEditorCreatedCardsStore
 			EffectSourcePlacement = source.EffectSourcePlacement,
 			PortraitSourceCardId = source.PortraitSourceCardId,
 			CustomPortraitFile = source.CustomPortraitFile,
+			CustomTextEnabled = source.CustomTextEnabled,
 			CustomText = source.CustomText,
+			CustomTextUpgradedEnabled = source.CustomTextUpgradedEnabled,
 			CustomTextUpgraded = source.CustomTextUpgraded,
 			Override = source.Override ?? new CardOverride()
 		};
@@ -868,7 +927,9 @@ internal static class CardEditorCreatedCardsStore
 		public string? EffectSourcePlacement { get; set; }
 		public string? PortraitSourceCardId { get; set; }
 		public string? CustomPortraitFile { get; set; }
+		public bool? CustomTextEnabled { get; set; }
 		public string? CustomText { get; set; }
+		public bool? CustomTextUpgradedEnabled { get; set; }
 		public string? CustomTextUpgraded { get; set; }
 		public CardEditorPresetStore.CardOverrideDto? Override { get; set; }
 
@@ -891,7 +952,9 @@ internal static class CardEditorCreatedCardsStore
 				EffectSourcePlacement = def.EffectSourcePlacement.ToString(),
 				PortraitSourceCardId = def.PortraitSourceCardId?.ToString(),
 				CustomPortraitFile = def.CustomPortraitFile,
+				CustomTextEnabled = def.CustomTextEnabled,
 				CustomText = def.CustomText,
+				CustomTextUpgradedEnabled = def.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = def.CustomTextUpgraded,
 				Override = CardEditorPresetStore.CardOverrideDto.FromOverride(def.Override ?? new CardOverride())
 			};
@@ -972,6 +1035,9 @@ internal static class CardEditorCreatedCardsStore
 			{
 				def.CustomPortraitFile = CustomPortraitFile.Trim();
 			}
+
+			def.CustomTextEnabled = CustomTextEnabled ?? (CustomText != null);
+			def.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? (CustomTextUpgraded != null);
 
 			if (CustomText != null)
 			{

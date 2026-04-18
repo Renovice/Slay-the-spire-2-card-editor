@@ -1,4 +1,7 @@
 {
-  "INPUT_SETTINGS.INPUT_TITLE.cardEditor": "Open Editor"
+  "INPUT_SETTINGS.INPUT_TITLE.cardEditor": "Open Editor",
+  "CARD_EDITOR_MULTIPLAYER_SYNC_HEADER": "Multiplayer Sync",
+  "CARD_EDITOR_MULTIPLAYER_SYNC_DESCRIPTION": "Automatically syncs the host's Card Editor changes for the current multiplayer session without overwriting your own local preset files.",
+  "CARD_EDITOR_MULTIPLAYER_AUTHORITY_HEADER": "Any Player Control",
+  "CARD_EDITOR_MULTIPLAYER_AUTHORITY_DESCRIPTION": "Lets any player push Card Editor changes to the shared multiplayer session. When disabled, only the host can sync live edits."
 }
-

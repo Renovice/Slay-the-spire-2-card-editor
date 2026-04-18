@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.ValueProps;
 
@@ -23,63 +24,30 @@ internal static class CreatureCmd_Damage_IgnoreProps_Patch
 {
 	public static void Prefix(ref ValueProp props, Creature? dealer, CardModel? cardSource)
 	{
-		if (cardSource == null)
+		CombatState? combatState = CardEditorCardPlayContext.Current?.Card?.CombatState ?? cardSource?.CombatState ?? dealer?.CombatState;
+		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target: null))
 		{
-			return;
+			props |= ValueProp.Unblockable;
 		}
-
-		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
-		if (effectiveSource == null)
+		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageModifiers, cardSource, dealer, combatState, target: null))
 		{
-			return;
+			props |= ValueProp.Unpowered;
 		}
+	}
+}
 
-		CardPlay? currentPlay = CardEditorCardPlayContext.Current;
-		CombatState? combatState = currentPlay?.Card?.CombatState ?? dealer?.CombatState;
-
-		IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetEffectsForDescription(effectiveSource, isUpgradePreview: false);
-		if (effects == null || effects.Count == 0)
+[HarmonyPatch(typeof(Hook), nameof(Hook.ModifyDamage))]
+internal static class Hook_ModifyDamage_IgnoreProps_Patch
+{
+	public static void Prefix(CombatState? combatState, Creature? target, Creature? dealer, ref ValueProp props, CardModel? cardSource)
+	{
+		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target))
 		{
-			return;
+			props |= ValueProp.Unblockable;
 		}
-
-		foreach (CardExtraEffect effect in effects)
+		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageModifiers, cardSource, dealer, combatState, target))
 		{
-			if (effect == null
-				|| (effect.AsPower && CardEditorExtraEffects.SupportsAsPower(effect.Kind))
-				|| !CardEditorExtraEffects.IsValidEffectAmount(effect.Kind, effect.Amount))
-			{
-				continue;
-			}
-
-			if (effect.Kind is not CardExtraEffectKind.IgnoreBlock and not CardExtraEffectKind.IgnoreDamageModifiers)
-			{
-				continue;
-			}
-
-			if (effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount)
-			{
-				if (combatState == null || dealer == null || currentPlay == null)
-				{
-					continue;
-				}
-
-				int multiplier = CardEditorExtraEffects.GetHistoryCountMultiplierForCardPlay(combatState, dealer, currentPlay, effect);
-				if (multiplier <= 0)
-				{
-					continue;
-				}
-			}
-
-			switch (effect.Kind)
-			{
-				case CardExtraEffectKind.IgnoreBlock:
-					props |= ValueProp.Unblockable;
-					break;
-				case CardExtraEffectKind.IgnoreDamageModifiers:
-					props |= ValueProp.Unpowered;
-					break;
-			}
+			props |= ValueProp.Unpowered;
 		}
 	}
 }

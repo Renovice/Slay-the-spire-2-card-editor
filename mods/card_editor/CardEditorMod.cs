@@ -1498,10 +1498,12 @@ public static class MainMenu_Ready_Patch
 
 		try
 		{
-			if (CardEditorPresetStore.TryLoadStartupPreset(out string editorPresetName, out Dictionary<ModelId, CardOverride> overrides))
+			if (CardEditorPresetStore.TryLoadStartupPreset(out string editorPresetName, out Dictionary<ModelId, CardOverride> overrides, out Dictionary<ModelId, List<ModelId>> baseDecks))
 			{
 				CardEditorOverrides.ReplaceAll(overrides);
-				Log.Info($"[CardEditor] Auto-loaded preset at startup: '{editorPresetName}' ({overrides.Count} cards)");
+				CardEditorBaseDeckStore.ImportSnapshot(baseDecks);
+				CardEditorBaseDeckUiState.EnsureValidCharacter();
+				Log.Info($"[CardEditor] Auto-loaded preset at startup: '{editorPresetName}' ({overrides.Count} cards, {baseDecks.Count} base decks)");
 			}
 		}
 		catch (Exception ex)
@@ -1647,17 +1649,36 @@ public static class CardLibrary_ShowCardDetail_Patch
 	public static bool Prefix(NCardHolder holder, NCardLibrary __instance)
 	{
 		Log.Info("[CardEditor] ShowCardDetail prefix");
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) &&
+			CardEditorBaseDeckLibraryHelper.ShouldSuppressShowCardDetailPopup())
+		{
+			return false;
+		}
+
+		if (holder?.CardModel != null &&
+			CardEditorBaseDeckLibraryHelper.TryConsumePendingCardDetailAction(holder, out bool isRightClick))
+		{
+			CardEditorBaseDeckLibraryHelper.ArmShowCardDetailSuppression(80);
+
+			if (CardEditorUiState.IsBaseDeckActive && !isRightClick)
+			{
+				CardEditorBaseDeckUiState.ToggleSelection(__instance, holder);
+				return false;
+			}
+
+			if (CardEditorUiState.IsBaseDeckAddActive && isRightClick)
+			{
+				CardEditorBaseDeckUiState.ToggleSelection(__instance, holder);
+				return false;
+			}
+		}
+
 		if (!CardEditorUiState.IsActive)
 		{
 			return true;
 		}
 		if (holder?.CardModel == null)
 		{
-			return false;
-		}
-		if (CardEditorUiState.IsBaseDeckAddActive)
-		{
-			CardEditorBaseDeckUiState.QueueCard(holder.CardModel.Id);
 			return false;
 		}
 		CardModel canonical = ModelDb.GetById<CardModel>(holder.CardModel.Id);
@@ -1696,6 +1717,34 @@ public static class CardLibrary_OnSubmenuOpened_Patch
 
 internal static class CardEditorPresetPanelHooks
 {
+	private const string OpenMetaKey = "card_editor_preset_panel_open";
+
+	public static bool IsOpen(NCardLibrary library)
+	{
+		return library != null && library.HasMeta(OpenMetaKey) && library.GetMeta(OpenMetaKey).AsBool();
+	}
+
+	public static void SetOpen(NCardLibrary library, bool open)
+	{
+		if (library == null)
+		{
+			return;
+		}
+
+		library.SetMeta(OpenMetaKey, open);
+	}
+
+	public static void ToggleOpen(NCardLibrary library)
+	{
+		if (library == null)
+		{
+			return;
+		}
+
+		SetOpen(library, !IsOpen(library));
+		Sync(library);
+	}
+
 	public static void Sync(NCardLibrary library)
 	{
 		if (library == null)
@@ -1704,23 +1753,59 @@ internal static class CardEditorPresetPanelHooks
 		}
 
 		NCardEditorPresetPanel? panel = library.GetNodeOrNull<NCardEditorPresetPanel>("CardEditorPresetPanel");
-		bool shouldShow = CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive;
-		if (shouldShow)
+		NCardEditorPresetToggleButton? toggleButton = library.GetNodeOrNull<NCardEditorPresetToggleButton>("CardEditorPresetToggleButton");
+		NCardEditorBaseDeckPanel? baseDeckPanel = library.GetNodeOrNull<NCardEditorBaseDeckPanel>("CardEditorBaseDeckPanel");
+		bool shouldShowPanel =
+			CardEditorUiState.IsEditorActive ||
+			CardEditorUiState.IsCreatorActive ||
+			CardEditorUiState.IsBaseDeckActive ||
+			CardEditorUiState.IsBaseDeckAddActive;
+		bool shouldShowStandaloneButton = CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive;
+		Log.Info($"[CardEditor][PresetButton] Sync mode={CardEditorUiState.Mode} shouldShowPanel={shouldShowPanel} shouldShowStandalone={shouldShowStandaloneButton} panelExists={panel != null} buttonExists={toggleButton != null} baseDeckPanelExists={baseDeckPanel != null} open={IsOpen(library)}");
+		if (shouldShowPanel)
 		{
 			CardEditorUiState.SetLastLibrary(library);
+			if (baseDeckPanel == null)
+			{
+				CardEditorBaseDeckPanelHooks.Sync(library);
+				baseDeckPanel = library.GetNodeOrNull<NCardEditorBaseDeckPanel>("CardEditorBaseDeckPanel");
+			}
+
 			if (panel == null)
 			{
 				panel = NCardEditorPresetPanel.Create(library, creatorMode: CardEditorUiState.IsCreatorActive);
 				library.AddChild(panel);
 			}
+
+			if (toggleButton != null)
+			{
+				toggleButton.QueueFree();
+				toggleButton = null;
+			}
+
 			panel.SetCreatorMode(CardEditorUiState.IsCreatorActive);
-			panel.Visible = true;
 			panel.RefreshPresetList();
+			panel.Visible = IsOpen(library);
+
+			baseDeckPanel?.RefreshState();
 		}
-		else if (panel != null)
+		else
 		{
-			panel.Visible = false;
+			SetOpen(library, open: false);
+			if (panel != null)
+			{
+				panel.Visible = false;
+			}
+
+			if (toggleButton != null)
+			{
+				toggleButton.QueueFree();
+			}
+
+			baseDeckPanel?.RefreshState();
 		}
+
+		CardEditorPresetButtonTunerHooks.Sync(library, shouldShowPanel);
 	}
 }
 
@@ -1827,7 +1912,6 @@ public static class CardLibraryGrid_FilterCards_Patch
 		if (mode == CardEditorLibraryMode.BaseDeck)
 		{
 			List<CardModel> deckCards = CardEditorBaseDeckStore.GetDeckPreviewCards(CardEditorBaseDeckUiState.EditingCharacterId)
-				.Where(filter)
 				.ToList();
 			__instance.SetCards(deckCards, PileType.None, sortingPriority, Task.CompletedTask);
 			return false;

@@ -29,6 +29,7 @@ internal static class CardEditorBaseDeckStore
 	private static bool _loaded;
 
 	public static IReadOnlyList<ModelId> SupportedCharacterIds => _supportedCharacterIds;
+	public static int Revision { get; private set; }
 
 	public static void EnsureLoaded()
 	{
@@ -168,7 +169,7 @@ internal static class CardEditorBaseDeckStore
 			.Where(id => id != null && id != ModelId.none && ModelDb.GetByIdOrNull<CardModel>(id) != null)
 			.ToList();
 		_overrides[characterId] = sanitized;
-		Save();
+		Revision++;
 	}
 
 	public static void AddCard(ModelId characterId, ModelId cardId)
@@ -182,7 +183,7 @@ internal static class CardEditorBaseDeckStore
 		List<ModelId> cards = GetDeckIds(characterId);
 		cards.Add(cardId);
 		_overrides[characterId] = cards;
-		Save();
+		Revision++;
 	}
 
 	public static void AddCards(ModelId characterId, IEnumerable<ModelId> cardIds)
@@ -211,7 +212,7 @@ internal static class CardEditorBaseDeckStore
 		}
 
 		_overrides[characterId] = cards;
-		Save();
+		Revision++;
 	}
 
 	public static void RemoveOne(ModelId characterId, ModelId cardId)
@@ -231,7 +232,7 @@ internal static class CardEditorBaseDeckStore
 
 		cards.RemoveAt(index);
 		_overrides[characterId] = cards;
-		Save();
+		Revision++;
 	}
 
 	public static void ResetToVanilla(ModelId characterId)
@@ -242,36 +243,55 @@ internal static class CardEditorBaseDeckStore
 			return;
 		}
 
-		if (_overrides.Remove(characterId))
-		{
-			Save();
-		}
+		_overrides.Remove(characterId);
+		Revision++;
 	}
 
-	private static void Save()
+	public static Dictionary<ModelId, List<ModelId>> ExportSnapshot()
 	{
-		try
-		{
-			string path = ProjectSettings.GlobalizePath(StorePath);
-			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+		EnsureLoaded();
+		return _overrides.ToDictionary(
+			kvp => kvp.Key,
+			kvp => new List<ModelId>(kvp.Value));
+	}
 
-			BaseDeckStoreDto dto = new()
+	public static void ImportSnapshot(IReadOnlyDictionary<ModelId, List<ModelId>>? snapshot)
+	{
+		EnsureLoaded();
+		_overrides.Clear();
+
+		if (snapshot == null)
+		{
+			return;
+		}
+
+		foreach ((ModelId characterId, List<ModelId> cardIds) in snapshot)
+		{
+			if (!IsSupportedCharacterId(characterId))
 			{
-				Version = CurrentVersion,
-				SavedAtUtc = DateTime.UtcNow,
-				Decks = _overrides.ToDictionary(
-					kvp => kvp.Key.ToString(),
-					kvp => kvp.Value.Select(v => v.ToString()).ToList(),
-					StringComparer.Ordinal)
-			};
+				continue;
+			}
 
-			string json = JsonSerializer.Serialize(dto, CreateJsonOptions());
-			File.WriteAllText(path, json);
+			List<ModelId> sanitized = (cardIds ?? new List<ModelId>())
+				.Where(cardId => cardId != null && cardId != ModelId.none && ModelDb.GetByIdOrNull<CardModel>(cardId) != null)
+				.ToList();
+
+			_overrides[characterId] = sanitized;
 		}
-		catch (Exception ex)
+
+		Revision++;
+	}
+
+	public static void ClearAllOverrides()
+	{
+		EnsureLoaded();
+		if (_overrides.Count == 0)
 		{
-			Log.Warn($"[CardEditor] Failed saving base deck store: {ex}");
+			return;
 		}
+
+		_overrides.Clear();
+		Revision++;
 	}
 
 	private static bool TryParseModelId(string text, out ModelId id)

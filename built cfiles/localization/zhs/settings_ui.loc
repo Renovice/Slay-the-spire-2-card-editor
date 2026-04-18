@@ -1,4 +1,7 @@
 {
-  "INPUT_SETTINGS.INPUT_TITLE.cardEditor": "打开编辑器"
+  "INPUT_SETTINGS.INPUT_TITLE.cardEditor": "打开编辑器",
+  "CARD_EDITOR_MULTIPLAYER_SYNC_HEADER": "多人同步",
+  "CARD_EDITOR_MULTIPLAYER_SYNC_DESCRIPTION": "自动同步房主在当前多人会话中的卡牌编辑器改动，不会覆盖你自己的本地预设文件。",
+  "CARD_EDITOR_MULTIPLAYER_AUTHORITY_HEADER": "任意玩家控制",
+  "CARD_EDITOR_MULTIPLAYER_AUTHORITY_DESCRIPTION": "允许任意玩家把卡牌编辑器改动同步到当前共享的多人会话。关闭时，只有房主可以同步实时编辑。"
 }
-
