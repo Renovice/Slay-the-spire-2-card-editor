@@ -117,16 +117,16 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		StyleBoxFlat panelStyle = new StyleBoxFlat
 		{
-			BgColor = new Color(0.08f, 0.07f, 0.06f, 0.92f),
+			BgColor = new Color(0.035f, 0.04f, 0.045f, 0.88f),
 			BorderColor = StsColors.gold,
-			BorderWidthLeft = 2,
-			BorderWidthTop = 2,
-			BorderWidthRight = 2,
-			BorderWidthBottom = 2,
-			CornerRadiusTopLeft = 10,
-			CornerRadiusTopRight = 10,
-			CornerRadiusBottomLeft = 10,
-			CornerRadiusBottomRight = 10
+			BorderWidthLeft = 1,
+			BorderWidthTop = 1,
+			BorderWidthRight = 1,
+			BorderWidthBottom = 1,
+			CornerRadiusTopLeft = 8,
+			CornerRadiusTopRight = 8,
+			CornerRadiusBottomLeft = 8,
+			CornerRadiusBottomRight = 8
 		};
 		AddThemeStyleboxOverride("panel", panelStyle);
 	}
@@ -818,10 +818,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			label.AddThemeFontOverride("font", _headerFont);
 		}
-		label.AddThemeFontSizeOverride("font_size", 28);
+		label.AddThemeFontSizeOverride("font_size", 24);
 		label.AddThemeColorOverride("font_color", StsColors.cream);
 		label.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
-		label.AddThemeConstantOverride("outline_size", 12);
+		label.AddThemeConstantOverride("outline_size", 10);
 	}
 
 	private void StyleInput(Control control)
@@ -841,9 +841,9 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 
-		StyleBoxFlat normal = CreateFieldStyle(new Color(0.40f, 0.33f, 0.14f, 1f));
-		StyleBoxFlat hover = CreateFieldStyle(StsColors.gold);
-		StyleBoxFlat focus = CreateFieldStyle(new Color(0.3648f, 0.9104f, 0.96f, 0.752941f));
+		StyleBoxFlat normal = CreateFieldStyle(new Color(0.20f, 0.23f, 0.26f, 1f));
+		StyleBoxFlat hover = CreateFieldStyle(new Color(0.34f, 0.38f, 0.42f, 1f));
+		StyleBoxFlat focus = CreateFieldStyle(StsColors.gold);
 
 		control.AddThemeStyleboxOverride("normal", normal);
 		control.AddThemeStyleboxOverride("hover", hover);
@@ -861,20 +861,20 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	{
 		return new StyleBoxFlat
 		{
-			BgColor = new Color(0.08f, 0.07f, 0.06f, 0.96f),
+			BgColor = new Color(0.055f, 0.065f, 0.075f, 0.95f),
 			BorderColor = borderColor,
-			BorderWidthLeft = 2,
-			BorderWidthTop = 2,
-			BorderWidthRight = 2,
-			BorderWidthBottom = 2,
-			CornerRadiusTopLeft = 10,
-			CornerRadiusTopRight = 10,
-			CornerRadiusBottomLeft = 10,
-			CornerRadiusBottomRight = 10,
-			ContentMarginLeft = 14,
-			ContentMarginTop = 10,
-			ContentMarginRight = 14,
-			ContentMarginBottom = 10
+			BorderWidthLeft = 1,
+			BorderWidthTop = 1,
+			BorderWidthRight = 1,
+			BorderWidthBottom = 1,
+			CornerRadiusTopLeft = 5,
+			CornerRadiusTopRight = 5,
+			CornerRadiusBottomLeft = 5,
+			CornerRadiusBottomRight = 5,
+			ContentMarginLeft = 8,
+			ContentMarginTop = 4,
+			ContentMarginRight = 8,
+			ContentMarginBottom = 4
 		};
 	}
 
@@ -882,8 +882,8 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	{
 		return new ColorRect
 		{
-			Color = new Color(0.71f, 0.63f, 0.46f, 0.55f),
-			CustomMinimumSize = new Vector2(0f, 2f),
+			Color = new Color(0.20f, 0.23f, 0.26f, 0.95f),
+			CustomMinimumSize = new Vector2(0f, 1f),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
 		};
 	}
