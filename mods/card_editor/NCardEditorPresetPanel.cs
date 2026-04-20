@@ -22,10 +22,9 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private static readonly string _actionButtonOutlineMaterialPath = "res://themes/canvas_item_material_additive_shared.tres";
 	private static readonly string _actionButtonShaderPath = "res://shaders/hsv.gdshader";
 	private static readonly string _tickboxScenePath = "res://scenes/ui/tickbox.tscn";
-	private const float ExpandedOffsetLeft = -520f;
-	private const float ExpandedOffsetTop = 114f;
-	private const float ExpandedOffsetRight = -24f;
-	private const float ExpandedOffsetBottom = 618f;
+	private static readonly string _popupShellTexturePath = "res://images/ui/reward_screen/reward_panel.png";
+	private static readonly Vector2 _slotCountSpinButtonMinSize = new(34f, 20f);
+	private static readonly Vector2 _slotCountSpinContainerMinSize = new(34f, 44f);
 	private const float CollapsedOffsetLeft = -92f;
 	private const float CollapsedOffsetTop = 20f;
 	private const float CollapsedOffsetRight = -20f;
@@ -44,6 +43,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private static Material? _actionButtonOutlineMaterial;
 	private static Shader? _actionButtonShader;
 	private static PackedScene? _tickboxScene;
+	private static Texture2D? _popupShellTexture;
 
 	private NCardLibrary _library = null!;
 	private OptionButton _presetSelect = null!;
@@ -53,15 +53,45 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private HBoxContainer? _slotCountRow;
 	private LineEdit? _slotCountField;
 	private MarginContainer _margin = null!;
+	private Control? _popupShell;
 	private HBoxContainer _headerRow = null!;
 	private Label _titleLabel = null!;
 	private Control _headerSpacer = null!;
 	private VBoxContainer _content = null!;
+	private MarginContainer _presetSelectWrapper = null!;
+	private MarginContainer _topActionsWrapper = null!;
+	private MarginContainer _loadButtonWrapper = null!;
+	private MarginContainer _deleteButtonWrapper = null!;
+	private MarginContainer _startupCheckboxWrapper = null!;
+	private MarginContainer? _slotCountRowWrapper;
+	private MarginContainer? _sortByCharacterCheckboxWrapper;
+	private MarginContainer _presetNameWrapper = null!;
+	private MarginContainer _bottomActionsWrapper = null!;
+	private MarginContainer _saveButtonWrapper = null!;
+	private MarginContainer _revertButtonWrapper = null!;
+	private MarginContainer? _slotCountSpinnerWrapper;
+	private MarginContainer? _slotCountFieldWrapper;
+	private MarginContainer? _slotCountArrowsWrapper;
+	private HBoxContainer _topActions = null!;
+	private HBoxContainer _bottomActions = null!;
+	private HBoxContainer? _slotCountSpinner;
+	private VBoxContainer? _slotCountArrows;
+	private CardEditorBaseDeckActionButton _loadButton = null!;
+	private CardEditorBaseDeckActionButton _deleteButton = null!;
+	private CardEditorBaseDeckActionButton _saveButton = null!;
+	private CardEditorBaseDeckActionButton _revertButton = null!;
+	private Button? _slotCountUpButton;
+	private Button? _slotCountDownButton;
 	private Button _toggleButton = null!;
 	private bool _isCollapsed;
 	private bool _isCreatorMode;
 	private float _scrollbarAlignOffsetX;
 	private int _alignRetriesRemaining = 12;
+	private bool _isDirectManipulating;
+	private bool _isResizeManipulation;
+	private Vector2 _dragStartMousePosition;
+	private PresetPanelTuningTarget _dragTarget = PresetPanelTuningTarget.None;
+	private PresetPanelTuningSnapshot _dragSnapshot;
 
 	public static NCardEditorPresetPanel Create(NCardLibrary library, bool creatorMode)
 	{
@@ -75,8 +105,46 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 	public override void _Ready()
 	{
-		Callable.From(RefreshAlignmentToScrollbar).CallDeferred();
+		ApplyLayoutTuning();
+		Callable.From(() =>
+		{
+			ApplyLayoutTuning();
+			RefreshAlignmentToScrollbar();
+		}).CallDeferred();
 		Connect(CanvasItem.SignalName.VisibilityChanged, Callable.From(OnVisibilityChanged));
+	}
+
+	public override void _Input(InputEvent @event)
+	{
+		base._Input(@event);
+		if (!Visible || !IsNodeReady() || _library == null || !CardEditorPresetPanelTunerHooks.IsOpenFor(_library))
+		{
+			return;
+		}
+
+		switch (@event)
+		{
+			case InputEventMouseButton mouseButton when mouseButton.ButtonIndex == MouseButton.Left:
+				if (mouseButton.Pressed)
+				{
+					TryBeginDirectManipulation(mouseButton);
+					if (_isDirectManipulating)
+					{
+						GetViewport().SetInputAsHandled();
+					}
+				}
+				else if (_isDirectManipulating)
+				{
+					EndDirectManipulation();
+					GetViewport().SetInputAsHandled();
+				}
+				break;
+
+			case InputEventMouseMotion mouseMotion when _isDirectManipulating:
+				UpdateDirectManipulation(mouseMotion.Position);
+				GetViewport().SetInputAsHandled();
+				break;
+		}
 	}
 
 	public override void _Notification(int what)
@@ -94,8 +162,293 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			return;
 		}
+		ApplyLayoutTuning();
 		_alignRetriesRemaining = 12;
-		Callable.From(RefreshAlignmentToScrollbar).CallDeferred();
+		Callable.From(() =>
+		{
+			ApplyLayoutTuning();
+			RefreshAlignmentToScrollbar();
+			CardEditorPresetPanelTunerHooks.RefreshFor(_library);
+		}).CallDeferred();
+	}
+
+	private void TryBeginDirectManipulation(InputEventMouseButton mouseButton)
+	{
+		PresetPanelTuningTarget target = HitTestTuningTarget(mouseButton.Position);
+		if (target == PresetPanelTuningTarget.None)
+		{
+			return;
+		}
+
+		_dragTarget = target;
+		_isResizeManipulation = mouseButton.ShiftPressed;
+		_isDirectManipulating = true;
+		_dragStartMousePosition = mouseButton.Position;
+		_dragSnapshot = PresetPanelTuningSnapshot.Capture();
+		CardEditorPresetPanelTunerHooks.RefreshFor(_library, $"Active={GetTuningTargetName(target)} Mode={(_isResizeManipulation ? "Resize" : "Move")}");
+	}
+
+	private void UpdateDirectManipulation(Vector2 mousePosition)
+	{
+		Vector2 delta = mousePosition - _dragStartMousePosition;
+		int dx = Mathf.RoundToInt(delta.X);
+		int dy = Mathf.RoundToInt(delta.Y);
+
+		switch (_dragTarget)
+		{
+			case PresetPanelTuningTarget.Popup:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.PopupWidth = Mathf.Max(240f, _dragSnapshot.PopupWidth + dx);
+					CardEditorPresetPanelTuning.PopupHeight = Mathf.Max(220f, _dragSnapshot.PopupHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.PopupRightInset = _dragSnapshot.PopupRightInset - dx;
+					CardEditorPresetPanelTuning.PopupTop = _dragSnapshot.PopupTop + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.Dropdown:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.DropdownInsetRight = _dragSnapshot.DropdownInsetRight - dx;
+					CardEditorPresetPanelTuning.DropdownHeight = Math.Max(30, _dragSnapshot.DropdownHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.DropdownInsetLeft = _dragSnapshot.DropdownInsetLeft + dx;
+					CardEditorPresetPanelTuning.DropdownInsetRight = _dragSnapshot.DropdownInsetRight - dx;
+					CardEditorPresetPanelTuning.DropdownOffsetY = _dragSnapshot.DropdownOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.TopButtons:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.TopButtonWidth = Math.Max(80, _dragSnapshot.TopButtonWidth + dx);
+					CardEditorPresetPanelTuning.TopButtonHeight = Math.Max(36, _dragSnapshot.TopButtonHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.TopButtonsInsetLeft = _dragSnapshot.TopButtonsInsetLeft + dx;
+					CardEditorPresetPanelTuning.TopButtonsInsetRight = _dragSnapshot.TopButtonsInsetRight - dx;
+					CardEditorPresetPanelTuning.TopButtonsOffsetY = _dragSnapshot.TopButtonsOffsetY + dy;
+					if (CardEditorPresetPanelTuning.LinkButtonRows)
+					{
+						CardEditorPresetPanelTuning.SyncBottomActionRowFromTop();
+					}
+				}
+				break;
+
+			case PresetPanelTuningTarget.LoadButton:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.TopButtonWidth = Math.Max(80, _dragSnapshot.TopButtonWidth + dx);
+					CardEditorPresetPanelTuning.TopButtonHeight = Math.Max(36, _dragSnapshot.TopButtonHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.LoadButtonOffsetX = _dragSnapshot.LoadButtonOffsetX + dx;
+					CardEditorPresetPanelTuning.LoadButtonOffsetY = _dragSnapshot.LoadButtonOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.DeleteButton:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.TopButtonWidth = Math.Max(80, _dragSnapshot.TopButtonWidth + dx);
+					CardEditorPresetPanelTuning.TopButtonHeight = Math.Max(36, _dragSnapshot.TopButtonHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.DeleteButtonOffsetX = _dragSnapshot.DeleteButtonOffsetX + dx;
+					CardEditorPresetPanelTuning.DeleteButtonOffsetY = _dragSnapshot.DeleteButtonOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.Checkbox:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.CheckboxInsetRight = _dragSnapshot.CheckboxInsetRight - dx;
+					CardEditorPresetPanelTuning.CheckboxHeight = Math.Max(24, _dragSnapshot.CheckboxHeight + dy);
+					CardEditorPresetPanelTuning.CheckboxVisualScale = Math.Max(20, _dragSnapshot.CheckboxVisualScale + Mathf.RoundToInt(delta.X * 0.5f));
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.CheckboxInsetLeft = _dragSnapshot.CheckboxInsetLeft + dx;
+					CardEditorPresetPanelTuning.CheckboxInsetRight = _dragSnapshot.CheckboxInsetRight - dx;
+					CardEditorPresetPanelTuning.CheckboxOffsetY = _dragSnapshot.CheckboxOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.NameField:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.NameInsetRight = _dragSnapshot.NameInsetRight - dx;
+					CardEditorPresetPanelTuning.NameHeight = Math.Max(30, _dragSnapshot.NameHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.NameInsetLeft = _dragSnapshot.NameInsetLeft + dx;
+					CardEditorPresetPanelTuning.NameInsetRight = _dragSnapshot.NameInsetRight - dx;
+					CardEditorPresetPanelTuning.NameOffsetY = _dragSnapshot.NameOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.SlotSpinner:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.SlotFieldWidth = Math.Max(48, _dragSnapshot.SlotFieldWidth + dx);
+					CardEditorPresetPanelTuning.SlotFieldHeight = Math.Max(24, _dragSnapshot.SlotFieldHeight + dy);
+					CardEditorPresetPanelTuning.SlotArrowColumnHeight = Math.Max(24, _dragSnapshot.SlotArrowColumnHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.SlotSpinnerInsetLeft = _dragSnapshot.SlotSpinnerInsetLeft + dx;
+					CardEditorPresetPanelTuning.SlotSpinnerInsetRight = _dragSnapshot.SlotSpinnerInsetRight - dx;
+					CardEditorPresetPanelTuning.SlotSpinnerOffsetY = _dragSnapshot.SlotSpinnerOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.SlotField:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.SlotFieldWidth = Math.Max(48, _dragSnapshot.SlotFieldWidth + dx);
+					CardEditorPresetPanelTuning.SlotFieldHeight = Math.Max(24, _dragSnapshot.SlotFieldHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.SlotFieldOffsetX = _dragSnapshot.SlotFieldOffsetX + dx;
+					CardEditorPresetPanelTuning.SlotFieldOffsetY = _dragSnapshot.SlotFieldOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.SlotArrows:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.SlotArrowColumnWidth = Math.Max(20, _dragSnapshot.SlotArrowColumnWidth + dx);
+					CardEditorPresetPanelTuning.SlotArrowColumnHeight = Math.Max(24, _dragSnapshot.SlotArrowColumnHeight + dy);
+					CardEditorPresetPanelTuning.SlotArrowButtonWidth = Math.Max(16, _dragSnapshot.SlotArrowButtonWidth + dx);
+					CardEditorPresetPanelTuning.SlotArrowButtonHeight = Math.Max(12, _dragSnapshot.SlotArrowButtonHeight + Mathf.RoundToInt(dy * 0.5f));
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.SlotArrowsOffsetX = _dragSnapshot.SlotArrowsOffsetX + dx;
+					CardEditorPresetPanelTuning.SlotArrowsOffsetY = _dragSnapshot.SlotArrowsOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.SaveButton:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.SaveButtonWidth = Math.Max(60, _dragSnapshot.SaveButtonWidth + dx);
+					CardEditorPresetPanelTuning.BottomButtonHeight = Math.Max(36, _dragSnapshot.BottomButtonHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.SaveButtonOffsetX = _dragSnapshot.SaveButtonOffsetX + dx;
+					CardEditorPresetPanelTuning.SaveButtonOffsetY = _dragSnapshot.SaveButtonOffsetY + dy;
+				}
+				break;
+
+			case PresetPanelTuningTarget.RevertButton:
+				if (_isResizeManipulation)
+				{
+					CardEditorPresetPanelTuning.RevertButtonWidth = Math.Max(120, _dragSnapshot.RevertButtonWidth + dx);
+					CardEditorPresetPanelTuning.BottomButtonHeight = Math.Max(36, _dragSnapshot.BottomButtonHeight + dy);
+				}
+				else
+				{
+					CardEditorPresetPanelTuning.RevertButtonOffsetX = _dragSnapshot.RevertButtonOffsetX + dx;
+					CardEditorPresetPanelTuning.RevertButtonOffsetY = _dragSnapshot.RevertButtonOffsetY + dy;
+				}
+				break;
+		}
+
+		ApplyLayoutTuning();
+		CardEditorPresetPanelTunerHooks.RefreshFor(_library, $"Active={GetTuningTargetName(_dragTarget)} Mode={(_isResizeManipulation ? "Resize" : "Move")}");
+	}
+
+	private void EndDirectManipulation()
+	{
+		_isDirectManipulating = false;
+		_isResizeManipulation = false;
+		_dragTarget = PresetPanelTuningTarget.None;
+		CardEditorPresetPanelTunerHooks.RefreshFor(_library, "Active=None");
+	}
+
+	private PresetPanelTuningTarget HitTestTuningTarget(Vector2 mousePosition)
+	{
+		if (_saveButton != null && GodotObject.IsInstanceValid(_saveButton) && _saveButton.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.SaveButton;
+		}
+		if (_revertButton != null && GodotObject.IsInstanceValid(_revertButton) && _revertButton.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.RevertButton;
+		}
+		if (_loadButton != null && GodotObject.IsInstanceValid(_loadButton) && _loadButton.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.LoadButton;
+		}
+		if (_deleteButton != null && GodotObject.IsInstanceValid(_deleteButton) && _deleteButton.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.DeleteButton;
+		}
+		if (_presetSelect != null && GodotObject.IsInstanceValid(_presetSelect) && _presetSelect.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.Dropdown;
+		}
+		if (_startupCheckbox != null && GodotObject.IsInstanceValid(_startupCheckbox) && _startupCheckbox.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.Checkbox;
+		}
+		if (_sortByCharacterCheckbox != null && GodotObject.IsInstanceValid(_sortByCharacterCheckbox) && _sortByCharacterCheckbox.Visible && _sortByCharacterCheckbox.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.Checkbox;
+		}
+		if (_presetNameField != null && GodotObject.IsInstanceValid(_presetNameField) && _presetNameField.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.NameField;
+		}
+		if (_slotCountField != null && GodotObject.IsInstanceValid(_slotCountField) && _slotCountField.Visible && _slotCountField.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.SlotField;
+		}
+		if (_slotCountArrows != null && GodotObject.IsInstanceValid(_slotCountArrows) && _slotCountArrows.Visible && _slotCountArrows.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.SlotArrows;
+		}
+		if (_slotCountSpinner != null && GodotObject.IsInstanceValid(_slotCountSpinner) && _slotCountSpinner.Visible && _slotCountSpinner.GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.SlotSpinner;
+		}
+		if (GetGlobalRect().HasPoint(mousePosition))
+		{
+			return PresetPanelTuningTarget.Popup;
+		}
+		return PresetPanelTuningTarget.None;
+	}
+
+	private static string GetTuningTargetName(PresetPanelTuningTarget target)
+	{
+		return target switch
+		{
+			PresetPanelTuningTarget.Popup => "Popup",
+			PresetPanelTuningTarget.Dropdown => "Dropdown",
+			PresetPanelTuningTarget.TopButtons => "TopButtons",
+			PresetPanelTuningTarget.LoadButton => "LoadButton",
+			PresetPanelTuningTarget.DeleteButton => "DeleteButton",
+			PresetPanelTuningTarget.Checkbox => "Checkbox",
+			PresetPanelTuningTarget.NameField => "NameField",
+			PresetPanelTuningTarget.SlotSpinner => "SlotSpinner",
+			PresetPanelTuningTarget.SlotField => "SlotField",
+			PresetPanelTuningTarget.SlotArrows => "SlotArrows",
+			PresetPanelTuningTarget.SaveButton => "SaveButton",
+			PresetPanelTuningTarget.RevertButton => "ResetButton",
+			_ => "None"
+		};
 	}
 
 	private void Initialize(NCardLibrary library)
@@ -110,11 +463,144 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		AnchorRight = 1f;
 		AnchorBottom = 0f;
 		GrowHorizontal = GrowDirection.Begin;
-		OffsetLeft = ExpandedOffsetLeft;
-		OffsetTop = ExpandedOffsetTop;
-		OffsetRight = ExpandedOffsetRight;
-		OffsetBottom = ExpandedOffsetBottom;
+		ApplyOffsetsForState();
 
+		AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
+	}
+
+	private void BuildUi()
+	{
+		_headerFont ??= TryLoadFont(_headerFontPath);
+		_bodyFont ??= TryLoadFont(_bodyFontPath);
+		_actionButtonTexture ??= GD.Load<Texture2D>(_actionButtonTexturePath);
+		_actionButtonOutlineTexture ??= GD.Load<Texture2D>(_actionButtonOutlineTexturePath);
+		_actionButtonFont ??= TryLoadFont(_actionButtonFontPath);
+		_actionButtonTheme ??= GD.Load<Theme>(_actionButtonThemePath);
+		_actionButtonOutlineMaterial ??= GD.Load<Material>(_actionButtonOutlineMaterialPath);
+		_actionButtonShader ??= GD.Load<Shader>(_actionButtonShaderPath);
+		_tickboxScene ??= GD.Load<PackedScene>(_tickboxScenePath);
+		_popupShell = CreatePopupShell();
+		if (_popupShell != null)
+		{
+			AddChild(_popupShell);
+		}
+		else
+		{
+			ApplyFallbackPanelStyle();
+		}
+
+		_margin = new MarginContainer();
+		_margin.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+		AddChild(_margin);
+
+		VBoxContainer root = new VBoxContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			SizeFlagsVertical = Control.SizeFlags.ExpandFill
+		};
+		root.AddThemeConstantOverride("separation", 8);
+		_margin.AddChild(root);
+
+		_content = new VBoxContainer();
+		_content.AddThemeConstantOverride("separation", 10);
+		root.AddChild(_content);
+
+		_presetSelect = new OptionButton
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			CustomMinimumSize = new Vector2(0, 50),
+			FocusMode = FocusModeEnum.All,
+			MouseFilter = MouseFilterEnum.Stop
+		};
+		StyleInput(_presetSelect);
+		_presetSelect.ItemSelected += _ => OnPresetSelected();
+		_presetSelectWrapper = CreateTunableWrapper(_presetSelect);
+		_content.AddChild(_presetSelectWrapper);
+
+		_topActions = new HBoxContainer();
+		_topActions.AddThemeConstantOverride("separation", 10);
+		_loadButton = CreateActionButton(
+			CardEditorLoc.T("button.load", "Load"),
+			LoadButtonTint,
+			OnLoadPressed,
+			193f,
+			54f,
+			18);
+		_loadButtonWrapper = CreateTunableWrapper(_loadButton, expandFill: false);
+		_topActions.AddChild(_loadButtonWrapper);
+		_deleteButton = CreateActionButton(
+			CardEditorLoc.T("button.delete", "Delete"),
+			DeleteButtonTint,
+			OnDeletePressed,
+			193f,
+			54f,
+			18);
+		_deleteButtonWrapper = CreateTunableWrapper(_deleteButton, expandFill: false);
+		_topActions.AddChild(_deleteButtonWrapper);
+		_topActionsWrapper = CreateTunableWrapper(_topActions);
+		_content.AddChild(_topActionsWrapper);
+
+		_startupCheckbox = CreateTickbox(CardEditorLoc.T("presets.runAtStartup", "Run at startup"));
+		_startupCheckbox.Toggled += OnStartupToggled;
+		_startupCheckboxWrapper = CreateTunableWrapper(_startupCheckbox);
+		_content.AddChild(_startupCheckboxWrapper);
+
+		_slotCountRow = BuildSlotCountRow();
+		_slotCountRow.Visible = _isCreatorMode;
+		_slotCountRowWrapper = CreateTunableWrapper(_slotCountRow);
+		_content.AddChild(_slotCountRowWrapper);
+
+		_sortByCharacterCheckbox = CreateTickbox(CardEditorLoc.T("presets.sortByCharacter", "Sort by Character"));
+		_sortByCharacterCheckbox.Toggled += OnSortByCharacterToggled;
+		_sortByCharacterCheckbox.Visible = _isCreatorMode;
+		_sortByCharacterCheckboxWrapper = CreateTunableWrapper(_sortByCharacterCheckbox);
+		_content.AddChild(_sortByCharacterCheckboxWrapper);
+
+		_content.AddChild(CreateDivider());
+
+		_presetNameField = new NMegaLineEdit
+		{
+			PlaceholderText = CardEditorLoc.T("presets.namePlaceholder", "Preset name…"),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			CustomMinimumSize = new Vector2(0, 44)
+		};
+		StyleInput(_presetNameField);
+		_presetNameField.PlaceholderText = CardEditorLoc.T("presets.namePlaceholder", "Preset name...");
+		_presetNameField.CustomMinimumSize = new Vector2(0, 50);
+		_presetNameWrapper = CreateTunableWrapper(_presetNameField);
+		_content.AddChild(_presetNameWrapper);
+
+		_bottomActions = new HBoxContainer();
+		_bottomActions.AddThemeConstantOverride("separation", 10);
+		_saveButton = CreateActionButton(
+			CardEditorLoc.T("button.save", "Save"),
+			SaveButtonTint,
+			OnSavePressed,
+			118f,
+			54f,
+			18);
+		_saveButtonWrapper = CreateTunableWrapper(_saveButton, expandFill: false);
+		_bottomActions.AddChild(_saveButtonWrapper);
+
+		_revertButton = CreateActionButton(
+			CardEditorLoc.T("button.reset", "Reset"),
+			VanillaButtonTint,
+			OnVanillaPressed,
+			276f,
+			54f,
+			15);
+		_revertButton.TooltipText = CardEditorLoc.T("button.revertToVanilla", "Revert to Vanilla");
+		_revertButtonWrapper = CreateTunableWrapper(_revertButton, expandFill: false);
+		_bottomActions.AddChild(_revertButtonWrapper);
+		_bottomActionsWrapper = CreateTunableWrapper(_bottomActions);
+		_content.AddChild(_bottomActionsWrapper);
+
+		SetCollapsed(collapsed: false);
+		ApplyLayoutTuning();
+	}
+
+	private void ApplyFallbackPanelStyle()
+	{
 		StyleBoxFlat panelStyle = new StyleBoxFlat
 		{
 			BgColor = new Color(0.035f, 0.04f, 0.045f, 0.88f),
@@ -131,131 +617,167 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		AddThemeStyleboxOverride("panel", panelStyle);
 	}
 
-	private void BuildUi()
+	private Control? CreatePopupShell()
 	{
-		_headerFont ??= TryLoadFont(_headerFontPath);
-		_bodyFont ??= TryLoadFont(_bodyFontPath);
-		_actionButtonTexture ??= GD.Load<Texture2D>(_actionButtonTexturePath);
-		_actionButtonOutlineTexture ??= GD.Load<Texture2D>(_actionButtonOutlineTexturePath);
-		_actionButtonFont ??= TryLoadFont(_actionButtonFontPath);
-		_actionButtonTheme ??= GD.Load<Theme>(_actionButtonThemePath);
-		_actionButtonOutlineMaterial ??= GD.Load<Material>(_actionButtonOutlineMaterialPath);
-		_actionButtonShader ??= GD.Load<Shader>(_actionButtonShaderPath);
-		_tickboxScene ??= GD.Load<PackedScene>(_tickboxScenePath);
-
-		_margin = new MarginContainer();
-		_margin.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-		_margin.AddThemeConstantOverride("margin_left", 16);
-		_margin.AddThemeConstantOverride("margin_top", 16);
-		_margin.AddThemeConstantOverride("margin_right", 16);
-		_margin.AddThemeConstantOverride("margin_bottom", 16);
-		AddChild(_margin);
-
-		VBoxContainer root = new VBoxContainer
+		try
 		{
-			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-			SizeFlagsVertical = Control.SizeFlags.ExpandFill
-		};
-		root.AddThemeConstantOverride("separation", 8);
-		_margin.AddChild(root);
+			_popupShellTexture ??= GD.Load<Texture2D>(_popupShellTexturePath);
+			if (_popupShellTexture == null)
+			{
+				return null;
+			}
 
-		_headerRow = new HBoxContainer();
-		_headerRow.AddThemeConstantOverride("separation", 8);
-		_headerRow.Alignment = BoxContainer.AlignmentMode.Begin;
-		root.AddChild(_headerRow);
-
-		_titleLabel = new Label { Text = _isCreatorMode ? "Preset Creator" : "Preset Editor" };
-		StyleSectionLabel(_titleLabel);
-		_headerRow.AddChild(_titleLabel);
-
-		_headerSpacer = new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-		_headerRow.AddChild(_headerSpacer);
-
-		root.AddChild(CreateDivider());
-
-		_content = new VBoxContainer();
-		_content.AddThemeConstantOverride("separation", 10);
-		root.AddChild(_content);
-
-		_presetSelect = new OptionButton
+			TextureRect shell = new TextureRect
+			{
+				Name = "PresetPopupShell",
+				Texture = _popupShellTexture,
+				ExpandMode = TextureRect.ExpandModeEnum.FitWidthProportional
+			};
+			shell.MouseFilter = MouseFilterEnum.Ignore;
+			shell.ZIndex = -1;
+			shell.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+			return shell;
+		}
+		catch (Exception ex)
 		{
-			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-			CustomMinimumSize = new Vector2(0, 50),
-			FocusMode = FocusModeEnum.All,
-			MouseFilter = MouseFilterEnum.Stop
-		};
-		StyleInput(_presetSelect);
-		_presetSelect.ItemSelected += _ => OnPresetSelected();
-		_content.AddChild(_presetSelect);
+			Log.Warn($"[CardEditor][PresetPanel] Failed creating popup shell: {ex}");
+			return null;
+		}
+	}
 
-		HBoxContainer loadActions = new HBoxContainer();
-		loadActions.AddThemeConstantOverride("separation", 10);
-		_content.AddChild(loadActions);
-
-		loadActions.AddChild(CreateActionButton(
-			CardEditorLoc.T("button.load", "Load"),
-			LoadButtonTint,
-			OnLoadPressed,
-			193f,
-			54f,
-			18));
-		loadActions.AddChild(CreateActionButton(
-			CardEditorLoc.T("button.delete", "Delete"),
-			DeleteButtonTint,
-			OnDeletePressed,
-			193f,
-			54f,
-			18));
-
-		_startupCheckbox = CreateTickbox(CardEditorLoc.T("presets.runAtStartup", "Run at startup"));
-		_startupCheckbox.Toggled += OnStartupToggled;
-		_content.AddChild(_startupCheckbox);
-
-		_slotCountRow = BuildSlotCountRow();
-		_slotCountRow.Visible = _isCreatorMode;
-		_content.AddChild(_slotCountRow);
-
-		_sortByCharacterCheckbox = CreateTickbox(CardEditorLoc.T("presets.sortByCharacter", "Sort by Character"));
-		_sortByCharacterCheckbox.Toggled += OnSortByCharacterToggled;
-		_sortByCharacterCheckbox.Visible = _isCreatorMode;
-		_content.AddChild(_sortByCharacterCheckbox);
-
-		_content.AddChild(CreateDivider());
-
-		_presetNameField = new NMegaLineEdit
+	private static MarginContainer CreateTunableWrapper(Control child, bool expandFill = true)
+	{
+		MarginContainer wrapper = new MarginContainer();
+		if (expandFill)
 		{
-			PlaceholderText = CardEditorLoc.T("presets.namePlaceholder", "Preset name…"),
-			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-			CustomMinimumSize = new Vector2(0, 44)
-		};
-		StyleInput(_presetNameField);
-		_presetNameField.PlaceholderText = CardEditorLoc.T("presets.namePlaceholder", "Preset name...");
-		_presetNameField.CustomMinimumSize = new Vector2(0, 50);
-		_content.AddChild(_presetNameField);
+			wrapper.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		}
+		wrapper.AddChild(child);
+		return wrapper;
+	}
 
-		HBoxContainer bottomActions = new HBoxContainer();
-		bottomActions.AddThemeConstantOverride("separation", 10);
-		_content.AddChild(bottomActions);
+	public void ApplyLayoutTuning()
+	{
+		if (!IsNodeReady())
+		{
+			return;
+		}
 
-		bottomActions.AddChild(CreateActionButton(
-			CardEditorLoc.T("button.save", "Save"),
-			SaveButtonTint,
-			OnSavePressed,
-			118f,
-			54f,
-			18));
+		if (_margin != null && GodotObject.IsInstanceValid(_margin) && !_isCollapsed)
+		{
+			_margin.AddThemeConstantOverride("margin_left", CardEditorPresetPanelTuning.MarginLeft);
+			_margin.AddThemeConstantOverride("margin_top", CardEditorPresetPanelTuning.MarginTop);
+			_margin.AddThemeConstantOverride("margin_right", CardEditorPresetPanelTuning.MarginRight);
+			_margin.AddThemeConstantOverride("margin_bottom", CardEditorPresetPanelTuning.MarginBottom);
+		}
 
-		CardEditorBaseDeckActionButton revertButton = CreateActionButton(
-			CardEditorLoc.T("button.revertToVanilla", "Revert to Vanilla"),
-			VanillaButtonTint,
-			OnVanillaPressed,
-			276f,
-			54f,
-			15);
-		revertButton.TooltipText = CardEditorLoc.T("button.revertToVanilla", "Revert to Vanilla");
-		bottomActions.AddChild(revertButton);
+		if (_content != null && GodotObject.IsInstanceValid(_content))
+		{
+			_content.AddThemeConstantOverride("separation", CardEditorPresetPanelTuning.ContentSeparation);
+		}
 
-		SetCollapsed(collapsed: false);
+		ApplyWrapperMargins(_presetSelectWrapper, CardEditorPresetPanelTuning.DropdownInsetLeft, CardEditorPresetPanelTuning.DropdownOffsetY, CardEditorPresetPanelTuning.DropdownInsetRight, 0);
+		if (_presetSelect != null && GodotObject.IsInstanceValid(_presetSelect))
+		{
+			_presetSelect.CustomMinimumSize = new Vector2(0f, CardEditorPresetPanelTuning.DropdownHeight);
+		}
+
+		ApplyWrapperMargins(_topActionsWrapper, CardEditorPresetPanelTuning.TopButtonsInsetLeft, CardEditorPresetPanelTuning.TopButtonsOffsetY, CardEditorPresetPanelTuning.TopButtonsInsetRight, 0);
+		if (_topActions != null && GodotObject.IsInstanceValid(_topActions))
+		{
+			_topActions.AddThemeConstantOverride("separation", CardEditorPresetPanelTuning.TopButtonsSeparation);
+		}
+		if (_loadButton != null && GodotObject.IsInstanceValid(_loadButton))
+		{
+			_loadButton.SetButtonSize(CardEditorPresetPanelTuning.TopButtonWidth, CardEditorPresetPanelTuning.TopButtonHeight);
+			_loadButton.SetTextSize(CardEditorPresetPanelTuning.LoadButtonTextSize);
+			_loadButton.SetTextOffsets(0f, 0f, CardEditorPresetPanelTuning.LoadButtonTextOffsetX, CardEditorPresetPanelTuning.LoadButtonTextOffsetY);
+		}
+		ApplyWrapperMargins(_loadButtonWrapper, CardEditorPresetPanelTuning.LoadButtonOffsetX, CardEditorPresetPanelTuning.LoadButtonOffsetY, 0, 0);
+		if (_deleteButton != null && GodotObject.IsInstanceValid(_deleteButton))
+		{
+			_deleteButton.SetButtonSize(CardEditorPresetPanelTuning.TopButtonWidth, CardEditorPresetPanelTuning.TopButtonHeight);
+			_deleteButton.SetTextSize(CardEditorPresetPanelTuning.DeleteButtonTextSize);
+			_deleteButton.SetTextOffsets(0f, 0f, CardEditorPresetPanelTuning.DeleteButtonTextOffsetX, CardEditorPresetPanelTuning.DeleteButtonTextOffsetY);
+		}
+		ApplyWrapperMargins(_deleteButtonWrapper, CardEditorPresetPanelTuning.DeleteButtonOffsetX, CardEditorPresetPanelTuning.DeleteButtonOffsetY, 0, 0);
+
+		ApplyWrapperMargins(_startupCheckboxWrapper, CardEditorPresetPanelTuning.CheckboxInsetLeft, CardEditorPresetPanelTuning.CheckboxOffsetY, CardEditorPresetPanelTuning.CheckboxInsetRight, 0);
+		_startupCheckbox?.ApplyLayoutTuning(
+			CardEditorPresetPanelTuning.CheckboxVisualScale / 100f,
+			CardEditorPresetPanelTuning.CheckboxHeight,
+			CardEditorPresetPanelTuning.CheckboxSeparation);
+		_sortByCharacterCheckbox?.ApplyLayoutTuning(
+			CardEditorPresetPanelTuning.CheckboxVisualScale / 100f,
+			CardEditorPresetPanelTuning.CheckboxHeight,
+			CardEditorPresetPanelTuning.CheckboxSeparation);
+
+		ApplyWrapperMargins(_presetNameWrapper, CardEditorPresetPanelTuning.NameInsetLeft, CardEditorPresetPanelTuning.NameOffsetY, CardEditorPresetPanelTuning.NameInsetRight, 0);
+		if (_presetNameField != null && GodotObject.IsInstanceValid(_presetNameField))
+		{
+			_presetNameField.CustomMinimumSize = new Vector2(0f, CardEditorPresetPanelTuning.NameHeight);
+		}
+		if (_slotCountField != null && GodotObject.IsInstanceValid(_slotCountField))
+		{
+			_slotCountField.CustomMinimumSize = new Vector2(CardEditorPresetPanelTuning.SlotFieldWidth, CardEditorPresetPanelTuning.SlotFieldHeight);
+		}
+		ApplyWrapperMargins(_slotCountSpinnerWrapper, CardEditorPresetPanelTuning.SlotSpinnerInsetLeft, CardEditorPresetPanelTuning.SlotSpinnerOffsetY, CardEditorPresetPanelTuning.SlotSpinnerInsetRight, 0);
+		ApplyWrapperMargins(_slotCountFieldWrapper, CardEditorPresetPanelTuning.SlotFieldOffsetX, CardEditorPresetPanelTuning.SlotFieldOffsetY, 0, 0);
+		ApplyWrapperMargins(_slotCountArrowsWrapper, CardEditorPresetPanelTuning.SlotArrowsOffsetX, CardEditorPresetPanelTuning.SlotArrowsOffsetY, 0, 0);
+		if (_slotCountSpinner != null && GodotObject.IsInstanceValid(_slotCountSpinner))
+		{
+			_slotCountSpinner.AddThemeConstantOverride("separation", CardEditorPresetPanelTuning.SlotSpinnerSeparation);
+		}
+		if (_slotCountArrows != null && GodotObject.IsInstanceValid(_slotCountArrows))
+		{
+			_slotCountArrows.AddThemeConstantOverride("separation", CardEditorPresetPanelTuning.SlotArrowSeparation);
+			_slotCountArrows.CustomMinimumSize = new Vector2(CardEditorPresetPanelTuning.SlotArrowColumnWidth, CardEditorPresetPanelTuning.SlotArrowColumnHeight);
+		}
+		if (_slotCountUpButton != null && GodotObject.IsInstanceValid(_slotCountUpButton))
+		{
+			_slotCountUpButton.CustomMinimumSize = new Vector2(CardEditorPresetPanelTuning.SlotArrowButtonWidth, CardEditorPresetPanelTuning.SlotArrowButtonHeight);
+		}
+		if (_slotCountDownButton != null && GodotObject.IsInstanceValid(_slotCountDownButton))
+		{
+			_slotCountDownButton.CustomMinimumSize = new Vector2(CardEditorPresetPanelTuning.SlotArrowButtonWidth, CardEditorPresetPanelTuning.SlotArrowButtonHeight);
+		}
+
+		ApplyWrapperMargins(_bottomActionsWrapper, CardEditorPresetPanelTuning.BottomButtonsInsetLeft, CardEditorPresetPanelTuning.BottomButtonsOffsetY, CardEditorPresetPanelTuning.BottomButtonsInsetRight, 0);
+		if (_bottomActions != null && GodotObject.IsInstanceValid(_bottomActions))
+		{
+			_bottomActions.AddThemeConstantOverride("separation", CardEditorPresetPanelTuning.BottomButtonsSeparation);
+		}
+		if (_saveButton != null && GodotObject.IsInstanceValid(_saveButton))
+		{
+			_saveButton.SetButtonSize(CardEditorPresetPanelTuning.SaveButtonWidth, CardEditorPresetPanelTuning.BottomButtonHeight);
+			_saveButton.SetTextSize(CardEditorPresetPanelTuning.SaveButtonTextSize);
+			_saveButton.SetTextOffsets(0f, 0f, CardEditorPresetPanelTuning.SaveButtonTextOffsetX, CardEditorPresetPanelTuning.SaveButtonTextOffsetY);
+		}
+		ApplyWrapperMargins(_saveButtonWrapper, CardEditorPresetPanelTuning.SaveButtonOffsetX, CardEditorPresetPanelTuning.SaveButtonOffsetY, 0, 0);
+		if (_revertButton != null && GodotObject.IsInstanceValid(_revertButton))
+		{
+			_revertButton.SetButtonSize(CardEditorPresetPanelTuning.RevertButtonWidth, CardEditorPresetPanelTuning.BottomButtonHeight);
+			_revertButton.SetTextSize(CardEditorPresetPanelTuning.RevertButtonTextSize);
+			_revertButton.SetTextOffsets(0f, 0f, CardEditorPresetPanelTuning.RevertButtonTextOffsetX, CardEditorPresetPanelTuning.RevertButtonTextOffsetY);
+		}
+		ApplyWrapperMargins(_revertButtonWrapper, CardEditorPresetPanelTuning.RevertButtonOffsetX, CardEditorPresetPanelTuning.RevertButtonOffsetY, 0, 0);
+
+		ApplyOffsetsForState();
+		QueueSort();
+		QueueRedraw();
+	}
+
+	private static void ApplyWrapperMargins(MarginContainer? wrapper, int left, int top, int right, int bottom)
+	{
+		if (wrapper == null || !GodotObject.IsInstanceValid(wrapper))
+		{
+			return;
+		}
+
+		wrapper.AddThemeConstantOverride("margin_left", left);
+		wrapper.AddThemeConstantOverride("margin_top", top);
+		wrapper.AddThemeConstantOverride("margin_right", right);
+		wrapper.AddThemeConstantOverride("margin_bottom", bottom);
 	}
 
 	private HBoxContainer BuildSlotCountRow()
@@ -279,37 +801,45 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		int configured = Math.Clamp(CardEditorCreatedCardsStore.ConfiguredSlotCount, 1, CardEditorCreatedCardsStore.MaxSlotCount);
 
-		HBoxContainer spinner = new HBoxContainer();
-		spinner.AddThemeConstantOverride("separation", 6);
-		spinner.CustomMinimumSize = new Vector2(164, 48);
-		row.AddChild(spinner);
+		_slotCountSpinner = new HBoxContainer();
+		_slotCountSpinner.AddThemeConstantOverride("separation", CardEditorPresetPanelTuning.SlotSpinnerSeparation);
+		_slotCountSpinner.CustomMinimumSize = new Vector2(138, 44);
+		_slotCountSpinnerWrapper = CreateTunableWrapper(_slotCountSpinner, expandFill: false);
+		row.AddChild(_slotCountSpinnerWrapper);
 
 		_slotCountField = new NMegaLineEdit
 		{
 			Text = configured.ToString(CultureInfo.InvariantCulture),
-			CustomMinimumSize = new Vector2(98, 48),
+			CustomMinimumSize = new Vector2(CardEditorPresetPanelTuning.SlotFieldWidth, CardEditorPresetPanelTuning.SlotFieldHeight),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 			FocusMode = FocusModeEnum.All,
-			MouseFilter = MouseFilterEnum.Stop
+			MouseFilter = MouseFilterEnum.Stop,
+			Alignment = HorizontalAlignment.Center
 		};
 		_slotCountField.TooltipText = label.TooltipText;
 		StyleInput(_slotCountField);
 		_slotCountField.TextSubmitted += _ => CommitSlotCountFromField();
 		_slotCountField.FocusExited += CommitSlotCountFromField;
-		spinner.AddChild(_slotCountField);
+		_slotCountFieldWrapper = CreateTunableWrapper(_slotCountField, expandFill: false);
+		_slotCountSpinner.AddChild(_slotCountFieldWrapper);
 
-		VBoxContainer arrows = new VBoxContainer();
-		arrows.AddThemeConstantOverride("separation", 4);
-		arrows.CustomMinimumSize = new Vector2(50, 48);
-		spinner.AddChild(arrows);
+		_slotCountArrows = new VBoxContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+			SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+			CustomMinimumSize = new Vector2(CardEditorPresetPanelTuning.SlotArrowColumnWidth, CardEditorPresetPanelTuning.SlotArrowColumnHeight)
+		};
+		_slotCountArrows.AddThemeConstantOverride("separation", CardEditorPresetPanelTuning.SlotArrowSeparation);
+		_slotCountArrowsWrapper = CreateTunableWrapper(_slotCountArrows, expandFill: false);
+		_slotCountSpinner.AddChild(_slotCountArrowsWrapper);
 
-		Button up = CreateSpinnerButton("\u25B2");
-		up.Pressed += () => AdjustSlotCount(+1);
-		arrows.AddChild(up);
+		_slotCountUpButton = CreateSpinnerButton("\u25B2");
+		_slotCountUpButton.Pressed += () => AdjustSlotCount(+1);
+		_slotCountArrows.AddChild(_slotCountUpButton);
 
-		Button down = CreateSpinnerButton("\u25BC");
-		down.Pressed += () => AdjustSlotCount(-1);
-		arrows.AddChild(down);
+		_slotCountDownButton = CreateSpinnerButton("\u25BC");
+		_slotCountDownButton.Pressed += () => AdjustSlotCount(-1);
+		_slotCountArrows.AddChild(_slotCountDownButton);
 
 		return row;
 	}
@@ -319,9 +849,12 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		Button button = new Button
 		{
 			Text = text,
+			Flat = true,
 			FocusMode = FocusModeEnum.None,
-			CustomMinimumSize = new Vector2(50, 22),
-			MouseFilter = MouseFilterEnum.Stop
+			CustomMinimumSize = _slotCountSpinButtonMinSize,
+			MouseFilter = MouseFilterEnum.Stop,
+			Alignment = HorizontalAlignment.Center,
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter
 		};
 		StyleSpinnerButton(button);
 		return button;
@@ -329,19 +862,20 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 	private void StyleSpinnerButton(Button button)
 	{
-		if (_bodyFont != null)
+		_headerFont ??= TryLoadFont(_headerFontPath);
+		if (_headerFont != null)
 		{
-			button.AddThemeFontOverride("font", _bodyFont);
+			button.AddThemeFontOverride("font", _headerFont);
 		}
 		button.AddThemeFontSizeOverride("font_size", 18);
 		button.AddThemeColorOverride("font_color", StsColors.gold);
 		button.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
-		button.AddThemeConstantOverride("outline_size", 8);
+		button.AddThemeConstantOverride("outline_size", 10);
 
-		StyleBoxFlat normal = CreateFieldStyle(new Color(0.40f, 0.33f, 0.14f, 1f));
-		StyleBoxFlat hover = CreateFieldStyle(StsColors.gold);
-		StyleBoxFlat pressed = CreateFieldStyle(new Color(0.3648f, 0.9104f, 0.96f, 0.752941f));
-		StyleBoxFlat disabled = CreateFieldStyle(StsColors.gray);
+		StyleBoxFlat normal = new StyleBoxFlat { BgColor = new Color(0f, 0f, 0f, 0f) };
+		StyleBoxFlat hover = new StyleBoxFlat { BgColor = new Color(1f, 1f, 1f, 0.06f) };
+		StyleBoxFlat pressed = new StyleBoxFlat { BgColor = new Color(1f, 1f, 1f, 0.10f) };
+		StyleBoxFlat disabled = new StyleBoxFlat { BgColor = new Color(0f, 0f, 0f, 0f) };
 		button.AddThemeStyleboxOverride("normal", normal);
 		button.AddThemeStyleboxOverride("hover", hover);
 		button.AddThemeStyleboxOverride("pressed", pressed);
@@ -412,15 +946,23 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			_slotCountRow.Visible = _isCreatorMode;
 		}
+		if (_slotCountRowWrapper != null && GodotObject.IsInstanceValid(_slotCountRowWrapper))
+		{
+			_slotCountRowWrapper.Visible = _isCreatorMode;
+		}
 
 		if (_sortByCharacterCheckbox != null && GodotObject.IsInstanceValid(_sortByCharacterCheckbox))
 		{
 			_sortByCharacterCheckbox.Visible = _isCreatorMode;
 		}
+		if (_sortByCharacterCheckboxWrapper != null && GodotObject.IsInstanceValid(_sortByCharacterCheckboxWrapper))
+		{
+			_sortByCharacterCheckboxWrapper.Visible = _isCreatorMode;
+		}
 
 		if (IsNodeReady() && !_isCollapsed)
 		{
-			ApplyOffsetsForState();
+			ApplyLayoutTuning();
 		}
 	}
 
@@ -894,7 +1436,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		button.Initialize(text, tint, _actionButtonTexture!, _actionButtonOutlineTexture!, _actionButtonFont, _actionButtonTheme, _actionButtonOutlineMaterial, _actionButtonShader);
 		button.SetButtonSize(width, height);
 		button.SetTextSize(fontSize);
-		button.SetTextOffsets(0f, 10f, 0f, 0f);
+		button.SetTextOffsets(0f, 0f, 0f, 0f);
 		button.Triggered += onTriggered;
 		return button;
 	}
@@ -960,20 +1502,26 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		if (_margin != null && GodotObject.IsInstanceValid(_margin))
 		{
-			int m = collapsed ? 8 : 16;
-			_margin.AddThemeConstantOverride("margin_left", m);
-			_margin.AddThemeConstantOverride("margin_top", m);
-			_margin.AddThemeConstantOverride("margin_right", m);
-			_margin.AddThemeConstantOverride("margin_bottom", m);
+			if (collapsed)
+			{
+				_margin.AddThemeConstantOverride("margin_left", 16);
+				_margin.AddThemeConstantOverride("margin_top", 14);
+				_margin.AddThemeConstantOverride("margin_right", 16);
+				_margin.AddThemeConstantOverride("margin_bottom", 14);
+			}
+			else
+			{
+				_margin.AddThemeConstantOverride("margin_left", CardEditorPresetPanelTuning.MarginLeft);
+				_margin.AddThemeConstantOverride("margin_top", CardEditorPresetPanelTuning.MarginTop);
+				_margin.AddThemeConstantOverride("margin_right", CardEditorPresetPanelTuning.MarginRight);
+				_margin.AddThemeConstantOverride("margin_bottom", CardEditorPresetPanelTuning.MarginBottom);
+			}
 		}
 
-		if (collapsed)
+		ApplyOffsetsForState();
+		if (!collapsed)
 		{
-			ApplyOffsetsForState();
-		}
-		else
-		{
-			ApplyOffsetsForState();
+			ApplyLayoutTuning();
 		}
 
 		_alignRetriesRemaining = 12;
@@ -991,10 +1539,237 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		}
 		else
 		{
-			OffsetLeft = ExpandedOffsetLeft + _scrollbarAlignOffsetX;
-			OffsetTop = ExpandedOffsetTop;
-			OffsetRight = ExpandedOffsetRight + _scrollbarAlignOffsetX;
-			OffsetBottom = ExpandedOffsetBottom;
+			float right = -CardEditorPresetPanelTuning.PopupRightInset + _scrollbarAlignOffsetX;
+			OffsetRight = right;
+			OffsetLeft = right - CardEditorPresetPanelTuning.PopupWidth;
+			OffsetTop = CardEditorPresetPanelTuning.PopupTop;
+			OffsetBottom = CardEditorPresetPanelTuning.PopupTop + CardEditorPresetPanelTuning.PopupHeight;
+		}
+	}
+
+	private enum PresetPanelTuningTarget
+	{
+		None,
+		Popup,
+		Dropdown,
+		TopButtons,
+		LoadButton,
+		DeleteButton,
+		Checkbox,
+		NameField,
+		SlotSpinner,
+		SlotField,
+		SlotArrows,
+		SaveButton,
+		RevertButton
+	}
+
+	private readonly struct PresetPanelTuningSnapshot
+	{
+		public readonly float PopupTop;
+		public readonly float PopupRightInset;
+		public readonly float PopupWidth;
+		public readonly float PopupHeight;
+		public readonly int DropdownInsetLeft;
+		public readonly int DropdownInsetRight;
+		public readonly int DropdownOffsetY;
+		public readonly int DropdownHeight;
+		public readonly int TopButtonsInsetLeft;
+		public readonly int TopButtonsInsetRight;
+		public readonly int TopButtonsOffsetY;
+		public readonly int TopButtonWidth;
+		public readonly int TopButtonHeight;
+		public readonly int LoadButtonOffsetX;
+		public readonly int LoadButtonOffsetY;
+		public readonly int DeleteButtonOffsetX;
+		public readonly int DeleteButtonOffsetY;
+		public readonly int CheckboxInsetLeft;
+		public readonly int CheckboxInsetRight;
+		public readonly int CheckboxOffsetY;
+		public readonly int CheckboxHeight;
+		public readonly int CheckboxVisualScale;
+		public readonly int NameInsetLeft;
+		public readonly int NameInsetRight;
+		public readonly int NameOffsetY;
+		public readonly int NameHeight;
+		public readonly int SlotSpinnerInsetLeft;
+		public readonly int SlotSpinnerInsetRight;
+		public readonly int SlotSpinnerOffsetY;
+		public readonly int SlotFieldOffsetX;
+		public readonly int SlotFieldOffsetY;
+		public readonly int SlotFieldWidth;
+		public readonly int SlotFieldHeight;
+		public readonly int SlotArrowsOffsetX;
+		public readonly int SlotArrowsOffsetY;
+		public readonly int SlotArrowColumnWidth;
+		public readonly int SlotArrowColumnHeight;
+		public readonly int SlotArrowButtonWidth;
+		public readonly int SlotArrowButtonHeight;
+		public readonly int BottomButtonsInsetLeft;
+		public readonly int BottomButtonsInsetRight;
+		public readonly int BottomButtonsOffsetY;
+		public readonly int SaveButtonWidth;
+		public readonly int RevertButtonWidth;
+		public readonly int BottomButtonHeight;
+		public readonly int SaveButtonOffsetX;
+		public readonly int SaveButtonOffsetY;
+		public readonly int RevertButtonOffsetX;
+		public readonly int RevertButtonOffsetY;
+
+		private PresetPanelTuningSnapshot(
+			float popupTop,
+			float popupRightInset,
+			float popupWidth,
+			float popupHeight,
+			int dropdownInsetLeft,
+			int dropdownInsetRight,
+			int dropdownOffsetY,
+			int dropdownHeight,
+			int topButtonsInsetLeft,
+			int topButtonsInsetRight,
+			int topButtonsOffsetY,
+			int topButtonWidth,
+			int topButtonHeight,
+			int loadButtonOffsetX,
+			int loadButtonOffsetY,
+			int deleteButtonOffsetX,
+			int deleteButtonOffsetY,
+			int checkboxInsetLeft,
+			int checkboxInsetRight,
+			int checkboxOffsetY,
+			int checkboxHeight,
+			int checkboxVisualScale,
+			int nameInsetLeft,
+			int nameInsetRight,
+			int nameOffsetY,
+			int nameHeight,
+			int slotSpinnerInsetLeft,
+			int slotSpinnerInsetRight,
+			int slotSpinnerOffsetY,
+			int slotFieldOffsetX,
+			int slotFieldOffsetY,
+			int slotFieldWidth,
+			int slotFieldHeight,
+			int slotArrowsOffsetX,
+			int slotArrowsOffsetY,
+			int slotArrowColumnWidth,
+			int slotArrowColumnHeight,
+			int slotArrowButtonWidth,
+			int slotArrowButtonHeight,
+			int bottomButtonsInsetLeft,
+			int bottomButtonsInsetRight,
+			int bottomButtonsOffsetY,
+			int saveButtonWidth,
+			int revertButtonWidth,
+			int bottomButtonHeight,
+			int saveButtonOffsetX,
+			int saveButtonOffsetY,
+			int revertButtonOffsetX,
+			int revertButtonOffsetY)
+		{
+			PopupTop = popupTop;
+			PopupRightInset = popupRightInset;
+			PopupWidth = popupWidth;
+			PopupHeight = popupHeight;
+			DropdownInsetLeft = dropdownInsetLeft;
+			DropdownInsetRight = dropdownInsetRight;
+			DropdownOffsetY = dropdownOffsetY;
+			DropdownHeight = dropdownHeight;
+			TopButtonsInsetLeft = topButtonsInsetLeft;
+			TopButtonsInsetRight = topButtonsInsetRight;
+			TopButtonsOffsetY = topButtonsOffsetY;
+			TopButtonWidth = topButtonWidth;
+			TopButtonHeight = topButtonHeight;
+			LoadButtonOffsetX = loadButtonOffsetX;
+			LoadButtonOffsetY = loadButtonOffsetY;
+			DeleteButtonOffsetX = deleteButtonOffsetX;
+			DeleteButtonOffsetY = deleteButtonOffsetY;
+			CheckboxInsetLeft = checkboxInsetLeft;
+			CheckboxInsetRight = checkboxInsetRight;
+			CheckboxOffsetY = checkboxOffsetY;
+			CheckboxHeight = checkboxHeight;
+			CheckboxVisualScale = checkboxVisualScale;
+			NameInsetLeft = nameInsetLeft;
+			NameInsetRight = nameInsetRight;
+			NameOffsetY = nameOffsetY;
+			NameHeight = nameHeight;
+			SlotSpinnerInsetLeft = slotSpinnerInsetLeft;
+			SlotSpinnerInsetRight = slotSpinnerInsetRight;
+			SlotSpinnerOffsetY = slotSpinnerOffsetY;
+			SlotFieldOffsetX = slotFieldOffsetX;
+			SlotFieldOffsetY = slotFieldOffsetY;
+			SlotFieldWidth = slotFieldWidth;
+			SlotFieldHeight = slotFieldHeight;
+			SlotArrowsOffsetX = slotArrowsOffsetX;
+			SlotArrowsOffsetY = slotArrowsOffsetY;
+			SlotArrowColumnWidth = slotArrowColumnWidth;
+			SlotArrowColumnHeight = slotArrowColumnHeight;
+			SlotArrowButtonWidth = slotArrowButtonWidth;
+			SlotArrowButtonHeight = slotArrowButtonHeight;
+			BottomButtonsInsetLeft = bottomButtonsInsetLeft;
+			BottomButtonsInsetRight = bottomButtonsInsetRight;
+			BottomButtonsOffsetY = bottomButtonsOffsetY;
+			SaveButtonWidth = saveButtonWidth;
+			RevertButtonWidth = revertButtonWidth;
+			BottomButtonHeight = bottomButtonHeight;
+			SaveButtonOffsetX = saveButtonOffsetX;
+			SaveButtonOffsetY = saveButtonOffsetY;
+			RevertButtonOffsetX = revertButtonOffsetX;
+			RevertButtonOffsetY = revertButtonOffsetY;
+		}
+
+		public static PresetPanelTuningSnapshot Capture()
+		{
+			return new PresetPanelTuningSnapshot(
+				CardEditorPresetPanelTuning.PopupTop,
+				CardEditorPresetPanelTuning.PopupRightInset,
+				CardEditorPresetPanelTuning.PopupWidth,
+				CardEditorPresetPanelTuning.PopupHeight,
+				CardEditorPresetPanelTuning.DropdownInsetLeft,
+				CardEditorPresetPanelTuning.DropdownInsetRight,
+				CardEditorPresetPanelTuning.DropdownOffsetY,
+				CardEditorPresetPanelTuning.DropdownHeight,
+				CardEditorPresetPanelTuning.TopButtonsInsetLeft,
+				CardEditorPresetPanelTuning.TopButtonsInsetRight,
+				CardEditorPresetPanelTuning.TopButtonsOffsetY,
+				CardEditorPresetPanelTuning.TopButtonWidth,
+				CardEditorPresetPanelTuning.TopButtonHeight,
+				CardEditorPresetPanelTuning.LoadButtonOffsetX,
+				CardEditorPresetPanelTuning.LoadButtonOffsetY,
+				CardEditorPresetPanelTuning.DeleteButtonOffsetX,
+				CardEditorPresetPanelTuning.DeleteButtonOffsetY,
+				CardEditorPresetPanelTuning.CheckboxInsetLeft,
+				CardEditorPresetPanelTuning.CheckboxInsetRight,
+				CardEditorPresetPanelTuning.CheckboxOffsetY,
+				CardEditorPresetPanelTuning.CheckboxHeight,
+				CardEditorPresetPanelTuning.CheckboxVisualScale,
+				CardEditorPresetPanelTuning.NameInsetLeft,
+				CardEditorPresetPanelTuning.NameInsetRight,
+				CardEditorPresetPanelTuning.NameOffsetY,
+				CardEditorPresetPanelTuning.NameHeight,
+				CardEditorPresetPanelTuning.SlotSpinnerInsetLeft,
+				CardEditorPresetPanelTuning.SlotSpinnerInsetRight,
+				CardEditorPresetPanelTuning.SlotSpinnerOffsetY,
+				CardEditorPresetPanelTuning.SlotFieldOffsetX,
+				CardEditorPresetPanelTuning.SlotFieldOffsetY,
+				CardEditorPresetPanelTuning.SlotFieldWidth,
+				CardEditorPresetPanelTuning.SlotFieldHeight,
+				CardEditorPresetPanelTuning.SlotArrowsOffsetX,
+				CardEditorPresetPanelTuning.SlotArrowsOffsetY,
+				CardEditorPresetPanelTuning.SlotArrowColumnWidth,
+				CardEditorPresetPanelTuning.SlotArrowColumnHeight,
+				CardEditorPresetPanelTuning.SlotArrowButtonWidth,
+				CardEditorPresetPanelTuning.SlotArrowButtonHeight,
+				CardEditorPresetPanelTuning.BottomButtonsInsetLeft,
+				CardEditorPresetPanelTuning.BottomButtonsInsetRight,
+				CardEditorPresetPanelTuning.BottomButtonsOffsetY,
+				CardEditorPresetPanelTuning.SaveButtonWidth,
+				CardEditorPresetPanelTuning.RevertButtonWidth,
+				CardEditorPresetPanelTuning.BottomButtonHeight,
+				CardEditorPresetPanelTuning.SaveButtonOffsetX,
+				CardEditorPresetPanelTuning.SaveButtonOffsetY,
+				CardEditorPresetPanelTuning.RevertButtonOffsetX,
+				CardEditorPresetPanelTuning.RevertButtonOffsetY);
 		}
 	}
 }
@@ -1003,6 +1778,8 @@ internal sealed class PresetVanillaTickbox : HBoxContainer
 {
 	private readonly Control _tickedImage;
 	private readonly Control _notTickedImage;
+	private readonly Control _tickboxVisuals;
+	private readonly Label _label;
 	private bool _interactive = true;
 
 	public bool IsTicked { get; private set; }
@@ -1017,15 +1794,15 @@ internal sealed class PresetVanillaTickbox : HBoxContainer
 		CustomMinimumSize = new Vector2(0f, 42f);
 		AddThemeConstantOverride("separation", 8);
 
-		Control tickboxVisuals = tickboxScene.Instantiate<Control>(PackedScene.GenEditState.Disabled);
-		tickboxVisuals.MouseFilter = MouseFilterEnum.Ignore;
-		tickboxVisuals.CustomMinimumSize = new Vector2(48f, 48f);
-		tickboxVisuals.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
-		tickboxVisuals.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
-		tickboxVisuals.Scale = Vector2.One * 0.72f;
-		tickboxVisuals.PivotOffset = new Vector2(24f, 24f);
+		_tickboxVisuals = tickboxScene.Instantiate<Control>(PackedScene.GenEditState.Disabled);
+		_tickboxVisuals.MouseFilter = MouseFilterEnum.Ignore;
+		_tickboxVisuals.CustomMinimumSize = new Vector2(48f, 48f);
+		_tickboxVisuals.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+		_tickboxVisuals.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
+		_tickboxVisuals.Scale = Vector2.One * 0.72f;
+		_tickboxVisuals.PivotOffset = new Vector2(24f, 24f);
 
-		Label label = new Label
+		_label = new Label
 		{
 			Text = text,
 			VerticalAlignment = VerticalAlignment.Center,
@@ -1034,21 +1811,29 @@ internal sealed class PresetVanillaTickbox : HBoxContainer
 		};
 		if (bodyFont != null)
 		{
-			label.AddThemeFontOverride("font", bodyFont);
+			_label.AddThemeFontOverride("font", bodyFont);
 		}
-		label.AddThemeFontSizeOverride("font_size", 20);
-		label.AddThemeColorOverride("font_color", StsColors.cream);
-		label.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
-		label.AddThemeConstantOverride("outline_size", 8);
+		_label.AddThemeFontSizeOverride("font_size", 20);
+		_label.AddThemeColorOverride("font_color", StsColors.cream);
+		_label.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
+		_label.AddThemeConstantOverride("outline_size", 8);
 
-		AddChild(tickboxVisuals);
-		AddChild(label);
+		AddChild(_tickboxVisuals);
+		AddChild(_label);
 
-		_tickedImage = tickboxVisuals.GetNode<Control>("Ticked");
-		_notTickedImage = tickboxVisuals.GetNode<Control>("NotTicked");
+		_tickedImage = _tickboxVisuals.GetNode<Control>("Ticked");
+		_notTickedImage = _tickboxVisuals.GetNode<Control>("NotTicked");
 		SetTicked(false, notify: false);
 
 		GuiInput += OnGuiInput;
+	}
+
+	public void ApplyLayoutTuning(float visualScale, int rowHeight, int separation)
+	{
+		CustomMinimumSize = new Vector2(0f, rowHeight);
+		AddThemeConstantOverride("separation", separation);
+		_tickboxVisuals.Scale = Vector2.One * visualScale;
+		_tickboxVisuals.PivotOffset = new Vector2(24f, 24f);
 	}
 
 	public void SetTickedSilent(bool value)

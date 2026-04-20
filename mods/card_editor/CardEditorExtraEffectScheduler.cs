@@ -27,6 +27,7 @@ internal static class CardEditorExtraEffectScheduler
 
 		public Creature? LockedTarget { get; init; }
 		public Creature? ExecutionHost { get; init; }
+		public int TriggerEventAmount { get; init; } = 1;
 		public int RemainingTriggers { get; set; }
 		public int SkipTriggers { get; set; }
 		public int TriggerCounter { get; set; }
@@ -39,7 +40,7 @@ internal static class CardEditorExtraEffectScheduler
 
 	private static readonly ConditionalWeakTable<CombatState, CombatSchedule> _schedules = new ConditionalWeakTable<CombatState, CombatSchedule>();
 
-	public static void Schedule(CombatState combatState, CardPlay sourcePlay, CardExtraEffect effect, Creature? lockedTarget, Creature? executionHost = null)
+	public static void Schedule(CombatState combatState, CardPlay sourcePlay, CardExtraEffect effect, Creature? lockedTarget, Creature? executionHost = null, int triggerEventAmount = 1)
 	{
 		if (combatState == null || sourcePlay == null || effect == null)
 		{
@@ -74,11 +75,12 @@ internal static class CardEditorExtraEffectScheduler
 		CombatSchedule schedule = _schedules.GetOrCreateValue(combatState);
 		schedule.Effects.Add(new ScheduledEffect
 		{
-			Card = sourcePlay.Card,
+			Card = CreateScheduledCardSnapshot(owner, sourcePlay.Card),
 			Owner = owner,
 			Effect = CardEditorExtraEffects.CloneEffect(effect),
 			LockedTarget = effect.Target == CardExtraEffectTarget.Target ? lockedTarget : null,
 			ExecutionHost = executionHost,
+			TriggerEventAmount = Math.Max(0, triggerEventAmount),
 			RemainingTriggers = remaining,
 			SkipTriggers = skip,
 			Resources = sourcePlay.Resources,
@@ -306,11 +308,48 @@ internal static class CardEditorExtraEffectScheduler
 			using IDisposable _ = CardEditorCardPlayContext.PushScoped(play);
 			using IDisposable __ = CardEditorEffectSourceContext.PushScoped(scheduled.Card);
 			using IDisposable ___ = CardEditorPowerExecutionHostContext.PushScoped(scheduled.ExecutionHost);
-			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, scheduled.Effect);
+			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, scheduled.Effect, scheduled.TriggerEventAmount);
 		}
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Scheduled extra effect failed: {ex}");
+		}
+	}
+
+	private static CardModel CreateScheduledCardSnapshot(Player owner, CardModel sourceCard)
+	{
+		if (owner == null || sourceCard == null)
+		{
+			return sourceCard;
+		}
+
+		try
+		{
+			CardModel snapshot = owner.RunState.CloneCard(sourceCard);
+			if (snapshot == null)
+			{
+				return sourceCard;
+			}
+
+			try
+			{
+				snapshot.Owner = sourceCard.Owner;
+			}
+			catch
+			{
+			}
+
+			if (CardEditorOverrides.TryGetEffectiveOverride(sourceCard, out CardOverride effectiveOverride))
+			{
+				CardEditorOverrides.SetInstanceOverride(snapshot, effectiveOverride);
+			}
+
+			return snapshot;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed cloning scheduled effect card snapshot for {sourceCard.Id}: {ex}");
+			return sourceCard;
 		}
 	}
 

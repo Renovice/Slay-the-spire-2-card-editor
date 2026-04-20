@@ -435,8 +435,8 @@ internal static class CardEditorCreatorPresetStore
 			}
 
 			def.CustomPortraitFile = string.IsNullOrWhiteSpace(CustomPortraitFile) ? null : CustomPortraitFile.Trim();
-			def.CustomTextEnabled = CustomTextEnabled ?? (CustomText != null);
-			def.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? (CustomTextUpgraded != null);
+			def.CustomTextEnabled = CustomTextEnabled ?? !string.IsNullOrWhiteSpace(CustomText);
+			def.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? !string.IsNullOrWhiteSpace(CustomTextUpgraded);
 
 			if (CustomText != null)
 			{

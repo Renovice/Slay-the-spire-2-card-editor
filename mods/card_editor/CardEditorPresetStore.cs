@@ -588,6 +588,9 @@ internal static class CardEditorPresetStore
 		public string? Rarity { get; set; }
 		public bool? Enabled { get; set; }
 		public string? TitleOverride { get; set; }
+		public bool? ModifiedBaseTextEnabled { get; set; }
+		public string? ModifiedBaseText { get; set; }
+		public bool? EndlessUpgrades { get; set; }
 		public bool? FullArt { get; set; }
 		public string? Finish { get; set; }
 		public Dictionary<string, decimal>? FinishParams { get; set; }
@@ -644,6 +647,9 @@ internal static class CardEditorPresetStore
 				Rarity = source.Rarity?.ToString(),
 				Enabled = source.Enabled,
 				TitleOverride = source.TitleOverride,
+				ModifiedBaseTextEnabled = source.ModifiedBaseTextEnabled,
+				ModifiedBaseText = source.ModifiedBaseText,
+				EndlessUpgrades = source.EndlessUpgrades,
 				FullArt = source.FullArt,
 				Finish = source.Finish?.ToString(),
 				FinishParams = source.FinishParams != null && source.FinishParams.Count > 0
@@ -741,6 +747,9 @@ internal static class CardEditorPresetStore
 			{
 				Enabled = Enabled,
 				TitleOverride = string.IsNullOrWhiteSpace(TitleOverride) ? null : TitleOverride.Trim(),
+				ModifiedBaseTextEnabled = ModifiedBaseTextEnabled,
+				ModifiedBaseText = ModifiedBaseText != null ? ModifiedBaseText : null,
+				EndlessUpgrades = EndlessUpgrades,
 				FullArt = FullArt,
 				EnergyCost = EnergyCost,
 				EnergyCostX = EnergyCostX,
@@ -1181,6 +1190,7 @@ internal static class CardEditorPresetStore
 		public string? CountCardType { get; set; }
 		public string? CountCardFilter { get; set; }
 		public bool CountOnlyBlockCards { get; set; }
+		public bool CountUsesCardEffectAmount { get; set; }
 		public bool HistoryScalingIncludesBase { get; set; }
 		public bool DisableOnUpgrade { get; set; }
 
@@ -1207,6 +1217,9 @@ internal static class CardEditorPresetStore
 		public string? SpecificCardId { get; set; }
 		public string? SpecificCardId2 { get; set; }
 		public string? SpecificCardId3 { get; set; }
+		public ChooseOneOptionDto? ChooseOneOption1 { get; set; }
+		public ChooseOneOptionDto? ChooseOneOption2 { get; set; }
+		public ChooseOneOptionDto? ChooseOneOption3 { get; set; }
 		public string? TransformMode { get; set; }
 		public int ConditionalBonusAmount { get; set; }
 		public string? ConditionalBonusConditionType { get; set; }
@@ -1228,6 +1241,7 @@ internal static class CardEditorPresetStore
 		public string? BranchCountCardPool { get; set; }
 		public string? BranchCountCardType { get; set; }
 		public string? BranchCountCardFilter { get; set; }
+		public bool BranchCountUsesCardEffectAmount { get; set; }
 		public bool BranchCountExcludeSourceCard { get; set; }
 		public string? BranchCountOrbType { get; set; }
 		public string? BranchCountOrbSelection { get; set; }
@@ -1256,6 +1270,7 @@ internal static class CardEditorPresetStore
 		public string? StatusCustomPackedIconPath { get; set; }
 		public string? StatusCustomBigIconPath { get; set; }
 		public string? PowerHost { get; set; }
+		public string? PowerTriggerFrom { get; set; }
 		public string? PowerTargeting { get; set; }
 		public string? CardMatchMode { get; set; }
 		public string? MatchCardId { get; set; }
@@ -1270,6 +1285,101 @@ internal static class CardEditorPresetStore
 		public string? SelfScalingTargetType { get; set; }
 		public string? SelfScalingField { get; set; }
 		public string? SelfScalingTargetEffectId { get; set; }
+
+		public sealed class ChooseOneOptionDto
+		{
+			public string? Mode { get; set; }
+			public bool ShowFullText { get; set; }
+			public string? CardId { get; set; }
+			public string? QuerySource { get; set; }
+			public string? QueryPile { get; set; }
+			public string? QueryPool { get; set; }
+			public string? QueryType { get; set; }
+			public string? QuerySelectionMode { get; set; }
+			public int QueryCount { get; set; } = 1;
+			public string? QueryMatchMode { get; set; }
+			public string? QueryMatchCardId { get; set; }
+			public string? QueryMatchTagKind { get; set; }
+			public string? QueryMatchVanillaTag { get; set; }
+			public string? QueryMatchCustomTag { get; set; }
+
+			public static ChooseOneOptionDto? FromOption(CardExtraEffectChooseOneOption? option)
+			{
+				if (option == null)
+				{
+					return null;
+				}
+
+				return new ChooseOneOptionDto
+				{
+					Mode = option.Mode.ToString(),
+					ShowFullText = option.ShowFullText,
+					CardId = option.CardId,
+					QuerySource = option.QuerySource.ToString(),
+					QueryPile = option.QueryPile.ToString(),
+					QueryPool = option.QueryPool.ToString(),
+					QueryType = option.QueryType.ToString(),
+					QuerySelectionMode = option.QuerySelectionMode.ToString(),
+					QueryCount = option.QueryCount,
+					QueryMatchMode = option.QueryMatchMode.ToString(),
+					QueryMatchCardId = option.QueryMatchCardId,
+					QueryMatchTagKind = option.QueryMatchTagKind.ToString(),
+					QueryMatchVanillaTag = option.QueryMatchVanillaTag.ToString(),
+					QueryMatchCustomTag = option.QueryMatchCustomTag
+				};
+			}
+
+			public CardExtraEffectChooseOneOption ToOption()
+			{
+				CardExtraEffectChooseOneOption option = new CardExtraEffectChooseOneOption
+				{
+					ShowFullText = ShowFullText,
+					CardId = string.IsNullOrWhiteSpace(CardId) ? null : CardId.Trim(),
+					QueryCount = Math.Clamp(QueryCount <= 0 ? 1 : QueryCount, 1, 99),
+					QueryMatchCardId = string.IsNullOrWhiteSpace(QueryMatchCardId) ? null : QueryMatchCardId.Trim(),
+					QueryMatchCustomTag = string.IsNullOrWhiteSpace(QueryMatchCustomTag) ? null : QueryMatchCustomTag.Trim()
+				};
+
+				if (!string.IsNullOrWhiteSpace(Mode) && Enum.TryParse(Mode, out CardExtraEffectChooseOneOptionMode parsedMode))
+				{
+					option.Mode = parsedMode;
+				}
+				if (!string.IsNullOrWhiteSpace(QuerySource) && Enum.TryParse(QuerySource, out CardExtraEffectChooseOneQuerySource parsedSource))
+				{
+					option.QuerySource = parsedSource;
+				}
+				if (!string.IsNullOrWhiteSpace(QueryPile) && Enum.TryParse(QueryPile, out CardExtraEffectCardPile parsedPile))
+				{
+					option.QueryPile = parsedPile;
+				}
+				if (!string.IsNullOrWhiteSpace(QueryPool) && Enum.TryParse(QueryPool, out CardGeneratedCardPool parsedPool))
+				{
+					option.QueryPool = parsedPool;
+				}
+				if (!string.IsNullOrWhiteSpace(QueryType) && Enum.TryParse(QueryType, out CardGeneratedCardType parsedType))
+				{
+					option.QueryType = parsedType;
+				}
+				if (!string.IsNullOrWhiteSpace(QuerySelectionMode) && Enum.TryParse(QuerySelectionMode, out CardExtraEffectCardSelectionMode parsedSelectionMode))
+				{
+					option.QuerySelectionMode = parsedSelectionMode;
+				}
+				if (!string.IsNullOrWhiteSpace(QueryMatchMode) && Enum.TryParse(QueryMatchMode, out CardExtraEffectCardMatchMode parsedMatchMode))
+				{
+					option.QueryMatchMode = parsedMatchMode;
+				}
+				if (!string.IsNullOrWhiteSpace(QueryMatchTagKind) && Enum.TryParse(QueryMatchTagKind, out CardExtraEffectCardMatchTagKind parsedTagKind))
+				{
+					option.QueryMatchTagKind = parsedTagKind;
+				}
+				if (!string.IsNullOrWhiteSpace(QueryMatchVanillaTag) && Enum.TryParse(QueryMatchVanillaTag, out CardTag parsedTag))
+				{
+					option.QueryMatchVanillaTag = parsedTag;
+				}
+
+				return option;
+			}
+		}
 
 		public static CardExtraEffectDto FromEffect(CardExtraEffect effect)
 		{
@@ -1317,6 +1427,7 @@ internal static class CardEditorPresetStore
 				CountCardType = effect.CountCardType.ToString(),
 				CountCardFilter = effect.CountCardFilter.ToString(),
 				CountOnlyBlockCards = effect.CountOnlyBlockCards,
+				CountUsesCardEffectAmount = effect.CountUsesCardEffectAmount,
 				HistoryScalingIncludesBase = effect.HistoryScalingIncludesBase,
 				DisableOnUpgrade = effect.DisableOnUpgrade,
 				GrantToCard = effect.GrantToCard,
@@ -1342,6 +1453,9 @@ internal static class CardEditorPresetStore
 				SpecificCardId = effect.SpecificCardId,
 				SpecificCardId2 = effect.SpecificCardId2,
 				SpecificCardId3 = effect.SpecificCardId3,
+				ChooseOneOption1 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption1),
+				ChooseOneOption2 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption2),
+				ChooseOneOption3 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption3),
 				TransformMode = effect.TransformMode.ToString(),
 				ConditionalBonusAmount = effect.ConditionalBonusAmount,
 				ConditionalBonusConditionType = effect.ConditionalBonusConditionType.ToString(),
@@ -1363,6 +1477,7 @@ internal static class CardEditorPresetStore
 				BranchCountCardPool = effect.BranchCountCardPool.ToString(),
 				BranchCountCardType = effect.BranchCountCardType.ToString(),
 				BranchCountCardFilter = effect.BranchCountCardFilter.ToString(),
+				BranchCountUsesCardEffectAmount = effect.BranchCountUsesCardEffectAmount,
 				BranchCountExcludeSourceCard = effect.BranchCountExcludeSourceCard,
 				BranchCountOrbType = effect.BranchCountOrbType.ToString(),
 				BranchCountOrbSelection = effect.BranchCountOrbSelection.ToString(),
@@ -1390,7 +1505,8 @@ internal static class CardEditorPresetStore
 				StatusIconPowerId = effect.StatusIconPowerId,
 				StatusCustomPackedIconPath = effect.StatusCustomPackedIconPath,
 				StatusCustomBigIconPath = effect.StatusCustomBigIconPath,
-				PowerHost = effect.PowerHost.ToString(),
+				PowerHost = CardEditorExtraEffects.GetEffectivePowerHost(effect).ToString(),
+				PowerTriggerFrom = CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect).ToString(),
 				PowerTargeting = effect.PowerTargeting.ToString(),
 				CardMatchMode = effect.CardMatchMode.ToString(),
 				MatchCardId = effect.MatchCardId,
@@ -1659,6 +1775,7 @@ internal static class CardEditorPresetStore
 			effect.CountCardFilter = countFilter;
 
 			effect.CountOnlyBlockCards = CountOnlyBlockCards;
+			effect.CountUsesCardEffectAmount = CountUsesCardEffectAmount;
 			effect.HistoryScalingIncludesBase = HistoryScalingIncludesBase;
 
 			effect.GrantToCard = GrantToCard;
@@ -1789,6 +1906,18 @@ internal static class CardEditorPresetStore
 			{
 				effect.SpecificCardId3 = SpecificCardId3.Trim();
 			}
+			if (ChooseOneOption1 != null)
+			{
+				effect.ChooseOneOption1 = ChooseOneOption1.ToOption();
+			}
+			if (ChooseOneOption2 != null)
+			{
+				effect.ChooseOneOption2 = ChooseOneOption2.ToOption();
+			}
+			if (ChooseOneOption3 != null)
+			{
+				effect.ChooseOneOption3 = ChooseOneOption3.ToOption();
+			}
 
 			effect.TransformMode = CardExtraEffectTransformMode.Random;
 			if (!string.IsNullOrWhiteSpace(TransformMode) && Enum.TryParse(TransformMode, out CardExtraEffectTransformMode parsedTransformMode))
@@ -1894,6 +2023,7 @@ internal static class CardEditorPresetStore
 			{
 				effect.BranchCountCardFilter = parsedBranchCountCardFilter;
 			}
+			effect.BranchCountUsesCardEffectAmount = BranchCountUsesCardEffectAmount;
 			effect.BranchCountExcludeSourceCard = BranchCountExcludeSourceCard;
 			effect.BranchCountOrbType = CardExtraEffectOrbType.Any;
 			if (!string.IsNullOrWhiteSpace(BranchCountOrbType) && Enum.TryParse(BranchCountOrbType, out CardExtraEffectOrbType parsedBranchCountOrbType))
@@ -1937,6 +2067,7 @@ internal static class CardEditorPresetStore
 				parsedBranchEffect.BranchCountCardPool = default;
 				parsedBranchEffect.BranchCountCardType = default;
 				parsedBranchEffect.BranchCountCardFilter = default;
+				parsedBranchEffect.BranchCountUsesCardEffectAmount = false;
 				parsedBranchEffect.BranchCountExcludeSourceCard = false;
 				parsedBranchEffect.BranchCountOrbType = default;
 				parsedBranchEffect.BranchCountOrbSelection = default;
@@ -2062,6 +2193,10 @@ internal static class CardEditorPresetStore
 			if (!string.IsNullOrWhiteSpace(PowerHost) && Enum.TryParse(PowerHost, out CardExtraEffectPowerHost parsedPowerHost))
 			{
 				effect.PowerHost = parsedPowerHost;
+			}
+			if (!string.IsNullOrWhiteSpace(PowerTriggerFrom) && Enum.TryParse(PowerTriggerFrom, out CardExtraEffectPowerTriggerFrom parsedPowerTriggerFrom))
+			{
+				effect.PowerTriggerFrom = parsedPowerTriggerFrom;
 			}
 			if (!string.IsNullOrWhiteSpace(PowerTargeting) && Enum.TryParse(PowerTargeting, out CardExtraEffectPowerTargeting parsedPowerTargeting))
 			{

@@ -75,8 +75,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 		base.DeepCloneFields();
 
-		if (snapshot != null && snapshot.Count > 0)
+		if (snapshot != null)
 		{
+			Entries.Clear();
 			Entries.AddRange(snapshot);
 		}
 	}
@@ -270,6 +271,30 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		}
 	}
 
+	private static Creature? GetEventActor(CardModel? triggeringCard, CardPlay? triggeringPlay = null)
+	{
+		return triggeringPlay?.Card?.Owner?.Creature ?? triggeringCard?.Owner?.Creature;
+	}
+
+	private bool WatchesEventActor(CardExtraEffect effect, Creature? eventActor)
+	{
+		Creature? owner = Owner;
+		if (owner == null || effect == null)
+		{
+			return false;
+		}
+
+		Creature effectiveEventActor = eventActor ?? owner;
+		return CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect) switch
+		{
+			CardExtraEffectPowerTriggerFrom.Self => ReferenceEquals(effectiveEventActor, owner),
+			CardExtraEffectPowerTriggerFrom.AnyEnemy => owner.CombatState?.GetOpponentsOf(owner).Contains(effectiveEventActor) == true,
+			CardExtraEffectPowerTriggerFrom.AnyAlly => effectiveEventActor.Side == owner.Side && !ReferenceEquals(effectiveEventActor, owner),
+			CardExtraEffectPowerTriggerFrom.Anyone => true,
+			_ => ReferenceEquals(effectiveEventActor, owner)
+		};
+	}
+
 	private CardExtraEffect BuildResolvedPowerEffect(PowerEffectEntry entry)
 	{
 		CardExtraEffect resolved = CardEditorExtraEffects.CloneEffect(entry.Effect);
@@ -285,7 +310,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		CombatState combatState,
 		PlayerChoiceContext choiceContext,
 		CardPlay triggerPlay,
-		PowerEffectEntry entry)
+		PowerEffectEntry entry,
+		int triggerEventAmount = 1)
 	{
 		CardExtraEffect effect = entry?.Effect;
 		CardModel sourceCard = entry?.SourceCard;
@@ -327,7 +353,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			CardEditorPowerSourceMap.Register(this, sourceCard);
 			using IDisposable _ = CardEditorEffectSourceContext.PushScoped(sourceCard);
 			using IDisposable __ = CardEditorPowerExecutionHostContext.PushScoped(Owner);
-			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, executionPlay, resolvedEffect);
+			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, executionPlay, resolvedEffect, triggerEventAmount);
 			return;
 		}
 
@@ -342,43 +368,49 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			PlayCount = 1
 		};
 
-		CardEditorExtraEffectScheduler.Schedule(combatState, schedulingPlay, resolvedEffect, lockedTarget, Owner);
+		CardEditorExtraEffectScheduler.Schedule(combatState, schedulingPlay, resolvedEffect, lockedTarget, Owner, triggerEventAmount);
 	}
 
 	public override async Task AfterCardPlayed(PlayerChoiceContext context, CardPlay cardPlay)
 	{
-		await RunTrigger(context, cardPlay?.Card, cardPlay, CardExtraEffectTrigger.OnPlay);
-		await TriggerCountEvent(context, CardExtraEffectCountEvent.Played, triggeringPlay: cardPlay, triggeringCard: cardPlay?.Card);
+		Creature? eventActor = GetEventActor(cardPlay?.Card, cardPlay);
+		await RunTrigger(context, cardPlay?.Card, cardPlay, CardExtraEffectTrigger.OnPlay, eventActor);
+		await TriggerCountEvent(context, CardExtraEffectCountEvent.Played, triggeringPlay: cardPlay, triggeringCard: cardPlay?.Card, eventActor: eventActor, amount: 1);
 	}
 
 	public override async Task AfterCardDrawn(PlayerChoiceContext choiceContext, CardModel card, bool fromHandDraw)
 	{
-		await RunTrigger(choiceContext, card, play: null, CardExtraEffectTrigger.OnDraw);
-		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.Drawn, triggeringCard: card);
+		Creature? eventActor = GetEventActor(card);
+		await RunTrigger(choiceContext, card, play: null, CardExtraEffectTrigger.OnDraw, eventActor);
+		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.Drawn, triggeringCard: card, eventActor: eventActor, amount: 1);
 	}
 
 	public override async Task AfterCardDiscarded(PlayerChoiceContext choiceContext, CardModel card)
 	{
-		await RunTrigger(choiceContext, card, play: null, CardExtraEffectTrigger.OnDiscard);
-		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.Discarded, triggeringCard: card);
+		Creature? eventActor = GetEventActor(card);
+		await RunTrigger(choiceContext, card, play: null, CardExtraEffectTrigger.OnDiscard, eventActor);
+		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.Discarded, triggeringCard: card, eventActor: eventActor, amount: 1);
 	}
 
 	public override async Task AfterCardExhausted(PlayerChoiceContext choiceContext, CardModel card, bool causedByEthereal)
 	{
-		await RunTrigger(choiceContext, card, play: null, CardExtraEffectTrigger.OnExhaust);
-		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.Exhausted, triggeringCard: card);
+		Creature? eventActor = GetEventActor(card);
+		await RunTrigger(choiceContext, card, play: null, CardExtraEffectTrigger.OnExhaust, eventActor);
+		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.Exhausted, triggeringCard: card, eventActor: eventActor, amount: 1);
 	}
 
 	public override async Task AfterOrbChanneled(PlayerChoiceContext choiceContext, Player player, OrbModel orb)
 	{
-		await RunOrbTrigger(choiceContext, CardExtraEffectTrigger.OnChannel);
-		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.OrbChanneled);
+		Creature? eventActor = player?.Creature;
+		await RunOrbTrigger(choiceContext, CardExtraEffectTrigger.OnChannel, eventActor);
+		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.OrbChanneled, eventActor: eventActor, amount: 1);
 	}
 
 	public override async Task AfterOrbEvoked(PlayerChoiceContext choiceContext, OrbModel orb, IEnumerable<Creature> targets)
 	{
-		await RunOrbTrigger(choiceContext, CardExtraEffectTrigger.OnEvoke);
-		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.OrbEvoked);
+		Creature? eventActor = orb?.Owner?.Creature;
+		await RunOrbTrigger(choiceContext, CardExtraEffectTrigger.OnEvoke, eventActor);
+		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.OrbEvoked, eventActor: eventActor, amount: 1);
 	}
 
 	public override Task AfterCardGeneratedForCombat(CardModel card, bool addedByPlayer)
@@ -397,7 +429,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				return Task.CompletedTask;
 			}
 
-			CardEditorExtraEffects.TriggerPowerCountEvent(combatState, owner, CardExtraEffectCountEvent.Generated);
+			CardEditorExtraEffects.TriggerPowerCountEvent(combatState, owner, CardExtraEffectCountEvent.Generated, amount: 1);
 		}
 		catch
 		{
@@ -413,7 +445,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		CardEditorExtraEffects.ResourceCountSource source = CardEditorExtraEffects.ResourceCountSource.Other,
 		CardPlay? triggeringPlay = null,
 		CardModel? triggeringCard = null,
-		PowerModel? triggeringPower = null)
+		PowerModel? triggeringPower = null,
+		Creature? eventActor = null,
+		int amount = 1)
 	{
 		try
 		{
@@ -430,6 +464,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			}
 
 			triggeringCard ??= triggeringPlay?.Card;
+			eventActor ??= GetEventActor(triggeringCard, triggeringPlay) ?? owner;
 
 			foreach (PowerEffectEntry entry in Entries.ToList())
 			{
@@ -439,6 +474,11 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					|| entry.Effect.Trigger != CardExtraEffectTrigger.OnCountEvent
 					|| entry.Effect.PowerTriggerCountEvent != countEvent
 					|| !CardEditorExtraEffects.IsValidEffectAmount(entry.Effect.Kind, entry.Effect.Amount))
+				{
+					continue;
+				}
+
+				if (!WatchesEventActor(entry.Effect, eventActor))
 				{
 					continue;
 				}
@@ -482,7 +522,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					basePlay = new CardPlay
 					{
 						Card = playCard,
-						Target = null,
+						Target = eventActor,
 						ResultPile = playCard.Pile?.Type ?? PileType.None,
 						Resources = new ResourceInfo
 						{
@@ -499,7 +539,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 				try
 				{
-					await ExecuteOrSchedulePowerEffect(combatState, choiceContext, basePlay, entry);
+					await ExecuteOrSchedulePowerEffect(combatState, choiceContext, basePlay, entry, amount);
 				}
 				catch (Exception ex)
 				{
@@ -526,7 +566,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		}
 	}
 
-	private async Task RunOrbTrigger(PlayerChoiceContext choiceContext, CardExtraEffectTrigger trigger)
+	private async Task RunOrbTrigger(PlayerChoiceContext choiceContext, CardExtraEffectTrigger trigger, Creature? eventActor = null)
 	{
 		try
 		{
@@ -553,6 +593,11 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					continue;
 				}
 
+				if (!WatchesEventActor(entry.Effect, eventActor))
+				{
+					continue;
+				}
+
 				if (entry.Effect.TriggerEveryN >= 2)
 				{
 					entry.TriggerCounter++;
@@ -571,7 +616,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
-					Target = null,
+					Target = eventActor,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
 					{
@@ -853,17 +898,20 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 			return;
 		}
 
-		foreach (PowerEffectEntry entry in Entries.ToList())
-		{
-			if (entry == null
-				|| entry.Effect == null
-				|| entry.SourceCard == null
-				|| (trigger == CardExtraEffectTrigger.EndOfTurnInHand && entry.Effect.Trigger == CardExtraEffectTrigger.TurnBoundary)
-				|| !CardEditorExtraEffects.DoesTriggerMatch(entry.Effect, trigger, entry.SourceCard)
-				|| !CardEditorExtraEffects.IsValidEffectAmount(entry.Effect.Kind, entry.Effect.Amount))
+			foreach (PowerEffectEntry entry in Entries.ToList())
 			{
-				continue;
-			}
+				if (entry == null
+					|| entry.Effect == null
+					|| entry.SourceCard == null
+					// Unified Turn Boundary powers have dedicated edge-specific runners.
+					// Letting them flow through Start/End-of-turn legacy hooks makes
+					// "before draw" / "before discard" fire a second time.
+					|| entry.Effect.Trigger == CardExtraEffectTrigger.TurnBoundary
+					|| !CardEditorExtraEffects.DoesTriggerMatch(entry.Effect, trigger, entry.SourceCard)
+					|| !CardEditorExtraEffects.IsValidEffectAmount(entry.Effect.Kind, entry.Effect.Amount))
+				{
+					continue;
+				}
 
 			if (entry.Effect.TriggerEveryN >= 2)
 			{
@@ -918,7 +966,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 	}
 }
 
-	private async Task RunTrigger(PlayerChoiceContext choiceContext, CardModel? triggeringCard, CardPlay? play, CardExtraEffectTrigger trigger)
+	private async Task RunTrigger(PlayerChoiceContext choiceContext, CardModel? triggeringCard, CardPlay? play, CardExtraEffectTrigger trigger, Creature? eventActor = null)
 	{
 		try
 		{
@@ -939,7 +987,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 				basePlay = new CardPlay
 				{
 					Card = triggeringCard,
-					Target = null,
+					Target = eventActor,
 					ResultPile = triggeringCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
 					{
@@ -966,6 +1014,11 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 					|| entry.SourceCard == null
 					|| entry.Effect.Trigger != trigger
 					|| !CardEditorExtraEffects.IsValidEffectAmount(entry.Effect.Kind, entry.Effect.Amount))
+				{
+					continue;
+				}
+
+				if (!WatchesEventActor(entry.Effect, eventActor))
 				{
 					continue;
 				}

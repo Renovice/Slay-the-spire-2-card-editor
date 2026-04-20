@@ -7,7 +7,9 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Hooks;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Runs;
@@ -17,9 +19,94 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorIgnoreEffectHelpers
 {
+	private static readonly Action<AttackCommand, ValueProp>? _attackCommandDamagePropsSetter =
+		AccessTools.PropertySetter(typeof(AttackCommand), nameof(AttackCommand.DamageProps)) is MethodInfo setter
+			? (Action<AttackCommand, ValueProp>)Delegate.CreateDelegate(typeof(Action<AttackCommand, ValueProp>), setter)
+			: null;
+
+	private static void LogCapDebug(string message)
+	{
+		Log.Info($"[CardEditor][IgnoreDamageDebug] {message}");
+	}
+
+	private static string DescribeCard(CardModel? card)
+	{
+		if (card == null)
+		{
+			return "<null>";
+		}
+
+		string id = card.Id?.Entry ?? "<no-id>";
+		return $"{id}@{RuntimeHelpers.GetHashCode(card)}";
+	}
+
+	private static string DescribeCreature(Creature? creature)
+	{
+		if (creature == null)
+		{
+			return "<null>";
+		}
+
+		return $"{creature.Name}@{RuntimeHelpers.GetHashCode(creature)}";
+	}
+
+	private static string DescribeEffects(IReadOnlyList<CardExtraEffect> effects)
+	{
+		if (effects == null || effects.Count == 0)
+		{
+			return "<none>";
+		}
+
+		return string.Join(", ", effects
+			.Where(effect => effect != null)
+			.Select(effect => $"{effect.Kind}(amt={effect.Amount},scale={effect.ScaleMode},asPower={effect.AsPower})"));
+	}
+
+	private static bool TargetHasRelevantCapPower(Creature? target)
+	{
+		return target?.GetPower<SlipperyPower>() != null
+			|| target?.GetPower<HardToKillPower>() != null
+			|| target?.GetPower<HardenedShellPower>() != null
+			|| target?.GetPower<IntangiblePower>() != null;
+	}
+
+	public static bool ShouldLogCapDebug(CardExtraEffectKind kind, CardModel? cardSource, Creature? target)
+	{
+		if (kind != CardExtraEffectKind.IgnoreDamageCaps && kind != CardExtraEffectKind.IgnoreEnemyDamageReductions)
+		{
+			return false;
+		}
+
+		return TargetHasRelevantCapPower(target)
+			|| cardSource == null
+			|| CardEditorEffectSourceContext.Current != null
+			|| CardEditorCardPlayContext.Current?.Card != null
+			|| CardEditorHookModelContext.Current is CardModel;
+	}
+
 	public static CardModel? ResolveEffectiveSource(CardModel? cardSource)
 	{
-		return CardEditorEffectSourceContext.Current ?? cardSource;
+		if (CardEditorEffectSourceContext.Current is CardModel effectSource)
+		{
+			return effectSource;
+		}
+
+		if (cardSource != null)
+		{
+			return cardSource;
+		}
+
+		if (CardEditorCardPlayContext.Current?.Card is CardModel currentPlayCard)
+		{
+			return currentPlayCard;
+		}
+
+		if (CardEditorHookModelContext.Current is CardModel hookCard)
+		{
+			return hookCard;
+		}
+
+		return null;
 	}
 
 	public static bool HasIgnoreEffect(CardModel? card, CardExtraEffectKind kind)
@@ -34,17 +121,28 @@ internal static class CardEditorIgnoreEffectHelpers
 		CombatState? combatState,
 		Creature? target)
 	{
+		bool debug = ShouldLogCapDebug(kind, cardSource, target);
 		CardModel? effectiveSource = ResolveEffectiveSource(cardSource);
 		if (effectiveSource == null)
 		{
+			if (debug)
+			{
+				LogCapDebug(
+					$"HasActiveIgnoreEffect:no-source kind={kind} cardSource={DescribeCard(cardSource)} playCard={DescribeCard(CardEditorCardPlayContext.Current?.Card)} hookCard={DescribeCard(CardEditorHookModelContext.Current as CardModel)} target={DescribeCreature(target)}");
+			}
 			return false;
 		}
 
 		try
 		{
-			IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetEffectsForDescription(effectiveSource, isUpgradePreview: false);
+			IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetRuntimeEffectsForExecution(combatState, effectiveSource);
 			if (effects == null || effects.Count == 0)
 			{
+				if (debug)
+				{
+					LogCapDebug(
+						$"HasActiveIgnoreEffect:no-effects kind={kind} source={DescribeCard(effectiveSource)} cardSource={DescribeCard(cardSource)} target={DescribeCreature(target)}");
+				}
 				return false;
 			}
 
@@ -54,6 +152,12 @@ internal static class CardEditorIgnoreEffectHelpers
 				?? CardEditorCardPlayContext.Current?.Card?.CombatState
 				?? effectiveSource.CombatState
 				?? dealer?.CombatState;
+
+			if (debug)
+			{
+				LogCapDebug(
+					$"HasActiveIgnoreEffect:start kind={kind} source={DescribeCard(effectiveSource)} cardSource={DescribeCard(cardSource)} playCard={DescribeCard(CardEditorCardPlayContext.Current?.Card)} hookCard={DescribeCard(CardEditorHookModelContext.Current as CardModel)} target={DescribeCreature(target)} owner={DescribeCreature(ownerCreature)} effects=[{DescribeEffects(effects)}]");
+			}
 
 			foreach (CardExtraEffect effect in effects)
 			{
@@ -67,29 +171,86 @@ internal static class CardEditorIgnoreEffectHelpers
 
 				if (effect.ScaleMode == CardExtraEffectScaleMode.None)
 				{
+					if (debug)
+					{
+						LogCapDebug($"HasActiveIgnoreEffect:match kind={kind} source={DescribeCard(effectiveSource)} mode=None amount={effect.Amount}");
+					}
 					return true;
 				}
 
 				if (resolvedCombatState == null || ownerCreature == null || playForConditions == null)
 				{
+					if (debug)
+					{
+						LogCapDebug(
+							$"HasActiveIgnoreEffect:missing-context kind={kind} source={DescribeCard(effectiveSource)} combat={(resolvedCombatState != null)} owner={(ownerCreature != null)} play={(playForConditions != null)}");
+					}
 					continue;
 				}
 
 				int multiplier = CardEditorExtraEffects.GetHistoryCountMultiplierForCardPlay(resolvedCombatState, ownerCreature, playForConditions, effect);
 				if (!DoesCountConditionPass(effect, multiplier))
 				{
+					if (debug)
+					{
+						LogCapDebug(
+							$"HasActiveIgnoreEffect:count-failed kind={kind} source={DescribeCard(effectiveSource)} count={multiplier} comparison={effect.CountComparison} threshold={effect.CountConditionAmount}");
+					}
 					continue;
 				}
 
+				if (debug)
+				{
+					LogCapDebug(
+						$"HasActiveIgnoreEffect:scaled-match kind={kind} source={DescribeCard(effectiveSource)} count={multiplier} scale={effect.ScaleMode}");
+				}
 				return true;
 			}
 
+			if (debug)
+			{
+				LogCapDebug($"HasActiveIgnoreEffect:miss kind={kind} source={DescribeCard(effectiveSource)} target={DescribeCreature(target)}");
+			}
 			return false;
 		}
-		catch
+		catch (Exception ex)
 		{
+			if (debug)
+			{
+				LogCapDebug(
+					$"HasActiveIgnoreEffect:error kind={kind} source={DescribeCard(effectiveSource)} error={ex.GetType().Name}: {ex.Message}");
+			}
 			return false;
 		}
+	}
+
+	public static void ApplyAttackDamageProps(AttackCommand attack)
+	{
+		if (attack?.ModelSource is not CardModel cardSource)
+		{
+			return;
+		}
+
+		Creature? dealer = attack.Attacker;
+		CombatState? combatState = dealer?.CombatState ?? cardSource.CombatState;
+		ValueProp props = attack.DamageProps;
+
+		if (HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target: null))
+		{
+			props |= ValueProp.Unblockable;
+		}
+
+		if (HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageModifiers, cardSource, dealer, combatState, target: null))
+		{
+			props |= ValueProp.Unpowered;
+		}
+
+		if (props == attack.DamageProps)
+		{
+			return;
+		}
+
+		_attackCommandDamagePropsSetter?.Invoke(attack, props);
 	}
 
 	private static CardPlay BuildPreviewPlay(CardModel card, Creature? target)
@@ -135,6 +296,15 @@ internal static class CardEditorIgnoreEffectHelpers
 	}
 }
 
+[HarmonyPatch(typeof(AttackCommand), nameof(AttackCommand.Execute))]
+internal static class AttackCommand_Execute_ApplyIgnoreDamageProps_Patch
+{
+	public static void Prefix(AttackCommand __instance)
+	{
+		CardEditorIgnoreEffectHelpers.ApplyAttackDamageProps(__instance);
+	}
+}
+
 [HarmonyPatch]
 internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 {
@@ -165,6 +335,28 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		return false;
 	}
 
+	private static bool ShouldSkipTargetOwnedCap(AbstractModel model, Creature? target, decimal candidate)
+	{
+		if (target == null)
+		{
+			return false;
+		}
+
+		// Only skip explicit caps that are clearly target-owned. This keeps dealer-side cap logic intact
+		// while allowing "ignore enemy damage reductions" to bypass powers like Slippery/Hard to Kill.
+		if (candidate >= decimal.MaxValue)
+		{
+			return false;
+		}
+
+		if (model is PowerModel power && power.Owner == target)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
 	public static bool Prefix(
 		IRunState runState,
 		CombatState? combatState,
@@ -180,6 +372,12 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
 		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, combatState, target);
 		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, combatState, target);
+		bool debug = CardEditorIgnoreEffectHelpers.ShouldLogCapDebug(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource ?? cardSource, target);
+		if (debug)
+		{
+			Log.Info(
+				$"[CardEditor][IgnoreDamageDebug] ModifyDamageInternal:start target={(target?.Name ?? "<null>")} source={(effectiveSource?.Id?.Entry ?? cardSource?.Id?.Entry ?? "<null>")} damage={damage} props={props} ignoreCaps={ignoreCaps} ignoreEnemyReductions={ignoreEnemyReductions} hookType={modifyDamageHookType}");
+		}
 		if (!ignoreCaps && !ignoreEnemyReductions)
 		{
 			return true;
@@ -224,6 +422,16 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 			foreach (AbstractModel item in runState.IterateHookListeners(combatState))
 			{
 				decimal candidate = item.ModifyDamageCap(target, props, dealer, cardSource);
+				bool skipAsEnemyReduction = ignoreEnemyReductions && ShouldSkipTargetOwnedCap(item, target, candidate);
+				if (debug && candidate < decimal.MaxValue)
+				{
+					Log.Info(
+						$"[CardEditor][IgnoreDamageDebug] ModifyDamageInternal:cap target={(target?.Name ?? "<null>")} source={(effectiveSource?.Id?.Entry ?? cardSource?.Id?.Entry ?? "<null>")} model={item.GetType().Name} candidate={candidate} numBefore={num} skipped={skipAsEnemyReduction}");
+				}
+				if (skipAsEnemyReduction)
+				{
+					continue;
+				}
 				if (candidate < cap)
 				{
 					cap = candidate;
@@ -238,6 +446,11 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 
 		modifiers = list;
 		__result = num;
+		if (debug)
+		{
+			Log.Info(
+				$"[CardEditor][IgnoreDamageDebug] ModifyDamageInternal:end target={(target?.Name ?? "<null>")} source={(effectiveSource?.Id?.Entry ?? cardSource?.Id?.Entry ?? "<null>")} result={num} modifiers=[{string.Join(", ", list.Select(item => item.GetType().Name))}]");
+		}
 		return false;
 	}
 }
@@ -294,12 +507,66 @@ internal static class IntangiblePower_ModifyHpLostAfterOsty_IgnoreCaps_Patch
 		CardModel? cardSource)
 	{
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
-		if (!CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState, target))
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState, target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState, target);
+		Log.Info(
+			$"[CardEditor][IgnoreDamageDebug] IntangiblePower.ModifyHpLostAfterOsty target={(target?.Name ?? "<null>")} source={(effectiveSource?.Id?.Entry ?? cardSource?.Id?.Entry ?? "<null>")} ignoreCaps={ignoreCaps} ignoreEnemyReductions={ignoreEnemyReductions} props={props}");
+		if (!ignoreCaps && !ignoreEnemyReductions)
 		{
 			return true;
 		}
 
 		__result = amount;
+		return false;
+	}
+}
+
+[HarmonyPatch(typeof(SlipperyPower), nameof(SlipperyPower.ModifyDamageCap))]
+internal static class SlipperyPower_ModifyDamageCap_IgnoreCaps_Patch
+{
+	public static bool Prefix(
+		ref decimal __result,
+		Creature? target,
+		ValueProp props,
+		Creature? dealer,
+		CardModel? cardSource)
+	{
+		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState, target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState, target);
+		Log.Info(
+			$"[CardEditor][IgnoreDamageDebug] SlipperyPower.ModifyDamageCap target={(target?.Name ?? "<null>")} source={(effectiveSource?.Id?.Entry ?? cardSource?.Id?.Entry ?? "<null>")} ignoreCaps={ignoreCaps} ignoreEnemyReductions={ignoreEnemyReductions} props={props}");
+		if (!ignoreCaps && !ignoreEnemyReductions)
+		{
+			return true;
+		}
+
+		__result = decimal.MaxValue;
+		return false;
+	}
+}
+
+[HarmonyPatch(typeof(HardToKillPower), nameof(HardToKillPower.ModifyDamageCap))]
+internal static class HardToKillPower_ModifyDamageCap_IgnoreCaps_Patch
+{
+	public static bool Prefix(
+		ref decimal __result,
+		Creature? target,
+		ValueProp props,
+		Creature? dealer,
+		CardModel? cardSource)
+	{
+		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState, target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState, target);
+		Log.Info(
+			$"[CardEditor][IgnoreDamageDebug] HardToKillPower.ModifyDamageCap target={(target?.Name ?? "<null>")} source={(effectiveSource?.Id?.Entry ?? cardSource?.Id?.Entry ?? "<null>")} ignoreCaps={ignoreCaps} ignoreEnemyReductions={ignoreEnemyReductions} props={props}");
+		if (!ignoreCaps && !ignoreEnemyReductions)
+		{
+			return true;
+		}
+
+		__result = decimal.MaxValue;
 		return false;
 	}
 }
@@ -328,8 +595,11 @@ internal static class HardenedShellPower_ModifyHpLostBeforeOstyLate_IgnoreCaps_P
 			return false;
 		}
 
-		// Ignore-caps bypasses Hardened Shell's cap.
-		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState, target))
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState, target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState, target);
+
+		// Ignore-caps and ignore-enemy-damage-reductions both bypass Hardened Shell's target-owned cap.
+		if (ignoreCaps || ignoreEnemyReductions)
 		{
 			__result = amount;
 			return false;

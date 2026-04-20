@@ -13,6 +13,15 @@ namespace SlayTheSpire2Mod.CardEditor;
 public static class CardEditorExternalLocalization
 {
 	private static bool _subscribed;
+	private static readonly IReadOnlyDictionary<string, string[]> _languageAliases = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+	{
+		["zhs"] = ["chinese"],
+		["kor"] = ["ko", "ko_kr", "ko-kr", "korean"],
+		["ko"] = ["kor", "ko_kr", "ko-kr", "korean"],
+		["ko_kr"] = ["kor", "ko", "ko-kr", "korean"],
+		["ko-kr"] = ["kor", "ko", "ko_kr", "korean"],
+		["korean"] = ["kor", "ko", "ko_kr", "ko-kr"]
+	};
 
 	public static void Init()
 	{
@@ -75,17 +84,38 @@ public static class CardEditorExternalLocalization
 
 		// Merge localization in order: base file first, then any user override. This avoids
 		// confusion when multiple files exist and a user edits the "wrong" one.
-		List<string> searchDirs = new List<string> { Path.Combine(modDir, "localization", language) };
-		if (string.Equals(language, "zhs", StringComparison.OrdinalIgnoreCase))
-		{
-			searchDirs.Add(Path.Combine(modDir, "chinese"));
-		}
+		List<string> searchDirs = BuildSearchDirectories(modDir, language);
 
 		MergeTableFromExisting(searchDirs, "extensions.loc", "extensions");
 		MergeTableFromExisting(searchDirs, "settings_ui.loc", "settings_ui");
 
 		// Runtime tweaks for vanilla strings we want to parameterize (no external files needed).
 		CardEditorTargetedDiscardLocalizationOverrides.TryApply();
+		CardEditorLoc.InvalidateCache();
+		CardEditorLocalizationWarmup.WarmCurrentLanguage();
+	}
+
+	private static List<string> BuildSearchDirectories(string modDir, string language)
+	{
+		HashSet<string> searchDirs = new(StringComparer.OrdinalIgnoreCase)
+		{
+			Path.Combine(modDir, "localization", language)
+		};
+
+		if (_languageAliases.TryGetValue(language, out string[]? aliases))
+		{
+			foreach (string alias in aliases)
+			{
+				searchDirs.Add(Path.Combine(modDir, "localization", alias));
+			}
+		}
+
+		if (string.Equals(language, "zhs", StringComparison.OrdinalIgnoreCase))
+		{
+			searchDirs.Add(Path.Combine(modDir, "chinese"));
+		}
+
+		return searchDirs.ToList();
 	}
 
 	private static void MergeTableFromExisting(IReadOnlyList<string> searchDirs, string fileName, string tableName)

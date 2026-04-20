@@ -28,6 +28,7 @@ internal static class CardEditorBaseDeckLibraryHelper
 	private static ulong _pendingCardDetailActionUntilMs;
 	private static NCardHolder? _pendingCardDetailHolder;
 	private static PendingCardDetailAction _pendingCardDetailAction;
+	private static bool _pendingCardDetailShiftPressed;
 
 	private static readonly MethodInfo? _showCardDetailMethod =
 		typeof(NCardLibrary).GetMethod("ShowCardDetail", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -58,7 +59,7 @@ internal static class CardEditorBaseDeckLibraryHelper
 			return;
 		}
 
-		RecordPendingCardDetailAction(holder, isRightClick: false);
+		RecordPendingCardDetailAction(holder, isRightClick: false, isShiftPressed: Input.IsKeyPressed(Key.Shift));
 		_showCardDetailMethod?.Invoke(library, new object[] { holder });
 	}
 
@@ -69,11 +70,11 @@ internal static class CardEditorBaseDeckLibraryHelper
 			return;
 		}
 
-		RecordPendingCardDetailAction(holder, isRightClick: true);
+		RecordPendingCardDetailAction(holder, isRightClick: true, isShiftPressed: Input.IsKeyPressed(Key.Shift));
 		_showCardDetailMethod?.Invoke(library, new object[] { holder });
 	}
 
-	public static void RecordPendingCardDetailAction(NCardHolder holder, bool isRightClick)
+	public static void RecordPendingCardDetailAction(NCardHolder holder, bool isRightClick, bool isShiftPressed = false)
 	{
 		if (holder?.CardModel == null)
 		{
@@ -82,12 +83,14 @@ internal static class CardEditorBaseDeckLibraryHelper
 
 		_pendingCardDetailHolder = holder;
 		_pendingCardDetailAction = isRightClick ? PendingCardDetailAction.RightClick : PendingCardDetailAction.LeftClick;
+		_pendingCardDetailShiftPressed = isShiftPressed;
 		_pendingCardDetailActionUntilMs = Time.GetTicksMsec() + 250;
 	}
 
-	public static bool TryConsumePendingCardDetailAction(NCardHolder holder, out bool isRightClick)
+	public static bool TryConsumePendingCardDetailAction(NCardHolder holder, out bool isRightClick, out bool isShiftPressed)
 	{
 		isRightClick = false;
+		isShiftPressed = false;
 		if (_pendingCardDetailAction == PendingCardDetailAction.None || _pendingCardDetailHolder != holder)
 		{
 			return false;
@@ -101,6 +104,7 @@ internal static class CardEditorBaseDeckLibraryHelper
 		}
 
 		isRightClick = _pendingCardDetailAction == PendingCardDetailAction.RightClick;
+		isShiftPressed = _pendingCardDetailShiftPressed;
 		ClearPendingCardDetailAction();
 		return true;
 	}
@@ -110,6 +114,7 @@ internal static class CardEditorBaseDeckLibraryHelper
 		_pendingCardDetailActionUntilMs = 0;
 		_pendingCardDetailHolder = null;
 		_pendingCardDetailAction = PendingCardDetailAction.None;
+		_pendingCardDetailShiftPressed = false;
 	}
 
 	public static void ArmShowCardDetailSuppression(ulong durationMs = 250)
@@ -191,9 +196,10 @@ internal static class CardGrid_BaseDeck_ArmShowCardDetailSuppression_Patch
 {
 	public static void Prefix(NCardHolder holder)
 	{
-		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) && holder?.CardModel != null)
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive || CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive)
+			&& holder?.CardModel != null)
 		{
-			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: true);
+			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: true, isShiftPressed: Input.IsKeyPressed(Key.Shift));
 		}
 	}
 }
@@ -203,9 +209,10 @@ internal static class CardGrid_BaseDeck_ArmShowCardDetailSuppression_OnPressed_P
 {
 	public static void Prefix(NCardHolder holder)
 	{
-		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) && holder?.CardModel != null)
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive || CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive)
+			&& holder?.CardModel != null)
 		{
-			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: false);
+			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: false, isShiftPressed: Input.IsKeyPressed(Key.Shift));
 		}
 	}
 }
@@ -271,6 +278,7 @@ internal static class CardLibrary_BaseDeck_OnOpened_Patch
 		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
 		CardEditorBaseDeckBookmarkHooks.SyncDeferred(__instance);
 		CardEditorBaseDeckUiState.RefreshVisibleHighlights(__instance);
+		CardEditorLibrarySelectionState.RefreshVisibleHighlights(__instance);
 		CardEditorBaseDeckBookmarkHooks.LogLibraryLifecycle("Library.OnSubmenuOpened:postfix:end", __instance);
 	}
 }
@@ -282,6 +290,7 @@ internal static class CardLibrary_BaseDeck_OnClosed_Patch
 	{
 		CardEditorBaseDeckBookmarkHooks.LogLibraryLifecycle("Library.OnSubmenuClosed:baseDeckPatch:start", __instance);
 		CardEditorBaseDeckUiState.ClearTransientState();
+		CardEditorLibrarySelectionState.ClearTransientState();
 		CardEditorBaseDeckPanelHooks.Sync(__instance);
 		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
 		CardEditorBaseDeckBookmarkHooks.LogLibraryLifecycle("Library.OnSubmenuClosed:baseDeckPatch:end", __instance);
@@ -302,6 +311,7 @@ internal static class CardLibrary_BaseDeck_UpdateCardPoolFilter_Patch
 		CardEditorBaseDeckPanelHooks.Sync(__instance);
 		CardEditorBaseDeckBookmarkHooks.Sync(__instance);
 		CardEditorBaseDeckUiState.RefreshVisibleHighlights(__instance);
+		CardEditorLibrarySelectionState.RefreshVisibleHighlights(__instance);
 	}
 }
 
@@ -310,12 +320,15 @@ internal static class CardHolder_BaseDeck_ReassignHighlight_Patch
 {
 	public static void Postfix(NCardHolder __instance)
 	{
-		if (!CardEditorUiState.IsBaseDeckActive && !CardEditorUiState.IsBaseDeckAddActive)
+		if (CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive)
 		{
-			return;
+			CardEditorBaseDeckUiState.ApplySelectionHighlight(__instance);
 		}
 
-		CardEditorBaseDeckUiState.ApplySelectionHighlight(__instance);
+		if (CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive)
+		{
+			CardEditorLibrarySelectionState.ApplySelectionHighlight(__instance);
+		}
 	}
 }
 

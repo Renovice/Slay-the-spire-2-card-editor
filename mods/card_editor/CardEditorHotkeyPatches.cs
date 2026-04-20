@@ -240,6 +240,7 @@ internal static class CardEditorQuickOpenHotkey
 		NSubmenu? top = stack.Peek();
 		if (top is NCardLibrary alreadyOpen)
 		{
+			CardEditorLibrarySelectionState.ClearSelections();
 			CardEditorUiState.Mode = CardEditorLibraryMode.Editor;
 			if (runState != null)
 			{
@@ -250,6 +251,7 @@ internal static class CardEditorQuickOpenHotkey
 			return;
 		}
 
+		CardEditorLibrarySelectionState.ClearSelections();
 		CardEditorUiState.Mode = CardEditorLibraryMode.Editor;
 		NCardLibrary library = stack.GetSubmenuType<NCardLibrary>();
 		if (runState != null)

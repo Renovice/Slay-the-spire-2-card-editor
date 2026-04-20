@@ -1,0 +1,7 @@
+{
+  "INPUT_SETTINGS.INPUT_TITLE.cardEditor": "카드 에디터 열기",
+  "CARD_EDITOR_MULTIPLAYER_SYNC_HEADER": "멀티플레이어 동기화",
+  "CARD_EDITOR_MULTIPLAYER_SYNC_DESCRIPTION": "현재 멀티플레이 세션에서 호스트의 카드 에디터 변경 사항을 자동으로 동기화하되, 자신의 로컬 프리셋 파일은 덮어쓰지 않습니다.",
+  "CARD_EDITOR_MULTIPLAYER_AUTHORITY_HEADER": "모든 플레이어 제어",
+  "CARD_EDITOR_MULTIPLAYER_AUTHORITY_DESCRIPTION": "누구나 카드 에디터 변경 사항을 현재 공유된 멀티플레이 세션에 동기화할 수 있게 합니다. 비활성화하면 호스트만 실시간 편집을 동기화할 수 있습니다."
+}

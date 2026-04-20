@@ -133,7 +133,7 @@ public partial class NCardEditorPresetToggleButton : Control
 
 internal static class CardEditorPresetButtonTunerHooks
 {
-	private const bool TunerEnabled = true;
+	private const bool TunerEnabled = false;
 	private const string ToggleName = "CardEditorPresetButtonTunerToggle";
 	private const string PanelName = "CardEditorPresetButtonTunerPanel";
 	private const string OpenMetaKey = "card_editor_preset_button_tuner_open";

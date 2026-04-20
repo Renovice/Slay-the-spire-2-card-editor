@@ -369,6 +369,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 				if (borrowedEffects.Count > 0)
 				{
 					using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
+					using IDisposable __ = CardEditorEffectSourceContext.PushScoped(effectSourceCard);
 					await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(combatState, choiceContext, cardPlay, borrowedEffects);
 				}
 			}
@@ -389,6 +390,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 				return;
 			}
 
+			using IDisposable ___ = CardEditorEffectSourceContext.PushScoped(effectSourceCard);
 			if (onPlay.Invoke(effectSourceCard, new object[] { choiceContext, cardPlay }) is Task task)
 			{
 				await task;
@@ -564,30 +566,24 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			ApplyBaseNumericOverrides(effectSourceCard, overrideData);
 		}
 
-		NumericSnapshot snapshot = CaptureNumericSnapshot(effectSourceCard);
-
 		if (desiredUpgradeLevel > 0)
 		{
-			bool prevSuppress = CardEditorOverrides.SuppressUpgradeOverrides;
-			CardEditorOverrides.SuppressUpgradeOverrides = true;
-			try
+			for (int i = 0; i < desiredUpgradeLevel && effectSourceCard.IsUpgradable; i++)
 			{
-				for (int i = 0; i < desiredUpgradeLevel; i++)
-				{
-					effectSourceCard.UpgradeInternal();
-				}
+				NumericSnapshot snapshot = CaptureNumericSnapshot(effectSourceCard);
+				effectSourceCard.UpgradeInternal();
 				effectSourceCard.FinalizeUpgradeInternal();
-			}
-			finally
-			{
-				CardEditorOverrides.SuppressUpgradeOverrides = prevSuppress;
+
+				if (overrideData?.Upgrade != null && !overrideData.Upgrade.IsEmpty())
+				{
+					ApplyUpgradeNumericOverrides(effectSourceCard, snapshot, overrideData.Upgrade);
+				}
 			}
 		}
 
-		if (desiredUpgradeLevel > 0 && overrideData?.Upgrade != null && !overrideData.Upgrade.IsEmpty())
-		{
-			ApplyUpgradeNumericOverrides(effectSourceCard, snapshot, overrideData.Upgrade);
-		}
+		bool appliedManualUpgradeOverrides = desiredUpgradeLevel > 0
+			&& overrideData?.Upgrade != null
+			&& !overrideData.Upgrade.IsEmpty();
 
 		CardEditorOverrides.SetInstanceOverride(effectSourceCard, BuildEffectSourceRuntimeOverride(effectSourceCard, overrideData));
 
@@ -598,6 +594,20 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Failed recalculating effect source dynamic vars: {ex}");
+		}
+
+		if (appliedManualUpgradeOverrides && !isUpgradePreview)
+		{
+			try
+			{
+				// Clear runtime "just upgraded" flags after retargeting upgrade deltas so later
+				// combat debuffs can highlight reduced values red instead of staying green.
+				effectSourceCard.FinalizeUpgradeInternal();
+			}
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor] Failed finalizing effect source upgrade overrides: {ex}");
+			}
 		}
 	}
 

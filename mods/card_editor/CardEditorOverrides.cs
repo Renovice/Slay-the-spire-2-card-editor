@@ -16,6 +16,9 @@ public sealed class CardOverride
 	public CardRarity? Rarity { get; set; }
 	public bool? Enabled { get; set; } // Dangerous for vanilla: removes from pools when false.
 	public string? TitleOverride { get; set; } // Cosmetic only (not localized).
+	public bool? ModifiedBaseTextEnabled { get; set; }
+	public string? ModifiedBaseText { get; set; }
+	public bool? EndlessUpgrades { get; set; }
 	public bool? FullArt { get; set; } // Cosmetic only (render-time).
 	public CardEditorVisualFinish? Finish { get; set; } // Cosmetic only (render-time).
 	public Dictionary<string, float>? FinishParams { get; set; } // Cosmetic only (render-time).
@@ -71,6 +74,9 @@ public sealed class CardOverride
 			&& Rarity == null
 			&& Enabled == null
 			&& string.IsNullOrWhiteSpace(TitleOverride)
+			&& ModifiedBaseTextEnabled == null
+			&& string.IsNullOrWhiteSpace(ModifiedBaseText)
+			&& EndlessUpgrades == null
 			&& FullArt == null
 			&& Finish == null
 			&& (FinishParams == null || FinishParams.Count == 0)
@@ -262,11 +268,6 @@ public static class CardEditorOverrides
 			return true;
 		}
 
-		if (card != null && CardEditorUiState.TryGetDraftOverride(card.Id, out overrideData))
-		{
-			return true;
-		}
-
 		if (card != null)
 		{
 			return _overrides.TryGetValue(card.Id, out overrideData);
@@ -396,6 +397,9 @@ public static class CardEditorOverrides
 			Rarity = source.Rarity,
 			Enabled = source.Enabled,
 			TitleOverride = source.TitleOverride,
+			ModifiedBaseTextEnabled = source.ModifiedBaseTextEnabled,
+			ModifiedBaseText = source.ModifiedBaseText,
+			EndlessUpgrades = source.EndlessUpgrades,
 			FullArt = source.FullArt,
 			Finish = source.Finish,
 			CardType = source.CardType,
@@ -509,6 +513,8 @@ public static class CardEditorOverrides
 
 	private static void ApplyOverride(CardModel card, CardOverride overrideData)
 	{
+		SetInstanceOverride(card, overrideData);
+
 		if (!string.IsNullOrWhiteSpace(overrideData.PoolTitle))
 		{
 			TrySetPool(card, overrideData.PoolTitle);
@@ -828,6 +834,7 @@ public static class CardEditorOverrides
 		{
 			return;
 		}
+		SetInstanceOverride(card, null);
 		CardModel canonical = ModelDb.GetById<CardModel>(card.Id);
 		InvalidateEnergyCostCache(card);
 		try
@@ -959,17 +966,19 @@ public static class CardEditorOverrides
 
 	private static void ApplyToExistingCardInstance(CardModel card)
 	{
+		RefreshCardAfterUpgradeStateChanged(card);
+	}
+
+	internal static void RefreshCardAfterUpgradeStateChanged(CardModel card)
+	{
 		if (card == null || !card.IsMutable)
 		{
 			return;
 		}
 
-		int desiredUpgradeLevel = card.CurrentUpgradeLevel;
-		if (desiredUpgradeLevel <= 0)
-		{
-			ApplyTo(card);
-			return;
-		}
+		int desiredUpgradeLevel = Math.Max(0, card.CurrentUpgradeLevel);
+		bool prevSuppressAll = SuppressAllOverrides;
+		SuppressAllOverrides = true;
 
 		try
 		{
@@ -988,6 +997,18 @@ public static class CardEditorOverrides
 			{
 			}
 			desiredUpgradeLevel = 0;
+		}
+		finally
+		{
+			SuppressAllOverrides = prevSuppressAll;
+		}
+
+		try
+		{
+			ApplyCanonicalValues(card);
+		}
+		catch
+		{
 		}
 
 		ApplyTo(card);

@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.HoverTips;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 
@@ -49,14 +53,101 @@ internal static class CardEditorVisibleExtraEffectPowerPatches
 			return true;
 		}
 
+		__result = BuildHoverTips(mirror);
+		return false;
+	}
+
+	private static IReadOnlyList<IHoverTip> BuildHoverTips(CardEditorVisibleExtraEffectPower mirror)
+	{
+		string title = GetTooltipTitle(mirror);
 		string body = mirror.GetTooltipBody();
+		if (string.IsNullOrWhiteSpace(body))
+		{
+			body = title;
+		}
+
 		List<IHoverTip> tips = new List<IHoverTip>
 		{
-			new HoverTip(mirror, body, false)
+			CreateRuntimeHoverTip(title, body, ResolveIcon(mirror, bigIcon: false))
 		};
 		tips.AddRange(CardEditorVanillaKeywordSupport.InferHoverTips(body));
-		__result = tips;
-		return false;
+		return IHoverTip.RemoveDupes(tips).ToList();
+	}
+
+	private static string GetTooltipTitle(CardEditorVisibleExtraEffectPower mirror)
+	{
+		CardExtraEffect? effect = mirror.SourceEffect;
+		if (!string.IsNullOrWhiteSpace(effect?.CustomKeywordName))
+		{
+			return effect.CustomKeywordName.Trim();
+		}
+
+		try
+		{
+			string? powerTitle = ResolveTooltipPower(effect)?.Title.GetFormattedText();
+			if (!string.IsNullOrWhiteSpace(powerTitle))
+			{
+				return powerTitle.Trim();
+			}
+		}
+		catch
+		{
+		}
+
+		if (effect != null)
+		{
+			string? effectLabel = CardEditorExtraEffects.Definitions
+				.FirstOrDefault(def => def.Kind == effect.Kind)
+				?.Label;
+			if (!string.IsNullOrWhiteSpace(effectLabel))
+			{
+				return effectLabel.Trim();
+			}
+		}
+
+		if (!string.IsNullOrWhiteSpace(mirror.SourceCard?.Title))
+		{
+			return mirror.SourceCard.Title.Trim();
+		}
+
+		try
+		{
+			string fallback = mirror.Title.GetFormattedText();
+			if (!string.IsNullOrWhiteSpace(fallback))
+			{
+				return fallback.Trim();
+			}
+		}
+		catch
+		{
+		}
+
+		return "Card Editor Power";
+	}
+
+	private static IHoverTip CreateRuntimeHoverTip(string title, string description, Texture2D? icon)
+	{
+		string safeTitle = string.IsNullOrWhiteSpace(title) ? "Card Editor Power" : title.Trim();
+		string safeDescription = string.IsNullOrWhiteSpace(description) ? safeTitle : description.Trim();
+		string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(safeTitle)));
+		string titleKey = "CARD_EDITOR.RUNTIME_POWER_TIP." + hash + ".title";
+
+		if (LocManager.Instance != null)
+		{
+			try
+			{
+				LocTable table = LocManager.Instance.GetTable("extensions");
+				table.MergeWith(new Dictionary<string, string>
+				{
+					[titleKey] = safeTitle
+				});
+			}
+			catch
+			{
+			}
+		}
+
+		return new HoverTip(new LocString("extensions", titleKey), safeDescription, icon);
 	}
 
 	private static Texture2D? ResolveIcon(CardEditorVisibleExtraEffectPower mirror, bool bigIcon)
@@ -116,6 +207,52 @@ internal static class CardEditorVisibleExtraEffectPowerPatches
 			ModelId powerId = ModelId.Deserialize(powerIdText.Trim());
 			PowerModel? power = ModelDb.GetByIdOrNull<PowerModel>(powerId);
 			return power == null ? null : (bigIcon ? power.BigIcon : power.Icon);
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static PowerModel? ResolveTooltipPower(CardExtraEffect? effect)
+	{
+		if (effect == null)
+		{
+			return null;
+		}
+
+		if (!string.IsNullOrWhiteSpace(effect.PowerId))
+		{
+			PowerModel? appliedPower = ResolveBaseGamePower(effect.PowerId);
+			if (appliedPower != null)
+			{
+				return appliedPower;
+			}
+		}
+
+		if (!string.IsNullOrWhiteSpace(effect.StatusIconPowerId))
+		{
+			PowerModel? statusIconPower = ResolveBaseGamePower(effect.StatusIconPowerId);
+			if (statusIconPower != null)
+			{
+				return statusIconPower;
+			}
+		}
+
+		return GetAutoMappedPower(effect);
+	}
+
+	private static PowerModel? ResolveBaseGamePower(string? powerIdText)
+	{
+		if (string.IsNullOrWhiteSpace(powerIdText))
+		{
+			return null;
+		}
+
+		try
+		{
+			ModelId powerId = ModelId.Deserialize(powerIdText.Trim());
+			return ModelDb.GetByIdOrNull<PowerModel>(powerId);
 		}
 		catch
 		{

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
@@ -44,14 +45,17 @@ namespace SlayTheSpire2Mod.CardEditor;
 [ModInitializer("Init")]
 public static class CardEditorMod
 {
+	private const string HarmonyId = "slaythespire2.card_editor";
+
 	public static void Init()
 	{
 		CardEditorExternalLocalization.Init();
 		CardEditorCreatedCardsStore.EnsureLoaded();
 		RegisterCreatedCardsInPools();
 
-		Harmony harmony = new Harmony("slaythespire2.card_editor");
+		Harmony harmony = new Harmony(HarmonyId);
 		harmony.PatchAll(Assembly.GetExecutingAssembly());
+		EnsureIgnoreDamagePatches(harmony);
 		
 		// Patch the PRIVATE 3-param GetDescriptionForPile - the runtime calls this directly,
 		// bypassing the public 2-param wrapper that annotation-based patches target.
@@ -89,6 +93,80 @@ public static class CardEditorMod
 		{
 			Log.Error($"[CardEditor] Failed to patch private GetDescriptionForPile: {ex}");
 		}
+	}
+
+	private static void EnsureIgnoreDamagePatches(Harmony harmony)
+	{
+		try
+		{
+			EnsurePatched(
+				harmony,
+				typeof(AttackCommand).GetMethod(nameof(AttackCommand.Execute), BindingFlags.Instance | BindingFlags.Public)!,
+				typeof(AttackCommand_Execute_ApplyIgnoreDamageProps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+				label: "AttackCommand.Execute");
+
+			EnsurePatched(
+				harmony,
+				AccessTools.Method(typeof(Hook), "ModifyDamageInternal"),
+				typeof(Hook_ModifyDamageInternal_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+				label: "Hook.ModifyDamageInternal");
+
+			EnsurePatched(
+				harmony,
+				typeof(Hook).GetMethod(nameof(Hook.ModifyHpLostAfterOsty), BindingFlags.Static | BindingFlags.Public)!,
+				typeof(Hook_ModifyHpLostAfterOsty_IgnoreNegation_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+				label: "Hook.ModifyHpLostAfterOsty");
+
+			EnsurePatched(
+				harmony,
+				typeof(IntangiblePower).GetMethod(nameof(IntangiblePower.ModifyHpLostAfterOsty), BindingFlags.Instance | BindingFlags.Public)!,
+				typeof(IntangiblePower_ModifyHpLostAfterOsty_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+				label: "IntangiblePower.ModifyHpLostAfterOsty");
+
+			EnsurePatched(
+				harmony,
+				typeof(SlipperyPower).GetMethod(nameof(SlipperyPower.ModifyDamageCap), BindingFlags.Instance | BindingFlags.Public)!,
+				typeof(SlipperyPower_ModifyDamageCap_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+				label: "SlipperyPower.ModifyDamageCap");
+
+			EnsurePatched(
+				harmony,
+				typeof(HardToKillPower).GetMethod(nameof(HardToKillPower.ModifyDamageCap), BindingFlags.Instance | BindingFlags.Public)!,
+				typeof(HardToKillPower_ModifyDamageCap_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+				label: "HardToKillPower.ModifyDamageCap");
+
+			EnsurePatched(
+				harmony,
+				typeof(HardenedShellPower).GetMethod(nameof(HardenedShellPower.ModifyHpLostBeforeOstyLate), BindingFlags.Instance | BindingFlags.Public)!,
+				typeof(HardenedShellPower_ModifyHpLostBeforeOstyLate_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+				label: "HardenedShellPower.ModifyHpLostBeforeOstyLate");
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"[CardEditor][IgnoreDamageDebug] Failed ensuring ignore-damage patches: {ex}");
+		}
+	}
+
+	private static void EnsurePatched(Harmony harmony, MethodBase? target, MethodInfo? prefix, string label)
+	{
+		if (target == null || prefix == null)
+		{
+			Log.Warn($"[CardEditor][IgnoreDamageDebug] Missing patch target or prefix for {label}.");
+			return;
+		}
+
+		Patches? infoBefore = Harmony.GetPatchInfo(target);
+		bool alreadyPatched = infoBefore?.Owners.Contains(HarmonyId) == true;
+		if (!alreadyPatched)
+		{
+			harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+		}
+
+		Patches? infoAfter = Harmony.GetPatchInfo(target);
+		string owners = infoAfter == null || infoAfter.Owners.Count == 0
+			? "<none>"
+			: string.Join(", ", infoAfter.Owners.Distinct());
+		Log.Info($"[CardEditor][IgnoreDamageDebug] EnsurePatched {label} alreadyPatched={alreadyPatched} owners={owners}");
 	}
 
 	private static void RegisterCreatedCardsInPools()
@@ -170,6 +248,24 @@ public static class CardModel_ToMutable_Patch
 	}
 }
 
+[HarmonyPatch(typeof(CardModel), nameof(CardModel.MaxUpgradeLevel), MethodType.Getter)]
+public static class CardModel_MaxUpgradeLevel_Patch
+{
+	public static void Postfix(CardModel __instance, ref int __result)
+	{
+		if (__instance == null || CardEditorOverrides.SuppressAllOverrides)
+		{
+			return;
+		}
+
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
+			&& overrideData.EndlessUpgrades == true)
+		{
+			__result = Math.Max(__result, int.MaxValue);
+		}
+	}
+}
+
 [HarmonyPatch(typeof(CardModel), nameof(CardModel.UpgradeInternal))]
 public static class CardModel_UpgradeInternal_Patch
 {
@@ -185,27 +281,30 @@ public static class CardModel_UpgradeInternal_Patch
 	public static void Prefix(CardModel __instance, ref UpgradeSnapshot __state)
 	{
 		__state = default;
+		__state.PreUpgradeLevel = -1;
 		if (__instance == null || !__instance.IsMutable)
 		{
-			__state.PreUpgradeLevel = -1;
 			return;
 		}
 		if (CardEditorOverrides.SuppressAllOverrides || CardEditorOverrides.SuppressUpgradeOverrides)
 		{
-			__state.PreUpgradeLevel = -1;
 			return;
 		}
-		__state.PreUpgradeLevel = __instance.CurrentUpgradeLevel;
-		if (__state.PreUpgradeLevel != 0)
-		{
-			return;
-		}
-		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+		if (!CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
 			|| overrideData.Upgrade == null
 			|| overrideData.Upgrade.IsEmpty())
 		{
 			return;
 		}
+
+		int preUpgradeLevel = __instance.CurrentUpgradeLevel;
+		bool shouldCapture = preUpgradeLevel == 0 || overrideData.EndlessUpgrades == true;
+		if (!shouldCapture)
+		{
+			return;
+		}
+
+		__state.PreUpgradeLevel = preUpgradeLevel;
 
 		try
 		{
@@ -254,11 +353,11 @@ public static class CardModel_UpgradeInternal_Patch
 		{
 			return;
 		}
-		if (__state.PreUpgradeLevel != 0 || __instance.CurrentUpgradeLevel != 1)
+		if (__state.PreUpgradeLevel < 0)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+		if (!CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
 			|| overrideData.Upgrade == null
 			|| overrideData.Upgrade.IsEmpty())
 		{
@@ -266,11 +365,46 @@ public static class CardModel_UpgradeInternal_Patch
 		}
 
 		CardUpgradeOverride upgrade = overrideData.Upgrade;
-
-		if (upgrade.EnergyCostDelta.HasValue && !__instance.EnergyCost.CostsX)
+		bool isFirstUpgrade = __state.PreUpgradeLevel == 0 && __instance.CurrentUpgradeLevel == 1;
+		bool isRepeatedEndlessUpgrade = overrideData.EndlessUpgrades == true
+			&& __state.PreUpgradeLevel > 0
+			&& __instance.CurrentUpgradeLevel == __state.PreUpgradeLevel + 1;
+		if (!isFirstUpgrade && !isRepeatedEndlessUpgrade)
 		{
-			int baseCost = __state.EnergyCostBase;
-			int vanillaUpgraded = __instance.EnergyCost.GetWithModifiers(CostModifiers.None);
+			return;
+		}
+
+		ApplyNumericUpgradeAdjustments(__instance, upgrade, __state);
+
+		if (!isFirstUpgrade)
+		{
+			try
+			{
+				__instance.DynamicVars.RecalculateForUpgradeOrEnchant();
+			}
+			catch
+			{
+			}
+			return;
+		}
+
+		ApplyFirstUpgradeOnlyAdjustments(__instance, upgrade);
+
+		try
+		{
+			__instance.DynamicVars.RecalculateForUpgradeOrEnchant();
+		}
+		catch
+		{
+		}
+	}
+
+	private static void ApplyNumericUpgradeAdjustments(CardModel card, CardUpgradeOverride upgrade, UpgradeSnapshot snapshot)
+	{
+		if (upgrade.EnergyCostDelta.HasValue && !card.EnergyCost.CostsX)
+		{
+			int baseCost = snapshot.EnergyCostBase;
+			int vanillaUpgraded = card.EnergyCost.GetWithModifiers(CostModifiers.None);
 			int vanillaDelta = vanillaUpgraded - baseCost;
 			int desiredDelta = upgrade.EnergyCostDelta.Value;
 			int adjust = desiredDelta - vanillaDelta;
@@ -278,8 +412,8 @@ public static class CardModel_UpgradeInternal_Patch
 			{
 				try
 				{
-					CardEditorOverrides.MarkEnergyCostJustUpgraded(__instance);
-					__instance.EnergyCost.SetCustomBaseCost(Math.Max(-1, vanillaUpgraded + adjust));
+					CardEditorOverrides.MarkEnergyCostJustUpgraded(card);
+					card.EnergyCost.SetCustomBaseCost(Math.Max(-1, vanillaUpgraded + adjust));
 				}
 				catch
 				{
@@ -287,40 +421,40 @@ public static class CardModel_UpgradeInternal_Patch
 			}
 		}
 
-		if (upgrade.StarCostDelta.HasValue && !__instance.HasStarCostX)
+		if (upgrade.StarCostDelta.HasValue && !card.HasStarCostX)
 		{
-			int vanillaUpgraded = __instance.BaseStarCost;
-			int vanillaDelta = vanillaUpgraded - __state.StarCostBase;
+			int vanillaUpgraded = card.BaseStarCost;
+			int vanillaDelta = vanillaUpgraded - snapshot.StarCostBase;
 			int desiredDelta = upgrade.StarCostDelta.Value;
 			int adjust = desiredDelta - vanillaDelta;
 			if (adjust != 0)
 			{
-				CardEditorOverrides.SetBaseStarCostUnsafe(__instance, Math.Max(-1, vanillaUpgraded + adjust));
-				CardEditorOverrides.MarkStarCostJustUpgraded(__instance);
+				CardEditorOverrides.SetBaseStarCostUnsafe(card, Math.Max(-1, vanillaUpgraded + adjust));
+				CardEditorOverrides.MarkStarCostJustUpgraded(card);
 			}
 		}
 
 		if (upgrade.ReplayCountDelta.HasValue)
 		{
-			int vanillaUpgraded = __instance.BaseReplayCount;
-			int vanillaDelta = vanillaUpgraded - __state.ReplayCountBase;
+			int vanillaUpgraded = card.BaseReplayCount;
+			int vanillaDelta = vanillaUpgraded - snapshot.ReplayCountBase;
 			int desiredDelta = upgrade.ReplayCountDelta.Value;
 			int adjust = desiredDelta - vanillaDelta;
 			if (adjust != 0)
 			{
-				__instance.BaseReplayCount = Math.Max(0, vanillaUpgraded + adjust);
+				card.BaseReplayCount = Math.Max(0, vanillaUpgraded + adjust);
 			}
 		}
 
-		if (upgrade.DynamicVarDeltas != null && upgrade.DynamicVarDeltas.Count > 0 && __state.DynamicVarBaseValues != null)
+		if (upgrade.DynamicVarDeltas != null && upgrade.DynamicVarDeltas.Count > 0 && snapshot.DynamicVarBaseValues != null)
 		{
 			foreach ((string key, decimal desiredDelta) in upgrade.DynamicVarDeltas)
 			{
-				if (!__state.DynamicVarBaseValues.TryGetValue(key, out decimal baseValue))
+				if (!snapshot.DynamicVarBaseValues.TryGetValue(key, out decimal baseValue))
 				{
 					continue;
 				}
-				if (!__instance.DynamicVars.TryGetValue(key, out var dynamicVar))
+				if (!card.DynamicVars.TryGetValue(key, out var dynamicVar))
 				{
 					continue;
 				}
@@ -333,14 +467,17 @@ public static class CardModel_UpgradeInternal_Patch
 				}
 			}
 		}
+	}
 
+	private static void ApplyFirstUpgradeOnlyAdjustments(CardModel card, CardUpgradeOverride upgrade)
+	{
 		if (upgrade.KeywordsToRemove != null)
 		{
 			foreach (CardKeyword keyword in upgrade.KeywordsToRemove)
 			{
-				if (keyword != CardKeyword.None && __instance.Keywords.Contains(keyword))
+				if (keyword != CardKeyword.None && card.Keywords.Contains(keyword))
 				{
-					__instance.RemoveKeyword(keyword);
+					card.RemoveKeyword(keyword);
 				}
 			}
 		}
@@ -349,30 +486,22 @@ public static class CardModel_UpgradeInternal_Patch
 		{
 			foreach (CardKeyword keyword in upgrade.KeywordsToAdd)
 			{
-				if (keyword != CardKeyword.None && !__instance.Keywords.Contains(keyword))
+				if (keyword != CardKeyword.None && !card.Keywords.Contains(keyword))
 				{
-					__instance.AddKeyword(keyword);
+					card.AddKeyword(keyword);
 				}
 			}
 		}
 
 		if (upgrade.EnchantmentId != null || upgrade.AfflictionId != null)
 		{
-			CardEditorOverrides.ApplyOverrideToCard(__instance, new CardOverride
+			CardEditorOverrides.ApplyOverrideToCard(card, new CardOverride
 			{
 				EnchantmentId = upgrade.EnchantmentId,
 				EnchantmentAmount = upgrade.EnchantmentAmount,
 				AfflictionId = upgrade.AfflictionId,
 				AfflictionAmount = upgrade.AfflictionAmount
 			});
-		}
-
-		try
-		{
-			__instance.DynamicVars.RecalculateForUpgradeOrEnchant();
-		}
-		catch
-		{
 		}
 	}
 }
@@ -391,7 +520,16 @@ public static class CardModel_DowngradeInternal_Patch
 {
 	public static void Postfix(CardModel __instance)
 	{
-		CardEditorOverrides.ApplyTo(__instance);
+		if (__instance == null || !__instance.IsMutable)
+		{
+			return;
+		}
+		if (CardEditorOverrides.SuppressAllOverrides)
+		{
+			return;
+		}
+
+		CardEditorOverrides.RefreshCardAfterUpgradeStateChanged(__instance);
 	}
 }
 
@@ -416,21 +554,7 @@ public static class GetDescriptionForPile_ManualPatch
 			return;
 		}
 
-		SealedThroneDescriptionFix.TryFix(__instance, ref __result);
-		KinglyKickDescriptionFix.TryFix(__instance, ref __result);
-		ResonanceEnemyStrengthLossDescriptionFix.TryFix(__instance, ref __result);
-		HardcodedPowerAmountDescriptionFix.TryFix(__instance, ref __result);
-		RetainHandDurationDescriptionFix.TryFix(__instance, ref __result);
-		NoDrawDurationDescriptionFix.TryFix(__instance, ref __result);
-		ConquerorDurationDescriptionFix.TryFix(__instance, ref __result);
-		ReflectDurationDescriptionFix.TryFix(__instance, ref __result);
-		ColossusDurationDescriptionFix.TryFix(__instance, ref __result);
-		BlurDurationDescriptionFix.TryFix(__instance, ref __result);
-		HandTrickSlyDurationDescriptionFix.TryFix(__instance, ref __result);
-		TemporaryStatDurationDescriptionFix.TryFix(__instance, ref __result);
-		TargetTypeOverrideDescriptionFix.TryFix(__instance, ref __result);
-		CardEditorExtraEffects.TryAppendDescription(__instance, ref __result, target);
-		__result = CardEditorVanillaKeywordSupport.FormatDescription(__result);
+		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, target, isUpgradePreview: false);
 	}
 }
 
@@ -456,21 +580,7 @@ public static class CardModel_GetDescriptionForPile_Patch
 			return;
 		}
 
-		SealedThroneDescriptionFix.TryFix(__instance, ref __result);
-		KinglyKickDescriptionFix.TryFix(__instance, ref __result);
-		ResonanceEnemyStrengthLossDescriptionFix.TryFix(__instance, ref __result);
-		HardcodedPowerAmountDescriptionFix.TryFix(__instance, ref __result);
-		RetainHandDurationDescriptionFix.TryFix(__instance, ref __result);
-		NoDrawDurationDescriptionFix.TryFix(__instance, ref __result);
-		ConquerorDurationDescriptionFix.TryFix(__instance, ref __result);
-		ReflectDurationDescriptionFix.TryFix(__instance, ref __result);
-		ColossusDurationDescriptionFix.TryFix(__instance, ref __result);
-		BlurDurationDescriptionFix.TryFix(__instance, ref __result);
-		HandTrickSlyDurationDescriptionFix.TryFix(__instance, ref __result);
-		TemporaryStatDurationDescriptionFix.TryFix(__instance, ref __result);
-		TargetTypeOverrideDescriptionFix.TryFix(__instance, ref __result);
-		CardEditorExtraEffects.TryAppendDescription(__instance, ref __result, target);
-		__result = CardEditorVanillaKeywordSupport.FormatDescription(__result);
+		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, target, isUpgradePreview: false);
 	}
 }
 
@@ -484,21 +594,7 @@ public static class CardModel_GetDescriptionForUpgradePreview_Patch
 			return;
 		}
 
-		SealedThroneDescriptionFix.TryFix(__instance, ref __result);
-		KinglyKickDescriptionFix.TryFix(__instance, ref __result);
-		ResonanceEnemyStrengthLossDescriptionFix.TryFix(__instance, ref __result);
-		HardcodedPowerAmountDescriptionFix.TryFix(__instance, ref __result);
-		RetainHandDurationDescriptionFix.TryFix(__instance, ref __result);
-		NoDrawDurationDescriptionFix.TryFix(__instance, ref __result);
-		ConquerorDurationDescriptionFix.TryFix(__instance, ref __result);
-		ReflectDurationDescriptionFix.TryFix(__instance, ref __result);
-		ColossusDurationDescriptionFix.TryFix(__instance, ref __result);
-		BlurDurationDescriptionFix.TryFix(__instance, ref __result);
-		HandTrickSlyDurationDescriptionFix.TryFix(__instance, ref __result);
-		TemporaryStatDurationDescriptionFix.TryFix(__instance, ref __result);
-		TargetTypeOverrideDescriptionFix.TryFix(__instance, ref __result);
-		CardEditorExtraEffects.TryAppendDescription(__instance, ref __result, __instance.CurrentTarget, isUpgradePreview: true);
-		__result = CardEditorVanillaKeywordSupport.FormatDescription(__result);
+		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, __instance.CurrentTarget, isUpgradePreview: true);
 	}
 }
 
@@ -1586,6 +1682,7 @@ public static class MainMenu_Ready_Patch
 
 	private static void OpenEditor(NMainMenu menu)
 	{
+		CardEditorLibrarySelectionState.ClearSelections();
 		CardEditorUiState.Mode = CardEditorLibraryMode.Editor;
 		NCardLibrary library = menu.SubmenuStack.GetSubmenuType<NCardLibrary>();
 		IRunState? runState = RunManager.Instance.DebugOnlyGetState();
@@ -1631,6 +1728,7 @@ public static class MainMenu_Ready_Patch
 	private static void OpenCreator(NMainMenu menu)
 	{
 		Log.Info("[CardEditor] OpenCreator: Setting Mode = Creator");
+		CardEditorLibrarySelectionState.ClearSelections();
 		CardEditorUiState.Mode = CardEditorLibraryMode.Creator;
 		NCardLibrary library = menu.SubmenuStack.GetSubmenuType<NCardLibrary>();
 		IRunState? runState = RunManager.Instance.DebugOnlyGetState();
@@ -1649,14 +1747,13 @@ public static class CardLibrary_ShowCardDetail_Patch
 	public static bool Prefix(NCardHolder holder, NCardLibrary __instance)
 	{
 		Log.Info("[CardEditor] ShowCardDetail prefix");
-		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) &&
-			CardEditorBaseDeckLibraryHelper.ShouldSuppressShowCardDetailPopup())
+		if (CardEditorUiState.IsActive && CardEditorBaseDeckLibraryHelper.ShouldSuppressShowCardDetailPopup())
 		{
 			return false;
 		}
 
 		if (holder?.CardModel != null &&
-			CardEditorBaseDeckLibraryHelper.TryConsumePendingCardDetailAction(holder, out bool isRightClick))
+			CardEditorBaseDeckLibraryHelper.TryConsumePendingCardDetailAction(holder, out bool isRightClick, out bool isShiftPressed))
 		{
 			CardEditorBaseDeckLibraryHelper.ArmShowCardDetailSuppression(80);
 
@@ -1666,11 +1763,30 @@ public static class CardLibrary_ShowCardDetail_Patch
 				return false;
 			}
 
-			if (CardEditorUiState.IsBaseDeckAddActive && isRightClick)
+			if (CardEditorUiState.IsBaseDeckAddActive && !isRightClick)
 			{
 				CardEditorBaseDeckUiState.ToggleSelection(__instance, holder);
 				return false;
 			}
+
+			if ((CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive) && isShiftPressed)
+			{
+				if (isRightClick)
+				{
+					CardEditorLibrarySelectionState.RemoveSelection(__instance, holder);
+				}
+				else
+				{
+					CardEditorLibrarySelectionState.AddSelection(__instance, holder);
+				}
+				return false;
+			}
+		}
+
+		if ((CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive) && Input.IsKeyPressed(Key.Shift))
+		{
+			CardEditorBaseDeckLibraryHelper.ArmShowCardDetailSuppression(80);
+			return false;
 		}
 
 		if (!CardEditorUiState.IsActive)
@@ -1681,9 +1797,21 @@ public static class CardLibrary_ShowCardDetail_Patch
 		{
 			return false;
 		}
-		CardModel canonical = ModelDb.GetById<CardModel>(holder.CardModel.Id);
-		CardModel preview = CardEditorOverrides.BuildPreview(canonical);
-		NCardEditorPopup popup = NCardEditorPopup.Create(preview, () => CardEditorUiState.RefreshLibrary(__instance));
+		NCardEditorPopup popup;
+		if ((CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive)
+			&& CardEditorLibrarySelectionState.ShouldOpenBatchEditor(holder.CardModel))
+		{
+			CardModel batchPreview = CardEditorOverrides.BuildPreview(ModelDb.GetById<CardModel>(holder.CardModel.Id));
+			IReadOnlyList<ModelId> batchCardIds = CardEditorLibrarySelectionState.GetOrderedSelection(holder.CardModel.Id);
+			popup = NCardEditorPopup.CreateBatch(batchPreview, batchCardIds, () => CardEditorUiState.RefreshLibrary(__instance));
+		}
+		else
+		{
+			CardModel canonical = ModelDb.GetById<CardModel>(holder.CardModel.Id);
+			CardModel preview = CardEditorOverrides.BuildPreview(canonical);
+			popup = NCardEditorPopup.Create(preview, () => CardEditorUiState.RefreshLibrary(__instance));
+		}
+
 		Callable.From(() =>
 		{
 			Log.Info($"[CardEditor] Adding popup to modal container (instance={NModalContainer.Instance != null})");
@@ -1786,6 +1914,17 @@ internal static class CardEditorPresetPanelHooks
 			panel.SetCreatorMode(CardEditorUiState.IsCreatorActive);
 			panel.RefreshPresetList();
 			panel.Visible = IsOpen(library);
+			if (panel.Visible)
+			{
+				Callable.From(() =>
+				{
+					if (GodotObject.IsInstanceValid(panel))
+					{
+						panel.ApplyLayoutTuning();
+						CardEditorPresetPanelTunerHooks.RefreshFor(library);
+					}
+				}).CallDeferred();
+			}
 
 			baseDeckPanel?.RefreshState();
 		}
@@ -1806,6 +1945,7 @@ internal static class CardEditorPresetPanelHooks
 		}
 
 		CardEditorPresetButtonTunerHooks.Sync(library, shouldShowPanel);
+		CardEditorPresetPanelTunerHooks.Sync(library, shouldShowPanel);
 	}
 }
 

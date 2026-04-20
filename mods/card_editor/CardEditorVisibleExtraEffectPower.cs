@@ -105,6 +105,22 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 			}
 		}
 
+		if (_sourceCard != null)
+		{
+			try
+			{
+				string description = string.Empty;
+				if (CardEditorExtraEffects.TryAppendDescription(_sourceCard, ref description, _sourceCard.CurrentTarget, isUpgradePreview: false)
+					&& !string.IsNullOrWhiteSpace(description))
+				{
+					return description.Trim();
+				}
+			}
+			catch
+			{
+			}
+		}
+
 		if (_sourceCard?.Title != null)
 		{
 			string title = _sourceCard.Title;
