@@ -196,7 +196,7 @@ internal static class CardGrid_BaseDeck_ArmShowCardDetailSuppression_Patch
 {
 	public static void Prefix(NCardHolder holder)
 	{
-		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive || CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive)
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive)
 			&& holder?.CardModel != null)
 		{
 			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: true, isShiftPressed: Input.IsKeyPressed(Key.Shift));
@@ -209,7 +209,7 @@ internal static class CardGrid_BaseDeck_ArmShowCardDetailSuppression_OnPressed_P
 {
 	public static void Prefix(NCardHolder holder)
 	{
-		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive || CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive)
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive)
 			&& holder?.CardModel != null)
 		{
 			CardEditorBaseDeckLibraryHelper.RecordPendingCardDetailAction(holder, isRightClick: false, isShiftPressed: Input.IsKeyPressed(Key.Shift));

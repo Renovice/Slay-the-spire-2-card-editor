@@ -454,7 +454,7 @@ internal static class Hook_AfterPowerAmountChanged_CardEditorPowerCountEvent_Pat
 [HarmonyPatch(typeof(PlayerCmd), nameof(PlayerCmd.GainStars))]
 internal static class PlayerCmd_GainStars_CardEditorPowerCountEvent_Patch
 {
-	public static void Postfix(Player player, int amount, ref Task __result)
+	public static void Postfix(decimal amount, Player player, ref Task __result)
 	{
 		if (__result == null || player?.Creature == null)
 		{
@@ -464,14 +464,16 @@ internal static class PlayerCmd_GainStars_CardEditorPowerCountEvent_Patch
 		__result = TrackAfter(__result, player, amount, CardExtraEffectCountEvent.StarsGained);
 	}
 
-	private static async Task TrackAfter(Task original, Player player, int amount, CardExtraEffectCountEvent countEvent)
+	private static async Task TrackAfter(Task original, Player player, decimal amount, CardExtraEffectCountEvent countEvent)
 	{
 		await original;
 		try
 		{
 			Creature actor = player.Creature;
 			CombatState? combatState = actor?.CombatState;
-			int delta = Math.Max(0, amount);
+			int delta = amount <= 0m
+				? 0
+				: (int)Math.Min(decimal.Truncate(amount), int.MaxValue);
 			if (combatState != null && delta > 0)
 			{
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, actor, countEvent, amount: delta);
@@ -487,7 +489,7 @@ internal static class PlayerCmd_GainStars_CardEditorPowerCountEvent_Patch
 [HarmonyPatch(typeof(PlayerCmd), nameof(PlayerCmd.LoseStars))]
 internal static class PlayerCmd_LoseStars_CardEditorPowerCountEvent_Patch
 {
-	public static void Postfix(Player player, int amount, ref Task __result)
+	public static void Postfix(decimal amount, Player player, ref Task __result)
 	{
 		if (__result == null || player?.Creature == null)
 		{
@@ -497,14 +499,16 @@ internal static class PlayerCmd_LoseStars_CardEditorPowerCountEvent_Patch
 		__result = TrackAfter(__result, player, amount, CardExtraEffectCountEvent.StarsLost);
 	}
 
-	private static async Task TrackAfter(Task original, Player player, int amount, CardExtraEffectCountEvent countEvent)
+	private static async Task TrackAfter(Task original, Player player, decimal amount, CardExtraEffectCountEvent countEvent)
 	{
 		await original;
 		try
 		{
 			Creature actor = player.Creature;
 			CombatState? combatState = actor?.CombatState;
-			int delta = Math.Max(0, amount);
+			int delta = amount <= 0m
+				? 0
+				: (int)Math.Min(decimal.Truncate(amount), int.MaxValue);
 			if (combatState != null && delta > 0)
 			{
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, actor, countEvent, amount: delta);

@@ -3477,7 +3477,7 @@ internal static class CardEditorExtraEffects
 			return false;
 		}
 
-		CombatState? combatState = card.CombatState;
+		CombatState? combatState = ResolveCardCombatState(card);
 		Creature? ownerCreature = card.Owner?.Creature;
 		if (combatState == null || ownerCreature == null)
 		{
@@ -3568,6 +3568,42 @@ internal static class CardEditorExtraEffects
 
 		return GetUsableBranchEffect(effect) != null
 			&& DoesBranchConditionPass(combatState, ownerCreature, playForConditions, effect);
+	}
+
+	private static CombatState? ResolveCardCombatState(CardModel? card)
+	{
+		return card?.CombatState ?? card?.Owner?.Creature?.CombatState;
+	}
+
+	// Count/history-based glow conditions often change after another card resolves, so repaint the hand explicitly.
+	private static void RefreshHandCardVisuals(Player? player)
+	{
+		CardPile? hand = player?.PlayerCombatState?.Hand;
+		if (hand?.Cards == null)
+		{
+			return;
+		}
+
+		foreach (CardModel? handCard in hand.Cards)
+		{
+			if (handCard == null)
+			{
+				continue;
+			}
+
+			try
+			{
+				NCard? node = NCard.FindOnTable(handCard);
+				if (node != null)
+				{
+					node.UpdateVisuals(node.DisplayingPile, CardPreviewMode.Normal);
+				}
+			}
+			catch
+			{
+				// ignored
+			}
+		}
 	}
 
 	private static CardOverride CreateSelfScalingSnapshot(CardModel card)
@@ -3719,7 +3755,8 @@ internal static class CardEditorExtraEffects
 		CombatState? combatState,
 		CardModel templateCard,
 		bool includeTemporaryEffects,
-		HashSet<ModelId> effectSourceGuard)
+		HashSet<ModelId> effectSourceGuard,
+		string? keywordFilter = null)
 	{
 		if (destination == null || templateCard == null)
 		{
@@ -3739,6 +3776,10 @@ internal static class CardEditorExtraEffects
 			{
 				continue;
 			}
+			if (!MatchesCustomKeywordFilter(effect, keywordFilter))
+			{
+				continue;
+			}
 
 			destination.Add(effect);
 			if (effect.Kind == CardExtraEffectKind.RunEffectSourceCard)
@@ -3752,7 +3793,7 @@ internal static class CardEditorExtraEffects
 
 		if (templateCard is CardEditorCreatedCardBase && !hasInlineEffectSources)
 		{
-			List<CardExtraEffect> borrowedEffects = BuildLegacyBorrowedRuntimeEffects(combatState, templateCard, effectSourceGuard);
+			List<CardExtraEffect> borrowedEffects = BuildLegacyBorrowedRuntimeEffects(combatState, templateCard, effectSourceGuard, keywordFilter);
 			if (borrowedEffects.Count > 0)
 			{
 				if (CardEditorCreatedCardsStore.GetEffectSourcePlacement(templateCard.Id) == CardEditorEffectSourcePlacement.BeforeCustomEffects)
@@ -3778,18 +3819,18 @@ internal static class CardEditorExtraEffects
 		}
 	}
 
-	private static List<CardExtraEffect> BuildLegacyBorrowedRuntimeEffects(CombatState? combatState, CardModel templateCard, HashSet<ModelId> effectSourceGuard)
+	private static List<CardExtraEffect> BuildLegacyBorrowedRuntimeEffects(CombatState? combatState, CardModel templateCard, HashSet<ModelId> effectSourceGuard, string? keywordFilter = null)
 	{
 		List<CardExtraEffect> borrowedEffects = new List<CardExtraEffect>();
 		foreach (ModelId sourceId in CardEditorCreatedCardEffectSourceSupport.GetRuntimeEffectSourceIds(templateCard, isUpgradePreview: false))
 		{
-			AppendBorrowedRuntimeEffectsFromSourceId(borrowedEffects, combatState, templateCard, sourceId, effectSourceGuard);
+			AppendBorrowedRuntimeEffectsFromSourceId(borrowedEffects, combatState, templateCard, sourceId, effectSourceGuard, keywordFilter);
 		}
 
 		return borrowedEffects;
 	}
 
-	internal static IReadOnlyList<CardExtraEffect> GetRuntimeEffectsForBorrowedSource(CombatState? combatState, CardModel hostCard, ModelId effectSourceId)
+	internal static IReadOnlyList<CardExtraEffect> GetRuntimeEffectsForBorrowedSource(CombatState? combatState, CardModel hostCard, ModelId effectSourceId, string? keywordFilter = null)
 	{
 		List<CardExtraEffect> borrowedEffects = new List<CardExtraEffect>();
 		AppendBorrowedRuntimeEffectsFromSourceId(
@@ -3797,7 +3838,8 @@ internal static class CardEditorExtraEffects
 			combatState,
 			hostCard,
 			effectSourceId,
-			new HashSet<ModelId>());
+			new HashSet<ModelId>(),
+			keywordFilter);
 		return borrowedEffects;
 	}
 
@@ -3838,7 +3880,8 @@ internal static class CardEditorExtraEffects
 		List<CardExtraEffect> destination,
 		CombatState combatState,
 		CardModel templateCard,
-		HashSet<ModelId> effectSourceGuard)
+		HashSet<ModelId> effectSourceGuard,
+		string? keywordFilter = null)
 	{
 		if (destination == null || templateCard == null)
 		{
@@ -3858,12 +3901,16 @@ internal static class CardEditorExtraEffects
 			{
 				continue;
 			}
+			if (!MatchesCustomKeywordFilter(effect, keywordFilter))
+			{
+				continue;
+			}
 
 			destination.Add(effect);
 			if (effect.Kind == CardExtraEffectKind.RunEffectSourceCard)
 			{
 				hasInlineEffectSources = true;
-				AppendBorrowedInspectionEffectsFromSourceId(destination, combatState, templateCard, effect.SpecificCardId, effectSourceGuard);
+				AppendBorrowedInspectionEffectsFromSourceId(destination, combatState, templateCard, effect.SpecificCardId, effectSourceGuard, effect.CustomKeywordName);
 			}
 		}
 
@@ -3872,7 +3919,7 @@ internal static class CardEditorExtraEffects
 			List<CardExtraEffect> borrowedEffects = new List<CardExtraEffect>();
 			foreach (ModelId sourceId in CardEditorCreatedCardEffectSourceSupport.GetRuntimeEffectSourceIds(templateCard, isUpgradePreview: false))
 			{
-				AppendBorrowedInspectionEffectsFromSourceId(borrowedEffects, combatState, templateCard, sourceId, effectSourceGuard);
+				AppendBorrowedInspectionEffectsFromSourceId(borrowedEffects, combatState, templateCard, sourceId, effectSourceGuard, keywordFilter);
 			}
 
 			if (borrowedEffects.Count > 0)
@@ -3900,14 +3947,15 @@ internal static class CardEditorExtraEffects
 		CombatState? combatState,
 		CardModel hostCard,
 		string? effectSourceIdText,
-		HashSet<ModelId> effectSourceGuard)
+		HashSet<ModelId> effectSourceGuard,
+		string? keywordFilter)
 	{
 		if (!TryParseEffectSourceModelId(effectSourceIdText, out ModelId effectSourceId))
 		{
 			return;
 		}
 
-		AppendBorrowedInspectionEffectsFromSourceId(destination, combatState, hostCard, effectSourceId, effectSourceGuard);
+		AppendBorrowedInspectionEffectsFromSourceId(destination, combatState, hostCard, effectSourceId, effectSourceGuard, keywordFilter);
 	}
 
 	private static void AppendBorrowedInspectionEffectsFromSourceId(
@@ -3915,7 +3963,8 @@ internal static class CardEditorExtraEffects
 		CombatState? combatState,
 		CardModel hostCard,
 		ModelId effectSourceId,
-		HashSet<ModelId> effectSourceGuard)
+		HashSet<ModelId> effectSourceGuard,
+		string? keywordFilter)
 	{
 		if (destination == null || hostCard == null || combatState == null || effectSourceId == null || effectSourceId == ModelId.none)
 		{
@@ -3935,7 +3984,7 @@ internal static class CardEditorExtraEffects
 				return;
 			}
 
-			AppendRuntimeEffectsForModifierInspection(destination, combatState, sourceCard, effectSourceGuard);
+			AppendRuntimeEffectsForModifierInspection(destination, combatState, sourceCard, effectSourceGuard, keywordFilter);
 		}
 		finally
 		{
@@ -3948,14 +3997,15 @@ internal static class CardEditorExtraEffects
 		CombatState? combatState,
 		CardModel hostCard,
 		string? effectSourceIdText,
-		HashSet<ModelId> effectSourceGuard)
+		HashSet<ModelId> effectSourceGuard,
+		string? keywordFilter)
 	{
 		if (!TryParseEffectSourceModelId(effectSourceIdText, out ModelId effectSourceId))
 		{
 			return;
 		}
 
-		AppendBorrowedRuntimeEffectsFromSourceId(destination, combatState, hostCard, effectSourceId, effectSourceGuard);
+		AppendBorrowedRuntimeEffectsFromSourceId(destination, combatState, hostCard, effectSourceId, effectSourceGuard, keywordFilter);
 	}
 
 	private static void AppendBorrowedRuntimeEffectsFromSourceId(
@@ -3963,7 +4013,8 @@ internal static class CardEditorExtraEffects
 		CombatState? combatState,
 		CardModel hostCard,
 		ModelId effectSourceId,
-		HashSet<ModelId> effectSourceGuard)
+		HashSet<ModelId> effectSourceGuard,
+		string? keywordFilter)
 	{
 		if (destination == null || hostCard == null || effectSourceId == null || effectSourceId == ModelId.none)
 		{
@@ -3983,7 +4034,7 @@ internal static class CardEditorExtraEffects
 				return;
 			}
 
-			AppendRuntimeEffectsIncludingBorrowedSources(destination, combatState, sourceCard, includeTemporaryEffects: false, effectSourceGuard);
+			AppendRuntimeEffectsIncludingBorrowedSources(destination, combatState, sourceCard, includeTemporaryEffects: false, effectSourceGuard, keywordFilter);
 		}
 		finally
 		{
@@ -4009,6 +4060,17 @@ internal static class CardEditorExtraEffects
 			id = ModelId.none;
 			return false;
 		}
+	}
+
+	private static bool MatchesCustomKeywordFilter(CardExtraEffect? effect, string? keywordFilter)
+	{
+		string? normalizedFilter = NormalizeCustomKeywordName(keywordFilter);
+		if (normalizedFilter == null)
+		{
+			return true;
+		}
+
+		return string.Equals(NormalizeCustomKeywordName(effect?.CustomKeywordName), normalizedFilter, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static string? NormalizeCustomKeywordName(string? value)
@@ -5125,6 +5187,7 @@ internal static class CardEditorExtraEffects
 				CardEditorTemporaryKeywordController.OnAfterCardPlayed(combatState, card);
 				CardEditorTemporaryEnchantmentController.OnAfterCardPlayed(combatState, card);
 				CardEditorTemporaryReplayController.OnAfterCardPlayed(combatState, card);
+				RefreshHandCardVisuals(card.Owner);
 				if (triggeredCardCostsLessToApplyAfter != null)
 				{
 					foreach (CardExtraEffect effect in triggeredCardCostsLessToApplyAfter)
@@ -6175,7 +6238,7 @@ internal static class CardEditorExtraEffects
 				return null;
 			}
 
-			return CardEditorCreatedCardEffectSourceSupport.GetSingleEffectSourceDescription(card, target, isUpgradePreview, sourceId, GetRunEffectSourceRuntimeInstanceKey(card, effect));
+			return CardEditorCreatedCardEffectSourceSupport.GetSingleEffectSourceDescription(card, target, isUpgradePreview, sourceId, GetRunEffectSourceRuntimeInstanceKey(card, effect), effect.CustomKeywordName);
 		}
 
 		if (effect.Kind == CardExtraEffectKind.ChooseOneEffectSource)
@@ -6274,26 +6337,33 @@ internal static class CardEditorExtraEffects
 				TryGetScaledAmountText(card, effect, baseAmount, target, upgradeHighlightComparison, out amountText);
 			}
 
-			string energyText = usesPowerTriggerEventAmount
-				? amountText + BuildEnergyIcons(card, 1)
-				: (amountIsX || forceNumericEnergyStars)
-				? amountText + BuildEnergyIcons(card, 1)
-				: BuildEnergyIcons(card, baseAmount);
-			string starText = usesPowerTriggerEventAmount
-				? amountText + BuildStarIcons(1)
-				: (amountIsX || forceNumericEnergyStars)
-				? amountText + BuildStarIcons(1)
-				: BuildStarIcons(baseAmount);
+			string FormatEnergyText()
+			{
+				return usesPowerTriggerEventAmount
+					? amountText + BuildEnergyIcons(card, 1)
+					: (amountIsX || forceNumericEnergyStars)
+						? amountText + BuildEnergyIcons(card, 1)
+						: BuildEnergyIcons(card, baseAmount);
+			}
+
+			string FormatStarText()
+			{
+				return usesPowerTriggerEventAmount
+					? amountText + BuildStarIcons(1)
+					: (amountIsX || forceNumericEnergyStars)
+						? amountText + BuildStarIcons(1)
+						: BuildStarIcons(baseAmount);
+			}
 
 			return effect.Kind switch
 			{
 				CardExtraEffectKind.GainBlock => FormatGainBlock(effect.Target, amountText),
 				CardExtraEffectKind.DealDamage => FormatDealDamage(effect.Target, amountText),
 				CardExtraEffectKind.DrawCards => FormatDrawCards(effect, grammarAmount, amountText),
-				CardExtraEffectKind.GainEnergy => CardEditorLoc.F("cardText.gainEnergy", $"Gain {energyText}.", ("Amount", energyText)),
-				CardExtraEffectKind.LoseEnergy => CardEditorLoc.F("cardText.loseEnergy", $"Lose {energyText}.", ("Amount", energyText)),
-				CardExtraEffectKind.GainStars => CardEditorLoc.F("cardText.gainStars", $"Gain {starText}.", ("Amount", starText)),
-				CardExtraEffectKind.LoseStars => CardEditorLoc.F("cardText.loseStars", $"Lose {starText}.", ("Amount", starText)),
+				CardExtraEffectKind.GainEnergy => CardEditorLoc.F("cardText.gainEnergy", $"Gain {FormatEnergyText()}.", ("Amount", FormatEnergyText())),
+				CardExtraEffectKind.LoseEnergy => CardEditorLoc.F("cardText.loseEnergy", $"Lose {FormatEnergyText()}.", ("Amount", FormatEnergyText())),
+				CardExtraEffectKind.GainStars => CardEditorLoc.F("cardText.gainStars", $"Gain {FormatStarText()}.", ("Amount", FormatStarText())),
+				CardExtraEffectKind.LoseStars => CardEditorLoc.F("cardText.loseStars", $"Lose {FormatStarText()}.", ("Amount", FormatStarText())),
 				CardExtraEffectKind.Heal => effect.Target switch
 				{
 					CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.heal.allEnemies", $"ALL enemies heal {amountText} HP.", ("Amount", amountText)),
@@ -10883,20 +10953,12 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 
 	private static string BuildStarIcons(int amount)
 	{
-		if (amount <= 0)
+		string icon = StarIconsFormatter.starIconSprite;
+		if (amount <= 0 || amount >= 4)
 		{
-			return "0 " + StarIconsFormatter.starIconSprite;
+			return amount.ToString(CultureInfo.InvariantCulture) + icon;
 		}
-		if (amount == 1)
-		{
-			return StarIconsFormatter.starIconSprite;
-		}
-		StringBuilder sb = new StringBuilder(StarIconsFormatter.starIconSprite.Length * amount);
-		for (int i = 0; i < amount; i++)
-		{
-			sb.Append(StarIconsFormatter.starIconSprite);
-		}
-		return sb.ToString();
+		return string.Concat(Enumerable.Repeat(icon, amount));
 	}
 
 	private static string PowerTitle(string powerName, string fallback)
@@ -12186,7 +12248,7 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 				return;
 			}
 
-			await CardEditorCreatedCardEffectSourceSupport.RunSingleEffectSourceOnPlay(card, choiceContext, cardPlay, sourceId, GetRunEffectSourceRuntimeInstanceKey(card, effect));
+			await CardEditorCreatedCardEffectSourceSupport.RunSingleEffectSourceOnPlay(card, choiceContext, cardPlay, sourceId, GetRunEffectSourceRuntimeInstanceKey(card, effect), effect.CustomKeywordName);
 			return;
 		}
 

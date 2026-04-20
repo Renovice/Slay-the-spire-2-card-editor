@@ -54,11 +54,16 @@ public static class CardEditorMod
 		RegisterCreatedCardsInPools();
 
 		Harmony harmony = new Harmony(HarmonyId);
+		PatchPrivateGetDescriptionForPile(harmony);
 		harmony.PatchAll(Assembly.GetExecutingAssembly());
 		EnsureIgnoreDamagePatches(harmony);
-		
-		// Patch the PRIVATE 3-param GetDescriptionForPile - the runtime calls this directly,
-		// bypassing the public 2-param wrapper that annotation-based patches target.
+
+	}
+
+	private static void PatchPrivateGetDescriptionForPile(Harmony harmony)
+	{
+		// Patch the PRIVATE 3-param GetDescriptionForPile before PatchAll so created-card
+		// descriptions still resolve even if a later attribute patch fails during init.
 		try
 		{
 			// DescriptionPreviewType is a private enum nested inside CardModel
@@ -536,25 +541,37 @@ public static class CardModel_DowngradeInternal_Patch
 // Manual patch class for GetDescriptionForPile - applied explicitly in Init()
 public static class GetDescriptionForPile_ManualPatch
 {
-	public static bool Prefix(CardModel __instance, MegaCrit.Sts2.Core.Entities.Creatures.Creature? target, ref string __result)
+	public static bool Prefix(CardModel __instance, object? __1, MegaCrit.Sts2.Core.Entities.Creatures.Creature? __2, ref string __result)
 	{
 		if (__instance is not CardEditorCreatedCardBase)
 		{
 			return true; // Continue to original for non-created cards
 		}
 
-		__result = CreatedCardTextBuilder.Build(__instance, target, isUpgradePreview: false);
+		__result = CreatedCardTextBuilder.Build(__instance, __2, isUpgradePreview: IsUpgradePreview(__1));
 		return false; // Skip original for created cards
 	}
 
-	public static void Postfix(CardModel __instance, MegaCrit.Sts2.Core.Entities.Creatures.Creature? target, ref string __result)
+	public static void Postfix(CardModel __instance, object? __1, MegaCrit.Sts2.Core.Entities.Creatures.Creature? __2, ref string __result)
 	{
 		if (__instance is CardEditorCreatedCardBase)
 		{
 			return;
 		}
 
-		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, target, isUpgradePreview: false);
+		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, __2, isUpgradePreview: IsUpgradePreview(__1));
+	}
+
+	private static bool IsUpgradePreview(object? previewType)
+	{
+		try
+		{
+			return previewType != null && Convert.ToInt32(previewType, System.Globalization.CultureInfo.InvariantCulture) == 1;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 }
 
@@ -1747,13 +1764,14 @@ public static class CardLibrary_ShowCardDetail_Patch
 	public static bool Prefix(NCardHolder holder, NCardLibrary __instance)
 	{
 		Log.Info("[CardEditor] ShowCardDetail prefix");
-		if (CardEditorUiState.IsActive && CardEditorBaseDeckLibraryHelper.ShouldSuppressShowCardDetailPopup())
+		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) &&
+			CardEditorBaseDeckLibraryHelper.ShouldSuppressShowCardDetailPopup())
 		{
 			return false;
 		}
 
 		if (holder?.CardModel != null &&
-			CardEditorBaseDeckLibraryHelper.TryConsumePendingCardDetailAction(holder, out bool isRightClick, out bool isShiftPressed))
+			CardEditorBaseDeckLibraryHelper.TryConsumePendingCardDetailAction(holder, out bool isRightClick, out _))
 		{
 			CardEditorBaseDeckLibraryHelper.ArmShowCardDetailSuppression(80);
 
@@ -1763,30 +1781,11 @@ public static class CardLibrary_ShowCardDetail_Patch
 				return false;
 			}
 
-			if (CardEditorUiState.IsBaseDeckAddActive && !isRightClick)
+			if (CardEditorUiState.IsBaseDeckAddActive && isRightClick)
 			{
 				CardEditorBaseDeckUiState.ToggleSelection(__instance, holder);
 				return false;
 			}
-
-			if ((CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive) && isShiftPressed)
-			{
-				if (isRightClick)
-				{
-					CardEditorLibrarySelectionState.RemoveSelection(__instance, holder);
-				}
-				else
-				{
-					CardEditorLibrarySelectionState.AddSelection(__instance, holder);
-				}
-				return false;
-			}
-		}
-
-		if ((CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive) && Input.IsKeyPressed(Key.Shift))
-		{
-			CardEditorBaseDeckLibraryHelper.ArmShowCardDetailSuppression(80);
-			return false;
 		}
 
 		if (!CardEditorUiState.IsActive)
@@ -1797,21 +1796,9 @@ public static class CardLibrary_ShowCardDetail_Patch
 		{
 			return false;
 		}
-		NCardEditorPopup popup;
-		if ((CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive)
-			&& CardEditorLibrarySelectionState.ShouldOpenBatchEditor(holder.CardModel))
-		{
-			CardModel batchPreview = CardEditorOverrides.BuildPreview(ModelDb.GetById<CardModel>(holder.CardModel.Id));
-			IReadOnlyList<ModelId> batchCardIds = CardEditorLibrarySelectionState.GetOrderedSelection(holder.CardModel.Id);
-			popup = NCardEditorPopup.CreateBatch(batchPreview, batchCardIds, () => CardEditorUiState.RefreshLibrary(__instance));
-		}
-		else
-		{
-			CardModel canonical = ModelDb.GetById<CardModel>(holder.CardModel.Id);
-			CardModel preview = CardEditorOverrides.BuildPreview(canonical);
-			popup = NCardEditorPopup.Create(preview, () => CardEditorUiState.RefreshLibrary(__instance));
-		}
-
+		CardModel canonical = ModelDb.GetById<CardModel>(holder.CardModel.Id);
+		CardModel preview = CardEditorOverrides.BuildPreview(canonical);
+		NCardEditorPopup popup = NCardEditorPopup.Create(preview, () => CardEditorUiState.RefreshLibrary(__instance));
 		Callable.From(() =>
 		{
 			Log.Info($"[CardEditor] Adding popup to modal container (instance={NModalContainer.Instance != null})");

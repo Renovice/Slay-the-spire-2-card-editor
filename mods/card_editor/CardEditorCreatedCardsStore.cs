@@ -121,9 +121,7 @@ internal static class CardEditorCreatedCardsStore
 		draft.Finish = finish;
 		draft.FinishParams = finishParams != null ? new Dictionary<string, float>(finishParams) : null;
 		draft.CustomTextEnabled = customTextEnabled;
-		draft.CustomText = customTextEnabled
-			? (customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText))
-			: (string.IsNullOrWhiteSpace(customText) ? null : customText);
+		draft.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
 	}
 
 	public static void ClearDraftMeta(ModelId cardId)
@@ -461,9 +459,7 @@ internal static class CardEditorCreatedCardsStore
 		def.Finish = finish;
 		def.FinishParams = finishParams != null ? new Dictionary<string, float>(finishParams) : null;
 		def.CustomTextEnabled = customTextEnabled;
-		def.CustomText = customTextEnabled
-			? (customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText))
-			: (string.IsNullOrWhiteSpace(customText) ? null : customText);
+		def.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
 		Revision++;
 		Save();
 	}
@@ -555,9 +551,7 @@ internal static class CardEditorCreatedCardsStore
 		}
 
 		draft.CustomTextUpgradedEnabled = enabled;
-		draft.CustomTextUpgraded = enabled
-			? (customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded))
-			: (string.IsNullOrWhiteSpace(customTextUpgraded) ? null : customTextUpgraded);
+		draft.CustomTextUpgraded = customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded);
 	}
 
 	public static void SetCustomTextUpgraded(ModelId cardId, string? customTextUpgraded, bool enabled)
@@ -570,9 +564,7 @@ internal static class CardEditorCreatedCardsStore
 		}
 
 		def.CustomTextUpgradedEnabled = enabled;
-		def.CustomTextUpgraded = enabled
-			? (customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded))
-			: (string.IsNullOrWhiteSpace(customTextUpgraded) ? null : customTextUpgraded);
+		def.CustomTextUpgraded = customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded);
 		Revision++;
 		Save();
 	}
@@ -1044,8 +1036,8 @@ internal static class CardEditorCreatedCardsStore
 				def.CustomPortraitFile = CustomPortraitFile.Trim();
 			}
 
-			def.CustomTextEnabled = CustomTextEnabled ?? !string.IsNullOrWhiteSpace(CustomText);
-			def.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? !string.IsNullOrWhiteSpace(CustomTextUpgraded);
+			def.CustomTextEnabled = CustomTextEnabled ?? (CustomText != null);
+			def.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? (CustomTextUpgraded != null);
 
 			if (CustomText != null)
 			{

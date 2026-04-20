@@ -1191,7 +1191,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			CustomMinimumSize = new Vector2(0, 42)
 		};
 		StyleActionButton(quickAddKeyword, minWidth: 150f);
-		quickAddKeyword.Pressed += () => OpenKeywordPicker(AddEffectSourceCardRow);
+		quickAddKeyword.Pressed += () => OpenKeywordPicker(AddKeywordEffectSourceRow);
 		buttons.AddChild(quickAddKeyword);
 
 		buttons.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
@@ -4504,6 +4504,31 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		QueuePreviewUpdate();
 	}
 
+	private void AddKeywordEffectSourceRow(CardEditorCustomKeywordLibraryEntry entry)
+	{
+		if (entry == null)
+		{
+			return;
+		}
+
+		ModelId selectedId = entry.SourceCardId;
+		if (selectedId == null || selectedId == ModelId.none || selectedId == _cardId)
+		{
+			return;
+		}
+
+		string keywordName = entry.KeywordName?.Trim() ?? string.Empty;
+		AddExtraEffectRow(new CardExtraEffect
+		{
+			Kind = CardExtraEffectKind.RunEffectSourceCard,
+			SpecificCardId = selectedId.ToString(),
+			CustomKeywordName = string.IsNullOrWhiteSpace(keywordName) ? null : keywordName,
+			Trigger = CardExtraEffectTrigger.OnPlay,
+			Target = CardExtraEffectTarget.Self
+		});
+		QueuePreviewUpdate();
+	}
+
 	private void BuildBaseCostUi(VBoxContainer rightColumn)
 	{
 		bool energyX = _previewCard.EnergyCost.CostsX;
@@ -5305,7 +5330,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		// Custom text override — checkbox + text area
 		bool hasCustomText = def.CustomTextEnabled;
 		rightColumn.AddChild(CreateTickboxRow(
-			CardEditorLoc.T("field.customText", "Custom Card Text"),
+			CardEditorLoc.T("field.modifiedBaseText", "Modified Base Card Text"),
 			hasCustomText,
 			out KeywordTickbox customTextTickbox,
 			OnCustomTextTickboxChanged));
@@ -5316,7 +5341,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			Text = def.CustomText ?? string.Empty,
 			CustomMinimumSize = new Vector2(0, 100),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-			PlaceholderText = CardEditorLoc.T("field.customTextPlaceholder", "Type your card text here..."),
+			PlaceholderText = CardEditorLoc.T("field.modifiedBaseTextPlaceholder", "Enable this to start from the current base card text."),
 			WrapMode = TextEdit.LineWrappingMode.Boundary,
 			Visible = hasCustomText
 		};
@@ -5342,6 +5367,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool enabled = _createdCustomTextTickbox?.IsTicked ?? false;
 		if (_createdCustomTextField != null)
 		{
+			if (enabled && string.IsNullOrEmpty(_createdCustomTextField.Text))
+			{
+				_createdCustomTextField.Text = BuildCreatedCustomTextSeedFromPreview(isUpgradePreview: false);
+			}
 			_createdCustomTextField.Visible = enabled;
 		}
 		OnCreatedCardMetaChanged();
@@ -5363,7 +5392,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool hasCustomText = CardEditorCreatedCardsStore.IsCustomTextUpgradedEnabled(_cardId);
 
 		rightColumn.AddChild(CreateTickboxRow(
-			CardEditorLoc.T("field.customTextUpgraded", "Custom Card Text (Upgraded)"),
+			CardEditorLoc.T("field.modifiedBaseTextUpgraded", "Modified Base Card Text (Upgraded)"),
 			hasCustomText,
 			out KeywordTickbox customTextTickbox,
 			OnUpgradeCustomTextTickboxChanged));
@@ -5374,7 +5403,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			Text = existing ?? string.Empty,
 			CustomMinimumSize = new Vector2(0, 100),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-			PlaceholderText = CardEditorLoc.T("field.customTextPlaceholder", "Type your card text here..."),
+			PlaceholderText = CardEditorLoc.T("field.modifiedBaseTextPlaceholder", "Enable this to start from the current base card text."),
 			WrapMode = TextEdit.LineWrappingMode.Boundary,
 			Visible = hasCustomText
 		};
@@ -5393,11 +5422,39 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool enabled = _createdCustomTextUpgradedTickbox?.IsTicked ?? false;
 		if (_createdCustomTextUpgradedField != null)
 		{
+			if (enabled && string.IsNullOrEmpty(_createdCustomTextUpgradedField.Text))
+			{
+				_createdCustomTextUpgradedField.Text = BuildCreatedCustomTextSeedFromPreview(isUpgradePreview: true);
+			}
 			_createdCustomTextUpgradedField.Visible = enabled;
 		}
 
 		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, enabled);
 		QueuePreviewUpdate();
+	}
+
+	private string BuildCreatedCustomTextSeedFromPreview(bool isUpgradePreview)
+	{
+		if (!_isCreatedCard)
+		{
+			return string.Empty;
+		}
+
+		try
+		{
+			CardModel preview = _previewCard;
+			if (preview == null || preview.Id != _cardId)
+			{
+				preview = CardEditorOverrides.BuildPreview(ModelDb.GetById<CardModel>(_cardId));
+				CardEditorCreatedCardEffectSourceSupport.EnsureEffectSourceDynamicVars(preview, isUpgradePreview);
+			}
+
+			return CreatedCardTextBuilder.Build(preview, preview.CurrentTarget, isUpgradePreview);
+		}
+		catch
+		{
+			return string.Empty;
+		}
 	}
 
 	private void OnUpgradeCustomTextChanged()
@@ -20643,7 +20700,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 	}
 
-	private void OpenKeywordPicker(Action<ModelId> onPicked)
+	private void OpenKeywordPicker(Action<CardEditorCustomKeywordLibraryEntry> onPicked)
 	{
 		if (onPicked == null)
 		{
@@ -20833,7 +20890,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				StyleActionButton(pickButton);
 				pickButton.Pressed += () =>
 				{
-					onPicked(entry.SourceCardId);
+					onPicked(entry);
 					CloseOverlay();
 				};
 				itemBody.AddChild(pickButton);

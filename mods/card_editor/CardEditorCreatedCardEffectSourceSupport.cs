@@ -337,7 +337,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 	}
 
-	public static async Task RunSingleEffectSourceOnPlay(CardModel createdCard, PlayerChoiceContext choiceContext, CardPlay cardPlay, ModelId effectSourceId, string? runtimeSourceInstanceKey = null)
+	public static async Task RunSingleEffectSourceOnPlay(CardModel createdCard, PlayerChoiceContext choiceContext, CardPlay cardPlay, ModelId effectSourceId, string? runtimeSourceInstanceKey = null, string? customKeywordFilter = null)
 	{
 		if (createdCard == null || choiceContext == null || cardPlay == null)
 		{
@@ -365,13 +365,18 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			CombatState? combatState = createdCard.CombatState ?? cardPlay?.Card?.CombatState;
 			if (combatState != null)
 			{
-				IReadOnlyList<CardExtraEffect> borrowedEffects = CardEditorExtraEffects.GetRuntimeEffectsForBorrowedSource(combatState, createdCard, effectSourceId);
+				IReadOnlyList<CardExtraEffect> borrowedEffects = CardEditorExtraEffects.GetRuntimeEffectsForBorrowedSource(combatState, createdCard, effectSourceId, customKeywordFilter);
 				if (borrowedEffects.Count > 0)
 				{
 					using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
 					using IDisposable __ = CardEditorEffectSourceContext.PushScoped(effectSourceCard);
 					await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(combatState, choiceContext, cardPlay, borrowedEffects);
 				}
+			}
+
+			if (!string.IsNullOrWhiteSpace(customKeywordFilter))
+			{
+				return;
 			}
 
 			if (effectSourceCard is CardEditorCreatedCardBase)
@@ -416,7 +421,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 	}
 
-	public static string? GetSingleEffectSourceDescription(CardModel createdCard, Creature? target, bool isUpgradePreview, ModelId effectSourceId, string? runtimeSourceInstanceKey = null)
+	public static string? GetSingleEffectSourceDescription(CardModel createdCard, Creature? target, bool isUpgradePreview, ModelId effectSourceId, string? runtimeSourceInstanceKey = null, string? customKeywordFilter = null)
 	{
 		if (createdCard == null || effectSourceId == null || effectSourceId == ModelId.none)
 		{
@@ -431,6 +436,19 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 		try
 		{
+			string keywordFilter = customKeywordFilter?.Trim() ?? string.Empty;
+			if (!string.IsNullOrWhiteSpace(keywordFilter))
+			{
+				CardExtraEffectKeywordSummary? keywordSummary = CardEditorExtraEffects.GetCustomKeywordSummaries(effectSourceCard, target, isUpgradePreview)
+					.FirstOrDefault(summary => string.Equals(summary.Name?.Trim() ?? string.Empty, keywordFilter, StringComparison.OrdinalIgnoreCase));
+				if (keywordSummary != null && !string.IsNullOrWhiteSpace(keywordSummary.Description))
+				{
+					return keywordSummary.Description.Trim();
+				}
+
+				return null;
+			}
+
 			return isUpgradePreview
 				? effectSourceCard.GetDescriptionForUpgradePreview()
 				: effectSourceCard.GetDescriptionForPile(PileType.None, target);

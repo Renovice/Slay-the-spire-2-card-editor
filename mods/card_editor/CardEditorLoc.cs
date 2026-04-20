@@ -214,7 +214,15 @@ internal static class CardEditorLoc
 			return false;
 		}
 
-		value = NormalizeLocalizedSpacing(new LocString(Table, fullKey).GetFormattedText());
+		LocString loc = new LocString(Table, fullKey);
+		try
+		{
+			value = NormalizeLocalizedSpacing(loc.GetFormattedText());
+		}
+		catch
+		{
+			value = NormalizeLocalizedSpacing(loc.GetRawText());
+		}
 		_textCache[cacheKey] = value;
 		return true;
 	}

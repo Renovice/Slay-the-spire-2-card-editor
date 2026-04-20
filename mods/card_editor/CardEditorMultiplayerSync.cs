@@ -156,8 +156,8 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 			definition.CustomPortraitFile = CustomPortraitFile.Trim();
 		}
 
-		definition.CustomTextEnabled = CustomTextEnabled ?? !string.IsNullOrWhiteSpace(CustomText);
-		definition.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? !string.IsNullOrWhiteSpace(CustomTextUpgraded);
+		definition.CustomTextEnabled = CustomTextEnabled ?? (CustomText != null);
+		definition.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? (CustomTextUpgraded != null);
 
 		if (CustomText != null)
 		{
