@@ -3,6 +3,7 @@ using System.Globalization;
 using Godot;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Logging;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardLibrary;
 
@@ -83,7 +84,8 @@ public partial class NCardEditorBaseDeckPanel : Control
 	{
 		bool baseDeckMode = CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive;
 		bool presetOnlyMode = CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive;
-		Visible = baseDeckMode || presetOnlyMode;
+		bool modalOpen = NModalContainer.Instance?.OpenModal != null;
+		Visible = (baseDeckMode || presetOnlyMode) && !modalOpen;
 		if (!Visible)
 		{
 			CardEditorBaseDeckActionBarTunerHooks.Sync(this);
@@ -140,7 +142,7 @@ public partial class NCardEditorBaseDeckPanel : Control
 		_presetButton.SetButtonEnabled(true);
 		_addButton.SetEmphasized(hasSelection);
 		_deleteButton.SetEmphasized(CardEditorUiState.IsBaseDeckActive && hasSelection);
-		_cardListButton.SetEmphasized(false);
+		_cardListButton.SetEmphasized(true);
 		_resetButton.SetEmphasized(false);
 		_presetButton.SetEmphasized(false);
 		_cardListButton.SetSelected(CardEditorUiState.IsBaseDeckAddActive);
@@ -243,6 +245,10 @@ internal static class CardEditorBaseDeckPanelHooks
 			CardEditorUiState.IsBaseDeckAddActive ||
 			CardEditorUiState.IsEditorActive ||
 			CardEditorUiState.IsCreatorActive;
+		if (NModalContainer.Instance?.OpenModal != null)
+		{
+			shouldShow = false;
+		}
 		if (shouldShow)
 		{
 			CardEditorUiState.SetLastLibrary(library);

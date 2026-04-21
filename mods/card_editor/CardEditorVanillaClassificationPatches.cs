@@ -136,11 +136,15 @@ internal static class CardModel_get_TargetType_VanillaOverride_Patch
 		}
 		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData))
 		{
-			return;
+			overrideData = null!;
 		}
-		if (overrideData.TargetType is TargetType target && target != TargetType.None)
+		if (overrideData != null && overrideData.TargetType is TargetType target && target != TargetType.None)
 		{
 			__result = target;
+		}
+		if (CardEditorExtraEffects.TryGetRuleAdjustedTargetType(__instance, __result, out TargetType adjustedTargetType))
+		{
+			__result = adjustedTargetType;
 		}
 	}
 }

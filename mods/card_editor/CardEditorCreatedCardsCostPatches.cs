@@ -286,6 +286,98 @@ internal static class CardEditorCreatedCardsCostController
 		return true;
 	}
 
+	private static bool ApplyPermanentEnergyCost(CardModel card, int amount, CardExtraEffectCostModifier modifier)
+	{
+		if (card == null || card.EnergyCost.CostsX)
+		{
+			return false;
+		}
+
+		int baseCost = card.EnergyCost.GetWithModifiers(CostModifiers.None);
+		if (baseCost < 0)
+		{
+			return false;
+		}
+
+		int targetCost = baseCost;
+		switch (modifier)
+		{
+			case CardExtraEffectCostModifier.Free:
+			case CardExtraEffectCostModifier.FreeToPlay:
+				targetCost = 0;
+				break;
+			case CardExtraEffectCostModifier.HalfCost:
+				targetCost = Math.Max(0, baseCost / 2);
+				break;
+			default:
+				if (amount == -1)
+				{
+					targetCost = 0;
+					break;
+				}
+				if (amount <= 0)
+				{
+					return false;
+				}
+				targetCost = Math.Max(-1, baseCost - amount);
+				break;
+		}
+
+		if (targetCost == baseCost)
+		{
+			return false;
+		}
+
+		card.EnergyCost.SetCustomBaseCost(targetCost);
+		return true;
+	}
+
+	private static bool ApplyPermanentStarCost(CardModel card, int amount, CardExtraEffectCostModifier modifier)
+	{
+		if (card == null || card.HasStarCostX)
+		{
+			return false;
+		}
+
+		int baseCost = card.BaseStarCost;
+		if (baseCost < 0)
+		{
+			return false;
+		}
+
+		int targetCost = baseCost;
+		switch (modifier)
+		{
+			case CardExtraEffectCostModifier.Free:
+			case CardExtraEffectCostModifier.FreeToPlay:
+				targetCost = 0;
+				break;
+			case CardExtraEffectCostModifier.HalfCost:
+				targetCost = Math.Max(0, baseCost / 2);
+				break;
+			default:
+				if (amount == -1)
+				{
+					targetCost = 0;
+					break;
+				}
+				if (amount <= 0)
+				{
+					return false;
+				}
+				targetCost = Math.Max(-1, baseCost - amount);
+				break;
+		}
+
+		if (targetCost == baseCost)
+		{
+			return false;
+		}
+
+		CardEditorOverrides.SetBaseStarCostUnsafe(card, targetCost);
+		return true;
+	}
+
 	private static bool ApplyThisTurnCore(CardModel card, int amount, CardExtraEffectCostModifier modifier)
 	{
 		if (card == null)
@@ -457,6 +549,24 @@ internal static class CardEditorCreatedCardsCostController
 		}
 
 		if (ApplyUntilPlayedCore(card, amount, modifier))
+		{
+			NotifyCostChanged(card, resource);
+		}
+	}
+
+	public static void ApplyPermanent(CardModel card, int amount, CardExtraEffectCostModifier modifier = CardExtraEffectCostModifier.Reduce, CardCreatedCardsCostResource resource = CardCreatedCardsCostResource.Energy)
+	{
+		modifier = NormalizeModifier(amount, modifier);
+		if (resource == CardCreatedCardsCostResource.Stars)
+		{
+			if (ApplyPermanentStarCost(card, amount, modifier))
+			{
+				NotifyCostChanged(card, resource);
+			}
+			return;
+		}
+
+		if (ApplyPermanentEnergyCost(card, amount, modifier))
 		{
 			NotifyCostChanged(card, resource);
 		}
@@ -674,6 +784,7 @@ internal static class CombatHistory_CardPlayFinished_CardEditorContext_Patch
 [HarmonyPatch(typeof(CardPileCmd), nameof(CardPileCmd.AddGeneratedCardsToCombat))]
 internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsCostLess_Patch
 {
+	[HarmonyPriority(Priority.Last)]
 	public static void Prefix(ref IEnumerable<CardModel> cards)
 	{
 		if (cards == null)
@@ -749,6 +860,9 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsCostLess
 				CardCreatedCardsCostResource resource = effect.CreatedCardsCostResource;
 				switch (effect.CreatedCardsCostDuration)
 				{
+					case CardCreatedCardsCostDuration.Permanent:
+						CardEditorCreatedCardsCostController.ApplyPermanent(card, effect.Amount, modifier, resource);
+						break;
 					case CardCreatedCardsCostDuration.ThisCombat:
 						CardEditorCreatedCardsCostController.ApplyThisCombat(card, effect.Amount, modifier, resource);
 						break;

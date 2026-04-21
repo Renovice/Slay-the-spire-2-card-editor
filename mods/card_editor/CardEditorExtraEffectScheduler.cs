@@ -308,6 +308,7 @@ internal static class CardEditorExtraEffectScheduler
 			using IDisposable _ = CardEditorCardPlayContext.PushScoped(play);
 			using IDisposable __ = CardEditorEffectSourceContext.PushScoped(scheduled.Card);
 			using IDisposable ___ = CardEditorPowerExecutionHostContext.PushScoped(scheduled.ExecutionHost);
+			using IDisposable ____ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
 			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, scheduled.Effect, scheduled.TriggerEventAmount);
 		}
 		catch (Exception ex)

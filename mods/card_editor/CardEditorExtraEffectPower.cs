@@ -466,6 +466,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			triggeringCard ??= triggeringPlay?.Card;
 			eventActor ??= GetEventActor(triggeringCard, triggeringPlay) ?? owner;
 
+			using IDisposable _ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
 			foreach (PowerEffectEntry entry in Entries.ToList())
 			{
 				if (entry == null
@@ -492,7 +493,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 				Player? filterOwner = entry.SourceCard?.Owner ?? owner.Player;
 				if (triggeringCard != null
-					&& CardEditorExtraEffects.CountEventUsesCardFilters(countEvent)
+					&& CardEditorExtraEffects.PowerCountEventUsesCardFilters(countEvent)
 					&& !CardEditorExtraEffects.MatchesPowerTriggerCardFilters(filterOwner, triggeringCard, entry.Effect))
 				{
 					continue;

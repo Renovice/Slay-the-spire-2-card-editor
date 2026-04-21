@@ -361,7 +361,7 @@ internal static class CardEditorBaseDeckBookmarkHooks
 		MakeButtonInvisible(hitbox);
 		hitbox.MouseEntered += () => SetHovered(root, hovered: true);
 		hitbox.MouseExited += () => SetHovered(root, hovered: false);
-		hitbox.Pressed += () => OnPressed(library);
+		hitbox.Pressed += () => OnPressed(library, root);
 		root.AddChild(hitbox);
 
 		root.SetMeta(HoverMetaKey, false);
@@ -490,8 +490,9 @@ internal static class CardEditorBaseDeckBookmarkHooks
 		ApplyVisualState(root, selected, hovered);
 	}
 
-	private static void OnPressed(NCardLibrary library)
+	private static void OnPressed(NCardLibrary library, Control root)
 	{
+		root.SetMeta(HoverMetaKey, false);
 		if (CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive)
 		{
 			CardEditorBaseDeckUiState.ExitToEditor();

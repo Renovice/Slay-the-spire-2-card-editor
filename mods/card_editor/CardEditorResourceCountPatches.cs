@@ -25,10 +25,10 @@ internal static class Hook_AfterBlockGained_CardEditorResourceCount_Patch
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, creature, amount);
+		__result = TrackAfter(__result, combatState, creature, amount, cardSource);
 	}
 
-	private static async Task TrackAfter(Task original, CombatState combatState, Creature creature, decimal amount)
+	private static async Task TrackAfter(Task original, CombatState combatState, Creature creature, decimal amount, CardModel? cardSource)
 	{
 		await original;
 		try
@@ -36,8 +36,9 @@ internal static class Hook_AfterBlockGained_CardEditorResourceCount_Patch
 			int delta = Math.Max(0, (int)Math.Min(amount, int.MaxValue));
 			if (delta > 0)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentBlockApplied(delta);
 				CardEditorExtraEffects.RecordResourceCount(combatState, creature, CardExtraEffectCountEvent.BlockGained, delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.BlockGained, amount: delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.BlockGained, triggeringCard: cardSource, amount: delta);
 			}
 		}
 		catch (Exception ex)
@@ -57,10 +58,10 @@ internal static class Hook_AfterEnergySpent_CardEditorPowerCountEvent_Patch
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, card.Owner.Creature, amount);
+		__result = TrackAfter(__result, combatState, card.Owner.Creature, card, amount);
 	}
 
-	private static async Task TrackAfter(Task original, CombatState combatState, Creature creature, int amount)
+	private static async Task TrackAfter(Task original, CombatState combatState, Creature creature, CardModel? triggeringCard, int amount)
 	{
 		await original;
 		try
@@ -68,7 +69,7 @@ internal static class Hook_AfterEnergySpent_CardEditorPowerCountEvent_Patch
 			int delta = Math.Max(0, amount);
 			if (delta > 0)
 			{
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.EnergyUsed, amount: delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.EnergyUsed, triggeringCard: triggeringCard, amount: delta);
 			}
 		}
 		catch (Exception ex)
@@ -99,6 +100,7 @@ internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 			int delta = Math.Max(0, results?.UnblockedDamage ?? 0);
 			if (delta > 0)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentDamageApplied(delta);
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, dealer, CardExtraEffectCountEvent.DamageDealt, amount: delta);
 			}
 		}
@@ -161,6 +163,7 @@ internal static class Hook_AfterSummon_CardEditorPowerCountEvent_Patch
 			int delta = Math.Max(0, (int)Math.Min(amount, int.MaxValue));
 			if (delta > 0)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentSummonApplied(delta);
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.Summoned, amount: delta);
 			}
 		}
@@ -203,6 +206,7 @@ internal static class PlayerCmd_GainEnergy_CardEditorResourceCount_Patch
 				: Math.Max(0, oldEnergy - currentEnergy);
 			if (delta > 0 && state != null)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentEnergyApplied(delta, gain);
 				CardEditorExtraEffects.RecordResourceCount(state, actor, countEvent, delta);
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(state, actor, countEvent, amount: delta);
 			}
@@ -246,6 +250,7 @@ internal static class PlayerCmd_LoseEnergy_CardEditorResourceCount_Patch
 				: Math.Max(0, oldEnergy - currentEnergy);
 			if (delta > 0 && state != null)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentEnergyApplied(delta, gain);
 				CardEditorExtraEffects.RecordResourceCount(state, actor, countEvent, delta);
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(state, actor, countEvent, amount: delta);
 			}
@@ -277,6 +282,7 @@ internal static class Creature_LoseBlockInternal_CardEditorResourceCount_Patch
 			int delta = Math.Max(0, __state - __instance.Block);
 			if (delta > 0 && __instance.CombatState != null)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentBlockRemoved(delta);
 				CardEditorExtraEffects.RecordResourceCount(__instance.CombatState, __instance, CardExtraEffectCountEvent.BlockLost, delta);
 				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.CombatState, __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
 			}
@@ -308,6 +314,7 @@ internal static class Creature_DamageBlockInternal_CardEditorResourceCount_Patch
 			int delta = Math.Max(0, __state - __instance.Block);
 			if (delta > 0)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentBlockRemoved(delta);
 				CardEditorExtraEffects.RecordResourceCount(__instance.CombatState, __instance, CardExtraEffectCountEvent.BlockLost, delta);
 				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.CombatState, __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
 			}
@@ -394,6 +401,7 @@ internal static class CreatureCmd_Heal_CardEditorResourceCount_Patch
 			int delta = Math.Max(0, creature.CurrentHp - oldHp);
 			if (delta > 0)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentHealingApplied(delta);
 				CardEditorExtraEffects.RecordResourceCount(combatState, creature, CardExtraEffectCountEvent.HealingReceived, delta);
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.HealingReceived, amount: delta);
 			}
@@ -415,10 +423,10 @@ internal static class Hook_AfterPowerAmountChanged_CardEditorPowerCountEvent_Pat
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, power, amount);
+		__result = TrackAfter(__result, combatState, power, amount, cardSource);
 	}
 
-	private static async Task TrackAfter(Task original, CombatState combatState, PowerModel power, decimal amount)
+	private static async Task TrackAfter(Task original, CombatState combatState, PowerModel power, decimal amount, CardModel? cardSource)
 	{
 		await original;
 		try
@@ -437,11 +445,13 @@ internal static class Hook_AfterPowerAmountChanged_CardEditorPowerCountEvent_Pat
 
 			if (amount > 0m)
 			{
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, owner, CardExtraEffectCountEvent.StatusGained, triggeringPower: power, amount: delta);
+				CardEditorEffectExecutionAmountContext.ReportCurrentPowerAmountChanged(power, delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, owner, CardExtraEffectCountEvent.StatusGained, triggeringPower: power, triggeringCard: cardSource, amount: delta);
 			}
 			else if (amount < 0m)
 			{
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, owner, CardExtraEffectCountEvent.StatusLost, triggeringPower: power, amount: delta);
+				CardEditorEffectExecutionAmountContext.ReportCurrentPowerAmountChanged(power, delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, owner, CardExtraEffectCountEvent.StatusLost, triggeringPower: power, triggeringCard: cardSource, amount: delta);
 			}
 		}
 		catch (Exception ex)
@@ -476,6 +486,7 @@ internal static class PlayerCmd_GainStars_CardEditorPowerCountEvent_Patch
 				: (int)Math.Min(decimal.Truncate(amount), int.MaxValue);
 			if (combatState != null && delta > 0)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentStarsApplied(delta, gain: true);
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, actor, countEvent, amount: delta);
 			}
 		}
@@ -511,6 +522,7 @@ internal static class PlayerCmd_LoseStars_CardEditorPowerCountEvent_Patch
 				: (int)Math.Min(decimal.Truncate(amount), int.MaxValue);
 			if (combatState != null && delta > 0)
 			{
+				CardEditorEffectExecutionAmountContext.ReportCurrentStarsApplied(delta, gain: false);
 				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, actor, countEvent, amount: delta);
 			}
 		}

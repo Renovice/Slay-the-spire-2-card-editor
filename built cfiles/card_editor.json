@@ -3,7 +3,7 @@
   "name": "Card Editor",
   "author": "Renovice",
   "description": "In-game card editor + compendium-style browser. Edit costs, keywords, numbers, enchantments/afflictions, and add extra effects. Includes presets to save/load profiles.",
-  "version": "4.6",
+  "version": "5.4",
   "has_pck": true,
   "has_dll": true,
   "affects_gameplay": true,

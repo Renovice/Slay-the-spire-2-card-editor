@@ -1781,7 +1781,7 @@ public static class CardLibrary_ShowCardDetail_Patch
 				return false;
 			}
 
-			if (CardEditorUiState.IsBaseDeckAddActive && isRightClick)
+			if (CardEditorUiState.IsBaseDeckAddActive && !isRightClick)
 			{
 				CardEditorBaseDeckUiState.ToggleSelection(__instance, holder);
 				return false;
@@ -1803,7 +1803,11 @@ public static class CardLibrary_ShowCardDetail_Patch
 		{
 			Log.Info($"[CardEditor] Adding popup to modal container (instance={NModalContainer.Instance != null})");
 			NModalContainer.Instance?.Add(popup);
+			CardEditorBaseDeckPanelHooks.RefreshLastLibrary();
+			CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
 			popup.ForceLayoutRefreshNow();
+			Callable.From(CardEditorBaseDeckPanelHooks.RefreshLastLibrary).CallDeferred();
+			Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
 			Callable.From(popup.ForceLayoutRefreshNow).CallDeferred();
 		}).CallDeferred();
 		return false;
@@ -2656,6 +2660,7 @@ public static class Hook_AfterTurnEnd_Patch
 				CardEditorTemporaryExtraEffectController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryEnchantmentController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryReplayController.OnAfterPlayerTurnEnd(combatState);
+				CardEditorMatchingCardAuraController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorCardTypeCostAuras.OnAfterPlayerTurnEnd(combatState);
 				CardEditorDrawnGeneratedCostController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorUpgradeAuraController.OnAfterPlayerTurnEnd(combatState);
@@ -2697,6 +2702,7 @@ public static class Hook_AfterCombatEnd_ClearScheduledEffects_Patch
 				CardEditorTemporaryExtraEffectController.Clear(combatState);
 				CardEditorTemporaryEnchantmentController.Clear(combatState);
 				CardEditorTemporaryReplayController.Clear(combatState);
+				CardEditorMatchingCardAuraController.Clear(combatState);
 				CardEditorCardTypeCostAuras.Clear(combatState);
 				CardEditorDrawnGeneratedCostController.Clear(combatState);
 				CardEditorUpgradeAuraController.Clear(combatState);
