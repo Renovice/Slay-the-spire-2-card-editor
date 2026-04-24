@@ -46,6 +46,19 @@ namespace SlayTheSpire2Mod.CardEditor;
 public static class CardEditorMod
 {
 	private const string HarmonyId = "slaythespire2.card_editor";
+	private static readonly bool VerboseEditorLogging = false;
+
+	internal static bool IsVerboseEditorLogging => VerboseEditorLogging;
+
+	internal static void VerboseLog(string message)
+	{
+		if (!VerboseEditorLogging)
+		{
+			return;
+		}
+
+		Log.Info(message);
+	}
 
 	public static void Init()
 	{
@@ -1599,6 +1612,7 @@ public static class MainMenu_Ready_Patch
 		TryAddEditorButton(__instance);
 		TryAddCreatorButton(__instance);
 		TryApplyStartupPresetsOnce();
+		NCardEditorPopup.TryQueueUiWarmup(__instance);
 	}
 
 	private static void TryApplyStartupPresetsOnce()
@@ -1761,9 +1775,109 @@ public static class MainMenu_Ready_Patch
 [HarmonyPatch(typeof(NCardLibrary), "ShowCardDetail")]
 public static class CardLibrary_ShowCardDetail_Patch
 {
+	private const string PopupOpenBlockerName = "CardEditorPopupOpenBlocker";
+
+	private static Control? AddPopupOpenBlocker()
+	{
+		Node? host = NModalContainer.Instance;
+		if (host == null || !GodotObject.IsInstanceValid(host))
+		{
+			host = NGame.Instance;
+		}
+
+		if (host == null || !GodotObject.IsInstanceValid(host))
+		{
+			return null;
+		}
+
+		host.GetNodeOrNull<Control>(PopupOpenBlockerName)?.QueueFreeSafely();
+
+		Control blocker = new()
+		{
+			Name = PopupOpenBlockerName,
+			ZAsRelative = false,
+			ZIndex = 500,
+			Visible = true,
+			MouseFilter = Control.MouseFilterEnum.Stop,
+			MouseDefaultCursorShape = Control.CursorShape.Arrow
+		};
+		blocker.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+		ColorRect backstop = new()
+		{
+			Color = new Color(0f, 0f, 0f, 0.01f),
+			MouseFilter = Control.MouseFilterEnum.Ignore
+		};
+		backstop.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+		blocker.AddChild(backstop);
+
+		host.AddChild(blocker);
+		host.MoveChild(blocker, host.GetChildCount() - 1);
+		return blocker;
+	}
+
+	private static void OpenEditorPopupDeferred(ModelId cardId, NCardLibrary library)
+	{
+		Callable.From(() =>
+		{
+			Control? blocker = AddPopupOpenBlocker();
+			Callable.From(() => CompleteEditorPopupOpen(cardId, library, blocker)).CallDeferred();
+		}).CallDeferred();
+	}
+
+	private static void CompleteEditorPopupOpen(ModelId cardId, NCardLibrary library, Control? blocker)
+	{
+		ulong openStartMs = Time.GetTicksMsec();
+		try
+		{
+			if (cardId == null || cardId == ModelId.none || library == null || !GodotObject.IsInstanceValid(library))
+			{
+				return;
+			}
+
+			CardEditorCustomPortraitLoader.TryGetCustomPortrait(cardId, out _);
+
+			Action onApplied = () =>
+			{
+				if (GodotObject.IsInstanceValid(library))
+				{
+					CardEditorUiState.RefreshLibrary(library);
+				}
+			};
+
+			CardModel canonical = ModelDb.GetById<CardModel>(cardId);
+			CardModel preview = CardEditorOverrides.BuildPreview(canonical);
+			NCardEditorPopup popup = NCardEditorPopup.GetOrCreatePersistentPopup(preview, onApplied);
+
+			CardEditorMod.VerboseLog("[CardEditor] Opening persistent popup from cache host");
+			if (popup.GetParent() == null)
+			{
+				NGame.Instance?.AddChildSafely(popup);
+			}
+
+			popup.ForceLayoutRefreshNow();
+			Callable.From(popup.ForceLayoutRefreshNow).CallDeferred();
+			CardEditorBaseDeckPanelHooks.RefreshLastLibrary();
+			CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
+			Callable.From(CardEditorBaseDeckPanelHooks.RefreshLastLibrary).CallDeferred();
+			Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
+
+			ulong openElapsedMs = Time.GetTicksMsec() - openStartMs;
+			Log.Info($"[CardEditor][Perf] OpenEditorPopup card={cardId} elapsedMs={openElapsedMs}");
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed opening editor popup for {cardId}: {ex}");
+		}
+		finally
+		{
+			blocker?.QueueFreeSafely();
+		}
+	}
+
 	public static bool Prefix(NCardHolder holder, NCardLibrary __instance)
 	{
-		Log.Info("[CardEditor] ShowCardDetail prefix");
+		CardEditorMod.VerboseLog("[CardEditor] ShowCardDetail prefix");
 		if ((CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive) &&
 			CardEditorBaseDeckLibraryHelper.ShouldSuppressShowCardDetailPopup())
 		{
@@ -1796,20 +1910,7 @@ public static class CardLibrary_ShowCardDetail_Patch
 		{
 			return false;
 		}
-		CardModel canonical = ModelDb.GetById<CardModel>(holder.CardModel.Id);
-		CardModel preview = CardEditorOverrides.BuildPreview(canonical);
-		NCardEditorPopup popup = NCardEditorPopup.Create(preview, () => CardEditorUiState.RefreshLibrary(__instance));
-		Callable.From(() =>
-		{
-			Log.Info($"[CardEditor] Adding popup to modal container (instance={NModalContainer.Instance != null})");
-			NModalContainer.Instance?.Add(popup);
-			CardEditorBaseDeckPanelHooks.RefreshLastLibrary();
-			CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
-			popup.ForceLayoutRefreshNow();
-			Callable.From(CardEditorBaseDeckPanelHooks.RefreshLastLibrary).CallDeferred();
-			Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
-			Callable.From(popup.ForceLayoutRefreshNow).CallDeferred();
-		}).CallDeferred();
+		OpenEditorPopupDeferred(holder.CardModel.Id, __instance);
 		return false;
 	}
 }
@@ -1880,7 +1981,10 @@ internal static class CardEditorPresetPanelHooks
 			CardEditorUiState.IsBaseDeckActive ||
 			CardEditorUiState.IsBaseDeckAddActive;
 		bool shouldShowStandaloneButton = CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive;
-		Log.Info($"[CardEditor][PresetButton] Sync mode={CardEditorUiState.Mode} shouldShowPanel={shouldShowPanel} shouldShowStandalone={shouldShowStandaloneButton} panelExists={panel != null} buttonExists={toggleButton != null} baseDeckPanelExists={baseDeckPanel != null} open={IsOpen(library)}");
+		if (CardEditorMod.IsVerboseEditorLogging)
+		{
+			Log.Info($"[CardEditor][PresetButton] Sync mode={CardEditorUiState.Mode} shouldShowPanel={shouldShowPanel} shouldShowStandalone={shouldShowStandaloneButton} panelExists={panel != null} buttonExists={toggleButton != null} baseDeckPanelExists={baseDeckPanel != null} open={IsOpen(library)}");
+		}
 		if (shouldShowPanel)
 		{
 			CardEditorUiState.SetLastLibrary(library);
@@ -1946,7 +2050,7 @@ public static class CardLibrary_OnSubmenuClosed_Patch
 	public static void Postfix(NCardLibrary __instance)
 	{
 		CardEditorBaseDeckBookmarkHooks.LogLibraryLifecycle("Library.OnSubmenuClosed:modeResetPatch:start", __instance);
-		Log.Info($"[CardEditor] OnSubmenuClosed: Resetting Mode from {CardEditorUiState.Mode} to None");
+		CardEditorMod.VerboseLog($"[CardEditor] OnSubmenuClosed: Resetting Mode from {CardEditorUiState.Mode} to None");
 		CardEditorBaseDeckBookmarkHooks.ForceReset(__instance);
 		CardEditorUiState.Mode = CardEditorLibraryMode.None;
 		CardEditorUiState.SetLastLibrary(null);
@@ -1961,6 +2065,15 @@ public static class CardLibraryGrid_FilterCards_Patch
 {
 	private static readonly FieldInfo? _allCardsField =
 		typeof(NCardLibraryGrid).GetField("_allCards", BindingFlags.Instance | BindingFlags.NonPublic);
+	private static int _cachedCreatorCardsOverrideRevision = -1;
+	private static int _cachedCreatorCardsCreatedRevision = -1;
+	private static int _cachedCreatorCardsDraftRevision = -1;
+	private static List<CardModel>? _cachedCreatorCards;
+	private static int _cachedEditableLibraryOverrideRevision = -1;
+	private static int _cachedEditableLibraryCreatedRevision = -1;
+	private static int _cachedEditableLibraryDraftRevision = -1;
+	private static int _cachedEditableLibrarySourceCount = -1;
+	private static List<CardModel>? _cachedEditableLibraryCards;
 
 	private static NCardLibrary? FindOwningLibrary(Node? node)
 	{
@@ -2003,7 +2116,10 @@ public static class CardLibraryGrid_FilterCards_Patch
 	public static bool Prefix(NCardLibraryGrid __instance, Func<CardModel, bool> filter, List<SortingOrders> sortingPriority)
 	{
 		CardEditorLibraryMode mode = CardEditorUiState.Mode;
-		Log.Info($"[CardEditor] FilterCards Prefix: mode={mode}");
+		if (CardEditorMod.IsVerboseEditorLogging)
+		{
+			Log.Info($"[CardEditor] FilterCards Prefix: mode={mode}");
+		}
 
 		if (mode == CardEditorLibraryMode.Editor || mode == CardEditorLibraryMode.BaseDeck || mode == CardEditorLibraryMode.BaseDeckAdd)
 		{
@@ -2027,9 +2143,12 @@ public static class CardLibraryGrid_FilterCards_Patch
 			else
 			{
 				// Original behaviour: show every card in slot order, ignore filters.
-				displayCards = creatorCards;
+				displayCards = new List<CardModel>(creatorCards);
 			}
-			Log.Info($"[CardEditor] Creator mode: {creatorCards.Count} cards, {displayCards.Count} displayed");
+			if (CardEditorMod.IsVerboseEditorLogging)
+			{
+				Log.Info($"[CardEditor] Creator mode: {creatorCards.Count} cards, {displayCards.Count} displayed");
+			}
 			List<SortingOrders> stableSort = new List<SortingOrders>(1) { SortingOrders.Ascending };
 			__instance.SetCards(displayCards, PileType.None, stableSort, Task.CompletedTask);
 			return false;
@@ -2072,8 +2191,18 @@ public static class CardLibraryGrid_FilterCards_Patch
 	private static List<CardModel> BuildCreatorCards()
 	{
 		CardEditorCreatedCardsStore.EnsureLoaded();
+		int overrideRevision = CardEditorOverrides.Revision;
+		int createdRevision = CardEditorCreatedCardsStore.Revision;
+		int draftRevision = CardEditorUiState.DraftRevision;
+		if (_cachedCreatorCards != null
+			&& _cachedCreatorCardsOverrideRevision == overrideRevision
+			&& _cachedCreatorCardsCreatedRevision == createdRevision
+			&& _cachedCreatorCardsDraftRevision == draftRevision)
+		{
+			return new List<CardModel>(_cachedCreatorCards);
+		}
+
 		IReadOnlyList<ModelId> ids = CardEditorCreatedCardsStore.GetAllCreatedCardIds();
-		Log.Info($"[CardEditor] BuildCreatorCards: SlotCount={CardEditorCreatedCardsStore.SlotCount}, ids.Count={ids.Count}");
 		List<CardModel> cards = new List<CardModel>(ids.Count);
 		for (int i = 0; i < ids.Count; i++)
 		{
@@ -2089,66 +2218,80 @@ public static class CardLibraryGrid_FilterCards_Patch
 				Log.Warn($"[CardEditor] BuildCreatorCards: slot {i+1} ({id}) failed to resolve");
 				continue;
 			}
-			try
-			{
-				cards.Add(CardEditorOverrides.BuildPreview(canonical));
-			}
-			catch (Exception ex)
-			{
-				Log.Warn($"[CardEditor] BuildCreatorCards: preview failed for slot {i+1}: {ex.Message}");
-				cards.Add(canonical);
-			}
+			cards.Add(BuildPreviewSafely(canonical, $"BuildCreatorCards: preview failed for slot {i + 1}"));
 		}
-		Log.Info($"[CardEditor] BuildCreatorCards: returning {cards.Count} cards");
+
+		_cachedCreatorCardsOverrideRevision = overrideRevision;
+		_cachedCreatorCardsCreatedRevision = createdRevision;
+		_cachedCreatorCardsDraftRevision = draftRevision;
+		_cachedCreatorCards = cards;
 		return cards;
 	}
 
 	private static List<CardModel> BuildEditableLibraryCards(List<CardModel> allCards, Func<CardModel, bool> filter)
 	{
-		List<CardModel> editCards = allCards
-			.Where(c => !CardEditorCreatedCardsStore.IsCreatedCardId(c.Id))
-			.Select(CardEditorOverrides.BuildPreview)
-			.Where(filter)
-			.ToList();
-
 		CardEditorCreatedCardsStore.EnsureLoaded();
-		IReadOnlyList<ModelId> ids = CardEditorCreatedCardsStore.GetAllCreatedCardIds();
-		for (int i = 0; i < ids.Count; i++)
+		int overrideRevision = CardEditorOverrides.Revision;
+		int createdRevision = CardEditorCreatedCardsStore.Revision;
+		int draftRevision = CardEditorUiState.DraftRevision;
+		if (_cachedEditableLibraryCards == null
+			|| _cachedEditableLibraryOverrideRevision != overrideRevision
+			|| _cachedEditableLibraryCreatedRevision != createdRevision
+			|| _cachedEditableLibraryDraftRevision != draftRevision
+			|| _cachedEditableLibrarySourceCount != allCards.Count)
 		{
-			ModelId id = ids[i];
-			if (!CardEditorCreatedCardsStore.IsEnabled(id))
+			List<CardModel> rebuiltCards = allCards
+				.Where(c => !CardEditorCreatedCardsStore.IsCreatedCardId(c.Id))
+				.Select(c => BuildPreviewSafely(c))
+				.ToList();
+
+			IReadOnlyList<ModelId> ids = CardEditorCreatedCardsStore.GetAllCreatedCardIds();
+			for (int i = 0; i < ids.Count; i++)
 			{
-				continue;
-			}
-			CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(id);
-			if (canonical == null)
-			{
-				TryInjectCreatedCardSlot(i + 1);
-				canonical = ModelDb.GetByIdOrNull<CardModel>(id);
-			}
-			if (canonical == null)
-			{
-				continue;
+				ModelId id = ids[i];
+				if (!CardEditorCreatedCardsStore.IsEnabled(id))
+				{
+					continue;
+				}
+				CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(id);
+				if (canonical == null)
+				{
+					TryInjectCreatedCardSlot(i + 1);
+					canonical = ModelDb.GetByIdOrNull<CardModel>(id);
+				}
+				if (canonical == null)
+				{
+					continue;
+				}
+
+				rebuiltCards.Add(BuildPreviewSafely(canonical, $"Editor mode: preview failed for created card {id}"));
 			}
 
-			CardModel preview;
-			try
-			{
-				preview = CardEditorOverrides.BuildPreview(canonical);
-			}
-			catch (Exception ex)
-			{
-				Log.Warn($"[CardEditor] Editor mode: preview failed for created card {id}: {ex.Message}");
-				preview = canonical;
-			}
-
-			if (filter(preview))
-			{
-				editCards.Add(preview);
-			}
+			_cachedEditableLibraryOverrideRevision = overrideRevision;
+			_cachedEditableLibraryCreatedRevision = createdRevision;
+			_cachedEditableLibraryDraftRevision = draftRevision;
+			_cachedEditableLibrarySourceCount = allCards.Count;
+			_cachedEditableLibraryCards = rebuiltCards;
 		}
 
-		return editCards;
+		return _cachedEditableLibraryCards.Where(filter).ToList();
+	}
+
+	private static CardModel BuildPreviewSafely(CardModel canonical, string? warnContext = null)
+	{
+		try
+		{
+			return CardEditorOverrides.BuildPreview(canonical);
+		}
+		catch (Exception ex)
+		{
+			if (!string.IsNullOrWhiteSpace(warnContext))
+			{
+				Log.Warn($"[CardEditor] {warnContext}: {ex.Message}");
+			}
+
+			return canonical;
+		}
 	}
 }
 
