@@ -5,7 +5,9 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.TextEffects;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 
@@ -78,7 +80,8 @@ internal static class CreatedCardTextBuilder
 			if (customUpgraded != null)
 			{
 				string rendered = CardEditorVanillaKeywordSupport.FormatDescription(card, customUpgraded, target, isUpgradePreview);
-				return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, rendered) : rendered;
+				string? baseCustom = CardEditorCreatedCardsStore.GetCustomText(card.Id);
+				return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, rendered, baseCustom) : rendered;
 			}
 		}
 
@@ -86,7 +89,7 @@ internal static class CreatedCardTextBuilder
 		if (customText != null)
 		{
 			string rendered = CardEditorVanillaKeywordSupport.FormatDescription(card, customText, target, isUpgradePreview);
-			return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, rendered) : rendered;
+			return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, rendered, customText) : rendered;
 		}
 
 		List<string> lines = new List<string>();
@@ -191,7 +194,7 @@ internal static class CreatedCardTextBuilder
 		}
 
 		string description = string.Join('\n', lines.Where(l => !string.IsNullOrEmpty(l)));
-		return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, description) : description;
+		return description;
 	}
 
 	private static string GetKeywordCardText(CardKeyword keyword)
@@ -208,14 +211,14 @@ internal static class CreatedCardTextBuilder
 		}
 	}
 
-	private static string ApplyUpgradePreviewNumericHighlight(CardModel card, Creature? target, string upgradedDescription)
+	private static string ApplyUpgradePreviewNumericHighlight(CardModel card, Creature? target, string upgradedDescription, string? baseDescriptionOverride = null)
 	{
 		if (card == null || string.IsNullOrWhiteSpace(upgradedDescription))
 		{
 			return upgradedDescription;
 		}
 
-		string? baseDescription = TryBuildBaseDescription(card, target);
+		string? baseDescription = TryBuildBaseDescription(card, target, baseDescriptionOverride);
 		if (string.IsNullOrWhiteSpace(baseDescription) || string.Equals(baseDescription, upgradedDescription, System.StringComparison.Ordinal))
 		{
 			return upgradedDescription;
@@ -232,7 +235,7 @@ internal static class CreatedCardTextBuilder
 		return string.Join('\n', upgradedLines);
 	}
 
-	private static string? TryBuildBaseDescription(CardModel upgradedCard, Creature? target)
+	private static string? TryBuildBaseDescription(CardModel upgradedCard, Creature? target, string? baseDescriptionOverride)
 	{
 		try
 		{
@@ -240,6 +243,11 @@ internal static class CreatedCardTextBuilder
 			if (upgradedCard.Owner != null && baseCard.Owner == null)
 			{
 				baseCard.Owner = upgradedCard.Owner;
+			}
+
+			if (!string.IsNullOrWhiteSpace(baseDescriptionOverride))
+			{
+				return CardEditorVanillaKeywordSupport.FormatDescription(baseCard, baseDescriptionOverride, target, isUpgradePreview: false);
 			}
 
 			return Build(baseCard, target, isUpgradePreview: false);
@@ -255,7 +263,7 @@ internal static class CreatedCardTextBuilder
 		List<string> baseTokens = ExtractVisibleNumberTokens(baseLine);
 		StringBuilder builder = new StringBuilder(upgradedLine.Length + 24);
 		int tokenIndex = 0;
-		int greenDepth = 0;
+		int highlightDepth = 0;
 		int imageDepth = 0;
 
 		for (int i = 0; i < upgradedLine.Length;)
@@ -271,30 +279,26 @@ internal static class CreatedCardTextBuilder
 
 				string tag = upgradedLine.Substring(i, tagEnd - i + 1);
 				builder.Append(tag);
-				UpdateInlineTagState(tag, ref greenDepth, ref imageDepth);
+				UpdateInlineTagState(tag, ref highlightDepth, ref imageDepth);
 				i = tagEnd + 1;
 				continue;
 			}
 
-			if (greenDepth == 0 && imageDepth == 0 && char.IsDigit(upgradedLine[i]))
+			if (highlightDepth == 0 && imageDepth == 0 && TryReadNumericToken(upgradedLine, i, out int tokenEndExclusive))
 			{
-				int start = i;
-				while (i < upgradedLine.Length && char.IsDigit(upgradedLine[i]))
-				{
-					i++;
-				}
-
-				string token = upgradedLine.Substring(start, i - start);
+				string token = upgradedLine.Substring(i, tokenEndExclusive - i);
 				string? baseToken = tokenIndex < baseTokens.Count ? baseTokens[tokenIndex] : null;
-				if (!string.Equals(baseToken, token, System.StringComparison.Ordinal))
+				int comparison = GetUpgradeHighlightComparison(baseToken, token);
+				if (comparison != 0)
 				{
-					builder.Append("[green]").Append(token).Append("[/green]");
+					builder.Append(StsTextUtilities.HighlightChangeText(token, comparison));
 				}
 				else
 				{
 					builder.Append(token);
 				}
 
+				i = tokenEndExclusive;
 				tokenIndex++;
 				continue;
 			}
@@ -309,7 +313,7 @@ internal static class CreatedCardTextBuilder
 	private static List<string> ExtractVisibleNumberTokens(string line)
 	{
 		List<string> tokens = new List<string>();
-		int greenDepth = 0;
+		int highlightDepth = 0;
 		int imageDepth = 0;
 		for (int i = 0; i < line.Length;)
 		{
@@ -322,20 +326,15 @@ internal static class CreatedCardTextBuilder
 				}
 
 				string tag = line.Substring(i, tagEnd - i + 1);
-				UpdateInlineTagState(tag, ref greenDepth, ref imageDepth);
+				UpdateInlineTagState(tag, ref highlightDepth, ref imageDepth);
 				i = tagEnd + 1;
 				continue;
 			}
 
-			if (imageDepth == 0 && char.IsDigit(line[i]))
+			if (highlightDepth == 0 && imageDepth == 0 && TryReadNumericToken(line, i, out int tokenEndExclusive))
 			{
-				int start = i;
-				while (i < line.Length && char.IsDigit(line[i]))
-				{
-					i++;
-				}
-
-				tokens.Add(line.Substring(start, i - start));
+				tokens.Add(line.Substring(i, tokenEndExclusive - i));
+				i = tokenEndExclusive;
 				continue;
 			}
 
@@ -345,15 +344,83 @@ internal static class CreatedCardTextBuilder
 		return tokens;
 	}
 
-	private static void UpdateInlineTagState(string tag, ref int greenDepth, ref int imageDepth)
+	private static bool TryReadNumericToken(string text, int start, out int endExclusive)
 	{
-		if (tag.Equals("[green]", System.StringComparison.OrdinalIgnoreCase))
+		endExclusive = start;
+		if (start < 0 || start >= text.Length)
 		{
-			greenDepth++;
+			return false;
 		}
-		else if (tag.Equals("[/green]", System.StringComparison.OrdinalIgnoreCase))
+
+		int cursor = start;
+		if ((text[cursor] == '+' || text[cursor] == '-') && cursor + 1 < text.Length && char.IsDigit(text[cursor + 1]))
 		{
-			greenDepth = greenDepth > 0 ? greenDepth - 1 : 0;
+			cursor++;
+		}
+
+		if (cursor >= text.Length || !char.IsDigit(text[cursor]))
+		{
+			return false;
+		}
+
+		while (cursor < text.Length && char.IsDigit(text[cursor]))
+		{
+			cursor++;
+		}
+
+		if (cursor < text.Length
+			&& text[cursor] == '.'
+			&& cursor + 1 < text.Length
+			&& char.IsDigit(text[cursor + 1]))
+		{
+			cursor++;
+			while (cursor < text.Length && char.IsDigit(text[cursor]))
+			{
+				cursor++;
+			}
+		}
+
+		endExclusive = cursor;
+		return true;
+	}
+
+	private static int GetUpgradeHighlightComparison(string? baseToken, string upgradedToken)
+	{
+		if (string.IsNullOrWhiteSpace(upgradedToken))
+		{
+			return 0;
+		}
+
+		if (string.IsNullOrWhiteSpace(baseToken))
+		{
+			return 1;
+		}
+
+		if (string.Equals(baseToken, upgradedToken, System.StringComparison.Ordinal))
+		{
+			return 0;
+		}
+
+		if (decimal.TryParse(baseToken, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal baseValue)
+			&& decimal.TryParse(upgradedToken, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal upgradedValue))
+		{
+			return upgradedValue.CompareTo(baseValue);
+		}
+
+		return 1;
+	}
+
+	private static void UpdateInlineTagState(string tag, ref int highlightDepth, ref int imageDepth)
+	{
+		if (tag.Equals("[green]", System.StringComparison.OrdinalIgnoreCase)
+			|| tag.Equals("[red]", System.StringComparison.OrdinalIgnoreCase))
+		{
+			highlightDepth++;
+		}
+		else if (tag.Equals("[/green]", System.StringComparison.OrdinalIgnoreCase)
+			|| tag.Equals("[/red]", System.StringComparison.OrdinalIgnoreCase))
+		{
+			highlightDepth = highlightDepth > 0 ? highlightDepth - 1 : 0;
 		}
 		else if (tag.StartsWith("[img", System.StringComparison.OrdinalIgnoreCase))
 		{

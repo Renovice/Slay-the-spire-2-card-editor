@@ -20,6 +20,57 @@ Before coding any new feature, always first understand how **both** the base gam
 
 ---
 
+## Power compatibility traps
+
+- Do **not** assume every vanilla `PowerModel` is safe on both players and enemies.
+- Some powers are really enemy encounter scripting wrapped in a power. They depend on `Owner.Monster`, monster move-state machines, enemy-specific classes, or `CreatureCmd.Stun(...)`.
+- Vanilla stun is **monster-only**. `Creature.StunInternal(...)` throws if `Monster == null`, so a player cannot be stunned through the vanilla stun pipeline.
+- If a created card grants one of these powers to the player, the result is not a "normal debuff". It can break combat flow or freeze the turn.
+
+### Confirmed unsafe on players
+
+These powers should be treated as player-unsafe unless we add a dedicated compatibility layer:
+
+| Power | Why it is unsafe |
+|---|---|
+| `FlutterPower` | Uses `Owner.Monster.MoveStateMachine`, calls `CreatureCmd.Stun(...)`, casts to `ThievingHopper` |
+| `AsleepPower` | Casts `Owner.Monster` to `LagavulinMatriarch`, calls `CreatureCmd.Stun(...)` |
+| `SlumberPower` | Casts `Owner.Monster` to `SlumberingBeetle`, calls `CreatureCmd.Stun(...)` |
+| `BurrowedPower` | Calls `CreatureCmd.Stun(...)` after enemy-specific animation flow |
+| `ImbalancedPower` | Checks `Owner.Monster is BowlbugRock`, calls `CreatureCmd.Stun(...)` |
+| `PlowPower` | Casts `Owner.Monster` to `CeremonialBeast`, calls `CreatureCmd.Stun(...)` |
+| `RavenousPower` | Casts `Owner.Monster` to `CorpseSlug`, calls `CreatureCmd.Stun(...)` |
+| `ShriekPower` | Casts `Owner.Monster` to `TerrorEel`, calls `CreatureCmd.Stun(...)` |
+
+### Likely unsafe on players
+
+These also depend on monster-only state and should be treated carefully:
+
+| Power | Why it is suspicious |
+|---|---|
+| `IllusionPower` | Uses `Owner.Monster.MoveStateMachine` and `SetMoveImmediate(...)` |
+| `ReattachPower` | Uses `Owner.Monster.SetMoveImmediate(...)` and segment-specific logic |
+| `CurlUpPower` | References monster-specific classes (`LouseProgenitor`) |
+
+### Mirror problem: player-only powers on enemies
+
+- There is also an opposite class of bugs: powers that assume `Owner.Player` / `Owner.Player.PlayerCombatState`.
+- Example candidates seen during investigation: `CoolantPower`, `HexPower`, `TangledPower`.
+- If we ever add a safety filter, it should work in **both** directions:
+  - monster-only powers blocked on players
+  - player-only powers blocked on enemies
+
+### Current recommendation
+
+- Leave vanilla behavior alone for now.
+- Do not try to make monster-only powers "work" on players one by one unless there is a strong reason.
+- Preferred future fix path:
+  1. Add an editor/runtime compatibility filter for unsafe powers.
+  2. Optionally add a mod-side "unstick combat" recovery tool for bad states.
+  3. Only build custom replacements if we truly want player-side versions of monster mechanics.
+
+---
+
 ## Power trigger system (CardEditorExtraEffectPower)
 
 | Field | Meaning |

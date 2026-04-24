@@ -646,6 +646,36 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		ScheduleQueuedPrebuiltPopupBuilds();
 	}
 
+	private static void InvalidatePrebuiltPopupCacheEntry(ModelId cardId, bool isUpgradeEditor, bool queueRebuild = false, NCardEditorPopup? skipPopup = null)
+	{
+		if (cardId == null || cardId == ModelId.none)
+		{
+			return;
+		}
+
+		string cacheKey = GetPrebuiltPopupCacheKey(cardId, isUpgradeEditor);
+		if (_prebuiltPopupCache.TryGetValue(cacheKey, out NCardEditorPopup? existingPopup))
+		{
+			_prebuiltPopupCache.Remove(cacheKey);
+			if (existingPopup != null
+				&& GodotObject.IsInstanceValid(existingPopup)
+				&& !existingPopup.IsQueuedForDeletion()
+				&& !ReferenceEquals(existingPopup, skipPopup))
+			{
+				existingPopup.Visible = false;
+				existingPopup.ReleasePreviewNodeResources();
+				existingPopup.QueueFreeSafely();
+			}
+		}
+
+		_queuedPrebuiltPopupKeys.Remove(cacheKey);
+		_queuedPrebuiltPopupHydrationKeys.Remove(cacheKey);
+		if (queueRebuild)
+		{
+			QueuePrebuiltPopupRebuild(cardId, isUpgradeEditor);
+		}
+	}
+
 	private static void ScheduleQueuedPrebuiltPopupBuilds(double delaySeconds = 0.0)
 	{
 		if (_prebuiltPopupBuildScheduled || _prebuiltPopupBuildQueue.Count == 0)
@@ -8628,6 +8658,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		grantModeSelect.TooltipText = CardEditorLoc.T("tooltip.selectionMode", "Card selection mode");
 		foreach (CardExtraEffectCardSelectionMode mode in Enum.GetValues<CardExtraEffectCardSelectionMode>())
 		{
+			if (CardEditorExtraEffects.IsOrderedPileSelectionMode(mode))
+			{
+				continue;
+			}
 			grantModeSelect.AddItem(CardEditorExtraEffects.CardSelectionModeLabel(mode));
 		}
 		int grantModeIndex = effect != null ? (int)effect.CardSelectionMode : (int)CardExtraEffectCardSelectionMode.Choose;
@@ -10395,6 +10429,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		grantModeSelect.TooltipText = CardEditorLoc.T("tooltip.selectionMode", "Card selection mode");
 		foreach (CardExtraEffectCardSelectionMode mode in Enum.GetValues<CardExtraEffectCardSelectionMode>())
 		{
+			if (CardEditorExtraEffects.IsOrderedPileSelectionMode(mode))
+			{
+				continue;
+			}
 			grantModeSelect.AddItem(CardEditorExtraEffects.CardSelectionModeLabel(mode));
 		}
 		int grantModeIndex = effect != null ? (int)effect.CardSelectionMode : (int)CardExtraEffectCardSelectionMode.Choose;
@@ -15491,6 +15529,65 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return IsHiddenUnifiedTurnBoundaryTrigger(trigger) ? CardExtraEffectTrigger.TurnBoundary : trigger;
 	}
 
+	private static bool IsMovedPileTrigger(CardExtraEffectTrigger trigger)
+	{
+		return CardEditorExtraEffects.IsMovedToPileTrigger(trigger);
+	}
+
+	private static bool SupportsOrderedMoveSelection(CardExtraEffectKind kind, CardExtraEffectCardPile pile)
+	{
+		if (pile == CardExtraEffectCardPile.AllPiles)
+		{
+			return false;
+		}
+
+		return kind is CardExtraEffectKind.PlayCardFromPile
+			or CardExtraEffectKind.AutoPlaySelfFromPile
+			or CardExtraEffectKind.AutoDrawSelfFromPile
+			or CardExtraEffectKind.ConditionalAutoPlayFromPile
+			or CardExtraEffectKind.ConditionalAutoDrawFromPile;
+	}
+
+	private static void RefreshMoveSelectionModeOptions(
+		OptionButton select,
+		CardExtraEffectKind kind,
+		CardExtraEffectCardPile pile,
+		CardExtraEffectCardSelectionMode desired,
+		CardExtraEffectCardSelectionMode fallback)
+	{
+		if (select == null || !GodotObject.IsInstanceValid(select))
+		{
+			return;
+		}
+
+		List<CardExtraEffectCardSelectionMode> modes = new List<CardExtraEffectCardSelectionMode>
+		{
+			CardExtraEffectCardSelectionMode.Choose,
+			CardExtraEffectCardSelectionMode.Random,
+			CardExtraEffectCardSelectionMode.All,
+			CardExtraEffectCardSelectionMode.UpTo
+		};
+		if (SupportsOrderedMoveSelection(kind, pile))
+		{
+			modes.Add(CardExtraEffectCardSelectionMode.Top);
+			modes.Add(CardExtraEffectCardSelectionMode.Bottom);
+		}
+
+		select.Clear();
+		foreach (CardExtraEffectCardSelectionMode mode in modes)
+		{
+			select.AddItem(CardEditorExtraEffects.CardSelectionModeLabel(mode), (int)mode);
+		}
+
+		CardExtraEffectCardSelectionMode resolvedSelection = modes.Contains(desired) ? desired : fallback;
+		int selectionIndex = select.GetItemIndex((int)resolvedSelection);
+		if (selectionIndex < 0)
+		{
+			selectionIndex = 0;
+		}
+		select.Select(selectionIndex);
+	}
+
 	private static bool IsHiddenUnifiedCardGenerationKind(CardExtraEffectKind kind)
 	{
 		// Hide specialized card-generation variants; expose them through AddRandomCardToHand (renamed "Card Generation") via a variant selector.
@@ -16994,10 +17091,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		UpdateExtraEffectTriggerLabelTexts(row, asPower);
 
+		if (asPower && IsMovedPileTrigger(trigger))
+		{
+			int onPlayIndex = row.TriggerSelect.GetItemIndex((int)CardExtraEffectTrigger.OnPlay);
+			if (onPlayIndex >= 0)
+			{
+				row.TriggerSelect.Select(onPlayIndex);
+			}
+			trigger = CardExtraEffectTrigger.OnPlay;
+		}
+
 		bool isOnPlayTrigger = trigger == CardExtraEffectTrigger.OnPlay;
 		bool isTimedTrigger = trigger is CardExtraEffectTrigger.TurnBoundary
 			or CardExtraEffectTrigger.StartOfTurn or CardExtraEffectTrigger.EndOfTurn or CardExtraEffectTrigger.EndOfTurnInHand
 			or CardExtraEffectTrigger.StartOfEnemyTurn or CardExtraEffectTrigger.EndOfEnemyTurn;
+		bool isMovedPileTrigger = IsMovedPileTrigger(trigger);
 		bool isOrbTrigger = trigger is CardExtraEffectTrigger.OnChannel or CardExtraEffectTrigger.OnEvoke;
 		bool isCountEventTrigger = trigger == CardExtraEffectTrigger.OnCountEvent;
 		bool showAffectedCardFilters = isCardTypeCostAura || isDrawnGeneratedCost || isUpgradeUnifiedKind;
@@ -17465,7 +17573,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool showTiming = allowTiming && (isOnPlayTrigger || asPower);
 		row.TimingRow.Visible = showTiming;
 
-		row.MoveCardsRow.Visible = isMoveCards || isUpgradeCardsInPile || isCopyThisCard || usesGeneratedDestination || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isSpecificCardMove || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck;
+		row.MoveCardsRow.Visible = isMoveCards || isUpgradeCardsInPile || isCopyThisCard || usesGeneratedDestination || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isSpecificCardMove || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isMovedPileTrigger;
 		if (row.MoveCardsRow.Visible)
 		{
 			// MoveCardsBetweenPiles: show both rows.
@@ -17475,17 +17583,32 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			// AutoPlaySelfFromPile / AutoDrawSelfFromPile: only needs the "from" pile (which pile this card must be in).
 			// GrantKeywordToPile: needs from pile + selection mode.
 			// UpgradeDeckCards: needs only selection mode (deck is always the pile).
-			row.MoveCardsRowTop.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || kind == CardExtraEffectKind.FetchSpecificCardToHand;
-		row.MoveCardsRowBottom.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || usesPileCopyDestination;
+			row.MoveCardsRowTop.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || kind == CardExtraEffectKind.FetchSpecificCardToHand || isMovedPileTrigger;
+			row.MoveCardsRowBottom.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || usesPileCopyDestination;
 
-			row.MoveFromPileSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck;
-			row.MoveSelectionModeSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || (kind == CardExtraEffectKind.FetchSpecificCardToHand);
+			row.MoveFromPileSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isMovedPileTrigger;
+			row.MoveSelectionModeSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || (kind == CardExtraEffectKind.FetchSpecificCardToHand);
 			row.MoveToPileSelect.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || usesPileCopyDestination;
 			row.MoveToPositionSelect.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || usesPileCopyDestination;
 			if (row.AdditionalMoveToRow != null && GodotObject.IsInstanceValid(row.AdditionalMoveToRow))
 			{
 				row.AdditionalMoveToRow.Visible = usesGeneratedDestination || isCopyThisCard || kind == CardExtraEffectKind.AddSpecificCardToHand || usesPileCopyDestination;
 			}
+		}
+
+		if (row.MoveSelectionModeSelect != null
+			&& GodotObject.IsInstanceValid(row.MoveSelectionModeSelect)
+			&& row.MoveFromPileSelect != null
+			&& GodotObject.IsInstanceValid(row.MoveFromPileSelect))
+		{
+			CardExtraEffectCardSelectionMode currentMoveSelectionMode = GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose);
+			CardExtraEffectCardPile currentMovePile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.Hand);
+			RefreshMoveSelectionModeOptions(
+				row.MoveSelectionModeSelect,
+				kind,
+				currentMovePile,
+				currentMoveSelectionMode,
+				kind == CardExtraEffectKind.FetchSpecificCardToHand ? CardExtraEffectCardSelectionMode.UpTo : CardExtraEffectCardSelectionMode.Choose);
 		}
 
 		if (row.MoveCardsRow.Visible)
@@ -17963,7 +18086,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 			CardExtraEffectTrigger trigger = (CardExtraEffectTrigger)id;
 			popup.SetItemText(i, CardEditorExtraEffects.TriggerLabel(trigger, asPower));
-			popup.SetItemDisabled(i, asPower && trigger == CardExtraEffectTrigger.Fatal);
+			popup.SetItemDisabled(i, asPower && (trigger == CardExtraEffectTrigger.Fatal || IsMovedPileTrigger(trigger)));
 		}
 	}
 
@@ -19321,7 +19444,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	private static CardCreatedCardsCostDuration GetSelectedCreatedCardsCostDuration(ExtraEffectRow row)
 	{
 		int selected = row.CreatedCostDurationSelect.Selected;
-		if (selected < 0 || selected > 3)
+		if (selected < 0 || selected >= Enum.GetValues<CardCreatedCardsCostDuration>().Length)
 		{
 			return CardCreatedCardsCostDuration.ThisTurn;
 		}
@@ -22138,6 +22261,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					selectionMode = GetSelectedCardSelectionMode(row.GrantModeSelect, CardExtraEffectCardSelectionMode.Choose);
 				}
 
+				if (IsMovedPileTrigger(trigger))
+				{
+					selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.DrawPile);
+				}
+
 				if (resolvedKind == CardExtraEffectKind.GrantKeywordToPile || grantToCard)
 				{
 					grantDuration = GetSelectedCardGrantDuration(row.GrantDurationSelect, CardExtraEffectCardGrantDuration.ThisTurn);
@@ -23243,6 +23371,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					selectionMode = GetSelectedCardSelectionMode(row.GrantModeSelect, CardExtraEffectCardSelectionMode.Choose);
 				}
 
+				if (IsMovedPileTrigger(trigger))
+				{
+					selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.DrawPile);
+				}
+
 				if (resolvedKind == CardExtraEffectKind.GrantKeywordToPile || grantToCard)
 				{
 					grantDuration = GetSelectedCardGrantDuration(row.GrantDurationSelect, CardExtraEffectCardGrantDuration.ThisTurn);
@@ -24137,13 +24270,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		else
 		{
+			CardOverride? previousEffectiveOverride = GetEffectivePopupOverride();
 			CardOverride overrideData = BuildOverrideFromUi();
 			CardUpgradeOverride? existingUpgrade = GetPreservedBaseEditorUpgradeOverride();
 			if (existingUpgrade != null && !existingUpgrade.IsEmpty())
 			{
 				overrideData.Upgrade = existingUpgrade;
 				overrideData.Upgrade.ExtraEffects = CardEditorExtraEffects.RebaseUpgradeEffectsAfterBaseEdit(
-					_openingEffectiveOverride?.ExtraEffects,
+					previousEffectiveOverride?.ExtraEffects,
 					overrideData.ExtraEffects,
 					existingUpgrade.ExtraEffects);
 			}
@@ -24164,7 +24298,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardEditorOverrides.ApplyToExistingCards(_cardId);
 		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		_onApplied?.Invoke();
-		_allowPersistentPopupReuseOnClose = true;
+		InvalidatePrebuiltPopupCacheEntry(_cardId, isUpgradeEditor: !_isUpgradeEditor, queueRebuild: true);
+		_allowPersistentPopupReuseOnClose = false;
+		_rebuildPrebuiltPopupOnClose = true;
 		_uiDirtySinceOpen = false;
 		Close();
 	}
@@ -24610,13 +24746,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				CardEditorCreatedCardsStore.ClearDraftMeta(_cardId);
 			}
 		}
-		if (rebuildPrebuiltPopupOnClose)
-		{
-			QueuePrebuiltPopupRebuild(_cardId, _isUpgradeEditor);
-		}
 		if (_isPersistentPopupCacheEntry && !reusePersistentPopup && !string.IsNullOrWhiteSpace(_persistentPopupCacheKey))
 		{
 			_prebuiltPopupCache.Remove(_persistentPopupCacheKey);
+		}
+		if (rebuildPrebuiltPopupOnClose)
+		{
+			InvalidatePrebuiltPopupCacheEntry(_cardId, _isUpgradeEditor, queueRebuild: true, skipPopup: this);
 		}
 		if (reusePersistentPopup)
 		{

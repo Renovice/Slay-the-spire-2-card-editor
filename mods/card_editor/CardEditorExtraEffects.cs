@@ -273,7 +273,9 @@ public enum CardExtraEffectCardSelectionMode
 	Choose = 0,
 	Random = 1,
 	All = 2,
-	UpTo = 3
+	UpTo = 3,
+	Top = 4,
+	Bottom = 5
 }
 
 public enum CardExtraEffectChooseOneOptionMode
@@ -500,7 +502,9 @@ public enum CardExtraEffectTrigger
 	TurnBoundary = 14,
 	OnCountEvent = 15,
 	DeckPassiveCombatStart = 16,
-	DeckPassiveCombatEnd = 17
+	DeckPassiveCombatEnd = 17,
+	OnMovedToTopOfPile = 18,
+	OnMovedToBottomOfPile = 19
 }
 
 public enum CardExtraEffectTurnBoundary
@@ -2296,6 +2300,8 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectTrigger.AfterCombat => "End of Combat",
 			CardExtraEffectTrigger.OnChannel => "On Channel",
 			CardExtraEffectTrigger.OnEvoke => "On Evoke",
+			CardExtraEffectTrigger.OnMovedToTopOfPile => "Moved To Top Of Pile",
+			CardExtraEffectTrigger.OnMovedToBottomOfPile => "Moved To Bottom Of Pile",
 			_ => trigger.ToString()
 		};
 		return CardEditorLoc.Enum("extraEffectTrigger", trigger, fallback);
@@ -3247,6 +3253,8 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			CardExtraEffectCardSelectionMode.Random => "Random",
 			CardExtraEffectCardSelectionMode.All => "All",
 			CardExtraEffectCardSelectionMode.UpTo => "Up To",
+			CardExtraEffectCardSelectionMode.Top => "Top",
+			CardExtraEffectCardSelectionMode.Bottom => "Bottom",
 			_ => mode.ToString()
 		};
 		return CardEditorLoc.Enum("cardSelectionMode", mode, fallback);
@@ -4664,6 +4672,188 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			CardEditorOverrides.ApplyOverrideToCard(card, runtimeSnapshot);
 			RecalculateSelfScalingCard(card);
+		}
+
+		return true;
+	}
+
+	private static bool TryApplyTriggeredPermanentCardCostsLessToSnapshot(CardModel card, CardOverride snapshot, CardExtraEffect effect)
+	{
+		if (card == null || snapshot == null || effect == null)
+		{
+			return false;
+		}
+
+		CardExtraEffectCostModifier modifier = GetEffectiveCardCostsLessModifier(effect);
+		switch (effect.Kind)
+		{
+			case CardExtraEffectKind.CardCostsLess:
+			{
+				if (snapshot.EnergyCostX == true || card.EnergyCost.CostsX)
+				{
+					return false;
+				}
+
+				int currentBaseCost;
+				try
+				{
+					currentBaseCost = snapshot.EnergyCost ?? card.EnergyCost.GetWithModifiers(CostModifiers.None);
+				}
+				catch
+				{
+					return false;
+				}
+
+				if (!TryGetTriggeredPermanentCardCostsLessBaseCost(currentBaseCost, modifier, effect.Amount, out int mutatedBaseCost))
+				{
+					return false;
+				}
+
+				snapshot.EnergyCostX = false;
+				snapshot.EnergyCost = mutatedBaseCost;
+				return true;
+			}
+
+			case CardExtraEffectKind.CardStarCostsLess:
+			{
+				if (snapshot.StarCostX == true || card.HasStarCostX)
+				{
+					return false;
+				}
+
+				int currentBaseCost;
+				try
+				{
+					currentBaseCost = snapshot.StarCost ?? card.BaseStarCost;
+				}
+				catch
+				{
+					return false;
+				}
+
+				if (!TryGetTriggeredPermanentCardCostsLessBaseCost(currentBaseCost, modifier, effect.Amount, out int mutatedBaseCost))
+				{
+					return false;
+				}
+
+				snapshot.StarCostX = false;
+				snapshot.StarCost = mutatedBaseCost;
+				return true;
+			}
+
+			default:
+				return false;
+		}
+	}
+
+	private static bool TryGetTriggeredPermanentCardCostsLessBaseCost(int currentBaseCost, CardExtraEffectCostModifier modifier, int amount, out int mutatedBaseCost)
+	{
+		mutatedBaseCost = currentBaseCost;
+		if (currentBaseCost < 0)
+		{
+			return false;
+		}
+
+		long nextBaseCost = modifier switch
+		{
+			CardExtraEffectCostModifier.Reduce => (long)currentBaseCost - amount,
+			CardExtraEffectCostModifier.Free => 0,
+			CardExtraEffectCostModifier.FreeToPlay => 0,
+			CardExtraEffectCostModifier.HalfCost => (long)Math.Floor(Math.Max(0, currentBaseCost) / 2m),
+			_ => currentBaseCost
+		};
+
+		if (modifier is not (CardExtraEffectCostModifier.Reduce
+			or CardExtraEffectCostModifier.Free
+			or CardExtraEffectCostModifier.FreeToPlay
+			or CardExtraEffectCostModifier.HalfCost))
+		{
+			return false;
+		}
+
+		if (nextBaseCost < 0)
+		{
+			nextBaseCost = 0;
+		}
+		else if (nextBaseCost > int.MaxValue)
+		{
+			nextBaseCost = int.MaxValue;
+		}
+
+		mutatedBaseCost = (int)nextBaseCost;
+		return true;
+	}
+
+	private static void NotifyTriggeredPermanentCardCostsLessChanged(CardModel card, CardExtraEffectKind kind)
+	{
+		if (card == null)
+		{
+			return;
+		}
+
+		try
+		{
+			if (kind == CardExtraEffectKind.CardStarCostsLess)
+			{
+				CardEditorOverrides.NotifyStarCostChanged(card);
+			}
+			else
+			{
+				card.InvokeEnergyCostChanged();
+			}
+		}
+		catch
+		{
+			// ignored
+		}
+	}
+
+	private static bool ApplyPersistentTriggeredCardCostsLessMutation(CardModel? card, CardExtraEffect effect)
+	{
+		if (card == null || effect == null || !card.IsMutable)
+		{
+			return false;
+		}
+
+		CardModel runtimeTargetCard = ResolveSelfScalingMutationTargetCard(card) ?? card;
+		if (!runtimeTargetCard.IsMutable)
+		{
+			return false;
+		}
+
+		CardModel persistentCard = runtimeTargetCard.DeckVersion is CardModel deckCard && deckCard.IsMutable
+			? deckCard
+			: runtimeTargetCard;
+		if (persistentCard.Id == null || persistentCard.Id == ModelId.none)
+		{
+			CardOverride runtimeOnlySnapshot = CreateSelfScalingSnapshot(runtimeTargetCard);
+			if (!TryApplyTriggeredPermanentCardCostsLessToSnapshot(runtimeTargetCard, runtimeOnlySnapshot, effect))
+			{
+				return false;
+			}
+
+			CardEditorOverrides.ApplyOverrideToCard(runtimeTargetCard, runtimeOnlySnapshot);
+			NotifyTriggeredPermanentCardCostsLessChanged(runtimeTargetCard, effect.Kind);
+			return true;
+		}
+
+		CardOverride persistentSnapshot = CreateSelfScalingSnapshot(persistentCard);
+		CardOverride? runtimeSnapshot = !ReferenceEquals(runtimeTargetCard, persistentCard)
+			? CreateSelfScalingSnapshot(runtimeTargetCard)
+			: null;
+		if (!TryApplyTriggeredPermanentCardCostsLessToSnapshot(persistentCard, persistentSnapshot, effect))
+		{
+			return false;
+		}
+
+		CardEditorOverrides.Set(persistentCard.Id, persistentSnapshot);
+		CardEditorOverrides.ApplyOverrideToCard(persistentCard, persistentSnapshot);
+		NotifyTriggeredPermanentCardCostsLessChanged(persistentCard, effect.Kind);
+
+		if (runtimeSnapshot != null && TryApplyTriggeredPermanentCardCostsLessToSnapshot(runtimeTargetCard, runtimeSnapshot, effect))
+		{
+			CardEditorOverrides.ApplyOverrideToCard(runtimeTargetCard, runtimeSnapshot);
+			NotifyTriggeredPermanentCardCostsLessChanged(runtimeTargetCard, effect.Kind);
 		}
 
 		return true;
@@ -6617,6 +6807,16 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		return RunForTrigger(combatState, choiceContext, card, CardExtraEffectTrigger.OstyDealDamage);
 	}
 
+	public static Task RunAfterCardMovedToTopOfPile(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card)
+	{
+		return RunForTrigger(combatState, choiceContext, card, CardExtraEffectTrigger.OnMovedToTopOfPile);
+	}
+
+	public static Task RunAfterCardMovedToBottomOfPile(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card)
+	{
+		return RunForTrigger(combatState, choiceContext, card, CardExtraEffectTrigger.OnMovedToBottomOfPile);
+	}
+
 	private static async Task RunForTurnBoundary(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, CardExtraEffectTurnBoundary boundary, CardExtraEffectTurnBoundarySide side)
 	{
 		if (combatState == null || choiceContext == null || card == null)
@@ -6801,7 +7001,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 
 		// Check all relevant non-hand piles
-		PileType[] pilesToCheck = { PileType.Exhaust, PileType.Discard, PileType.Draw };
+		PileType[] pilesToCheck = { PileType.Exhaust, PileType.Discard, PileType.Draw, PileType.Deck };
 		foreach (PileType pileType in pilesToCheck)
 		{
 			CardPile? pile = pileType.GetPile(player);
@@ -6860,6 +7060,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				}
 			}
 
+			if (!IsCardAtConfiguredPilePosition(card, effect.CardSelectionMode))
+			{
+				continue;
+			}
+
 			if (effect.ScaleMode != CardExtraEffectScaleMode.None)
 			{
 				if (CardEditorConditionalFromPileFiredTracker.HasFired(combatState, card))
@@ -6888,7 +7093,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return;
 		}
 
-		PileType[] pilesToCheck = { PileType.Exhaust, PileType.Discard, PileType.Draw };
+		PileType[] pilesToCheck = { PileType.Exhaust, PileType.Discard, PileType.Draw, PileType.Deck };
 		foreach (PileType pileType in pilesToCheck)
 		{
 			CardPile? pile = pileType.GetPile(player);
@@ -6943,6 +7148,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				{
 					continue;
 				}
+			}
+
+			if (!IsCardAtConfiguredPilePosition(card, effect.CardSelectionMode))
+			{
+				continue;
 			}
 
 			if (effect.ScaleMode != CardExtraEffectScaleMode.None)
@@ -7148,6 +7358,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		{
 			return false;
 		}
+		if (IsMovedToPileTrigger(effect.Trigger) || IsMovedToPileTrigger(observedTrigger))
+		{
+			return DoesMovedPileTriggerMatch(effect, observedTrigger, card);
+		}
 		if (effect.Trigger == observedTrigger
 			|| (observedTrigger == CardExtraEffectTrigger.EndOfTurnInHand && effect.Trigger == CardExtraEffectTrigger.EndOfTurn))
 		{
@@ -7175,6 +7389,26 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return false;
 		}
 		return true;
+	}
+
+	private static bool DoesMovedPileTriggerMatch(CardExtraEffect effect, CardExtraEffectTrigger observedTrigger, CardModel card)
+	{
+		if (effect == null || effect.Trigger != observedTrigger || !IsMovedToPileTrigger(effect.Trigger) || card?.Pile == null)
+		{
+			return false;
+		}
+		if (effect.CardSelectionPile != CardExtraEffectCardPile.AllPiles
+			&& card.Pile.Type != ResolvePileType(effect.CardSelectionPile))
+		{
+			return false;
+		}
+
+		return effect.Trigger switch
+		{
+			CardExtraEffectTrigger.OnMovedToTopOfPile => IsCardAtTopOfPile(card),
+			CardExtraEffectTrigger.OnMovedToBottomOfPile => IsCardAtBottomOfPile(card),
+			_ => false
+		};
 	}
 
 	internal static bool DoesTurnBoundaryMatch(CardExtraEffect effect, CardExtraEffectTurnBoundary boundary, CardExtraEffectTurnBoundarySide side, CardModel card)
@@ -7254,19 +7488,6 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return;
 		}
 
-		CardExtraEffectCardGrantDuration duration = effect.CardCostsLessDuration switch
-		{
-			CardExtraEffectCardCostsLessDuration.ThisTurn => CardExtraEffectCardGrantDuration.ThisTurn,
-			CardExtraEffectCardCostsLessDuration.ThisCombat => CardExtraEffectCardGrantDuration.ThisCombat,
-			CardExtraEffectCardCostsLessDuration.UntilPlayed => CardExtraEffectCardGrantDuration.UntilPlayed,
-			CardExtraEffectCardCostsLessDuration.Turns => CardExtraEffectCardGrantDuration.Turns,
-			// "Permanent" means "for the rest of combat" once it has triggered.
-			_ => CardExtraEffectCardGrantDuration.ThisCombat
-		};
-		int turns = duration == CardExtraEffectCardGrantDuration.Turns
-			? Math.Clamp(effect.CardCostsLessTurns, 1, 99)
-			: 1;
-
 		CardExtraEffect active = CloneEffect(effect);
 		if (active.AmountIsX)
 		{
@@ -7284,13 +7505,35 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		active.GrantToCard = false;
 		active.CardCostsLessMode = CardExtraEffectCardCostsLessMode.Passive;
 
+		if (active.CardCostsLessDuration == CardExtraEffectCardCostsLessDuration.Permanent)
+		{
+			if (ApplyPersistentTriggeredCardCostsLessMutation(card, active))
+			{
+				Log.Info($"[CardEditor][ApplyTriggeredCostLess] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration=Permanent amount={active.Amount} modifier={GetEffectiveCardCostsLessModifier(active)} persistent=True");
+				return;
+			}
+
+			Log.Warn($"[CardEditor][ApplyTriggeredCostLess] Permanent trigger could not persist on {card?.Id}; falling back to combat-only grant.");
+		}
+
+		CardExtraEffectCardGrantDuration duration = effect.CardCostsLessDuration switch
+		{
+			CardExtraEffectCardCostsLessDuration.ThisTurn => CardExtraEffectCardGrantDuration.ThisTurn,
+			CardExtraEffectCardCostsLessDuration.ThisCombat => CardExtraEffectCardGrantDuration.ThisCombat,
+			CardExtraEffectCardCostsLessDuration.UntilPlayed => CardExtraEffectCardGrantDuration.UntilPlayed,
+			CardExtraEffectCardCostsLessDuration.Turns => CardExtraEffectCardGrantDuration.Turns,
+			_ => CardExtraEffectCardGrantDuration.ThisCombat
+		};
+		int turns = duration == CardExtraEffectCardGrantDuration.Turns
+			? Math.Clamp(effect.CardCostsLessTurns, 1, 99)
+			: 1;
 		// Stack repeated triggers (e.g. "Costs 1 less each time it's played") by merging into an equivalent existing grant when possible.
 		if (!CardEditorTemporaryExtraEffectController.TryStackTimedCardCostsLess(combatState, card, active, duration, turns))
 		{
 			CardEditorTemporaryExtraEffectController.Grant(combatState, card, active, duration, turns);
 		}
 		Log.Info($"[CardEditor][ApplyTriggeredCostLess] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration={duration} turns={turns} amount={active.Amount} modifier={GetEffectiveCardCostsLessModifier(active)}");
-		card.InvokeEnergyCostChanged();
+		NotifyTriggeredPermanentCardCostsLessChanged(card, active.Kind);
 	}
 
 	private static string GetSelfScalingTargetLabel(CardModel card, CardExtraEffect effect, bool isUpgradePreview)
@@ -7806,7 +8049,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 		else if (effect.Trigger != CardExtraEffectTrigger.OnPlay)
 		{
-			rendered = ApplyTriggerPrefix(rendered, effect.Trigger);
+			rendered = ApplyTriggerPrefix(rendered, effect);
 		}
 
 		return ApplyConditionalBranchSuffix(card, target, rendered, effect, upgradeHighlightComparison, isUpgradePreview);
@@ -8279,7 +8522,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			|| effect.Kind is CardExtraEffectKind.CardTypeCostsLess or CardExtraEffectKind.CardTypeStarCostsLess
 				or CardExtraEffectKind.DrawnCardsCostLess or CardExtraEffectKind.GeneratedCardsCostLess)
 		{
-			rendered = ApplyTriggerPrefix(rendered, effect.Trigger);
+			rendered = ApplyTriggerPrefix(rendered, effect);
 		}
 
 		rendered = ApplyConditionalBranchSuffix(card, target, rendered, effect, upgradeHighlightComparison, isUpgradePreview);
@@ -10125,8 +10368,9 @@ private static string BuildCountAmountMetricLabel(CardExtraEffect effect, bool p
 		return string.Empty;
 	}
 
-	private static string ApplyTriggerPrefix(string line, CardExtraEffectTrigger trigger)
+	private static string ApplyTriggerPrefix(string line, CardExtraEffect effect)
 	{
+		CardExtraEffectTrigger trigger = effect?.Trigger ?? CardExtraEffectTrigger.OnPlay;
 		string fallback = trigger switch
 		{
 			// For most effects, "On Play" is just the default card text behavior (i.e. what happens when you play this card),
@@ -10141,6 +10385,8 @@ private static string BuildCountAmountMetricLabel(CardExtraEffect effect, bool p
 			CardExtraEffectTrigger.EndOfTurnInHand => "End of your turn (in hand): ",
 			CardExtraEffectTrigger.EndOfTurn => string.Empty,
 			CardExtraEffectTrigger.OstyDealDamage => "Whenever Osty attacks: ",
+			CardExtraEffectTrigger.OnMovedToTopOfPile => $"When moved to {GetCardPileBoundary(effect?.CardSelectionPile ?? CardExtraEffectCardPile.AllPiles, top: true)}: ",
+			CardExtraEffectTrigger.OnMovedToBottomOfPile => $"When moved to {GetCardPileBoundary(effect?.CardSelectionPile ?? CardExtraEffectCardPile.AllPiles, top: false)}: ",
 			_ => string.Empty
 		};
 
@@ -10332,6 +10578,12 @@ private static string BuildCountAmountMetricLabel(CardExtraEffect effect, bool p
 				CardExtraEffectCardSelectionMode.UpTo => singular
 					? CardEditorLoc.T("cardText.selection.upToOneCard", "up to 1 card")
 					: CardEditorLoc.F("cardText.selection.upToCards", $"up to {countText} cards", ("Count", countText)),
+				CardExtraEffectCardSelectionMode.Top => singular
+					? CardEditorLoc.T("cardText.selection.topCard", "the top card")
+					: CardEditorLoc.F("cardText.selection.topCards", $"the top {countText} cards", ("Count", countText)),
+				CardExtraEffectCardSelectionMode.Bottom => singular
+					? CardEditorLoc.T("cardText.selection.bottomCard", "the bottom card")
+					: CardEditorLoc.F("cardText.selection.bottomCards", $"the bottom {countText} cards", ("Count", countText)),
 				_ => singular
 					? CardEditorLoc.T("cardText.selection.aCard", "a card")
 					: CardEditorLoc.F("cardText.selection.cards", $"{countText} cards", ("Count", countText))
@@ -10352,6 +10604,12 @@ private static string BuildCountAmountMetricLabel(CardExtraEffect effect, bool p
 			CardExtraEffectCardSelectionMode.UpTo => singular
 				? $"up to 1 {typeAdj}card"
 				: $"up to {countText} {typeAdj}{cardsText}",
+			CardExtraEffectCardSelectionMode.Top => singular
+				? $"the top {typeAdj}card"
+				: $"the top {countText} {typeAdj}{cardsText}",
+			CardExtraEffectCardSelectionMode.Bottom => singular
+				? $"the bottom {typeAdj}card"
+				: $"the bottom {countText} {typeAdj}{cardsText}",
 			_ => singular
 				? $"{typeArticle} {typeAdj}card"
 				: $"{countText} {typeAdj}{cardsText}",
@@ -11437,6 +11695,8 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
 		bool all = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
 		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
+		bool top = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Top;
+		bool bottom = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Bottom;
 		string result;
 		if (all)
 		{
@@ -11445,6 +11705,18 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		else if (upTo)
 		{
 			result = CardEditorLoc.F("cardText.playFromPile.upTo.many", $"Play up to {amountText} cards from {pile}.", ("Amount", amountText), ("Pile", pile));
+		}
+		else if (top)
+		{
+			result = amount == 1
+				? CardEditorLoc.F("cardText.playFromPile.top.one", $"Play the top card of {pile}.", ("Pile", pile))
+				: CardEditorLoc.F("cardText.playFromPile.top.many", $"Play the top {amountText} cards of {pile}.", ("Amount", amountText), ("Pile", pile));
+		}
+		else if (bottom)
+		{
+			result = amount == 1
+				? CardEditorLoc.F("cardText.playFromPile.bottom.one", $"Play the bottom card of {pile}.", ("Pile", pile))
+				: CardEditorLoc.F("cardText.playFromPile.bottom.many", $"Play the bottom {amountText} cards of {pile}.", ("Amount", amountText), ("Pile", pile));
 		}
 		else if (amount == 1)
 		{
@@ -11464,7 +11736,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 
 	private static string FormatAutoPlaySelfFromPile(CardExtraEffect effect)
 	{
-		string pile = GetCardPileLocation(effect.CardSelectionPile);
+		string pile = GetCardPileLocationWithSelectionMode(effect.CardSelectionPile, effect.CardSelectionMode);
 		return effect.Trigger switch
 		{
 			CardExtraEffectTrigger.OnDraw => CardEditorLoc.F(
@@ -11491,6 +11763,14 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				"cardText.autoPlaySelf.onPlay",
 				$"Whenever a card is played, if this is {pile}, play it.",
 				("Pile", pile)),
+			CardExtraEffectTrigger.OnMovedToTopOfPile => CardEditorLoc.F(
+				"cardText.autoPlaySelf.onMovedToTop",
+				$"Whenever this is moved to {GetCardPileBoundary(effect.CardSelectionPile, top: true)}, play it.",
+				("Pile", GetCardPileBoundary(effect.CardSelectionPile, top: true))),
+			CardExtraEffectTrigger.OnMovedToBottomOfPile => CardEditorLoc.F(
+				"cardText.autoPlaySelf.onMovedToBottom",
+				$"Whenever this is moved to {GetCardPileBoundary(effect.CardSelectionPile, top: false)}, play it.",
+				("Pile", GetCardPileBoundary(effect.CardSelectionPile, top: false))),
 			_ => CardEditorLoc.F(
 				"cardText.autoPlaySelf.startOfTurn",
 				$"At the start of your turn, if this is {pile}, play it.",
@@ -11586,7 +11866,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 
 	private static string FormatAutoDrawSelfFromPile(CardExtraEffect effect)
 	{
-		string pile = GetCardPileLocation(effect.CardSelectionPile);
+		string pile = GetCardPileLocationWithSelectionMode(effect.CardSelectionPile, effect.CardSelectionMode);
 		return effect.Trigger switch
 		{
 			CardExtraEffectTrigger.OnDraw => CardEditorLoc.F(
@@ -11613,6 +11893,14 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				"cardText.autoDrawSelf.onPlay",
 				$"Whenever a card is played, if this is {pile}, draw it.",
 				("Pile", pile)),
+			CardExtraEffectTrigger.OnMovedToTopOfPile => CardEditorLoc.F(
+				"cardText.autoDrawSelf.onMovedToTop",
+				$"Whenever this is moved to {GetCardPileBoundary(effect.CardSelectionPile, top: true)}, draw it.",
+				("Pile", GetCardPileBoundary(effect.CardSelectionPile, top: true))),
+			CardExtraEffectTrigger.OnMovedToBottomOfPile => CardEditorLoc.F(
+				"cardText.autoDrawSelf.onMovedToBottom",
+				$"Whenever this is moved to {GetCardPileBoundary(effect.CardSelectionPile, top: false)}, draw it.",
+				("Pile", GetCardPileBoundary(effect.CardSelectionPile, top: false))),
 			_ => CardEditorLoc.F(
 				"cardText.autoDrawSelf.startOfTurn",
 				$"At the start of your turn, if this is {pile}, draw it.",
@@ -12708,6 +12996,37 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 		}
 		string label = CardPileLabel(pile);
 		return CardEditorLoc.F("cardText.pile.your", $"your {label}", ("Pile", label));
+	}
+
+	private static string GetCardPileBoundary(CardExtraEffectCardPile pile, bool top)
+	{
+		if (pile == CardExtraEffectCardPile.AllPiles)
+		{
+			return top
+				? CardEditorLoc.T("cardText.pile.topOfAny", "the top of any pile")
+				: CardEditorLoc.T("cardText.pile.bottomOfAny", "the bottom of any pile");
+		}
+
+		string possessive = GetCardPilePossessive(pile);
+		return top
+			? CardEditorLoc.F("cardText.pile.topOfSelected", $"the top of {possessive}", ("Pile", possessive))
+			: CardEditorLoc.F("cardText.pile.bottomOfSelected", $"the bottom of {possessive}", ("Pile", possessive));
+	}
+
+	private static string GetCardPileLocationWithSelectionMode(CardExtraEffectCardPile pile, CardExtraEffectCardSelectionMode selectionMode)
+	{
+		return selectionMode switch
+		{
+			CardExtraEffectCardSelectionMode.Top => CardEditorLoc.F(
+				"cardText.pile.atTopOfSelected",
+				$"at {GetCardPileBoundary(pile, top: true)}",
+				("Pile", GetCardPileBoundary(pile, top: true))),
+			CardExtraEffectCardSelectionMode.Bottom => CardEditorLoc.F(
+				"cardText.pile.atBottomOfSelected",
+				$"at {GetCardPileBoundary(pile, top: false)}",
+				("Pile", GetCardPileBoundary(pile, top: false))),
+			_ => GetCardPileLocation(pile)
+		};
 	}
 
 	private static string GetCardPileDestination(CardExtraEffectCardPile pile, CardExtraEffectCardPilePosition position)
@@ -16632,6 +16951,16 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return PickRandomDistinct(candidates, count, shuffleRng);
 		}
 
+		if (selectionMode == CardExtraEffectCardSelectionMode.Top)
+		{
+			return candidates.Where(c => c != null).Take(count).ToList();
+		}
+
+		if (selectionMode == CardExtraEffectCardSelectionMode.Bottom)
+		{
+			return candidates.Where(c => c != null).Reverse().Take(count).Reverse().ToList();
+		}
+
 		bool isUpTo = selectionMode == CardExtraEffectCardSelectionMode.UpTo;
 		CardSelectorPrefs prefs = isUpTo
 			? new CardSelectorPrefs(prompt, 0, count) { Cancelable = true }
@@ -17266,7 +17595,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			pileTypes = new[] { ResolvePileType(effect.CardSelectionPile) };
 		}
 
-		HashSet<CardModel> unique = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
+		HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
 		foreach (PileType pileType in pileTypes)
 		{
 			CardPile? pile = pileType.GetPile(owner);
@@ -17285,17 +17614,20 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					continue;
 				}
 
-				unique.Add(card);
+				if (seen.Add(card))
+				{
+					candidates.Add(card);
+				}
 			}
 		}
 
 		CardModel? sourceCandidate = ResolveSourceCardSelectionCandidate(effect, sourceCard, requireDeckVersion);
-		if (sourceCandidate != null && MatchesCardSelectionFilters(owner, sourceCandidate, effect, includeCostFilter))
+		if (sourceCandidate != null
+			&& MatchesCardSelectionFilters(owner, sourceCandidate, effect, includeCostFilter)
+			&& seen.Add(sourceCandidate))
 		{
-			unique.Add(sourceCandidate);
+			candidates.Add(sourceCandidate);
 		}
-
-		candidates.AddRange(unique);
 		return candidates;
 	}
 
@@ -18456,6 +18788,42 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			CardExtraEffectCardPilePosition.Top => CardPilePosition.Top,
 			CardExtraEffectCardPilePosition.Random => CardPilePosition.Random,
 			_ => CardPilePosition.Bottom
+		};
+	}
+
+	internal static bool IsMovedToPileTrigger(CardExtraEffectTrigger trigger)
+	{
+		return trigger is CardExtraEffectTrigger.OnMovedToTopOfPile or CardExtraEffectTrigger.OnMovedToBottomOfPile;
+	}
+
+	internal static bool IsOrderedPileSelectionMode(CardExtraEffectCardSelectionMode mode)
+	{
+		return mode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom;
+	}
+
+	internal static bool IsCardAtTopOfPile(CardModel? card)
+	{
+		CardPile? pile = card?.Pile;
+		return pile?.Cards != null
+			&& pile.Cards.Count > 0
+			&& ReferenceEquals(pile.Cards[0], card);
+	}
+
+	internal static bool IsCardAtBottomOfPile(CardModel? card)
+	{
+		CardPile? pile = card?.Pile;
+		return pile?.Cards != null
+			&& pile.Cards.Count > 0
+			&& ReferenceEquals(pile.Cards[^1], card);
+	}
+
+	private static bool IsCardAtConfiguredPilePosition(CardModel? card, CardExtraEffectCardSelectionMode selectionMode)
+	{
+		return selectionMode switch
+		{
+			CardExtraEffectCardSelectionMode.Top => IsCardAtTopOfPile(card),
+			CardExtraEffectCardSelectionMode.Bottom => IsCardAtBottomOfPile(card),
+			_ => true
 		};
 	}
 
