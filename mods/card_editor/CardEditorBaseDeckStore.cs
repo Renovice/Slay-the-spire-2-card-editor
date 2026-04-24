@@ -16,19 +16,10 @@ internal static class CardEditorBaseDeckStore
 	private const int CurrentVersion = 1;
 	private const string StorePath = "user://card_editor/base_decks.json";
 
-	private static readonly ModelId[] _supportedCharacterIds =
-	{
-		ModelDb.Character<Ironclad>().Id,
-		ModelDb.Character<Silent>().Id,
-		ModelDb.Character<Defect>().Id,
-		ModelDb.Character<Regent>().Id,
-		ModelDb.Character<Necrobinder>().Id
-	};
-
 	private static readonly Dictionary<ModelId, List<ModelId>> _overrides = new();
 	private static bool _loaded;
 
-	public static IReadOnlyList<ModelId> SupportedCharacterIds => _supportedCharacterIds;
+	public static IReadOnlyList<ModelId> SupportedCharacterIds => GetSupportedCharacterIds();
 	public static int Revision { get; private set; }
 
 	public static void EnsureLoaded()
@@ -100,13 +91,16 @@ internal static class CardEditorBaseDeckStore
 
 	public static bool IsSupportedCharacterId(ModelId characterId)
 	{
-		return _supportedCharacterIds.Contains(characterId);
+		return characterId != null
+			&& characterId != ModelId.none
+			&& SupportedCharacterIds.Contains(characterId);
 	}
 
 	public static ModelId GetDefaultCharacterId()
 	{
 		EnsureLoaded();
-		return _supportedCharacterIds.Length > 0 ? _supportedCharacterIds[0] : ModelId.none;
+		IReadOnlyList<ModelId> supported = SupportedCharacterIds;
+		return supported.Count > 0 ? supported[0] : ModelId.none;
 	}
 
 	public static List<ModelId> GetDeckIds(ModelId characterId)
@@ -292,6 +286,89 @@ internal static class CardEditorBaseDeckStore
 
 		_overrides.Clear();
 		Revision++;
+	}
+
+	public static bool TryGetCharacterIdForCard(CardModel? card, out ModelId characterId)
+	{
+		if (card == null)
+		{
+			characterId = ModelId.none;
+			return false;
+		}
+
+		return TryGetCharacterIdForCardPool(card.VisualCardPool ?? card.Pool, out characterId);
+	}
+
+	public static bool TryGetCharacterIdForCardPool(CardPoolModel? pool, out ModelId characterId)
+	{
+		if (pool != null)
+		{
+			foreach (CharacterModel character in GetSupportedCharacters())
+			{
+				try
+				{
+					CardPoolModel? characterPool = character.CardPool;
+					if (characterPool == null)
+					{
+						continue;
+					}
+
+					if (characterPool == pool
+						|| characterPool.Id == pool.Id
+						|| string.Equals(characterPool.Title, pool.Title, StringComparison.OrdinalIgnoreCase))
+					{
+						characterId = character.Id;
+						return true;
+					}
+				}
+				catch
+				{
+				}
+			}
+		}
+
+		characterId = ModelId.none;
+		return false;
+	}
+
+	private static IReadOnlyList<ModelId> GetSupportedCharacterIds()
+	{
+		return GetSupportedCharacters()
+			.Select(character => character.Id)
+			.ToList();
+	}
+
+	private static List<CharacterModel> GetSupportedCharacters()
+	{
+		try
+		{
+			return ModelDb.AllCharacters
+				.Where(IsSupportedCharacter)
+				.GroupBy(character => character.Id)
+				.Select(group => group.First())
+				.ToList();
+		}
+		catch
+		{
+			return new List<CharacterModel>();
+		}
+	}
+
+	private static bool IsSupportedCharacter(CharacterModel? character)
+	{
+		if (character?.Id == null || character.Id == ModelId.none)
+		{
+			return false;
+		}
+
+		try
+		{
+			return character.StartingDeck.Any(card => card?.Id != null && card.Id != ModelId.none);
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	private static bool TryParseModelId(string text, out ModelId id)

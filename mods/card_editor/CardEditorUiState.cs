@@ -22,6 +22,8 @@ public static class CardEditorUiState
 
 	public static CardEditorLibraryMode Mode { get; set; } = CardEditorLibraryMode.None;
 
+	public static int DraftRevision { get; private set; }
+
 	public static bool IsActive => Mode != CardEditorLibraryMode.None;
 
 	public static bool IsEditorActive => Mode == CardEditorLibraryMode.Editor;
@@ -36,10 +38,14 @@ public static class CardEditorUiState
 	{
 		if (overrideData == null)
 		{
-			_draftOverrides.Remove(cardId);
+			if (_draftOverrides.Remove(cardId))
+			{
+				DraftRevision++;
+			}
 			return;
 		}
 		_draftOverrides[cardId] = overrideData;
+		DraftRevision++;
 	}
 
 	public static bool TryGetDraftOverride(ModelId cardId, out CardOverride overrideData)
@@ -49,7 +55,10 @@ public static class CardEditorUiState
 
 	public static void ClearDraftOverride(ModelId cardId)
 	{
-		_draftOverrides.Remove(cardId);
+		if (_draftOverrides.Remove(cardId))
+		{
+			DraftRevision++;
+		}
 	}
 
 	public static void RefreshLibrary(NCardLibrary library)

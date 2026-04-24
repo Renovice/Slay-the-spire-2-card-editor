@@ -73,10 +73,15 @@ internal static class CardEditorBaseDeckBookmarkHooks
 
 	private static void DebugLog(string eventName, NCardLibrary? library = null, Control? bookmark = null, NBackButton? backButton = null)
 	{
+		if (!CardEditorMod.IsVerboseEditorLogging)
+		{
+			return;
+		}
+
 		string libraryText = library == null || !GodotObject.IsInstanceValid(library)
 			? "library=null"
 			: $"libraryVisible={library.Visible}/{library.IsVisibleInTree()} mode={CardEditorUiState.Mode}";
-		Log.Info($"[CardEditor][BaseDeckBookmarkDebug] {eventName} {libraryText} {DescribeBackButton(backButton)} {DescribeBookmark(bookmark)}");
+		CardEditorMod.VerboseLog($"[CardEditor][BaseDeckBookmarkDebug] {eventName} {libraryText} {DescribeBackButton(backButton)} {DescribeBookmark(bookmark)}");
 	}
 
 	public static void Sync(NCardLibrary library)
@@ -92,7 +97,10 @@ internal static class CardEditorBaseDeckBookmarkHooks
 		{
 			shouldShow = false;
 		}
-		Log.Info($"[CardEditor][BaseDeckBookmark] Sync mode={CardEditorUiState.Mode} shouldShow={shouldShow} bookmarkExists={bookmark != null}");
+		if (CardEditorMod.IsVerboseEditorLogging)
+		{
+			Log.Info($"[CardEditor][BaseDeckBookmark] Sync mode={CardEditorUiState.Mode} shouldShow={shouldShow} bookmarkExists={bookmark != null}");
+		}
 		if (!shouldShow)
 		{
 			if (bookmark != null)
@@ -812,13 +820,18 @@ internal partial class CardEditorBookmarkMoveDriver : Node
 
 	private void DebugLog(string eventName)
 	{
-		if (_root == null || !GodotObject.IsInstanceValid(_root))
+		if (!CardEditorMod.IsVerboseEditorLogging)
 		{
-			Log.Info($"[CardEditor][BaseDeckBookmarkDebug] MoveDriver:{eventName} root=null state={DescribeState()}");
 			return;
 		}
 
-		Log.Info($"[CardEditor][BaseDeckBookmarkDebug] MoveDriver:{eventName} rootVisible={_root.Visible}/{_root.IsVisibleInTree()} rootPos={FormatVector(_root.GlobalPosition)} {DescribeState()}");
+		if (_root == null || !GodotObject.IsInstanceValid(_root))
+		{
+			CardEditorMod.VerboseLog($"[CardEditor][BaseDeckBookmarkDebug] MoveDriver:{eventName} root=null state={DescribeState()}");
+			return;
+		}
+
+		CardEditorMod.VerboseLog($"[CardEditor][BaseDeckBookmarkDebug] MoveDriver:{eventName} rootVisible={_root.Visible}/{_root.IsVisibleInTree()} rootPos={FormatVector(_root.GlobalPosition)} {DescribeState()}");
 	}
 
 	public void Bind(Control root, CanvasItem owner)

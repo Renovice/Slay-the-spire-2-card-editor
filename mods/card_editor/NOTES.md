@@ -11,6 +11,15 @@ Before coding any new feature, always first understand how **both** the base gam
 
 ---
 
+## Rule: Do not touch the original compendium by default
+
+- Do **not** patch the vanilla compendium / card library rendering path unless there is no safer alternative.
+- Canonical library cards are immutable preview models. Never assume they have combat ownership, mutable state, or a valid `Owner` / `CombatState`.
+- Any shared text/targeting/helper patch must explicitly bail out for non-mutable canonical cards unless the feature is intentionally supposed to affect the vanilla library.
+- Prefer Card Editor popups, Card Editor-created previews, or Card Editor-owned cards over hooks that run on the base compendium.
+
+---
+
 ## Power trigger system (CardEditorExtraEffectPower)
 
 | Field | Meaning |

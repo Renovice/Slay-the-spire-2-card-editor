@@ -19,6 +19,13 @@ Default to **mod-scoped changes only**.
 - If touching a shared vanilla path is unavoidable, keep the guard clause as narrow as possible and document why the broader hook was necessary.
 - Never broaden a helper from "our cards" to "all cards" without an explicit reason and a regression check against normal vanilla cards.
 
+### Original compendium / library is off-limits by default
+
+- Do **not** patch the original vanilla compendium / card library rendering path unless there is no safer alternative.
+- Canonical library cards are immutable preview models. Never assume they have combat ownership, mutable state, or a valid `Owner` / `CombatState`.
+- Any shared text/targeting/helper patch must explicitly bail out for non-mutable canonical cards unless the feature is intentionally supposed to affect the vanilla library.
+- Prefer Card Editor popups, Card Editor-created previews, or Card Editor-owned cards over hooks that run on the base compendium.
+
 ## Rule: New editor controls must use the existing grid system
 
 When adding a new UI "box", dropdown, modifier row, or extra field to the card editor:
@@ -78,6 +85,16 @@ dotnet build card_editor.csproj -c Release
 #   ../../built cfiles/card_editor.dll
 #   C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\mods\Card_editor\card_editor.dll
 ```
+
+---
+
+## Bug fix verification
+
+- After fixing a bug, always test it in the live setup environment after build and deploy, not just by reading code or relying on logs.
+- For live verification, launch through Steam rather than the standalone `.exe`, because the Steam run is the real mod environment we ship against.
+- When checking runtime logs from a live verification run, inspect `user://logs/godot.log`.
+- Reproduce the original bug in the live game setup when possible, then confirm the exact scenario now behaves correctly.
+- Treat a bug fix as incomplete until it has been verified in the live setup environment.
 
 ---
 

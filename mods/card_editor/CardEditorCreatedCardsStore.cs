@@ -39,6 +39,7 @@ internal sealed class CardEditorCreatedCardDefinition
 	public bool Enabled { get; set; }
 	public string Title { get; set; } = string.Empty;
 	public CardEditorCreatedCardPool Pool { get; set; } = CardEditorCreatedCardPool.Ironclad;
+	public string? PoolTitle { get; set; }
 	public CardRarity Rarity { get; set; } = CardRarity.Common;
 	public CardType Type { get; set; } = CardType.Attack;
 	public TargetType TargetType { get; set; } = TargetType.AnyEnemy;
@@ -73,7 +74,7 @@ internal static class CardEditorCreatedCardsStore
 	public static int Revision { get; private set; }
 	internal static bool PersistenceSuspended { get; set; }
 
-	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
+	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? persistent))
@@ -88,6 +89,7 @@ internal static class CardEditorCreatedCardsStore
 				Enabled = persistent.Enabled,
 				Title = persistent.Title,
 				Pool = persistent.Pool,
+				PoolTitle = persistent.PoolTitle,
 				Rarity = persistent.Rarity,
 				Type = persistent.Type,
 				TargetType = persistent.TargetType,
@@ -110,6 +112,11 @@ internal static class CardEditorCreatedCardsStore
 		draft.Enabled = enabled;
 		draft.Title = title?.Trim() ?? string.Empty;
 		draft.Pool = pool;
+		draft.PoolTitle = NormalizePoolTitle(poolTitle) ?? GetPoolModel(pool).Title;
+		if (TryParsePoolTitleAsLegacyEnum(draft.PoolTitle, out CardEditorCreatedCardPool parsedPool))
+		{
+			draft.Pool = parsedPool;
+		}
 		draft.Rarity = rarity;
 		draft.Type = type;
 		draft.TargetType = targetType;
@@ -167,9 +174,31 @@ internal static class CardEditorCreatedCardsStore
 		EnsureLoaded();
 		if (TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def))
 		{
-			return GetPoolModel(def.Pool);
+			return ResolvePoolModel(def);
 		}
-		return GetPoolModel(CardEditorCreatedCardPool.Ironclad);
+		return GetDefaultPoolModel();
+	}
+
+	internal static string GetResolvedPoolTitle(CardEditorCreatedCardDefinition? definition)
+	{
+		return ResolvePoolModel(definition).Title;
+	}
+
+	public static IReadOnlyList<string> GetAvailablePoolTitles()
+	{
+		try
+		{
+			return ModelDb.AllCardPools
+				.Where(pool => pool != null && !string.IsNullOrWhiteSpace(pool.Title))
+				.Select(pool => pool.Title.Trim())
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.OrderBy(title => title, StringComparer.OrdinalIgnoreCase)
+				.ToList();
+		}
+		catch
+		{
+			return new List<string> { GetDefaultPoolModel().Title };
+		}
 	}
 
 	public static string? GetPortraitPathForCard(ModelId cardId)
@@ -281,21 +310,18 @@ internal static class CardEditorCreatedCardsStore
 		{
 			return int.MaxValue;
 		}
-		return def.Pool switch
+
+		string resolvedTitle = GetResolvedPoolTitle(def);
+		IReadOnlyList<string> availableTitles = GetAvailablePoolTitles();
+		for (int i = 0; i < availableTitles.Count; i++)
 		{
-			CardEditorCreatedCardPool.Ironclad => 0,
-			CardEditorCreatedCardPool.Silent => 1,
-			CardEditorCreatedCardPool.Defect => 2,
-			CardEditorCreatedCardPool.Regent => 3,
-			CardEditorCreatedCardPool.Necrobinder => 4,
-			CardEditorCreatedCardPool.Colorless => 5,
-			CardEditorCreatedCardPool.Curse => 6,
-			CardEditorCreatedCardPool.Status => 7,
-			CardEditorCreatedCardPool.Token => 8,
-			CardEditorCreatedCardPool.Event => 9,
-			CardEditorCreatedCardPool.Quest => 10,
-			_ => 11
-		};
+			if (string.Equals(availableTitles[i], resolvedTitle, StringComparison.OrdinalIgnoreCase))
+			{
+				return i;
+			}
+		}
+
+		return int.MaxValue;
 	}
 
 	public static bool IsFullArt(ModelId cardId)
@@ -439,7 +465,7 @@ internal static class CardEditorCreatedCardsStore
 		Save();
 	}
 
-	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
+	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? def))
@@ -449,6 +475,11 @@ internal static class CardEditorCreatedCardsStore
 		}
 		def.Title = title?.Trim() ?? string.Empty;
 		def.Pool = pool;
+		def.PoolTitle = NormalizePoolTitle(poolTitle) ?? GetPoolModel(pool).Title;
+		if (TryParsePoolTitleAsLegacyEnum(def.PoolTitle, out CardEditorCreatedCardPool parsedPool))
+		{
+			def.Pool = parsedPool;
+		}
 		def.Rarity = rarity;
 		def.Type = type;
 		def.TargetType = targetType;
@@ -531,6 +562,7 @@ internal static class CardEditorCreatedCardsStore
 				Enabled = persistent.Enabled,
 				Title = persistent.Title,
 				Pool = persistent.Pool,
+				PoolTitle = persistent.PoolTitle,
 				Rarity = persistent.Rarity,
 				Type = persistent.Type,
 				TargetType = persistent.TargetType,
@@ -725,6 +757,7 @@ internal static class CardEditorCreatedCardsStore
 					Enabled = false,
 					Title = $"Custom Card {i.ToString("D2", System.Globalization.CultureInfo.InvariantCulture)}",
 					Pool = CardEditorCreatedCardPool.Ironclad,
+					PoolTitle = GetDefaultPoolModel().Title,
 					Rarity = CardRarity.Common,
 					Type = CardType.Attack,
 					TargetType = TargetType.AnyEnemy,
@@ -815,6 +848,76 @@ internal static class CardEditorCreatedCardsStore
 			&& slot <= SlotCount;
 	}
 
+	private static CardPoolModel GetDefaultPoolModel()
+	{
+		return GetPoolModel(CardEditorCreatedCardPool.Ironclad);
+	}
+
+	private static CardPoolModel ResolvePoolModel(CardEditorCreatedCardDefinition? definition)
+	{
+		if (definition != null && TryGetPoolModelByTitle(definition.PoolTitle, out CardPoolModel resolvedByTitle))
+		{
+			return resolvedByTitle;
+		}
+
+		if (definition != null)
+		{
+			return GetPoolModel(definition.Pool);
+		}
+
+		return GetDefaultPoolModel();
+	}
+
+	private static string? NormalizePoolTitle(string? poolTitle)
+	{
+		return string.IsNullOrWhiteSpace(poolTitle) ? null : poolTitle.Trim();
+	}
+
+	private static bool TryGetPoolModelByTitle(string? poolTitle, out CardPoolModel pool)
+	{
+		string? normalized = NormalizePoolTitle(poolTitle);
+		if (!string.IsNullOrWhiteSpace(normalized))
+		{
+			CardPoolModel? resolved = ModelDb.AllCardPools.FirstOrDefault(candidate =>
+				candidate != null && string.Equals(candidate.Title, normalized, StringComparison.OrdinalIgnoreCase));
+			if (resolved != null)
+			{
+				pool = resolved;
+				return true;
+			}
+		}
+
+		pool = null!;
+		return false;
+	}
+
+	private static bool TryParsePoolTitleAsLegacyEnum(string? poolTitle, out CardEditorCreatedCardPool pool)
+	{
+		string? normalized = NormalizePoolTitle(poolTitle);
+		if (string.IsNullOrWhiteSpace(normalized))
+		{
+			pool = CardEditorCreatedCardPool.Ironclad;
+			return false;
+		}
+
+		foreach (CardEditorCreatedCardPool candidate in Enum.GetValues<CardEditorCreatedCardPool>())
+		{
+			if (string.Equals(GetPoolModel(candidate).Title, normalized, StringComparison.OrdinalIgnoreCase))
+			{
+				pool = candidate;
+				return true;
+			}
+		}
+
+		if (Enum.TryParse(normalized, ignoreCase: true, out pool))
+		{
+			return true;
+		}
+
+		pool = CardEditorCreatedCardPool.Ironclad;
+		return false;
+	}
+
 	private static CardPoolModel GetPoolModel(CardEditorCreatedCardPool pool)
 	{
 		return pool switch
@@ -893,6 +996,7 @@ internal static class CardEditorCreatedCardsStore
 			Enabled = source.Enabled,
 			Title = source.Title,
 			Pool = source.Pool,
+			PoolTitle = source.PoolTitle,
 			Rarity = source.Rarity,
 			Type = source.Type,
 			TargetType = source.TargetType,
@@ -916,6 +1020,7 @@ internal static class CardEditorCreatedCardsStore
 		public bool Enabled { get; set; }
 		public string? Title { get; set; }
 		public string? Pool { get; set; }
+		public string? PoolTitle { get; set; }
 		public string? Rarity { get; set; }
 		public string? Type { get; set; }
 		public string? TargetType { get; set; }
@@ -940,6 +1045,7 @@ internal static class CardEditorCreatedCardsStore
 				Enabled = def.Enabled,
 				Title = def.Title,
 				Pool = def.Pool.ToString(),
+				PoolTitle = def.PoolTitle,
 				Rarity = def.Rarity.ToString(),
 				Type = def.Type.ToString(),
 				TargetType = def.TargetType.ToString(),
@@ -970,9 +1076,15 @@ internal static class CardEditorCreatedCardsStore
 				Finish = CardEditorVisualFinish.None
 			};
 
+			def.PoolTitle = NormalizePoolTitle(PoolTitle);
+
 			if (!string.IsNullOrWhiteSpace(Pool) && Enum.TryParse(Pool, out CardEditorCreatedCardPool parsedPool))
 			{
 				def.Pool = parsedPool;
+			}
+			else if (TryParsePoolTitleAsLegacyEnum(def.PoolTitle, out CardEditorCreatedCardPool parsedPoolFromTitle))
+			{
+				def.Pool = parsedPoolFromTitle;
 			}
 
 			if (!string.IsNullOrWhiteSpace(Rarity) && Enum.TryParse(Rarity, out CardRarity parsedRarity))

@@ -335,13 +335,18 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 		if (resolvedEffect.Timing == CardExtraEffectTiming.Immediate)
 		{
+			CardModel executionCard = CardEditorExtraEffects.ResolveImmediatePowerExecutionCard(sourceCard, triggerPlay, resolvedEffect);
+			Creature? executionTarget = resolvedEffect.Target == CardExtraEffectTarget.Target
+				? lockedTarget
+				: triggerPlay.Target;
 			CardPlay executionPlay = triggerPlay;
-			if (resolvedEffect.Target == CardExtraEffectTarget.Target && !ReferenceEquals(triggerPlay.Target, lockedTarget))
+			if (!ReferenceEquals(triggerPlay.Card, executionCard)
+				|| !ReferenceEquals(triggerPlay.Target, executionTarget))
 			{
 				executionPlay = new CardPlay
 				{
-					Card = triggerPlay.Card,
-					Target = lockedTarget,
+					Card = executionCard,
+					Target = executionTarget,
 					ResultPile = triggerPlay.ResultPile,
 					Resources = triggerPlay.Resources,
 					IsAutoPlay = triggerPlay.IsAutoPlay,
@@ -501,7 +506,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 				if (CardEditorExtraEffects.CountEventUsesEnemyStatus(countEvent))
 				{
-					if (triggeringPower == null || !CardEditorExtraEffects.PowerMatchesStatus(triggeringPower, entry.Effect.PowerTriggerEnemyStatus))
+					if (triggeringPower == null || !CardEditorExtraEffects.PowerMatchesConfiguredStatus(triggeringPower, entry.Effect.PowerTriggerEnemyStatus, entry.Effect.PowerTriggerPowerId))
 					{
 						continue;
 					}

@@ -40,6 +40,7 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 	public bool Enabled { get; set; }
 	public string? Title { get; set; }
 	public string? Pool { get; set; }
+	public string? PoolTitle { get; set; }
 	public string? Rarity { get; set; }
 	public string? Type { get; set; }
 	public string? TargetType { get; set; }
@@ -63,6 +64,7 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 			Enabled = definition.Enabled,
 			Title = definition.Title,
 			Pool = definition.Pool.ToString(),
+			PoolTitle = definition.PoolTitle,
 			Rarity = definition.Rarity.ToString(),
 			Type = definition.Type.ToString(),
 			TargetType = definition.TargetType.ToString(),
@@ -93,6 +95,7 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 		{
 			Enabled = Enabled,
 			Title = Title?.Trim() ?? string.Empty,
+			PoolTitle = string.IsNullOrWhiteSpace(PoolTitle) ? null : PoolTitle.Trim(),
 			FullArt = FullArt,
 			Finish = CardEditorVisualFinish.None,
 			Override = new CardOverride()

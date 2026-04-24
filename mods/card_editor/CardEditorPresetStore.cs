@@ -1155,9 +1155,15 @@ internal static class CardEditorPresetStore
 		public int AmountXPlus { get; set; }
 		public string? AmountSourceMode { get; set; }
 		public string? AmountSourceEffectId { get; set; }
+		public string? ValueSourceMode { get; set; }
+		public string? ValueSourceActor { get; set; }
+		public string? ValueSourceAggregation { get; set; }
+		public string? ValueSourceKind { get; set; }
+		public string? ValueSourcePowerId { get; set; }
 		public string? Trigger { get; set; }
 		public string? PowerTriggerCountEvent { get; set; }
 		public string? PowerTriggerEnemyStatus { get; set; }
+		public string? PowerTriggerPowerId { get; set; }
 		public string? TurnBoundary { get; set; }
 		public string? TurnBoundarySide { get; set; }
 		public string? TurnBoundaryCardLocation { get; set; }
@@ -1231,11 +1237,13 @@ internal static class CardEditorPresetStore
 		public string? ConditionalBonusConditionType { get; set; }
 		public string? ConditionalBonusCondition { get; set; }
 		public string? ConditionalBonusEnemyStatus { get; set; }
+		public string? ConditionalBonusPowerId { get; set; }
 		public string? ConditionalBonusEnemyIntent { get; set; }
 		public string? BranchMode { get; set; }
 		public string? BranchConditionType { get; set; }
 		public string? BranchCondition { get; set; }
 		public string? BranchEnemyStatus { get; set; }
+		public string? BranchPowerId { get; set; }
 		public string? BranchEnemyIntent { get; set; }
 		public CardExtraEffectDto? BranchEffect { get; set; }
 		public string? BranchCountEvent { get; set; }
@@ -1253,6 +1261,7 @@ internal static class CardEditorPresetStore
 		public string? BranchCountOrbType { get; set; }
 		public string? BranchCountOrbSelection { get; set; }
 		public string? BranchCountEnemyStatus { get; set; }
+		public string? BranchCountPowerId { get; set; }
 		public string? BranchCountEnemyIntent { get; set; }
 		public string? BranchCountComparison { get; set; }
 		public int BranchCountConditionAmount { get; set; } = 1;
@@ -1265,17 +1274,22 @@ internal static class CardEditorPresetStore
 		public string? CountOrbType { get; set; }
 		public string? CountOrbSelection { get; set; }
 		public string? CountEnemyStatus { get; set; }
+		public string? CountPowerId { get; set; }
 		public string? CountEnemyIntent { get; set; }
 		public string? CountComparison { get; set; }
 		public int CountConditionAmount { get; set; } = 1;
 		public bool CountExcludeSourceCard { get; set; }
 		public string? OstyAction { get; set; }
 		public string? MultiplierStat { get; set; }
+		public string? MultiplierSourceMode { get; set; }
+		public string? MultiplierPowerId { get; set; }
 		public string? GrantedKeyword { get; set; }
 		public string? StatusIconMode { get; set; }
 		public string? StatusIconPowerId { get; set; }
 		public string? StatusCustomPackedIconPath { get; set; }
 		public string? StatusCustomBigIconPath { get; set; }
+		public string? CustomPowerName { get; set; }
+		public string? CustomPowerDescription { get; set; }
 		public string? PowerHost { get; set; }
 		public string? PowerTriggerFrom { get; set; }
 		public string? PowerTargeting { get; set; }
@@ -1286,7 +1300,10 @@ internal static class CardEditorPresetStore
 		public string? MatchCustomTag { get; set; }
 		public string? MatchCustomKeyword { get; set; }
 		public string? CustomKeywordName { get; set; }
+		public bool NameFilterEnabled { get; set; }
+		public string? NameFilterText { get; set; }
 		public bool CostFilterEnabled { get; set; }
+		public string? CostFilterMode { get; set; }
 		public int CostFilterMax { get; set; }
 		public string? EffectId { get; set; }
 		public string? ResourceConsumptionMode { get; set; }
@@ -1406,9 +1423,15 @@ internal static class CardEditorPresetStore
 				AmountXPlus = effect.AmountXPlus,
 				AmountSourceMode = effect.AmountSourceMode.ToString(),
 				AmountSourceEffectId = effect.AmountSourceEffectId,
+				ValueSourceMode = effect.ValueSourceMode.ToString(),
+				ValueSourceActor = effect.ValueSourceActor.ToString(),
+				ValueSourceAggregation = effect.ValueSourceAggregation.ToString(),
+				ValueSourceKind = effect.ValueSourceKind.ToString(),
+				ValueSourcePowerId = effect.ValueSourcePowerId,
 				Trigger = effect.Trigger.ToString(),
 				PowerTriggerCountEvent = effect.PowerTriggerCountEvent.ToString(),
 				PowerTriggerEnemyStatus = effect.PowerTriggerEnemyStatus.ToString(),
+				PowerTriggerPowerId = effect.PowerTriggerPowerId,
 				TurnBoundary = effect.TurnBoundary.ToString(),
 				TurnBoundarySide = effect.TurnBoundarySide.ToString(),
 				TurnBoundaryCardLocation = effect.TurnBoundaryCardLocation.ToString(),
@@ -1481,11 +1504,13 @@ internal static class CardEditorPresetStore
 				ConditionalBonusConditionType = effect.ConditionalBonusConditionType.ToString(),
 				ConditionalBonusCondition = effect.ConditionalBonusCondition.ToString(),
 				ConditionalBonusEnemyStatus = effect.ConditionalBonusEnemyStatus.ToString(),
+				ConditionalBonusPowerId = effect.ConditionalBonusPowerId,
 				ConditionalBonusEnemyIntent = effect.ConditionalBonusEnemyIntent.ToString(),
 				BranchMode = effect.BranchMode.ToString(),
 				BranchConditionType = effect.BranchConditionType.ToString(),
 				BranchCondition = effect.BranchCondition.ToString(),
 				BranchEnemyStatus = effect.BranchEnemyStatus.ToString(),
+				BranchPowerId = effect.BranchPowerId,
 				BranchEnemyIntent = effect.BranchEnemyIntent.ToString(),
 				BranchEffect = effect.BranchEffect != null ? FromEffect(effect.BranchEffect) : null,
 				BranchCountEvent = effect.BranchCountEvent.ToString(),
@@ -1503,6 +1528,7 @@ internal static class CardEditorPresetStore
 				BranchCountOrbType = effect.BranchCountOrbType.ToString(),
 				BranchCountOrbSelection = effect.BranchCountOrbSelection.ToString(),
 				BranchCountEnemyStatus = effect.BranchCountEnemyStatus.ToString(),
+				BranchCountPowerId = effect.BranchCountPowerId,
 				BranchCountEnemyIntent = effect.BranchCountEnemyIntent.ToString(),
 				BranchCountComparison = effect.BranchCountComparison.ToString(),
 				BranchCountConditionAmount = effect.BranchCountConditionAmount,
@@ -1515,17 +1541,22 @@ internal static class CardEditorPresetStore
 				CountOrbType = effect.CountOrbType.ToString(),
 				CountOrbSelection = effect.CountOrbSelection.ToString(),
 				CountEnemyStatus = effect.CountEnemyStatus.ToString(),
+				CountPowerId = effect.CountPowerId,
 				CountEnemyIntent = effect.CountEnemyIntent.ToString(),
 				CountComparison = effect.CountComparison.ToString(),
 				CountConditionAmount = effect.CountConditionAmount,
 				CountExcludeSourceCard = effect.CountExcludeSourceCard,
 				OstyAction = effect.OstyAction.ToString(),
 				MultiplierStat = effect.MultiplierStat.ToString(),
+				MultiplierSourceMode = effect.MultiplierSourceMode.ToString(),
+				MultiplierPowerId = effect.MultiplierPowerId,
 				GrantedKeyword = effect.GrantedKeyword.ToString(),
 				StatusIconMode = effect.StatusIconMode.ToString(),
 				StatusIconPowerId = effect.StatusIconPowerId,
 				StatusCustomPackedIconPath = effect.StatusCustomPackedIconPath,
 				StatusCustomBigIconPath = effect.StatusCustomBigIconPath,
+				CustomPowerName = effect.CustomPowerName,
+				CustomPowerDescription = effect.CustomPowerDescription,
 				PowerHost = CardEditorExtraEffects.GetEffectivePowerHost(effect).ToString(),
 				PowerTriggerFrom = CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect).ToString(),
 				PowerTargeting = effect.PowerTargeting.ToString(),
@@ -1536,7 +1567,10 @@ internal static class CardEditorPresetStore
 				MatchCustomTag = effect.MatchCustomTag,
 				MatchCustomKeyword = effect.MatchCustomKeyword,
 				CustomKeywordName = effect.CustomKeywordName,
+				NameFilterEnabled = effect.NameFilterEnabled,
+				NameFilterText = effect.NameFilterText,
 				CostFilterEnabled = effect.CostFilterEnabled,
+				CostFilterMode = effect.CostFilterMode.ToString(),
 				CostFilterMax = effect.CostFilterMax,
 				EffectId = effect.EffectId,
 				ResourceConsumptionMode = effect.ResourceConsumptionMode.ToString(),
@@ -1597,6 +1631,33 @@ internal static class CardEditorPresetStore
 			effect.AmountSourceEffectId = string.IsNullOrWhiteSpace(AmountSourceEffectId)
 				? null
 				: AmountSourceEffectId.Trim();
+			effect.ValueSourceMode = CardExtraEffectValueSourceMode.Common;
+			if (!string.IsNullOrWhiteSpace(ValueSourceMode)
+				&& Enum.TryParse(ValueSourceMode, out CardExtraEffectValueSourceMode parsedValueSourceMode))
+			{
+				effect.ValueSourceMode = parsedValueSourceMode;
+			}
+			effect.ValueSourceActor = CardExtraEffectValueSourceActor.Self;
+			if (!string.IsNullOrWhiteSpace(ValueSourceActor)
+				&& Enum.TryParse(ValueSourceActor, out CardExtraEffectValueSourceActor parsedValueSourceActor))
+			{
+				effect.ValueSourceActor = parsedValueSourceActor;
+			}
+			effect.ValueSourceAggregation = CardExtraEffectValueSourceAggregation.Value;
+			if (!string.IsNullOrWhiteSpace(ValueSourceAggregation)
+				&& Enum.TryParse(ValueSourceAggregation, out CardExtraEffectValueSourceAggregation parsedValueSourceAggregation))
+			{
+				effect.ValueSourceAggregation = parsedValueSourceAggregation;
+			}
+			effect.ValueSourceKind = CardExtraEffectValueSourceKind.MaxHp;
+			if (!string.IsNullOrWhiteSpace(ValueSourceKind)
+				&& Enum.TryParse(ValueSourceKind, out CardExtraEffectValueSourceKind parsedValueSourceKind))
+			{
+				effect.ValueSourceKind = parsedValueSourceKind;
+			}
+			effect.ValueSourcePowerId = string.IsNullOrWhiteSpace(ValueSourcePowerId)
+				? null
+				: ValueSourcePowerId.Trim();
 			effect.DisableOnUpgrade = DisableOnUpgrade;
 			effect.Trigger = trigger;
 			effect.PowerTriggerCountEvent = CardExtraEffectCountEvent.BlockLost;
@@ -1609,6 +1670,9 @@ internal static class CardEditorPresetStore
 			{
 				effect.PowerTriggerEnemyStatus = parsedPowerTriggerEnemyStatus;
 			}
+			effect.PowerTriggerPowerId = string.IsNullOrWhiteSpace(PowerTriggerPowerId)
+				? null
+				: PowerTriggerPowerId.Trim();
 			effect.TurnBoundary = CardExtraEffectTurnBoundary.End;
 			if (!string.IsNullOrWhiteSpace(TurnBoundary) && Enum.TryParse(TurnBoundary, out CardExtraEffectTurnBoundary parsedTurnBoundary))
 			{
@@ -1659,6 +1723,8 @@ internal static class CardEditorPresetStore
 			effect.MatchCustomTag = string.IsNullOrWhiteSpace(MatchCustomTag) ? null : MatchCustomTag.Trim();
 			effect.MatchCustomKeyword = string.IsNullOrWhiteSpace(MatchCustomKeyword) ? null : MatchCustomKeyword.Trim();
 			effect.CustomKeywordName = string.IsNullOrWhiteSpace(CustomKeywordName) ? null : CustomKeywordName.Trim();
+			effect.NameFilterEnabled = NameFilterEnabled;
+			effect.NameFilterText = string.IsNullOrWhiteSpace(NameFilterText) ? null : NameFilterText.Trim();
 			effect.CountExcludeSourceCard = CountExcludeSourceCard;
 			effect.PowerId = string.IsNullOrWhiteSpace(PowerId) ? null : PowerId.Trim();
 
@@ -2009,6 +2075,9 @@ internal static class CardEditorPresetStore
 			{
 				effect.ConditionalBonusEnemyStatus = parsedConditionalBonusEnemyStatus;
 			}
+			effect.ConditionalBonusPowerId = string.IsNullOrWhiteSpace(ConditionalBonusPowerId)
+				? null
+				: ConditionalBonusPowerId.Trim();
 			effect.ConditionalBonusEnemyIntent = CardExtraEffectEnemyIntent.Attack;
 			if (!string.IsNullOrWhiteSpace(ConditionalBonusEnemyIntent) && Enum.TryParse(ConditionalBonusEnemyIntent, out CardExtraEffectEnemyIntent parsedConditionalBonusEnemyIntent))
 			{
@@ -2040,6 +2109,9 @@ internal static class CardEditorPresetStore
 			{
 				effect.BranchEnemyStatus = parsedBranchEnemyStatus;
 			}
+			effect.BranchPowerId = string.IsNullOrWhiteSpace(BranchPowerId)
+				? null
+				: BranchPowerId.Trim();
 			effect.BranchEnemyIntent = CardExtraEffectEnemyIntent.Attack;
 			if (!string.IsNullOrWhiteSpace(BranchEnemyIntent) && Enum.TryParse(BranchEnemyIntent, out CardExtraEffectEnemyIntent parsedBranchEnemyIntent))
 			{
@@ -2108,6 +2180,9 @@ internal static class CardEditorPresetStore
 			{
 				effect.BranchCountEnemyStatus = parsedBranchCountEnemyStatus;
 			}
+			effect.BranchCountPowerId = string.IsNullOrWhiteSpace(BranchCountPowerId)
+				? null
+				: BranchCountPowerId.Trim();
 			effect.BranchCountEnemyIntent = CardExtraEffectEnemyIntent.Attack;
 			if (!string.IsNullOrWhiteSpace(BranchCountEnemyIntent) && Enum.TryParse(BranchCountEnemyIntent, out CardExtraEffectEnemyIntent parsedBranchCountEnemyIntent))
 			{
@@ -2207,6 +2282,9 @@ internal static class CardEditorPresetStore
 				countEnemyStatus = parsedCountEnemyStatus;
 			}
 			effect.CountEnemyStatus = countEnemyStatus;
+			effect.CountPowerId = string.IsNullOrWhiteSpace(CountPowerId)
+				? null
+				: CountPowerId.Trim();
 
 			CardExtraEffectEnemyIntent countEnemyIntent = CardExtraEffectEnemyIntent.Attack;
 			if (!string.IsNullOrWhiteSpace(CountEnemyIntent) && Enum.TryParse(CountEnemyIntent, out CardExtraEffectEnemyIntent parsedCountEnemyIntent))
@@ -2236,6 +2314,14 @@ internal static class CardEditorPresetStore
 				multiplierStat = parsedMultiplierStat;
 			}
 			effect.MultiplierStat = multiplierStat;
+			effect.MultiplierSourceMode = CardExtraEffectValueSourceMode.Common;
+			if (!string.IsNullOrWhiteSpace(MultiplierSourceMode) && Enum.TryParse(MultiplierSourceMode, out CardExtraEffectValueSourceMode parsedMultiplierSourceMode))
+			{
+				effect.MultiplierSourceMode = parsedMultiplierSourceMode;
+			}
+			effect.MultiplierPowerId = string.IsNullOrWhiteSpace(MultiplierPowerId)
+				? null
+				: MultiplierPowerId.Trim();
 
 			CardKeyword grantedKeyword = CardKeyword.Exhaust;
 			if (!string.IsNullOrWhiteSpace(GrantedKeyword) && Enum.TryParse(GrantedKeyword, out CardKeyword parsedGrantedKeyword))
@@ -2259,6 +2345,8 @@ internal static class CardEditorPresetStore
 			{
 				effect.StatusCustomBigIconPath = StatusCustomBigIconPath.Trim();
 			}
+			effect.CustomPowerName = string.IsNullOrWhiteSpace(CustomPowerName) ? null : CustomPowerName.Trim();
+			effect.CustomPowerDescription = string.IsNullOrWhiteSpace(CustomPowerDescription) ? null : CustomPowerDescription.Trim();
 			if (!string.IsNullOrWhiteSpace(PowerHost) && Enum.TryParse(PowerHost, out CardExtraEffectPowerHost parsedPowerHost))
 			{
 				effect.PowerHost = parsedPowerHost;
@@ -2293,6 +2381,11 @@ internal static class CardEditorPresetStore
 				: SelfScalingTargetEffectId.Trim();
 
 			effect.CostFilterEnabled = CostFilterEnabled;
+			if (!string.IsNullOrWhiteSpace(CostFilterMode)
+				&& Enum.TryParse(CostFilterMode, out CardExtraEffectCostFilterMode parsedCostFilterMode))
+			{
+				effect.CostFilterMode = parsedCostFilterMode;
+			}
 			effect.CostFilterMax = CostFilterMax;
 
 			return true;

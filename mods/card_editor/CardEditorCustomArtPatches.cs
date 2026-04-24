@@ -22,6 +22,9 @@ internal static class CardEditorCustomPortraitLoader
 	[ThreadStatic]
 	private static HashSet<ModelId>? _resolvingSourcePortraits;
 
+	[ThreadStatic]
+	private static HashSet<ModelId>? _resolvingSourcePortraitPaths;
+
 	public static bool TryGetCustomPortrait(ModelId cardId, out Texture2D texture)
 	{
 		texture = null!;
@@ -60,6 +63,49 @@ internal static class CardEditorCustomPortraitLoader
 		}
 
 		return false;
+	}
+
+	public static bool TryGetPortrait(CardModel? card, out Texture2D texture)
+	{
+		texture = null!;
+
+		if (card?.Id == null)
+		{
+			return false;
+		}
+
+		if (TryGetCustomPortrait(card.Id, out texture))
+		{
+			return true;
+		}
+
+		return TryGetPoolOverridePortraitFallback(card, out texture);
+	}
+
+	public static bool TryGetPortraitPath(CardModel? card, bool beta, out string portraitPath)
+	{
+		portraitPath = string.Empty;
+
+		if (card?.Id == null
+			|| CardEditorCreatedCardsStore.IsCreatedCardId(card.Id)
+			|| CardEditorOverrides.SuppressAllOverrides
+			|| !CardEditorOverrides.TryGetEffectiveOverride(card.Id, out CardOverride overrideData))
+		{
+			return false;
+		}
+
+		if (overrideData.PortraitSourceCardId != null && overrideData.PortraitSourceCardId != ModelId.none)
+		{
+			return TryGetPortraitPathFromSourceCard(overrideData.PortraitSourceCardId, beta, out portraitPath);
+		}
+
+		if (string.IsNullOrWhiteSpace(overrideData.CustomPortraitFile)
+			&& string.IsNullOrWhiteSpace(overrideData.PoolTitle))
+		{
+			return false;
+		}
+
+		return TryGetOriginalPortraitPath(card.Id, beta, out portraitPath);
 	}
 
 	private static bool TryGetOrLoadTexture(string absolutePath, ModelId cardId, out Texture2D texture)
@@ -126,6 +172,122 @@ internal static class CardEditorCustomPortraitLoader
 			catch
 			{
 			}
+		}
+	}
+
+	private static bool TryGetPortraitPathFromSourceCard(ModelId sourceCardId, bool beta, out string portraitPath)
+	{
+		portraitPath = string.Empty;
+		try
+		{
+			_resolvingSourcePortraitPaths ??= new HashSet<ModelId>();
+			if (!_resolvingSourcePortraitPaths.Add(sourceCardId))
+			{
+				return false;
+			}
+
+			CardModel? source = ModelDb.GetByIdOrNull<CardModel>(sourceCardId);
+			if (source == null)
+			{
+				return false;
+			}
+
+			portraitPath = beta ? source.BetaPortraitPath : source.PortraitPath;
+			return !string.IsNullOrWhiteSpace(portraitPath);
+		}
+		catch
+		{
+			return false;
+		}
+		finally
+		{
+			try
+			{
+				_resolvingSourcePortraitPaths?.Remove(sourceCardId);
+			}
+			catch
+			{
+			}
+		}
+	}
+
+	private static bool TryGetPoolOverridePortraitFallback(CardModel card, out Texture2D texture)
+	{
+		texture = null!;
+
+		if (CardEditorOverrides.SuppressAllOverrides
+			|| CardEditorCreatedCardsStore.IsCreatedCardId(card.Id)
+			|| !CardEditorOverrides.TryGetEffectiveOverride(card.Id, out CardOverride overrideData)
+			|| string.IsNullOrWhiteSpace(overrideData.PoolTitle)
+			|| !string.IsNullOrWhiteSpace(overrideData.CustomPortraitFile)
+			|| (overrideData.PortraitSourceCardId != null && overrideData.PortraitSourceCardId != ModelId.none))
+		{
+			return false;
+		}
+
+		try
+		{
+			string currentPortraitPath = card.PortraitPath;
+			if (!string.IsNullOrWhiteSpace(currentPortraitPath) && ResourceLoader.Exists(currentPortraitPath))
+			{
+				return false;
+			}
+		}
+		catch
+		{
+		}
+
+		return TryGetOriginalPortrait(card, out texture);
+	}
+
+	private static bool TryGetOriginalPortrait(CardModel card, out Texture2D texture)
+	{
+		texture = null!;
+		try
+		{
+			if (!TryGetOriginalPortraitPath(card.Id, beta: false, out string originalPortraitPath))
+			{
+				return false;
+			}
+
+			Texture2D? originalTexture = ResourceLoader.Load<Texture2D>(originalPortraitPath, null, ResourceLoader.CacheMode.Reuse);
+			if (originalTexture == null)
+			{
+				return false;
+			}
+
+			texture = originalTexture;
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static bool TryGetOriginalPortraitPath(ModelId cardId, bool beta, out string portraitPath)
+	{
+		portraitPath = string.Empty;
+		bool previousSuppressAllOverrides = CardEditorOverrides.SuppressAllOverrides;
+		try
+		{
+			CardEditorOverrides.SuppressAllOverrides = true;
+			CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(cardId);
+			if (canonical == null)
+			{
+				return false;
+			}
+
+			portraitPath = beta ? canonical.BetaPortraitPath : canonical.PortraitPath;
+			return !string.IsNullOrWhiteSpace(portraitPath);
+		}
+		catch
+		{
+			return false;
+		}
+		finally
+		{
+			CardEditorOverrides.SuppressAllOverrides = previousSuppressAllOverrides;
 		}
 	}
 
@@ -273,6 +435,30 @@ internal static class CardEditorCustomPortraitLoader
 	}
 }
 
+[HarmonyPatch(typeof(CardModel), "get_PortraitPath")]
+internal static class CardModel_get_PortraitPath_CustomArt_Patch
+{
+	public static void Postfix(CardModel __instance, ref string __result)
+	{
+		if (CardEditorCustomPortraitLoader.TryGetPortraitPath(__instance, beta: false, out string portraitPath))
+		{
+			__result = portraitPath;
+		}
+	}
+}
+
+[HarmonyPatch(typeof(CardModel), "get_BetaPortraitPath")]
+internal static class CardModel_get_BetaPortraitPath_CustomArt_Patch
+{
+	public static void Postfix(CardModel __instance, ref string __result)
+	{
+		if (CardEditorCustomPortraitLoader.TryGetPortraitPath(__instance, beta: true, out string portraitPath))
+		{
+			__result = portraitPath;
+		}
+	}
+}
+
 [HarmonyPatch(typeof(CardModel), "get_Portrait")]
 internal static class CardModel_get_Portrait_CustomArt_Patch
 {
@@ -284,7 +470,7 @@ internal static class CardModel_get_Portrait_CustomArt_Patch
 		}
 
 		// This can be inlined in some call-sites, so we also patch NCard.Reload. This patch remains as a best-effort.
-		if (!CardEditorCustomPortraitLoader.TryGetCustomPortrait(__instance.Id, out Texture2D texture))
+		if (!CardEditorCustomPortraitLoader.TryGetPortrait(__instance, out Texture2D texture))
 		{
 			return true;
 		}
@@ -310,7 +496,7 @@ internal static class NCard_Reload_CustomPortrait_Patch
 			return;
 		}
 
-		if (!CardEditorCustomPortraitLoader.TryGetCustomPortrait(model.Id, out Texture2D texture))
+		if (!CardEditorCustomPortraitLoader.TryGetPortrait(model, out Texture2D texture))
 		{
 			return;
 		}

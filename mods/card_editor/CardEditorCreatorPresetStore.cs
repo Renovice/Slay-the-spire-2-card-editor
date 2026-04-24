@@ -323,6 +323,7 @@ internal static class CardEditorCreatorPresetStore
 		public bool Enabled { get; set; }
 		public string? Title { get; set; }
 		public string? Pool { get; set; }
+		public string? PoolTitle { get; set; }
 		public string? Rarity { get; set; }
 		public string? Type { get; set; }
 		public string? TargetType { get; set; }
@@ -347,6 +348,7 @@ internal static class CardEditorCreatorPresetStore
 				Enabled = def.Enabled,
 				Title = def.Title,
 				Pool = def.Pool.ToString(),
+				PoolTitle = def.PoolTitle,
 				Rarity = def.Rarity.ToString(),
 				Type = def.Type.ToString(),
 				TargetType = def.TargetType.ToString(),
@@ -375,6 +377,7 @@ internal static class CardEditorCreatorPresetStore
 
 			def.Enabled = Enabled;
 			def.Title = Title?.Trim() ?? string.Empty;
+			def.PoolTitle = string.IsNullOrWhiteSpace(PoolTitle) ? null : PoolTitle.Trim();
 
 			if (Enum.TryParse(Pool ?? string.Empty, ignoreCase: true, out CardEditorCreatedCardPool pool))
 			{

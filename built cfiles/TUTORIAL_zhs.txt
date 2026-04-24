@@ -1,0 +1,288 @@
+CARD EDITOR 教程 (简体中文)
+这是 Slay the Spire 2 Card Editor 的可搜索参考文档。
+
+使用方法
+- 用 Ctrl+F 搜索。
+- 优先搜索编辑器里看到的准确字段名。
+- 也可以搜索英文别名。
+
+SEARCH: enabled, title, cost, type, class, rarity, effect list, add effect, edit upgrade
+SEARCH: applied effect, value source, resource protection, scaling, branch, power, grant
+SEARCH: poison, weak, vulnerable, replay, keyword, copy exact, future matching cards, include this card
+
+========================================================================
+1. 快速答案 (Quick Answers)
+========================================================================
+
+造成等同于自己最大生命的伤害：
+- `Deal Damage`
+- `Amount Source = Value Source`
+- `Self -> Common -> Max HP`
+
+获得等同于已造成伤害的格挡：
+- 第1行 `Deal Damage`
+- 第2行 `Gain Block`
+- 第2行 `Amount Source = Applied Effect`
+- 第2行 `Source Effect = 第1行`
+
+此牌不消耗中毒：
+- `Resource Protection`
+- `Specific Power / Status`
+- 选择 `Poison`
+
+把弃牌堆里的 Strike 复制到手牌：
+- `Copy Cards from Pile`
+- `From = Discard`, `To = Hand`
+- `Match = Card Id`
+- 选择 `Strike`
+
+========================================================================
+2. 主界面
+========================================================================
+
+Card Preview:
+- 当前卡牌文本预览。
+
+Effect List:
+- 效果行列表。
+- `Applied Effect` 会受到行顺序影响。
+
+按钮：
+- `Add Effect`
+- `Add Effect Source`
+- `Add Keyword`
+- `Edit Upgrade`
+
+========================================================================
+3. 卡牌基础设置
+========================================================================
+
+`Enabled`:
+- 开启或关闭此卡牌覆盖。
+
+`Title`, `Cost`, `Type`, `Class`, `Rarity`:
+- 设置卡牌基础信息。
+
+`Endless Upgrades`:
+- 给可重复升级的自定义卡使用。
+
+========================================================================
+4. 效果行基础结构
+========================================================================
+
+每一行通常包含：
+
+`Effect / Subtype`
+- 这行到底做什么。
+
+`Trigger`
+- 常见是 `On Play`。
+- 部分行也可在抽牌、弃牌、消耗、回合边界或威能模式下触发。
+
+`Target`
+- Self、Target、Random Enemy、All Enemies 等。
+
+`Amount`
+- 固定数值时使用。
+
+`Repeat`
+- 重复同一个效果多次。
+
+========================================================================
+5. 数值来源 (Amount Source)
+========================================================================
+
+`Fixed`
+- 使用该行直接写的数字。
+
+`Applied Effect`
+- 读取前一行实际结算出的数值。
+- 常见用途：
+  - 获得等同于已造成伤害的格挡
+  - 造成等同于施加中毒的伤害
+  - 读取效果来源卡的数值
+
+`Value Source`
+- 直接读取实时数值。
+- 对象：
+  - Self
+  - Target
+  - All Enemies
+  - All Allies
+- 类型：
+  - Common
+  - Power / Status
+- 聚合：
+  - Value
+  - Sum
+  - Highest
+  - Lowest
+  - Average
+
+========================================================================
+6. 高级属性 (Advanced Properties)
+========================================================================
+
+`Scaling`
+- 让数值根据本回合 / 本场战斗中的记录变化。
+
+`Power`
+- 把一次性效果变成持续触发效果。
+
+`Grant`
+- 给卡牌赋予效果、关键词、Replay。
+
+`Branch`
+- 条件满足时改走另一条效果。
+
+`Condition Bonus`
+- 条件满足时给当前数值额外加减。
+
+`Timing`
+- 现在触发，或延迟到回合开始/结束等。
+
+`Resource Protection`
+- `This card does not consume ...`
+
+`Include This Card`
+- 让选牌类效果把此牌自身也算进去。
+
+`Future Matching Cards`
+- 之后新生成的匹配卡牌也能拿到赋予效果。
+
+========================================================================
+7. 计数 / 历史系统
+========================================================================
+
+常见事件：
+- Played
+- Drawn
+- Discarded
+- Exhausted
+- Created
+- Damage dealt
+- HP lost
+- Status gained / lost
+
+常见时间窗：
+- This Turn
+- This Combat
+- Last X Turns
+
+常见过滤：
+- 牌类型
+- 牌池
+- 精确卡牌 ID
+- 关键词
+- 标签
+- 状态 / 威能
+- 意图
+
+========================================================================
+8. 主要效果分类
+========================================================================
+
+伤害 / 防御：
+- Deal Damage
+- Gain Block / Remove Block
+- Heal / Lose HP
+- Gain / Lose Max HP
+
+资源：
+- Energy
+- Stars
+- Gold
+- Resource Protection
+
+状态 / 威能：
+- Apply Power / Status
+- Weak, Frail, Vulnerable, Poison
+- Strength / Dexterity / Focus
+- `Status to Status`
+- `Multiply Stat / Status`
+
+卡牌生成：
+- Add Random Card
+- Choose 1 of 3
+- Add Specific Card
+- Add Copy of This Card
+- Exact Copy
+
+牌堆 / 卡牌操作：
+- Move
+- Copy from Pile
+- Copy Exact from Pile
+- Play from Pile
+- Fetch Specific Card
+- Discard / Exhaust / Transform / Remove
+- Upgrade Cards in Pile
+
+========================================================================
+9. 升级
+========================================================================
+
+基础编辑器：
+- 升级前的卡牌。
+
+升级编辑器：
+- 只编辑升级时发生的增量变化。
+
+建议：
+- 基础信息放 base。
+- 仅升级变化放 upgrade。
+
+========================================================================
+10. 常见配方
+========================================================================
+
+获得等同于所有敌人中毒总和的格挡：
+- `Gain Block`
+- `Amount Source = Value Source`
+- `Actor = All Enemies`
+- `Value = Poison`
+- `Aggregation = Sum`
+
+施加等同于本场战斗已打出牌数的虚弱：
+- `Apply Weak`
+- 计数 / 缩放设置为 `Played`, `This Combat`
+- 用牌张数，不要用效果数值总和
+
+使用原版卡牌效果数值：
+- 第1行 `Run Effect Source`
+- 选择原版卡
+- 后续行设为 `Amount Source = Applied Effect`
+
+========================================================================
+11. 故障排查
+========================================================================
+
+看到 `Deal 0 damage. Equal to ...`：
+- 通常要重新检查 `Amount Source`。
+
+效果完全不生效：
+- 检查 Trigger
+- 检查 Target
+- 检查 Timing
+- 检查 Count / Window
+- 检查 Aggregation
+
+`Applied Effect` 读错数值：
+- 只能读取更前面的行。
+- 行顺序非常重要。
+
+========================================================================
+12. 搜索索引
+========================================================================
+
+Applied Effect = 旧名字 `Applied Effect Row`
+Source Effect = 旧名字 `Source Effect Row`
+Linked Effect = 旧名字 `Linked Row`
+Resource Protection = `does not consume`
+Value Source = 实时数值来源
+Power / Status = 长列表威能/状态选择器
+Future Matching Cards = 包括之后生成的匹配卡
+Include This Card = 包括此牌自身
+Status to Status = 让一个状态等同于另一个值
+Scaling Stage = 分阶段条件效果
+
+结束。

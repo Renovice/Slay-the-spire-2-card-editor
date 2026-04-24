@@ -74,9 +74,10 @@ internal static class CardEditorTemporaryExtraEffectController
 		}
 		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule))
 		{
-			return false;
+			return CardEditorMatchingCardAuraController.HasAny(combatState);
 		}
-		return schedule.States.Count > 0;
+
+		return schedule.States.Count > 0 || CardEditorMatchingCardAuraController.HasAny(combatState);
 	}
 
 	public static IReadOnlyList<CardExtraEffect> GetEffects(CombatState combatState, CardModel card)

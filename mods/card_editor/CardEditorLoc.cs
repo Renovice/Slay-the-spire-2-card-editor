@@ -47,7 +47,15 @@ internal static class CardEditorLoc
 			}
 
 			string fullKey = NormalizeKey(key);
-			TryGetTranslatedText(fullKey, out _);
+			string cacheKey = BuildCacheKey(fullKey);
+			if (_textCache.ContainsKey(cacheKey) || !HasTranslation(fullKey, cacheKey))
+			{
+				continue;
+			}
+
+			// Warm the cache without formatting template strings like "{Payload}" that need runtime args.
+			LocString loc = new LocString(Table, fullKey);
+			_textCache[cacheKey] = NormalizeLocalizedSpacing(loc.GetRawText());
 		}
 	}
 

@@ -1,0 +1,289 @@
+CARD EDITOR 튜토리얼 (Korean)
+Slay the Spire 2 Card Editor용 검색형 안내서입니다.
+
+사용 방법
+- Ctrl+F로 검색하세요.
+- 에디터에 보이는 정확한 행 이름을 검색하세요.
+- 영어 별칭도 같이 검색해 보세요.
+
+SEARCH: enabled, title, cost, type, class, rarity, effect list, add effect, edit upgrade
+SEARCH: applied effect, value source, resource protection, scaling, branch, power, grant
+SEARCH: poison, weak, vulnerable, replay, keyword, copy exact, future matching cards, include this card
+
+========================================================================
+1. 빠른 답변 (Quick Answers)
+========================================================================
+
+내 최대 체력만큼 피해:
+- `Deal Damage`
+- `Amount Source = Value Source`
+- `Self -> Common -> Max HP`
+
+가한 피해만큼 방어도 획득:
+- 1행 `Deal Damage`
+- 2행 `Gain Block`
+- 2행 `Amount Source = Applied Effect`
+- 2행 `Source Effect = 1행`
+
+이 카드가 독을 소모하지 않음:
+- `Resource Protection`
+- `Specific Power / Status`
+- `Poison` 선택
+
+버린 카드 더미의 Strike를 손으로 복사:
+- `Copy Cards from Pile`
+- `From = Discard`, `To = Hand`
+- `Match = Card Id`
+- `Strike` 선택
+
+========================================================================
+2. 메인 화면
+========================================================================
+
+Card Preview:
+- 현재 카드의 텍스트 미리보기입니다.
+
+Effect List:
+- 효과 행 목록입니다.
+- `Applied Effect`는 행 순서의 영향을 받습니다.
+
+버튼:
+- `Add Effect`
+- `Add Effect Source`
+- `Add Keyword`
+- `Edit Upgrade`
+
+========================================================================
+3. 카드 기본 설정
+========================================================================
+
+`Enabled`:
+- 카드 오버라이드를 켜거나 끕니다.
+
+`Title`, `Cost`, `Type`, `Class`, `Rarity`:
+- 카드의 기본 정보를 정합니다.
+
+`Endless Upgrades`:
+- 반복 업그레이드형 커스텀 카드에 사용합니다.
+
+========================================================================
+4. 효과 행 기본 구조
+========================================================================
+
+각 행은 보통 아래 요소를 가집니다.
+
+`Effect / Subtype`
+- 행이 실제로 무엇을 하는지.
+
+`Trigger`
+- 보통 `On Play`.
+- 일부는 드로우, 버리기, 소멸, 턴 경계, 파워 모드에서 동작합니다.
+
+`Target`
+- Self, Target, Random Enemy, All Enemies 등.
+
+`Amount`
+- 고정 수치일 때 사용.
+
+`Repeat`
+- 같은 효과를 여러 번 반복.
+
+========================================================================
+5. 수치 읽기 (Amount Source)
+========================================================================
+
+`Fixed`
+- 행에 적힌 숫자를 그대로 사용합니다.
+
+`Applied Effect`
+- 이전 행이 실제로 적용한 수치를 읽습니다.
+- 예:
+  - 가한 피해만큼 방어도
+  - 건 독 수치만큼 추가 효과
+  - 효과 출처 카드의 수치 사용
+
+`Value Source`
+- 실시간 값을 직접 읽습니다.
+- 대상:
+  - Self
+  - Target
+  - All Enemies
+  - All Allies
+- 타입:
+  - Common
+  - Power / Status
+- 집계:
+  - Value
+  - Sum
+  - Highest
+  - Lowest
+  - Average
+
+========================================================================
+6. 고급 속성 (Advanced Properties)
+========================================================================
+
+`Scaling`
+- 이번 턴 / 이번 전투 기록에 따라 수치가 바뀝니다.
+
+`Power`
+- 1회성 효과가 아니라 지속 트리거 효과로 바꿉니다.
+
+`Grant`
+- 카드에게 효과, 키워드, 리플레이를 부여합니다.
+
+`Branch`
+- 조건이 맞으면 다른 효과를 실행합니다.
+
+`Condition Bonus`
+- 조건이 맞을 때 추가 수치를 더하거나 뺍니다.
+
+`Timing`
+- 지금, 턴 시작/종료 등으로 지연시킬 수 있습니다.
+
+`Resource Protection`
+- `This card does not consume ...`
+
+`Include This Card`
+- 카드 선택 계열 효과가 이 카드 자신도 포함하도록 합니다.
+
+`Future Matching Cards`
+- 나중에 생성된 일치 카드에도 부여 효과가 들어가게 합니다.
+
+========================================================================
+7. 카운트 / 기록 시스템
+========================================================================
+
+자주 쓰는 이벤트:
+- Played
+- Drawn
+- Discarded
+- Exhausted
+- Created
+- Damage dealt
+- HP lost
+- Status gained / lost
+
+자주 쓰는 기간:
+- This Turn
+- This Combat
+- Last X Turns
+
+자주 쓰는 필터:
+- 카드 타입
+- 카드 풀
+- 정확한 카드 ID
+- 키워드
+- 태그
+- 상태 / 파워
+- 의도
+
+========================================================================
+8. 주요 효과 카테고리
+========================================================================
+
+피해 / 방어:
+- Deal Damage
+- Gain Block / Remove Block
+- Heal / Lose HP
+- Gain / Lose Max HP
+
+자원:
+- Energy
+- Stars
+- Gold
+- Resource Protection
+
+상태 / 파워:
+- Apply Power / Status
+- Weak, Frail, Vulnerable, Poison
+- Strength / Dexterity / Focus
+- `Status to Status`
+- `Multiply Stat / Status`
+
+카드 생성:
+- Add Random Card
+- Choose 1 of 3
+- Add Specific Card
+- Add Copy of This Card
+- Exact Copy
+
+더미 / 카드 조작:
+- Move
+- Copy from Pile
+- Copy Exact from Pile
+- Play from Pile
+- Fetch Specific Card
+- Discard / Exhaust / Transform / Remove
+- Upgrade Cards in Pile
+
+========================================================================
+9. 업그레이드
+========================================================================
+
+기본 에디터:
+- 업그레이드 전 카드.
+
+업그레이드 에디터:
+- 업그레이드 시 바뀌는 델타만 편집합니다.
+
+좋은 규칙:
+- 기본 정보는 base.
+- 업그레이드 전용 변경은 upgrade.
+
+========================================================================
+10. 자주 만드는 예시
+========================================================================
+
+모든 적의 독 총합만큼 방어도 획득:
+- `Gain Block`
+- `Amount Source = Value Source`
+- `Actor = All Enemies`
+- `Value = Poison`
+- `Aggregation = Sum`
+
+이번 전투에 사용한 카드 수만큼 약화 부여:
+- `Apply Weak`
+- 카운트 / 스케일링을 `Played`, `This Combat`로 설정
+- 효과 수치 합이 아니라 카드 수를 사용해야 합니다
+
+바닐라 카드 효과 수치 사용:
+- 1행 `Run Effect Source`
+- 바닐라 카드 선택
+- 다음 행에서 `Amount Source = Applied Effect`
+
+========================================================================
+11. 문제 해결
+========================================================================
+
+`Deal 0 damage. Equal to ...`처럼 보임:
+- 보통 `Amount Source` 설정을 다시 확인해야 합니다.
+
+효과가 아무것도 안 함:
+- Trigger
+- Target
+- Timing
+- Count / Window
+- Aggregation
+를 확인하세요.
+
+`Applied Effect`가 잘못된 값을 읽음:
+- 항상 더 앞선 행을 읽습니다.
+- 순서가 중요합니다.
+
+========================================================================
+12. 검색 색인
+========================================================================
+
+Applied Effect = 예전 이름 `Applied Effect Row`
+Source Effect = 예전 이름 `Source Effect Row`
+Linked Effect = 예전 이름 `Linked Row`
+Resource Protection = `does not consume`
+Value Source = 실시간 수치 출처
+Power / Status = 긴 파워/상태 선택기
+Future Matching Cards = 나중에 생성된 일치 카드 포함
+Include This Card = 이 카드 자신 포함
+Status to Status = 한 상태를 다른 값과 같게 얻거나 잃음
+Scaling Stage = 단계별 조건 효과
+
+끝.

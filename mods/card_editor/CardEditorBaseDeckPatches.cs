@@ -1,9 +1,11 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
@@ -12,6 +14,7 @@ using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardLibrary;
+using MegaCrit.Sts2.Core.Runs;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -33,7 +36,13 @@ internal static class CardEditorBaseDeckLibraryHelper
 	private static readonly MethodInfo? _showCardDetailMethod =
 		typeof(NCardLibrary).GetMethod("ShowCardDetail", BindingFlags.Instance | BindingFlags.NonPublic);
 
-	private static readonly Dictionary<string, ModelId> _characterFilterPaths = new(StringComparer.Ordinal)
+	private static readonly FieldInfo? _cardPoolFiltersField =
+		typeof(NCardLibrary).GetField("_cardPoolFilters", BindingFlags.Instance | BindingFlags.NonPublic);
+
+	private static readonly FieldInfo? _runStateField =
+		typeof(NCardLibrary).GetField("_runState", BindingFlags.Instance | BindingFlags.NonPublic);
+
+	private static readonly Dictionary<string, ModelId> _builtInCharacterFilterPaths = new(StringComparer.Ordinal)
 	{
 		["%IroncladPool"] = ModelDb.Character<MegaCrit.Sts2.Core.Models.Characters.Ironclad>().Id,
 		["%SilentPool"] = ModelDb.Character<MegaCrit.Sts2.Core.Models.Characters.Silent>().Id,
@@ -142,17 +151,12 @@ internal static class CardEditorBaseDeckLibraryHelper
 			return;
 		}
 
-		foreach ((string path, ModelId characterId) in _characterFilterPaths)
+		if (TryGetSelectedCharacterFromLibrary(library, out ModelId characterId)
+			&& characterId != null
+			&& characterId != ModelId.none
+			&& CardEditorBaseDeckUiState.EditingCharacterId != characterId)
 		{
-			NCardPoolFilter? filter = library.GetNodeOrNull<NCardPoolFilter>(path);
-			if (filter?.IsSelected == true)
-			{
-				if (CardEditorBaseDeckUiState.EditingCharacterId != characterId)
-				{
-					CardEditorBaseDeckUiState.SetEditingCharacter(characterId);
-				}
-				return;
-			}
+			CardEditorBaseDeckUiState.SetEditingCharacter(characterId);
 		}
 	}
 
@@ -164,19 +168,114 @@ internal static class CardEditorBaseDeckLibraryHelper
 		}
 
 		ModelId selected = CardEditorBaseDeckUiState.EditingCharacterId;
-		foreach ((string path, ModelId characterId) in _characterFilterPaths)
+		if (TryGetReflectedCharacterFilters(library, out Dictionary<ModelId, NCardPoolFilter> reflectedFilters) && reflectedFilters.Count > 0)
+		{
+			foreach ((ModelId candidateId, NCardPoolFilter filter) in reflectedFilters)
+			{
+				if (filter != null)
+				{
+					filter.IsSelected = candidateId == selected;
+				}
+			}
+			return;
+		}
+
+		if (!TryGetBuiltInFilterPathForCharacter(selected, out string selectedPath))
+		{
+			return;
+		}
+
+		foreach ((string path, _) in _builtInCharacterFilterPaths)
 		{
 			NCardPoolFilter? filter = library.GetNodeOrNull<NCardPoolFilter>(path);
 			if (filter != null && CardEditorUiState.IsBaseDeckActive)
 			{
-				filter.IsSelected = characterId == selected;
+				filter.IsSelected = string.Equals(path, selectedPath, StringComparison.Ordinal);
 			}
 		}
 	}
 
 	public static bool TryGetSelectedCharacterFromLibrary(NCardLibrary library, out ModelId characterId)
 	{
-		foreach ((string path, ModelId candidate) in _characterFilterPaths)
+		if (TryGetSelectedCharacterFromReflectedFilters(library, out characterId))
+		{
+			return true;
+		}
+
+		if (TryGetBuiltInSelectedCharacterFromLibrary(library, out characterId))
+		{
+			return true;
+		}
+
+		if (TryInferSelectedCharacterFromVisibleCards(library, out characterId))
+		{
+			return true;
+		}
+
+		if (TryGetCurrentRunCharacter(library, out characterId))
+		{
+			return true;
+		}
+
+		characterId = ModelId.none;
+		return false;
+	}
+
+	private static bool TryGetSelectedCharacterFromReflectedFilters(NCardLibrary library, out ModelId characterId)
+	{
+		if (TryGetReflectedCharacterFilters(library, out Dictionary<ModelId, NCardPoolFilter> reflectedFilters))
+		{
+			foreach ((ModelId candidateId, NCardPoolFilter filter) in reflectedFilters)
+			{
+				if (filter?.IsSelected == true)
+				{
+					characterId = candidateId;
+					return true;
+				}
+			}
+		}
+
+		characterId = ModelId.none;
+		return false;
+	}
+
+	private static bool TryGetReflectedCharacterFilters(NCardLibrary library, out Dictionary<ModelId, NCardPoolFilter> filters)
+	{
+		filters = new Dictionary<ModelId, NCardPoolFilter>();
+
+		try
+		{
+			if (_cardPoolFiltersField?.GetValue(library) is not IDictionary rawFilters)
+			{
+				return false;
+			}
+
+			foreach (DictionaryEntry entry in rawFilters)
+			{
+				if (entry.Key is not CharacterModel character
+					|| character.Id == null
+					|| character.Id == ModelId.none
+					|| !CardEditorBaseDeckStore.IsSupportedCharacterId(character.Id)
+					|| entry.Value is not NCardPoolFilter filter)
+				{
+					continue;
+				}
+
+				filters[character.Id] = filter;
+			}
+		}
+		catch
+		{
+			filters.Clear();
+			return false;
+		}
+
+		return filters.Count > 0;
+	}
+
+	private static bool TryGetBuiltInSelectedCharacterFromLibrary(NCardLibrary library, out ModelId characterId)
+	{
+		foreach ((string path, ModelId candidate) in _builtInCharacterFilterPaths)
 		{
 			NCardPoolFilter? filter = library.GetNodeOrNull<NCardPoolFilter>(path);
 			if (filter?.IsSelected == true)
@@ -187,6 +286,63 @@ internal static class CardEditorBaseDeckLibraryHelper
 		}
 
 		characterId = ModelId.none;
+		return false;
+	}
+
+	private static bool TryInferSelectedCharacterFromVisibleCards(NCardLibrary library, out ModelId characterId)
+	{
+		NCardLibraryGrid? grid = library.GetNodeOrNull<NCardLibraryGrid>("%CardGrid");
+		if (grid != null)
+		{
+			List<ModelId> matchingCharacters = grid.VisibleCards
+				.Select(card => CardEditorBaseDeckStore.TryGetCharacterIdForCard(card, out ModelId candidate) ? candidate : ModelId.none)
+				.Where(candidate => candidate != null && candidate != ModelId.none)
+				.Distinct()
+				.ToList();
+
+			if (matchingCharacters.Count == 1)
+			{
+				characterId = matchingCharacters[0];
+				return true;
+			}
+		}
+
+		characterId = ModelId.none;
+		return false;
+	}
+
+	private static bool TryGetCurrentRunCharacter(NCardLibrary library, out ModelId characterId)
+	{
+		try
+		{
+			IRunState? runState = _runStateField?.GetValue(library) as IRunState;
+			CharacterModel? character = LocalContext.GetMe(runState)?.Character;
+			if (character?.Id != null && CardEditorBaseDeckStore.IsSupportedCharacterId(character.Id))
+			{
+				characterId = character.Id;
+				return true;
+			}
+		}
+		catch
+		{
+		}
+
+		characterId = ModelId.none;
+		return false;
+	}
+
+	private static bool TryGetBuiltInFilterPathForCharacter(ModelId characterId, out string path)
+	{
+		foreach ((string candidatePath, ModelId candidateCharacterId) in _builtInCharacterFilterPaths)
+		{
+			if (candidateCharacterId == characterId)
+			{
+				path = candidatePath;
+				return true;
+			}
+		}
+
+		path = string.Empty;
 		return false;
 	}
 }

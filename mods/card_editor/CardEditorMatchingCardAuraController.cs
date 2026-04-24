@@ -69,6 +69,20 @@ internal static class CardEditorMatchingCardAuraController
 		_schedules.Remove(combatState);
 	}
 
+	public static bool HasAny(CombatState combatState)
+	{
+		if (combatState == null)
+		{
+			return false;
+		}
+		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule))
+		{
+			return false;
+		}
+
+		return schedule.States.Count > 0;
+	}
+
 	public static void OnAfterPlayerTurnEnd(CombatState combatState)
 	{
 		if (combatState == null)
@@ -186,6 +200,46 @@ internal static class CardEditorMatchingCardAuraController
 		ApplyToCurrentCards(combatState, owner, grant, currentCards);
 	}
 
+	public static IReadOnlyList<CardExtraEffect> GetVirtualExtraEffects(CombatState combatState, CardModel card)
+	{
+		if (combatState == null || card?.Owner == null)
+		{
+			return Array.Empty<CardExtraEffect>();
+		}
+		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule) || schedule.States.Count == 0)
+		{
+			return Array.Empty<CardExtraEffect>();
+		}
+		if (!schedule.States.TryGetValue(card.Owner, out PlayerState? state) || state.Grants.Count == 0)
+		{
+			return Array.Empty<CardExtraEffect>();
+		}
+
+		List<CardExtraEffect>? effects = null;
+		foreach (AuraGrant? grant in state.Grants)
+		{
+			if (grant == null || grant.Kind != AuraKind.ExtraEffect)
+			{
+				continue;
+			}
+			if (!CardMatchesGrant(card.Owner, grant, card, requireMutable: false))
+			{
+				continue;
+			}
+			if (WasGrantAlreadyApplied(grant, card))
+			{
+				continue;
+			}
+
+			CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(grant.Effect);
+			stored.GrantToCard = false;
+			effects ??= new List<CardExtraEffect>();
+			effects.Add(stored);
+		}
+
+		return effects != null ? effects : Array.Empty<CardExtraEffect>();
+	}
+
 	internal static void OnCardGenerated(CombatState combatState, CardModel card)
 	{
 		if (combatState == null || card?.Owner == null)
@@ -289,27 +343,15 @@ internal static class CardEditorMatchingCardAuraController
 
 	private static void TryApplyGrantToCard(CombatState combatState, Player owner, AuraGrant grant, CardModel card)
 	{
-		if (combatState == null || owner == null || grant == null || card == null || !card.IsMutable)
+		if (combatState == null || owner == null || grant == null || card == null)
 		{
 			return;
 		}
-
-		if (!PileMatches(grant.Effect.CardSelectionPile, card.Pile?.Type ?? PileType.None))
+		if (!CardMatchesGrant(owner, grant, card, requireMutable: true))
 		{
 			return;
 		}
-
-		if (!grant.Effect.IncludeSourceCardInSelection && grant.SourceCard != null && ReferenceEquals(card, grant.SourceCard))
-		{
-			return;
-		}
-
-		if (!CardEditorExtraEffects.MatchesCardSelectionFilters(owner, card, grant.Effect, includeCostFilter: false))
-		{
-			return;
-		}
-
-		if (grant.AppliedCards.Contains(card))
+		if (WasGrantAlreadyApplied(grant, card))
 		{
 			return;
 		}
@@ -329,6 +371,56 @@ internal static class CardEditorMatchingCardAuraController
 
 		grant.AppliedCards.Add(card);
 		RefreshCardVisuals(card);
+	}
+
+	private static bool CardMatchesGrant(Player owner, AuraGrant grant, CardModel card, bool requireMutable)
+	{
+		if (owner == null || grant == null || card == null)
+		{
+			return false;
+		}
+		if (requireMutable && !card.IsMutable)
+		{
+			return false;
+		}
+		if (!PileMatches(grant.Effect.CardSelectionPile, card.Pile?.Type ?? PileType.None))
+		{
+			return false;
+		}
+		if (!grant.Effect.IncludeSourceCardInSelection && grant.SourceCard != null && ReferenceEquals(card, grant.SourceCard))
+		{
+			return false;
+		}
+		if (!CardEditorExtraEffects.MatchesCardSelectionFilters(owner, card, grant.Effect, includeCostFilter: false))
+		{
+			return false;
+		}
+
+		return true;
+	}
+
+	private static bool WasGrantAlreadyApplied(AuraGrant grant, CardModel card)
+	{
+		if (grant == null || card == null)
+		{
+			return false;
+		}
+		if (grant.AppliedCards.Contains(card))
+		{
+			return true;
+		}
+
+		CardModel? cursor = card.CloneOf;
+		for (int i = 0; i < 8 && cursor != null; i++)
+		{
+			if (grant.AppliedCards.Contains(cursor))
+			{
+				return true;
+			}
+			cursor = cursor.CloneOf;
+		}
+
+		return false;
 	}
 
 	private static void ApplyKeywordGrant(CombatState combatState, CardModel card, AuraGrant grant)

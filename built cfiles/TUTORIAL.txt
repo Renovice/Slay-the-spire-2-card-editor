@@ -1,0 +1,378 @@
+CARD EDITOR TUTORIAL
+Searchable reference for the Slay the Spire 2 Card Editor mod.
+
+HOW TO USE THIS FILE
+- Use Ctrl+F.
+- Search the exact row name you see in the editor.
+- Also search aliases. Example: `does not consume`, `resource protection`, `applied effect`, `value source`, `copy exact`, `future matching cards`.
+
+SEARCH: enabled, title, cost, type, class, rarity, endless upgrades, effect list, add effect, add effect source, add keyword, edit upgrade
+SEARCH: deal damage, gain block, heal, lose hp, gain energy, lose energy, stars, gold, weak, vulnerable, poison, apply power, remove power
+SEARCH: timing, target, repeat, scaling, branch, power, grant, condition bonus, value source, applied effect, source effect, resource protection
+SEARCH: count, history, this turn, this combat, last turns, pile, copy, exact copy, move, exhaust, discard, transform, fetch, enchant, replay, keyword
+
+========================================================================
+1. QUICK ANSWERS
+========================================================================
+
+Damage equal to your Max HP:
+- Add `Deal Damage`.
+- Set `Amount Source = Value Source`.
+- Set `Value Source = Self -> Common -> Max HP`.
+
+Gain Block equal to damage dealt:
+- Row 1: `Deal Damage`.
+- Row 2: `Gain Block`.
+- Row 2 `Amount Source = Applied Effect`.
+- Row 2 `Source Effect = Row 1`.
+
+This card does not consume Poison:
+- Add `Resource Protection`.
+- Set protection type to `Specific Power / Status`.
+- Pick `Poison`.
+
+Copy all Strikes from discard into hand:
+- Add `Copy Cards from Pile`.
+- `From = Discard`, `To = Hand`.
+- Match by `Card Id`.
+- Pick `Strike`.
+- Use `All` or `Up To`.
+
+Future matching cards gain an effect this turn/combat:
+- Use a grant effect (`Grant Effect`, `Grant Keyword`, `Grant Replay`).
+- Turn on `Future Matching Cards`.
+- Set `Grant Duration`.
+- Set the card match/filter.
+
+Use a vanilla card as an applied effect source:
+- Add `Run Effect Source`.
+- Pick the vanilla card.
+- Add a later numeric row.
+- Set that later row to `Amount Source = Applied Effect`.
+
+========================================================================
+2. MAIN SCREEN
+========================================================================
+
+Card Preview:
+- Live text preview of the current base card.
+
+Effect List:
+- Ordered list of extra effect rows.
+- Order matters for `Applied Effect`.
+- You can move rows up/down.
+
+Buttons:
+- `Add Effect`: add a normal row.
+- `Add Effect Source`: add an effect-source card row.
+- `Add Keyword`: add a keyword row.
+- `Edit Upgrade`: open the upgrade delta editor.
+
+========================================================================
+3. CARD BASICS
+========================================================================
+
+`Enabled`:
+- Turns the edited override on or off.
+
+`Title`, `Cost`, `Type`, `Class`, `Rarity`:
+- Base card identity fields.
+
+`Endless Upgrades`:
+- Lets upgrade behavior keep scaling on custom cards that support repeated upgrading.
+
+Upgrade editor:
+- Upgrade values are deltas from the base card.
+- If something only changes on upgrade, put it in the upgrade editor instead of the base card.
+
+========================================================================
+4. EFFECT ROW BASICS
+========================================================================
+
+Every effect row has a few core ideas:
+
+`Effect` / `Subtype`:
+- What the row does.
+- Some merged families use `Subtype` to switch between variants like gain/lose.
+
+`Trigger`:
+- Usually `On Play`.
+- Some rows can run on draw, discard, exhaust, turn timing, or in power mode.
+
+`Target`:
+- Self, target, random enemy, all enemies, and similar target shapes.
+
+`Amount`:
+- The row's number if it uses a fixed amount.
+
+`Repeat`:
+- Repeat the same effect multiple times.
+
+`Disable On Upgrade`:
+- Hide/disable this base row on the upgraded version.
+
+========================================================================
+5. AMOUNT SOURCES
+========================================================================
+
+`Fixed`:
+- Use the number written on the row.
+
+`Applied Effect`:
+- Read the real resolved amount from an earlier row.
+- Best for:
+  - gain Block equal to damage dealt
+  - deal damage equal to Poison applied
+  - use a `Run Effect Source` row as a number source
+
+`Value Source`:
+- Read a live value directly.
+- Actor examples:
+  - `Self`
+  - `Target`
+  - `All Enemies`
+  - `All Allies`
+- Source types:
+  - `Common`
+  - `Power / Status`
+- Aggregation for groups:
+  - `Value`
+  - `Sum`
+  - `Highest`
+  - `Lowest`
+  - `Average`
+
+Examples:
+- `Self -> Max HP`
+- `Target -> Block`
+- `All Enemies -> Power / Status -> Poison -> Sum`
+
+========================================================================
+6. ADVANCED PROPERTIES
+========================================================================
+
+`Scaling`:
+- Uses count/history style scaling or other amount logic.
+- Use when the effect should depend on what happened this turn/combat.
+
+`Power`:
+- Turns the row into a persistent trigger entry instead of a one-shot effect.
+- Use for repeating triggers like:
+  - at start/end of turn
+  - whenever you play/draw/discard/exhaust
+  - whenever an actor gains a status
+
+`Grant`:
+- Apply an effect/keyword/replay to cards.
+- Can target current cards and, with the right rows, future matching cards.
+
+`Branch`:
+- If condition A is true, run a different effect or an extra branch effect.
+
+`Condition Bonus`:
+- Add or subtract an extra amount if a condition passes.
+
+`Timing`:
+- Run now, at turn boundaries, or similar delayed timing.
+
+`Resource Protection`:
+- `This card does not consume ...`
+- Can protect things like Vigor or selected statuses/powers if that path is supported.
+
+`Include This Card`:
+- Lets some card-selection effects include the source card itself.
+
+`Future Matching Cards`:
+- Aura-style grant behavior.
+- Matching cards created later can still receive the granted effect while the aura lasts.
+
+========================================================================
+7. COUNT / HISTORY / CONDITION SYSTEM
+========================================================================
+
+Use count/history when an effect depends on what happened before.
+
+Common verbs/events:
+- Played
+- Drawn
+- Discarded
+- Exhausted
+- Created
+- Damage dealt
+- HP lost
+- Status gained/lost
+
+Common windows:
+- This Turn
+- This Combat
+- Last X Turns
+
+Common filters:
+- Card type
+- Pool
+- Exact card id
+- Keyword
+- Tag
+- Status / power
+- Intent
+
+Use cases:
+- `If you've played 3 attacks this turn`
+- `For each card drawn this combat`
+- `Gain X equal to Poison gained this combat`
+
+========================================================================
+8. MAIN EFFECT FAMILIES
+========================================================================
+
+Damage / defense:
+- Deal Damage
+- Gain Block / Remove Block
+- Heal / Lose HP
+- Gain / Lose Max HP
+
+Resources:
+- Energy
+- Stars
+- Gold
+- Resource Protection
+
+Status / power:
+- Apply Power / Status
+- Built-in rows like Weak, Frail, Vulnerable, Poison
+- Gain / lose Strength, Dexterity, Focus, etc.
+- `Status to Status`
+- `Multiply Stat / Status`
+
+Card generation:
+- Add random card(s)
+- Choose 1 of 3
+- Add specific card
+- Add copy of this card
+- Exact copy variants
+
+Pile / card actions:
+- Move cards between piles
+- Copy cards from pile
+- Copy exact cards from pile
+- Play card from pile
+- Fetch specific card
+- Discard / Exhaust / Transform / Remove
+- Upgrade cards in pile
+
+Keywords / replay / enchant / effect sources:
+- Add keyword rows
+- Grant replay
+- Enchant card
+- Run Effect Source
+
+========================================================================
+9. PICKERS, FILTERS, AND MATCHING
+========================================================================
+
+`Pick` / card id picker:
+- Used when a row needs one exact card.
+- Usually best for exact references like Strike, Claw, a custom card, or an effect-source card.
+
+`Match` / filters:
+- Used when a row should apply to a set of cards.
+- Match by:
+  - exact card id
+  - card type
+  - pool
+  - keyword
+  - tag
+
+`Full Text` toggle:
+- Changes how exact-card references render in card text.
+
+========================================================================
+10. UPGRADES
+========================================================================
+
+Base editor:
+- Defines the card before upgrade.
+
+Upgrade editor:
+- Defines what changes on upgrade.
+
+Good rule:
+- Put stable card identity in base.
+- Put upgrade-only amount changes, extra rows, or replaced rows in the upgrade editor.
+
+========================================================================
+11. COMMON RECIPES
+========================================================================
+
+SEARCH: recipe, example, how do i make, can i make
+
+Gain Block equal to Poison on all enemies:
+- `Gain Block`
+- `Amount Source = Value Source`
+- `Actor = All Enemies`
+- `Source Type = Common or Power / Status`
+- `Value = Poison`
+- `Aggregation = Sum`
+
+Apply Weak equal to cards played this combat:
+- `Apply Weak`
+- `Amount Source = Scaling / Count` or `Value Source` if the row supports it
+- `Count Event = Played`
+- `Window = This Combat`
+- Aggregation should be card count, not matching effect amount
+
+Deal damage equal to a vanilla card's effect:
+- Row 1 `Run Effect Source -> vanilla card`
+- Row 2 `Deal Damage`
+- Row 2 `Amount Source = Applied Effect`
+
+All attacks ignore Block this combat:
+- Use a grant/matching-card aura style row
+- Match `Type = Attack`
+- Grant the ignore-Block effect
+- Set duration to combat
+- Turn on `Future Matching Cards` if new matching cards should get it too
+
+========================================================================
+12. TROUBLESHOOTING
+========================================================================
+
+`Deal 0 damage. Equal to ...`
+- Usually means the row was still using old placeholder wording or a fixed amount preview.
+- For dynamic rows, check `Amount Source`.
+
+The row does nothing:
+- Check the trigger.
+- Check target.
+- Check timing.
+- Check whether the count/scaling window can currently be non-zero.
+- Check whether you accidentally used `Matching Effect Amount` instead of card count.
+
+Upgrade text resets or looks wrong:
+- Reopen the upgrade editor and verify the delta is still there.
+- Make sure the change belongs in upgrade, not in base.
+
+Applied Effect reads the wrong amount:
+- Row order matters.
+- The source row must happen earlier.
+
+========================================================================
+13. SEARCH INDEX
+========================================================================
+
+Applied Effect = old name `Applied Effect Row`
+Source Effect = old name `Source Effect Row`
+Linked Effect = old name `Linked Row`
+Resource Protection = old `does not consume`
+Value Source = live number source
+Power / Status = long searchable power list
+Future Matching Cards = aura applies to later-created matching cards
+Include This Card = let pile/card selectors include the source card
+Status to Status = gain or lose one status equal to another value
+Scaling Stage = staged conditional effect-source execution
+Effect Source = card used as a reusable effect payload or number source
+
+End of file.
+
+
+

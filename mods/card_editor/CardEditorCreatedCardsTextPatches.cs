@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -76,14 +77,16 @@ internal static class CreatedCardTextBuilder
 			string? customUpgraded = CardEditorCreatedCardsStore.GetCustomTextUpgraded(card.Id);
 			if (customUpgraded != null)
 			{
-				return CardEditorVanillaKeywordSupport.FormatDescription(card, customUpgraded, target, isUpgradePreview);
+				string rendered = CardEditorVanillaKeywordSupport.FormatDescription(card, customUpgraded, target, isUpgradePreview);
+				return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, rendered) : rendered;
 			}
 		}
 
 		string? customText = CardEditorCreatedCardsStore.GetCustomText(card.Id);
 		if (customText != null)
 		{
-			return CardEditorVanillaKeywordSupport.FormatDescription(card, customText, target, isUpgradePreview);
+			string rendered = CardEditorVanillaKeywordSupport.FormatDescription(card, customText, target, isUpgradePreview);
+			return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, rendered) : rendered;
 		}
 
 		List<string> lines = new List<string>();
@@ -187,7 +190,8 @@ internal static class CreatedCardTextBuilder
 			}
 		}
 
-		return string.Join('\n', lines.Where(l => !string.IsNullOrEmpty(l)));
+		string description = string.Join('\n', lines.Where(l => !string.IsNullOrEmpty(l)));
+		return isUpgradePreview ? ApplyUpgradePreviewNumericHighlight(card, target, description) : description;
 	}
 
 	private static string GetKeywordCardText(CardKeyword keyword)
@@ -201,6 +205,163 @@ internal static class CreatedCardTextBuilder
 		catch
 		{
 			return "[gold]" + keyword + "[/gold].";
+		}
+	}
+
+	private static string ApplyUpgradePreviewNumericHighlight(CardModel card, Creature? target, string upgradedDescription)
+	{
+		if (card == null || string.IsNullOrWhiteSpace(upgradedDescription))
+		{
+			return upgradedDescription;
+		}
+
+		string? baseDescription = TryBuildBaseDescription(card, target);
+		if (string.IsNullOrWhiteSpace(baseDescription) || string.Equals(baseDescription, upgradedDescription, System.StringComparison.Ordinal))
+		{
+			return upgradedDescription;
+		}
+
+		string[] baseLines = baseDescription.Split('\n');
+		string[] upgradedLines = upgradedDescription.Split('\n');
+		for (int i = 0; i < upgradedLines.Length; i++)
+		{
+			string baseLine = i < baseLines.Length ? baseLines[i] : string.Empty;
+			upgradedLines[i] = HighlightChangedNumbersInLine(baseLine, upgradedLines[i]);
+		}
+
+		return string.Join('\n', upgradedLines);
+	}
+
+	private static string? TryBuildBaseDescription(CardModel upgradedCard, Creature? target)
+	{
+		try
+		{
+			CardModel baseCard = ModelDb.GetById<CardModel>(upgradedCard.Id).ToMutable();
+			if (upgradedCard.Owner != null && baseCard.Owner == null)
+			{
+				baseCard.Owner = upgradedCard.Owner;
+			}
+
+			return Build(baseCard, target, isUpgradePreview: false);
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static string HighlightChangedNumbersInLine(string baseLine, string upgradedLine)
+	{
+		List<string> baseTokens = ExtractVisibleNumberTokens(baseLine);
+		StringBuilder builder = new StringBuilder(upgradedLine.Length + 24);
+		int tokenIndex = 0;
+		int greenDepth = 0;
+		int imageDepth = 0;
+
+		for (int i = 0; i < upgradedLine.Length;)
+		{
+			if (upgradedLine[i] == '[')
+			{
+				int tagEnd = upgradedLine.IndexOf(']', i);
+				if (tagEnd < 0)
+				{
+					builder.Append(upgradedLine.AsSpan(i));
+					break;
+				}
+
+				string tag = upgradedLine.Substring(i, tagEnd - i + 1);
+				builder.Append(tag);
+				UpdateInlineTagState(tag, ref greenDepth, ref imageDepth);
+				i = tagEnd + 1;
+				continue;
+			}
+
+			if (greenDepth == 0 && imageDepth == 0 && char.IsDigit(upgradedLine[i]))
+			{
+				int start = i;
+				while (i < upgradedLine.Length && char.IsDigit(upgradedLine[i]))
+				{
+					i++;
+				}
+
+				string token = upgradedLine.Substring(start, i - start);
+				string? baseToken = tokenIndex < baseTokens.Count ? baseTokens[tokenIndex] : null;
+				if (!string.Equals(baseToken, token, System.StringComparison.Ordinal))
+				{
+					builder.Append("[green]").Append(token).Append("[/green]");
+				}
+				else
+				{
+					builder.Append(token);
+				}
+
+				tokenIndex++;
+				continue;
+			}
+
+			builder.Append(upgradedLine[i]);
+			i++;
+		}
+
+		return builder.ToString();
+	}
+
+	private static List<string> ExtractVisibleNumberTokens(string line)
+	{
+		List<string> tokens = new List<string>();
+		int greenDepth = 0;
+		int imageDepth = 0;
+		for (int i = 0; i < line.Length;)
+		{
+			if (line[i] == '[')
+			{
+				int tagEnd = line.IndexOf(']', i);
+				if (tagEnd < 0)
+				{
+					break;
+				}
+
+				string tag = line.Substring(i, tagEnd - i + 1);
+				UpdateInlineTagState(tag, ref greenDepth, ref imageDepth);
+				i = tagEnd + 1;
+				continue;
+			}
+
+			if (imageDepth == 0 && char.IsDigit(line[i]))
+			{
+				int start = i;
+				while (i < line.Length && char.IsDigit(line[i]))
+				{
+					i++;
+				}
+
+				tokens.Add(line.Substring(start, i - start));
+				continue;
+			}
+
+			i++;
+		}
+
+		return tokens;
+	}
+
+	private static void UpdateInlineTagState(string tag, ref int greenDepth, ref int imageDepth)
+	{
+		if (tag.Equals("[green]", System.StringComparison.OrdinalIgnoreCase))
+		{
+			greenDepth++;
+		}
+		else if (tag.Equals("[/green]", System.StringComparison.OrdinalIgnoreCase))
+		{
+			greenDepth = greenDepth > 0 ? greenDepth - 1 : 0;
+		}
+		else if (tag.StartsWith("[img", System.StringComparison.OrdinalIgnoreCase))
+		{
+			imageDepth++;
+		}
+		else if (tag.Equals("[/img]", System.StringComparison.OrdinalIgnoreCase))
+		{
+			imageDepth = imageDepth > 0 ? imageDepth - 1 : 0;
 		}
 	}
 }

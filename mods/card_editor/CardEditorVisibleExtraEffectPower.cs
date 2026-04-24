@@ -96,6 +96,11 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 
 	internal string GetTooltipBody()
 	{
+		if (!string.IsNullOrWhiteSpace(_sourceEffect?.CustomPowerDescription))
+		{
+			return _sourceEffect.CustomPowerDescription.Trim();
+		}
+
 		if (_sourceCard != null && _sourceEffect != null)
 		{
 			string? formatted = CardEditorExtraEffects.FormatSingleEffectLine(_sourceCard, _sourceEffect);

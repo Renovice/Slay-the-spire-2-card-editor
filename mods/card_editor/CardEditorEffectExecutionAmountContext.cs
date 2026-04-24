@@ -72,12 +72,13 @@ internal static class CardEditorEffectExecutionAmountContext
 				return;
 			}
 
-			int appliedAmount = _frame.HasReportedAppliedAmount
-				? _frame.ReportedAppliedAmount
-				: _frame.FallbackAppliedAmount;
-			_session.AppliedAmountsByEffectId[effectId] = ClampNonNegative(appliedAmount);
+				int appliedAmount = _frame.HasReportedAppliedAmount
+					? _frame.ReportedAppliedAmount
+					: _frame.FallbackAppliedAmount;
+				AccumulateIntoParentRunEffectSource(_session, appliedAmount);
+				_session.AppliedAmountsByEffectId[effectId] = ClampNonNegative(appliedAmount);
+			}
 		}
-	}
 
 	private sealed class NoopScope : IDisposable
 	{
@@ -183,6 +184,13 @@ internal static class CardEditorEffectExecutionAmountContext
 			return;
 		}
 
+		if (frame.Effect.Kind == CardExtraEffectKind.RunEffectSourceCard)
+		{
+			frame.ReportedAppliedAmount = ClampNonNegative(frame.ReportedAppliedAmount + amount);
+			frame.HasReportedAppliedAmount = true;
+			return;
+		}
+
 		if (!MatchesPowerAmountSource(frame.Effect, power))
 		{
 			return;
@@ -202,6 +210,13 @@ internal static class CardEditorEffectExecutionAmountContext
 		EffectFrame? frame = GetCurrentFrame();
 		if (frame?.Effect == null)
 		{
+			return;
+		}
+
+		if (frame.Effect.Kind == CardExtraEffectKind.RunEffectSourceCard)
+		{
+			frame.ReportedAppliedAmount = ClampNonNegative(frame.ReportedAppliedAmount + amount);
+			frame.HasReportedAppliedAmount = true;
 			return;
 		}
 
@@ -255,6 +270,23 @@ internal static class CardEditorEffectExecutionAmountContext
 
 		return CardEditorExtraEffects.TryGetEffectPowerMatchStatus(effect.Kind, out CardExtraEffectEnemyStatus status)
 			&& CardEditorExtraEffects.PowerMatchesStatus(power, status);
+	}
+
+	private static void AccumulateIntoParentRunEffectSource(Session session, int appliedAmount)
+	{
+		if (session == null || session.Frames.Count == 0 || appliedAmount <= 0)
+		{
+			return;
+		}
+
+		EffectFrame? parent = session.Frames.Peek();
+		if (parent?.Effect?.Kind != CardExtraEffectKind.RunEffectSourceCard)
+		{
+			return;
+		}
+
+		parent.ReportedAppliedAmount = ClampNonNegative(parent.ReportedAppliedAmount + appliedAmount);
+		parent.HasReportedAppliedAmount = true;
 	}
 
 	private static void RemoveFrame(Session session, EffectFrame frame)

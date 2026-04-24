@@ -16,8 +16,6 @@ namespace SlayTheSpire2Mod.CardEditor;
 [HarmonyPatch]
 internal static class CardEditorVisibleExtraEffectPowerPatches
 {
-	private static readonly Dictionary<string, Texture2D?> _textureCache = new Dictionary<string, Texture2D?>(StringComparer.Ordinal);
-
 	[HarmonyPatch(typeof(PowerModel), "get_Icon")]
 	[HarmonyPrefix]
 	private static bool PowerModel_get_Icon_Prefix(PowerModel __instance, ref Texture2D? __result)
@@ -77,6 +75,11 @@ internal static class CardEditorVisibleExtraEffectPowerPatches
 	private static string GetTooltipTitle(CardEditorVisibleExtraEffectPower mirror)
 	{
 		CardExtraEffect? effect = mirror.SourceEffect;
+		if (!string.IsNullOrWhiteSpace(effect?.CustomPowerName))
+		{
+			return effect.CustomPowerName.Trim();
+		}
+
 		if (!string.IsNullOrWhiteSpace(effect?.CustomKeywordName))
 		{
 			return effect.CustomKeywordName.Trim();
@@ -277,32 +280,7 @@ internal static class CardEditorVisibleExtraEffectPowerPatches
 
 	private static Texture2D? LoadTexture(string? path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
-		{
-			return null;
-		}
-
-		string normalized = path.Trim();
-		if (_textureCache.TryGetValue(normalized, out Texture2D? cached))
-		{
-			return cached;
-		}
-
-		Texture2D? loaded = null;
-		try
-		{
-			if (ResourceLoader.Exists(normalized))
-			{
-				loaded = ResourceLoader.Load<Texture2D>(normalized);
-			}
-		}
-		catch
-		{
-			loaded = null;
-		}
-
-		_textureCache[normalized] = loaded;
-		return loaded;
+		return CardEditorCustomIconLoader.LoadTexture(path);
 	}
 
 	private static PowerModel? GetAutoMappedPower(CardExtraEffect effect)
