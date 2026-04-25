@@ -1616,6 +1616,9 @@ public static class KinglyKick_AfterCardDrawn_CostReductionOverride_Patch
 [HarmonyPatch(typeof(NMainMenu), "_Ready")]
 public static class MainMenu_Ready_Patch
 {
+	private const int MainMenuButtonDuplicateFlags =
+		(int)(Node.DuplicateFlags.Groups | Node.DuplicateFlags.Scripts | Node.DuplicateFlags.UseInstantiation);
+
 	private static MethodInfo? _focusMethod;
 	private static MethodInfo? _unfocusMethod;
 	private static bool _startupPresetsApplied;
@@ -1624,6 +1627,7 @@ public static class MainMenu_Ready_Patch
 	{
 		TryAddEditorButton(__instance);
 		TryAddCreatorButton(__instance);
+		RefreshCustomButtons(__instance);
 		TryApplyStartupPresetsOnce();
 		NCardEditorPopup.TryQueueUiWarmup(__instance);
 	}
@@ -1677,7 +1681,7 @@ public static class MainMenu_Ready_Patch
 		{
 			return;
 		}
-		NMainMenuTextButton editorButton = (NMainMenuTextButton)compendium.Duplicate();
+		NMainMenuTextButton editorButton = (NMainMenuTextButton)compendium.Duplicate(MainMenuButtonDuplicateFlags);
 		editorButton.Name = "EditorButton";
 		Label label = editorButton.GetNode<Label>("Label");
 		label.Text = CardEditorLoc.T("menu.editor", "Editor");
@@ -1689,7 +1693,7 @@ public static class MainMenu_Ready_Patch
 
 		// Ensure initial visuals match other main menu buttons. Since we're adding after NMainMenu._Ready,
 		// the base menu's initialization may not have applied focus/unfocus styling to our duplicated node yet.
-		Callable.From(() => TryApplyInitialMainMenuButtonStyle(menu, editorButton)).CallDeferred();
+		RefreshCustomButton(menu, editorButton, "menu.editor", "Editor");
 	}
 
 	private static void ConnectFocusHooks(NMainMenu menu, NMainMenuTextButton button)
@@ -1724,6 +1728,43 @@ public static class MainMenu_Ready_Patch
 		}
 	}
 
+	internal static void RefreshCustomButtons(NMainMenu menu)
+	{
+		if (menu == null || !GodotObject.IsInstanceValid(menu))
+		{
+			return;
+		}
+
+		Control buttonContainer = menu.GetNodeOrNull<Control>("MainMenuTextButtons");
+		if (buttonContainer == null)
+		{
+			return;
+		}
+
+		RefreshCustomButton(menu, buttonContainer.GetNodeOrNull<NMainMenuTextButton>("EditorButton"), "menu.editor", "Editor");
+		RefreshCustomButton(menu, buttonContainer.GetNodeOrNull<NMainMenuTextButton>("CreatorButton"), "menu.creator", "Creator");
+	}
+
+	private static void RefreshCustomButton(NMainMenu menu, NMainMenuTextButton? button, string locKey, string fallback)
+	{
+		if (button == null || !GodotObject.IsInstanceValid(button))
+		{
+			return;
+		}
+
+		Label? label = button.GetNodeOrNull<Label>("Label");
+		if (label != null)
+		{
+			label.Text = CardEditorLoc.T(locKey, fallback);
+			label.Modulate = Colors.White;
+		}
+
+		button.Visible = true;
+		button.MouseFilter = Control.MouseFilterEnum.Stop;
+		button.Enable();
+		Callable.From(() => TryApplyInitialMainMenuButtonStyle(menu, button)).CallDeferred();
+	}
+
 	private static void OpenEditor(NMainMenu menu)
 	{
 		CardEditorLibrarySelectionState.ClearSelections();
@@ -1755,7 +1796,7 @@ public static class MainMenu_Ready_Patch
 			return;
 		}
 
-		NMainMenuTextButton creatorButton = (NMainMenuTextButton)compendium.Duplicate();
+		NMainMenuTextButton creatorButton = (NMainMenuTextButton)compendium.Duplicate(MainMenuButtonDuplicateFlags);
 		creatorButton.Name = "CreatorButton";
 		Label label = creatorButton.GetNode<Label>("Label");
 		label.Text = CardEditorLoc.T("menu.creator", "Creator");
@@ -1766,7 +1807,7 @@ public static class MainMenu_Ready_Patch
 		int insertAt = buttonContainer.GetNodeOrNull("EditorButton")?.GetIndex() + 1 ?? compendium.GetIndex() + 2;
 		buttonContainer.MoveChild(creatorButton, insertAt);
 
-		Callable.From(() => TryApplyInitialMainMenuButtonStyle(menu, creatorButton)).CallDeferred();
+		RefreshCustomButton(menu, creatorButton, "menu.creator", "Creator");
 	}
 
 	private static void OpenCreator(NMainMenu menu)
@@ -1782,6 +1823,24 @@ public static class MainMenu_Ready_Patch
 		}
 		CardEditorMod.VerboseLog("[CardEditor] OpenCreator: Pushing library (deferred)");
 		Callable.From(() => menu.SubmenuStack.Push(library)).CallDeferred();
+	}
+}
+
+[HarmonyPatch(typeof(NMainMenu), nameof(NMainMenu.RefreshButtons))]
+public static class MainMenu_RefreshButtons_CardEditorButtons_Patch
+{
+	public static void Postfix(NMainMenu __instance)
+	{
+		MainMenu_Ready_Patch.RefreshCustomButtons(__instance);
+	}
+}
+
+[HarmonyPatch(typeof(NMainMenu), "OnSubmenuStackChanged")]
+public static class MainMenu_SubmenuStackChanged_CardEditorButtons_Patch
+{
+	public static void Postfix(NMainMenu __instance)
+	{
+		MainMenu_Ready_Patch.RefreshCustomButtons(__instance);
 	}
 }
 

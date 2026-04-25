@@ -144,6 +144,8 @@ public enum CardKeywordGrantDuration
 
 public sealed class CardUpgradeOverride
 {
+	public bool? ModifiedBaseTextEnabled { get; set; }
+	public string? ModifiedBaseText { get; set; }
 	public int? EnergyCostDelta { get; set; }
 	public int? StarCostDelta { get; set; }
 	public int? ReplayCountDelta { get; set; }
@@ -159,7 +161,9 @@ public sealed class CardUpgradeOverride
 
 	public bool IsEmpty()
 	{
-		return EnergyCostDelta == null
+		return ModifiedBaseTextEnabled == null
+			&& string.IsNullOrWhiteSpace(ModifiedBaseText)
+			&& EnergyCostDelta == null
 			&& StarCostDelta == null
 			&& ReplayCountDelta == null
 			&& EnchantmentId == null
@@ -499,6 +503,8 @@ public static class CardEditorOverrides
 			Upgrade = source.Upgrade != null && !source.Upgrade.IsEmpty()
 				? new CardUpgradeOverride
 				{
+					ModifiedBaseTextEnabled = source.Upgrade.ModifiedBaseTextEnabled,
+					ModifiedBaseText = source.Upgrade.ModifiedBaseText,
 					EnergyCostDelta = source.Upgrade.EnergyCostDelta,
 					StarCostDelta = source.Upgrade.StarCostDelta,
 					ReplayCountDelta = source.Upgrade.ReplayCountDelta,

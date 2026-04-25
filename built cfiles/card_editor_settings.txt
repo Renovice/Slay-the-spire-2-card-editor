@@ -1,6 +1,6 @@
 {
   "PreloadEditorPopupsOnLaunch": true,
-  "IncrementalPopupHydrationOnOpen": false,
+  "IncrementalPopupHydrationOnOpen": true,
   "BackgroundPopupWarmupAfterDirtyClose": false,
   "BackgroundPopupWarmupDelaySeconds": 0.08
 }

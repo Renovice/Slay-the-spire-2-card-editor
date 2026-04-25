@@ -188,6 +188,7 @@ internal static class CardEditorTemporaryExtraEffectController
 			&& existing.CountCardType == candidate.CountCardType
 			&& existing.CountCardFilter == candidate.CountCardFilter
 			&& existing.CountOnlyBlockCards == candidate.CountOnlyBlockCards
+			&& CardEditorExtraEffects.ResolveHistoryScalingCountStep(existing) == CardEditorExtraEffects.ResolveHistoryScalingCountStep(candidate)
 			&& existing.CardCostsLessDuration == candidate.CardCostsLessDuration
 			&& existing.CardCostsLessTurns == candidate.CardCostsLessTurns
 			&& existing.CardCostsLessModifier == candidate.CardCostsLessModifier

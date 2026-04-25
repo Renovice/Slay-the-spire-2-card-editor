@@ -273,6 +273,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private KeywordTickbox? _endlessUpgradesTickbox;
 	private KeywordTickbox? _vanillaModifiedBaseTextTickbox;
 	private TextEdit? _vanillaModifiedBaseTextField;
+	private KeywordTickbox? _vanillaModifiedBaseTextUpgradedTickbox;
+	private TextEdit? _vanillaModifiedBaseTextUpgradedField;
 
 	private readonly List<CardType> _cardTypes = new();
 	private readonly List<TargetType?> _targetTypeOptions = new();
@@ -1749,6 +1751,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			{
 				BuildCreatedCardUpgradeTextUi(rightColumn);
 			}
+			else if (!_isBatchEdit)
+			{
+				BuildVanillaUpgradeTextUi(rightColumn, storedUpgrade);
+			}
 		}
 		else if (!(_isCreatedCard && !_isUpgradeEditor))
 		{
@@ -2827,6 +2833,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public KeywordTickbox ScalingBaseTickbox { get; init; } = null!;
 		public Control ScalingBaseAmountPair { get; init; } = null!;
 		public LineEdit ScalingBaseAmountField { get; init; } = null!;
+		public Control ScalingCountStepRow { get; init; } = null!;
+		public LineEdit ScalingCountStepField { get; init; } = null!;
 	}
 
 	private sealed class PendingExtraEffectRow
@@ -4929,6 +4937,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		if (control == row.CountRow) return "Scaling";
 		if (control == row.CountCardFilterRow) return "Filter";
 		if (control == row.ScalingBaseAmountPair) return "Base";
+		if (control == row.ScalingCountStepRow) return "PerCount";
 		if (control == row.CountAmountRow) return "AmountMode";
 		if (control == row.CountOrbFilterRow) return "Orb";
 		if (control == row.GrantFilterRow) return "GrantFilter";
@@ -4997,6 +5006,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 				row.CountRow,
 				row.CountCardFilterRow,
 				row.ScalingBaseAmountPair,
+				row.ScalingCountStepRow,
 				row.CountAmountRow,
 				row.GrantFilterRow,
 				row.PowerConditionRow,
@@ -6635,6 +6645,84 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, _createdCustomTextUpgradedTickbox?.IsTicked ?? false);
 		QueuePreviewUpdate();
+	}
+
+	private void BuildVanillaUpgradeTextUi(VBoxContainer rightColumn, CardUpgradeOverride? storedUpgrade)
+	{
+		if (_isCreatedCard || !_isUpgradeEditor || rightColumn == null)
+		{
+			return;
+		}
+
+		bool hasModifiedBaseText = storedUpgrade?.ModifiedBaseTextEnabled == true;
+		rightColumn.AddChild(CreateTickboxRow(
+			CardEditorLoc.T("field.modifiedBaseTextUpgraded", "Modified Base Card Text (Upgraded)"),
+			hasModifiedBaseText,
+			out KeywordTickbox modifiedBaseTextTickbox,
+			OnVanillaUpgradeModifiedBaseTextTickboxChanged));
+		_vanillaModifiedBaseTextUpgradedTickbox = modifiedBaseTextTickbox;
+
+		_vanillaModifiedBaseTextUpgradedField = new TextEdit
+		{
+			Text = hasModifiedBaseText ? (storedUpgrade?.ModifiedBaseText ?? string.Empty) : string.Empty,
+			CustomMinimumSize = new Vector2(0, 100),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			PlaceholderText = CardEditorLoc.T("field.modifiedBaseTextPlaceholder", "Enable this to start from the current base card text."),
+			WrapMode = TextEdit.LineWrappingMode.Boundary,
+			Visible = hasModifiedBaseText
+		};
+		StyleInput(_vanillaModifiedBaseTextUpgradedField);
+		_vanillaModifiedBaseTextUpgradedField.TextChanged += OnVanillaUpgradeModifiedBaseTextChanged;
+		rightColumn.AddChild(_vanillaModifiedBaseTextUpgradedField);
+	}
+
+	private void OnVanillaUpgradeModifiedBaseTextTickboxChanged()
+	{
+		bool enabled = _vanillaModifiedBaseTextUpgradedTickbox?.IsTicked ?? false;
+		if (_vanillaModifiedBaseTextUpgradedField != null)
+		{
+			if (enabled && string.IsNullOrEmpty(_vanillaModifiedBaseTextUpgradedField.Text))
+			{
+				_vanillaModifiedBaseTextUpgradedField.Text = BuildVanillaModifiedBaseTextUpgradedSeedFromUi();
+			}
+			_vanillaModifiedBaseTextUpgradedField.Visible = enabled;
+		}
+
+		QueuePreviewUpdate();
+	}
+
+	private void OnVanillaUpgradeModifiedBaseTextChanged()
+	{
+		if (_suppressPreviewUpdate)
+		{
+			return;
+		}
+
+		QueuePreviewUpdate();
+	}
+
+	private string BuildVanillaModifiedBaseTextUpgradedSeedFromUi()
+	{
+		if (_isCreatedCard || !_isUpgradeEditor)
+		{
+			return string.Empty;
+		}
+
+		try
+		{
+			CardModel preview = _previewCard;
+			if (preview == null || preview.Id != _cardId)
+			{
+				preview = CardEditorOverrides.BuildPreview(ModelDb.GetById<CardModel>(_cardId));
+				TryUpgradeForPreview(preview);
+			}
+
+			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableBaseDescription(preview, preview.CurrentTarget);
+		}
+		catch
+		{
+			return string.Empty;
+		}
 	}
 
 	private (ModelId? CardId, string? CustomFile) GetSelectedPortraitSourceId()
@@ -9631,6 +9719,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				? upgradeEffect.HistoryScalingBaseAmount.GetValueOrDefault()
 				: CardEditorExtraEffects.ResolveHistoryScalingBaseAmount(upgradeEffect, upgradeEffect.Amount) - baseHistoryStart;
 			display.HistoryScalingBaseAmount = upgradeHistoryStartDelta == 0 ? null : upgradeHistoryStartDelta;
+			display.HistoryScalingCountStep = numericFieldsAreDeltas
+				? upgradeEffect.HistoryScalingCountStep
+				: CardEditorExtraEffects.ResolveHistoryScalingCountStep(upgradeEffect) - CardEditorExtraEffects.ResolveHistoryScalingCountStep(baseEffect);
+		}
+		else
+		{
+			display.HistoryScalingCountStep = 0;
 		}
 		display.CardGrantTurns = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CardGrantTurns, numericFieldsAreDeltas);
 		display.CardSelectionCount = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CardSelectionCount, numericFieldsAreDeltas);
@@ -12384,7 +12479,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		StyleInput(conditionalBonusConditionSelect);
 		ConstrainOptionButtonPopup(conditionalBonusConditionSelect);
-		conditionalBonusConditionSelect.TooltipText = CardEditorLoc.T("tooltip.conditionalBonusCondition", "Optional: add a bonus to this effect's amount when the condition is true.");
+		conditionalBonusConditionSelect.TooltipText = CardEditorLoc.T("tooltip.conditionalBonusCondition", "Optional extra amount added only when this condition is true. This is separate from Count Logic scaling.");
 		foreach (CardExtraEffectConditionalBonusCondition cond in Enum.GetValues<CardExtraEffectConditionalBonusCondition>())
 		{
 			conditionalBonusConditionSelect.AddItem(CardEditorExtraEffects.ConditionalBonusConditionLabel(cond));
@@ -12501,13 +12596,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = _amountFieldMinSize,
 			Alignment = HorizontalAlignment.Center
 		};
-		conditionalBonusAmountField.TooltipText = CardEditorLoc.T("tooltip.conditionalBonusAmount", "Amount added when the conditional bonus passes (can be negative).");
+		conditionalBonusAmountField.TooltipText = CardEditorLoc.T("tooltip.conditionalBonusAmount", "Extra amount added when Bonus If passes (can be negative). Use Per Count, not this, for 'every 10 Block lost' style scaling.");
 		StyleInput(conditionalBonusAmountField);
 		conditionalBonusAmountField.TextChanged += _ => QueuePreviewUpdate();
 		Control conditionalBonusSpin = CreateSpinButtons(conditionalBonusAmountField, step: 1m, minValue: -99m, maxValue: 99m, isInteger: true);
 
 		conditionalBonusRow = CreateEffectFormRow(
-			CardEditorLoc.T("ui.conditionalBonus", "Condition Bonus"),
+			CardEditorLoc.T("ui.conditionalBonus", "Bonus If"),
 			conditionalBonusConditionTypeSelect,
 			conditionalBonusConditionSelect,
 			conditionalBonusTargetSelectRow,
@@ -13665,10 +13760,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			countEnemyIntentSelect);
 
 		Control scalingBaseTickboxVisuals = InstantiateTickboxVisuals(tickboxScene);
-		Label scalingBaseLabel = new Label { Text = CardEditorLoc.T("scaling.includeBase", "Include Base") };
+		Label scalingBaseLabel = new Label { Text = CardEditorLoc.T("scaling.includeBase", "Add Base") };
 		StyleBodyLabel(scalingBaseLabel);
 		KeywordTickbox scalingBaseTickbox = new KeywordTickbox(scalingBaseTickboxVisuals, scalingBaseLabel, effect?.HistoryScalingIncludesBase ?? false);
-		scalingBaseTickbox.TooltipText = CardEditorLoc.T("tooltip.scalingIncludeBase", "When Scaling is enabled, also apply a starting base amount even if the count is zero (Base + Amount*count).");
+		scalingBaseTickbox.TooltipText = CardEditorLoc.T("tooltip.scalingIncludeBase", "Adds a fixed starting amount to the scaled result. This is not the 'per X' divisor; use Per Count for that.");
 		scalingBaseTickbox.Toggled += QueuePreviewUpdate;
 		scalingBaseTickbox.Visible = false;
 		scalingToggleRow.AddChild(scalingBaseTickbox);
@@ -13680,7 +13775,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = _amountFieldMinSize
 		};
 		scalingBaseAmountField.Alignment = HorizontalAlignment.Center;
-		scalingBaseAmountField.TooltipText = CardEditorLoc.T("tooltip.scalingBaseAmount", "Starting amount used by Include Base. Leave unchanged to mirror Amount; edit it to make Base and per-count Amount different.");
+		scalingBaseAmountField.TooltipText = CardEditorLoc.T("tooltip.scalingBaseAmount", "Fixed amount added by Add Base. Leave unchanged to mirror Amount; edit it to make the added base and per-count amount different.");
 		scalingBaseAmountField.SetMeta(ScalingBaseAmountAutoMetaKey, effect?.HistoryScalingBaseAmount == null);
 		StyleInput(scalingBaseAmountField);
 		scalingBaseAmountField.TextChanged += _ =>
@@ -13691,9 +13786,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		decimal scalingBaseAmountMin = isUpgradeDeltaRow ? -999m : 0m;
 		Control scalingBaseAmountSpin = CreateSpinButtons(scalingBaseAmountField, step: 1m, minValue: scalingBaseAmountMin, maxValue: 999m, isInteger: true);
 		HBoxContainer scalingBaseAmountPair = CreateEffectFormRow(
-			CardEditorLoc.T("scaling.baseAmount", "Base"),
+			CardEditorLoc.T("scaling.baseAmount", "Base Amount"),
 			CreateEffectCompactValuePair(scalingBaseAmountSpin, scalingBaseAmountField));
 		scalingBaseAmountPair.Visible = false;
+
+		int initialHistoryScalingCountStep = isUpgradeDeltaRow
+			? effect?.HistoryScalingCountStep ?? 0
+			: CardEditorExtraEffects.ResolveHistoryScalingCountStep(effect);
+		NMegaLineEdit scalingCountStepField = new NMegaLineEdit
+		{
+			Text = initialHistoryScalingCountStep.ToString(CultureInfo.InvariantCulture),
+			CustomMinimumSize = _amountFieldMinSize
+		};
+		scalingCountStepField.Alignment = HorizontalAlignment.Center;
+		scalingCountStepField.TooltipText = CardEditorLoc.T("tooltip.scalingCountStep", "How many counted units make one scaling step. Example: Per Count 10 with Block Lost means 10 Block lost = 1 step, 20 = 2 steps. Threshold still checks the raw count.");
+		StyleInput(scalingCountStepField);
+		scalingCountStepField.TextChanged += _ => QueuePreviewUpdate();
+		decimal scalingCountStepMin = isUpgradeDeltaRow ? -999m : 1m;
+		Control scalingCountStepSpin = CreateSpinButtons(scalingCountStepField, step: 1m, minValue: scalingCountStepMin, maxValue: 999m, isInteger: true);
+		HBoxContainer scalingCountStepRow = CreateEffectFormRow(
+			CardEditorLoc.T("scaling.countStep", "Per Count"),
+			CreateEffectCompactValuePair(scalingCountStepSpin, scalingCountStepField));
+		scalingCountStepRow.Visible = false;
 		scalingToggleRow.AddChild(keywordGroupRow);
 		scalingToggleRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
@@ -14022,6 +14136,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		advancedPropertyGrid.AddChild(countRow);
 		advancedPropertyGrid.AddChild(filterRow);
 		advancedPropertyGrid.AddChild(scalingBaseAmountPair);
+		advancedPropertyGrid.AddChild(scalingCountStepRow);
 		advancedPropertyGrid.AddChild(countAmountRow);
 		advancedPropertyGrid.AddChild(grantRow);
 		advancedPropertyGrid.AddChild(grantCountRow);
@@ -14450,7 +14565,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CountEnemyIntentSelect = countEnemyIntentSelect,
 			ScalingBaseTickbox = scalingBaseTickbox,
 			ScalingBaseAmountPair = scalingBaseAmountPair,
-			ScalingBaseAmountField = scalingBaseAmountField
+			ScalingBaseAmountField = scalingBaseAmountField,
+			ScalingCountStepRow = scalingCountStepRow,
+			ScalingCountStepField = scalingCountStepField
 		};
 
 		if (effect?.SelfScalingTargetType == CardExtraEffectSelfScalingTargetType.BaseDamage)
@@ -18683,11 +18800,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			row.CountModeSelect.Visible = showCountLogic && !isConditionalAutoFromPile && supportsScaling && row.ScalingTickbox.IsTicked;
 		}
 
-		bool showScalingBase = !isScalingStage
+		bool showHistoryScalingKnobs = !isScalingStage
 			&& showCountLogic
 			&& row.ScalingTickbox.IsTicked
 			&& GetSelectedScaleMode(row, kind) == CardExtraEffectScaleMode.PerHistoryCount
 			&& CardEditorExtraEffects.SupportsHistoryScaling(kind);
+		bool showScalingBase = showHistoryScalingKnobs;
 		row.ScalingBaseTickbox.Visible = showScalingBase;
 		bool amountFieldVisible = row.AmountField != null
 			&& GodotObject.IsInstanceValid(row.AmountField)
@@ -18709,6 +18827,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				row.ScalingBaseAmountField.SetMeta(ScalingBaseAmountAutoMetaKey, true);
 			}
 			SetSpinFieldState(row.ScalingBaseAmountField, visible: showScalingBaseAmount, enabled: showScalingBaseAmount);
+		}
+		if (row.ScalingCountStepRow != null && GodotObject.IsInstanceValid(row.ScalingCountStepRow))
+		{
+			row.ScalingCountStepRow.Visible = showHistoryScalingKnobs;
+		}
+		if (row.ScalingCountStepField != null && GodotObject.IsInstanceValid(row.ScalingCountStepField))
+		{
+			SetSpinFieldState(row.ScalingCountStepField, visible: showHistoryScalingKnobs, enabled: showHistoryScalingKnobs);
 		}
 
 		if (!supportsScaling)
@@ -19248,6 +19374,23 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		int min = row.IsUpgradeDeltaRow ? -999 : 0;
 		int value = Math.Clamp(ParseIntOrDefault(row.ScalingBaseAmountField.Text, fallback), min, 999);
 		return value == fallback ? null : value;
+	}
+
+	private static int GetSelectedHistoryScalingCountStep(ExtraEffectRow row)
+	{
+		if (row?.ScalingCountStepField == null
+			|| !GodotObject.IsInstanceValid(row.ScalingCountStepField)
+			|| !row.ScalingCountStepField.Visible)
+		{
+			return row?.IsUpgradeDeltaRow == true ? 0 : 1;
+		}
+
+		return ParseExtraEffectNumericField(
+			row.ScalingCountStepField,
+			absoluteDefault: 1,
+			isDeltaRow: row.IsUpgradeDeltaRow,
+			minAbsolute: 1,
+			maxAbsolute: 999);
 	}
 
 	private static CardExtraEffectCountEvent GetSelectedCountEvent(ExtraEffectRow row)
@@ -23289,6 +23432,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CountOnlyBlockCards = GetSelectedCountFilter(row) == CardExtraEffectCountCardFilter.GainBlock,
 					HistoryScalingIncludesBase = IsHistoryScalingBaseEnabled(row),
 					HistoryScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, amount),
+					HistoryScalingCountStep = GetSelectedHistoryScalingCountStep(row),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,
@@ -23820,6 +23964,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				upgrade.ReplayCountDelta = desiredReplayDelta;
 			}
+		}
+
+		if (!_isCreatedCard && _vanillaModifiedBaseTextUpgradedTickbox?.IsTicked == true)
+		{
+			upgrade.ModifiedBaseTextEnabled = true;
+			upgrade.ModifiedBaseText = _vanillaModifiedBaseTextUpgradedField?.Text ?? string.Empty;
 		}
 
 		if (_dynamicFields.Count > 0)
@@ -24432,6 +24582,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CountOnlyBlockCards = GetSelectedCountFilter(row) == CardExtraEffectCountCardFilter.GainBlock,
 					HistoryScalingIncludesBase = IsHistoryScalingBaseEnabled(row),
 					HistoryScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, savedAmount),
+					HistoryScalingCountStep = GetSelectedHistoryScalingCountStep(row),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,

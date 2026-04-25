@@ -32,7 +32,7 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 
 		if (!SuppressModifiedBaseTextOverride)
 		{
-			TryApplyModifiedBaseText(card, ref description, isUpgradePreview);
+			TryApplyModifiedBaseText(card, ref description, target, isUpgradePreview);
 		}
 
 		if (!SuppressExtraEffectDescriptionAppend)
@@ -69,28 +69,67 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		}
 	}
 
-	private static void TryApplyModifiedBaseText(CardModel card, ref string description, bool isUpgradePreview)
+	private static void TryApplyModifiedBaseText(CardModel card, ref string description, Creature? target, bool isUpgradePreview)
 	{
-		if (card == null || isUpgradePreview || card.IsUpgraded)
+		if (card == null)
 		{
 			return;
 		}
 
 		CardOverride? overrideData = null;
 		if (CardEditorUiState.TryGetDraftOverride(card.Id, out CardOverride draftOverride)
-			&& draftOverride.ModifiedBaseTextEnabled == true)
+			&& (draftOverride.ModifiedBaseTextEnabled == true || draftOverride.Upgrade?.ModifiedBaseTextEnabled == true))
 		{
 			overrideData = draftOverride;
 		}
 		else if (CardEditorOverrides.TryGet(card.Id, out CardOverride storedOverride)
-			&& storedOverride.ModifiedBaseTextEnabled == true)
+			&& (storedOverride.ModifiedBaseTextEnabled == true || storedOverride.Upgrade?.ModifiedBaseTextEnabled == true))
 		{
 			overrideData = storedOverride;
 		}
 
-		if (overrideData?.ModifiedBaseTextEnabled == true)
+		bool wantsUpgradeText = isUpgradePreview || card.IsUpgraded;
+		if (wantsUpgradeText && overrideData?.Upgrade?.ModifiedBaseTextEnabled == true)
 		{
-			description = overrideData.ModifiedBaseText ?? string.Empty;
+			string upgradedDescription = CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(
+				overrideData.Upgrade.ModifiedBaseText ?? string.Empty,
+				description);
+			description = isUpgradePreview
+				? CardEditorDescriptionNumberHighlighter.HighlightChangedNumbers(
+					BuildBaseModifiedTextForUpgradePreview(card, target, overrideData) ?? string.Empty,
+					upgradedDescription)
+				: upgradedDescription;
+			return;
+		}
+
+		if (!wantsUpgradeText && overrideData?.ModifiedBaseTextEnabled == true)
+		{
+			description = CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(
+				overrideData.ModifiedBaseText ?? string.Empty,
+				description);
+		}
+	}
+
+	private static string? BuildBaseModifiedTextForUpgradePreview(CardModel upgradedCard, Creature? target, CardOverride overrideData)
+	{
+		try
+		{
+			CardModel baseCard = ModelDb.GetById<CardModel>(upgradedCard.Id).ToMutable();
+			if (upgradedCard.Owner != null && baseCard.Owner == null)
+			{
+				baseCard.Owner = upgradedCard.Owner;
+			}
+
+			CardEditorOverrides.ApplyOverrideToCard(baseCard, overrideData);
+			string liveBaseDescription = BuildEditableBaseDescription(baseCard, target);
+			string template = overrideData.ModifiedBaseTextEnabled == true
+				? overrideData.ModifiedBaseText ?? string.Empty
+				: liveBaseDescription;
+			return CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(template, liveBaseDescription);
+		}
+		catch
+		{
+			return null;
 		}
 	}
 }

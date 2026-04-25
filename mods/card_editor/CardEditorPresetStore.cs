@@ -12,7 +12,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorPresetStore
 {
-	private const int CurrentVersion = 8;
+	private const int CurrentVersion = 10;
 	private const string PresetExtension = ".json";
 	private const string SettingsPath = "user://card_editor/presets_settings.json";
 
@@ -392,6 +392,11 @@ internal static class CardEditorPresetStore
 			HashSet<CardKeyword> vanillaKeywords = new HashSet<CardKeyword>(vanillaUpgraded.Keywords);
 
 			CardUpgradeOverride upgrade = new CardUpgradeOverride();
+			if (desiredUpgradedAbsolute.ModifiedBaseTextEnabled == true)
+			{
+				upgrade.ModifiedBaseTextEnabled = true;
+				upgrade.ModifiedBaseText = desiredUpgradedAbsolute.ModifiedBaseText ?? string.Empty;
+			}
 
 			if (!baseCard.EnergyCost.CostsX)
 			{
@@ -718,7 +723,7 @@ internal static class CardEditorPresetStore
 			{
 				if (Upgrade != null)
 				{
-					CardUpgradeOverride upgrade = Upgrade.ToUpgradeSafe();
+					CardUpgradeOverride upgrade = Upgrade.ToUpgradeSafe(fileVersion);
 					if (!upgrade.IsEmpty())
 					{
 						result.Upgrade = upgrade;
@@ -1018,6 +1023,8 @@ internal static class CardEditorPresetStore
 
 	internal sealed class CardUpgradeOverrideDto
 	{
+		public bool? ModifiedBaseTextEnabled { get; set; }
+		public string? ModifiedBaseText { get; set; }
 		public int? EnergyCostDelta { get; set; }
 		public int? StarCostDelta { get; set; }
 		public int? ReplayCountDelta { get; set; }
@@ -1035,6 +1042,8 @@ internal static class CardEditorPresetStore
 		{
 			return new CardUpgradeOverrideDto
 			{
+				ModifiedBaseTextEnabled = source.ModifiedBaseTextEnabled,
+				ModifiedBaseText = source.ModifiedBaseText,
 				EnergyCostDelta = source.EnergyCostDelta,
 				StarCostDelta = source.StarCostDelta,
 				ReplayCountDelta = source.ReplayCountDelta,
@@ -1049,15 +1058,17 @@ internal static class CardEditorPresetStore
 					? new Dictionary<string, decimal>(source.DynamicVarDeltas, StringComparer.Ordinal)
 					: null,
 				ExtraEffects = source.ExtraEffects != null
-					? source.ExtraEffects.Select(e => e != null ? CardExtraEffectDto.FromEffect(e) : null).ToList()
+					? source.ExtraEffects.Select(e => e != null ? CardExtraEffectDto.FromEffect(e, numericFieldsAreDeltas: source.ExtraEffectNumericFieldsAreDeltas) : null).ToList()
 					: null
 			};
 		}
 
-		public CardUpgradeOverride ToUpgradeSafe()
+		public CardUpgradeOverride ToUpgradeSafe(int fileVersion = CurrentVersion)
 		{
 			CardUpgradeOverride result = new CardUpgradeOverride
 			{
+				ModifiedBaseTextEnabled = ModifiedBaseTextEnabled,
+				ModifiedBaseText = ModifiedBaseText != null ? ModifiedBaseText : null,
 				EnergyCostDelta = EnergyCostDelta,
 				StarCostDelta = StarCostDelta,
 				ReplayCountDelta = ReplayCountDelta,
@@ -1134,6 +1145,10 @@ internal static class CardEditorPresetStore
 						parsed.Add(null!);
 						continue;
 					}
+					if (fileVersion < 10 && ExtraEffectNumericFieldsAreDeltas && dto.HistoryScalingCountStep == 1)
+					{
+						effect.HistoryScalingCountStep = 0;
+					}
 					parsed.Add(effect);
 				}
 				if (parsed.Any(e => e != null))
@@ -1201,6 +1216,8 @@ internal static class CardEditorPresetStore
 		public string? CountAggregationMode { get; set; }
 		public bool CountUsesCardEffectAmount { get; set; }
 		public bool HistoryScalingIncludesBase { get; set; }
+		public int? HistoryScalingBaseAmount { get; set; }
+		public int HistoryScalingCountStep { get; set; }
 		public bool DisableOnUpgrade { get; set; }
 
 		public bool GrantToCard { get; set; }
@@ -1416,7 +1433,7 @@ internal static class CardEditorPresetStore
 			}
 		}
 
-		public static CardExtraEffectDto FromEffect(CardExtraEffect effect)
+		public static CardExtraEffectDto FromEffect(CardExtraEffect effect, bool numericFieldsAreDeltas = false)
 		{
 			return new CardExtraEffectDto
 			{
@@ -1473,6 +1490,10 @@ internal static class CardEditorPresetStore
 				CountAggregationMode = CardEditorExtraEffects.GetEffectiveCountAggregationMode(effect).ToString(),
 				CountUsesCardEffectAmount = effect.CountUsesCardEffectAmount,
 				HistoryScalingIncludesBase = effect.HistoryScalingIncludesBase,
+				HistoryScalingBaseAmount = effect.HistoryScalingBaseAmount,
+				HistoryScalingCountStep = numericFieldsAreDeltas
+					? effect.HistoryScalingCountStep
+					: CardEditorExtraEffects.ResolveHistoryScalingCountStep(effect),
 				DisableOnUpgrade = effect.DisableOnUpgrade,
 				GrantToCard = effect.GrantToCard,
 				CardSelectionMode = effect.CardSelectionMode.ToString(),
@@ -1516,7 +1537,7 @@ internal static class CardEditorPresetStore
 				BranchEnemyStatus = effect.BranchEnemyStatus.ToString(),
 				BranchPowerId = effect.BranchPowerId,
 				BranchEnemyIntent = effect.BranchEnemyIntent.ToString(),
-				BranchEffect = effect.BranchEffect != null ? FromEffect(effect.BranchEffect) : null,
+				BranchEffect = effect.BranchEffect != null ? FromEffect(effect.BranchEffect, numericFieldsAreDeltas) : null,
 				BranchCountEvent = effect.BranchCountEvent.ToString(),
 				BranchCountWindow = effect.BranchCountWindow.ToString(),
 				BranchCountWindowInclusion = effect.BranchCountWindowInclusion.ToString(),
@@ -1891,6 +1912,10 @@ internal static class CardEditorPresetStore
 			}
 			effect.CountUsesCardEffectAmount = CountUsesCardEffectAmount;
 			effect.HistoryScalingIncludesBase = HistoryScalingIncludesBase;
+			effect.HistoryScalingBaseAmount = HistoryScalingBaseAmount;
+			effect.HistoryScalingCountStep = numericFieldsAreDeltas
+				? Math.Clamp(HistoryScalingCountStep, -999, 999)
+				: HistoryScalingCountStep <= 0 ? 1 : Math.Clamp(HistoryScalingCountStep, 1, 999);
 
 			effect.GrantToCard = GrantToCard;
 			effect.RepeatIsX = RepeatIsX;

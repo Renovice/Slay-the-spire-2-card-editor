@@ -294,6 +294,11 @@ internal static class CardEditorIgnoreEffectHelpers
 
 		if (effect.CountComparison == CardExtraEffectCountComparison.None)
 		{
+			if (effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount)
+			{
+				return CardEditorExtraEffects.ResolveHistoryScalingMultiplier(effect, count) > 0 || effect.HistoryScalingIncludesBase;
+			}
+
 			return count > 0 || (effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount && effect.HistoryScalingIncludesBase);
 		}
 
