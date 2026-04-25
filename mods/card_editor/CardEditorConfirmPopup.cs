@@ -10,7 +10,7 @@ internal static class CardEditorConfirmPopup
 {
 	public static Task<bool> ShowConfirmation(string title, string body)
 	{
-		Log.Info($"[CardEditor][ConfirmPopup] ShowConfirmation title='{title}' modalInstance={(NModalContainer.Instance != null)}");
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] ShowConfirmation title='{title}' modalInstance={(NModalContainer.Instance != null)}");
 		if (NModalContainer.Instance == null)
 		{
 			Log.Warn($"[CardEditor][ConfirmPopup] Aborting popup '{title}' because NModalContainer.Instance is null.");
@@ -26,9 +26,9 @@ internal static class CardEditorConfirmPopup
 
 		try
 		{
-			Log.Info($"[CardEditor][ConfirmPopup] Adding popup title='{title}' modalVisible={NModalContainer.Instance.Visible} modalChildrenBefore={NModalContainer.Instance.GetChildCount()}");
+			CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Adding popup title='{title}' modalVisible={NModalContainer.Instance.Visible} modalChildrenBefore={NModalContainer.Instance.GetChildCount()}");
 			NModalContainer.Instance.Add(popup);
-			Log.Info($"[CardEditor][ConfirmPopup] Added popup title='{title}' modalChildrenAfter={NModalContainer.Instance.GetChildCount()} popupInTree={popup.IsInsideTree()} popupVisible={popup.Visible}");
+			CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Added popup title='{title}' modalChildrenAfter={NModalContainer.Instance.GetChildCount()} popupInTree={popup.IsInsideTree()} popupVisible={popup.Visible}");
 		}
 		catch (System.Exception ex)
 		{
@@ -49,17 +49,32 @@ internal static class CardEditorConfirmPopup
 			return Task.FromResult(false);
 		}
 
-		Log.Info($"[CardEditor][ConfirmPopup] Popup created title='{title}' popupName='{popup.Name}' childCount={popup.GetChildCount()}");
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Popup created title='{title}' popupName='{popup.Name}' childCount={popup.GetChildCount()}");
 		TaskCompletionSource<bool> completion = new();
 
 		void Finish(bool result)
 		{
-			Log.Info($"[CardEditor][ConfirmPopup] Finish title='{title}' result={result} inTree={popup.IsInsideTree()} visible={popup.Visible}");
+			CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Finish title='{title}' result={result} inTree={popup.IsInsideTree()} visible={popup.Visible}");
+			try
+			{
+				if (NModalContainer.Instance != null && popup.GetParent() == NModalContainer.Instance)
+				{
+					NModalContainer.Instance.Clear();
+				}
+				else
+				{
+					popup.QueueFree();
+				}
+			}
+			catch (System.Exception ex)
+			{
+				Log.Warn($"[CardEditor][ConfirmPopup] Failed closing popup '{title}': {ex}");
+				popup.QueueFree();
+			}
 			if (!completion.Task.IsCompleted)
 			{
 				completion.SetResult(result);
 			}
-			popup.QueueFree();
 		}
 
 		try
@@ -67,7 +82,7 @@ internal static class CardEditorConfirmPopup
 			verticalPopup.SetText(title, body);
 			verticalPopup.InitNoButton(new LocString("main_menu_ui", "GENERIC_POPUP.cancel"), _ => Finish(false));
 			verticalPopup.InitYesButton(new LocString("main_menu_ui", "GENERIC_POPUP.confirm"), _ => Finish(true));
-			Log.Info($"[CardEditor][ConfirmPopup] Initialized popup title='{title}'");
+			CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Initialized popup title='{title}'");
 		}
 		catch (System.Exception ex)
 		{

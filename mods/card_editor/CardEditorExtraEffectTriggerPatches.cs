@@ -211,7 +211,7 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 						continue;
 					}
 
-					Log.Info($"[CardEditor][EndOfTurnInHandHook] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id}");
+					CardEditorMod.VerboseLog($"[CardEditor][EndOfTurnInHandHook] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id}");
 					CardEditorEndOfTurnInHandTracker.Mark(combatState, card);
 
 					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);

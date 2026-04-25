@@ -93,8 +93,9 @@ internal static class CardEditorBaseDeckBookmarkHooks
 
 		Control? bookmark = library.FindChild(BookmarkNodeName, recursive: true, owned: false) as Control;
 		bool shouldShow = CardEditorUiState.IsEditorActive || CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive;
-		if (NModalContainer.Instance?.OpenModal != null)
+		if (CardEditorBaseDeckPanelHooks.IsBlockingModalOpen())
 		{
+			SyncDeferred(library);
 			shouldShow = false;
 		}
 		if (CardEditorMod.IsVerboseEditorLogging)

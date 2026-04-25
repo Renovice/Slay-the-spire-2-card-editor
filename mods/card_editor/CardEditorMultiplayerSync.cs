@@ -369,7 +369,7 @@ internal static class CardEditorMultiplayerSync
 		_lastAppliedSequence = 0;
 		_remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
 		CaptureRevisionCheckpoint();
-		Log.Info($"[CardEditor][MultiplayerSync] Bound to {_netService.Type} service netId={_netService.NetId}");
+		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Bound to {_netService.Type} service netId={_netService.NetId}");
 	}
 
 	public static void UnbindFromNetService(INetGameService? expectedService = null)
@@ -435,7 +435,7 @@ internal static class CardEditorMultiplayerSync
 			{
 				_requestedInitialSync = true;
 				_netService.SendMessage(new CardEditorMultiplayerSyncRequestMessage());
-				Log.Info("[CardEditor][MultiplayerSync] Requested authoritative host snapshot.");
+				CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Requested authoritative host snapshot.");
 			}
 
 			return;
@@ -604,7 +604,7 @@ internal static class CardEditorMultiplayerSync
 	{
 		if (content.GetNodeOrNull(lineName) != null)
 		{
-			Log.Info($"[CardEditor][MultiplayerSettings] Reusing existing line '{lineName}'.");
+			CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSettings] Reusing existing line '{lineName}'.");
 			return;
 		}
 
@@ -644,7 +644,7 @@ internal static class CardEditorMultiplayerSync
 
 		content.AddChild(duplicatedLine);
 
-		Log.Info(
+		CardEditorMod.VerboseLog(
 			$"[CardEditor][MultiplayerSettings] Added line '{lineName}' label='{labelName}' tickbox='{tickboxName}' " +
 			$"contentChildren={content.GetChildCount()} template='{templateLine.Name}' tickboxFound={(tickbox != null)}.");
 	}
@@ -846,7 +846,7 @@ internal static class CardEditorMultiplayerSync
 			RichTextLabel? syncLabel = FindNamedDescendant<RichTextLabel>(syncLine, "CardEditorMultiplayerSyncLabel");
 			RichTextLabel? authorityLabel = FindNamedDescendant<RichTextLabel>(authorityLine, "CardEditorMultiplayerAuthorityLabel");
 
-			Log.Info(
+			CardEditorMod.VerboseLog(
 				$"[CardEditor][MultiplayerSettings] {context} " +
 				$"contentChildren={content.GetChildCount()} " +
 				$"syncLine={DescribeNode(syncLine)} syncLabel={DescribeControl(syncLabel)} syncTickbox={DescribeControl(syncTickbox)} " +
@@ -921,7 +921,7 @@ internal static class CardEditorMultiplayerSync
 			RestoreLocalStateIfNeeded();
 		}
 
-		Log.Info($"[CardEditor][MultiplayerSync] Detached from {_netService.Type} service.");
+		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Detached from {_netService.Type} service.");
 		_netService = null;
 		_requestedInitialSync = false;
 		_forceImmediateBroadcast = false;
@@ -931,7 +931,7 @@ internal static class CardEditorMultiplayerSync
 
 	private static void OnServiceDisconnected(NetErrorInfo info)
 	{
-		Log.Info($"[CardEditor][MultiplayerSync] Net service disconnected: {info.GetErrorString()}");
+		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Net service disconnected: {info.GetErrorString()}");
 		UnbindFromNetService();
 	}
 
@@ -963,7 +963,7 @@ internal static class CardEditorMultiplayerSync
 			return;
 		}
 
-		Log.Info($"[CardEditor][MultiplayerSync] Applying authoritative snapshot seq={message.Sequence} from host={senderId}.");
+		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Applying authoritative snapshot seq={message.Sequence} from host={senderId}.");
 		ApplyState(state, preserveLocalState: true);
 		_remoteAuthorityMode = state.AuthorityMode;
 		_lastAppliedSequence = message.Sequence;
@@ -984,7 +984,7 @@ internal static class CardEditorMultiplayerSync
 			return;
 		}
 
-		Log.Info($"[CardEditor][MultiplayerSync] Applying client-authored sync request from {senderId}.");
+		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Applying client-authored sync request from {senderId}.");
 		ApplyState(state, preserveLocalState: false);
 		CaptureRevisionCheckpoint();
 		BroadcastSnapshotToReadyPeers();
@@ -1003,7 +1003,7 @@ internal static class CardEditorMultiplayerSync
 			StateJson = SerializeState(BuildCurrentState())
 		};
 		hostService.SendMessage(message, peerId);
-		Log.Info($"[CardEditor][MultiplayerSync] Sent snapshot seq={message.Sequence} to peer {peerId}.");
+		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Sent snapshot seq={message.Sequence} to peer {peerId}.");
 	}
 
 	private static void BroadcastSnapshotToReadyPeers()
@@ -1019,7 +1019,7 @@ internal static class CardEditorMultiplayerSync
 			StateJson = SerializeState(BuildCurrentState())
 		};
 		_netService.SendMessage(message);
-		Log.Info($"[CardEditor][MultiplayerSync] Broadcast snapshot seq={message.Sequence}.");
+		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Broadcast snapshot seq={message.Sequence}.");
 	}
 
 	private static void SendEditRequestToHost()
@@ -1034,7 +1034,7 @@ internal static class CardEditorMultiplayerSync
 			StateJson = SerializeState(BuildCurrentState())
 		};
 		_netService.SendMessage(message);
-		Log.Info("[CardEditor][MultiplayerSync] Sent client edit request to host.");
+		CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Sent client edit request to host.");
 	}
 
 	private static CardEditorMultiplayerStateDto BuildCurrentState()
@@ -1138,7 +1138,7 @@ internal static class CardEditorMultiplayerSync
 			BaseDecks = CardEditorBaseDeckStore.ExportSnapshot(),
 			CreatedCards = CardEditorCreatedCardsStore.ExportSnapshot()
 		};
-		Log.Info("[CardEditor][MultiplayerSync] Backed up local card editor state before applying host snapshot.");
+		CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Backed up local card editor state before applying host snapshot.");
 	}
 
 	private static void RestoreLocalStateIfNeeded()
@@ -1149,7 +1149,7 @@ internal static class CardEditorMultiplayerSync
 			return;
 		}
 
-		Log.Info("[CardEditor][MultiplayerSync] Restoring local card editor state after multiplayer session.");
+			CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Restoring local card editor state after multiplayer session.");
 		bool previousPersistenceSuspended = CardEditorCreatedCardsStore.PersistenceSuspended;
 
 		try

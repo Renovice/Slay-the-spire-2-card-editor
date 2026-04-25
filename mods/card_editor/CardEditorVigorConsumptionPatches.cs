@@ -4,6 +4,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Models;
+using PowerCmd = SlayTheSpire2Mod.CardEditor.CardEditorPowerCmdCompat;
 
 namespace SlayTheSpire2Mod.CardEditor;
 

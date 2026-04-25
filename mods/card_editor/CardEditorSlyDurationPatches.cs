@@ -47,7 +47,7 @@ internal static class CardCmd_ApplySingleTurnSly_DurationOverride_Patch
 			return true;
 		}
 
-		CombatState? combatState = sourceCard.CombatState ?? card.CombatState ?? card.Owner?.Creature?.CombatState;
+		CombatState? combatState = sourceCard.CombatState.AsCombatState() ?? card.CombatState.AsCombatState() ?? card.Owner?.Creature?.CombatState.AsCombatState();
 		if (combatState == null)
 		{
 			return true;

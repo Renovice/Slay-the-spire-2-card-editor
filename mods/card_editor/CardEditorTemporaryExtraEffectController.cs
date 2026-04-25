@@ -234,7 +234,7 @@ internal static class CardEditorTemporaryExtraEffectController
 		});
 		state.Effects.Add(stored);
 
-		Log.Info($"[CardEditor][TempCostGrant] card={card.Id} key={key?.Id} sameKey={ReferenceEquals(card, key)} pile={card.Pile?.Type} mutableCard={card.IsMutable} mutableKey={key?.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration={duration} turns={remainingTurns} amount={stored.Amount} modifier={stored.CardCostsLessModifier}");
+		CardEditorMod.VerboseLog($"[CardEditor][TempCostGrant] card={card.Id} key={key?.Id} sameKey={ReferenceEquals(card, key)} pile={card.Pile?.Type} mutableCard={card.IsMutable} mutableKey={key?.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration={duration} turns={remainingTurns} amount={stored.Amount} modifier={stored.CardCostsLessModifier}");
 	}
 
 	public static void OnAfterCardPlayed(CombatState combatState, CardModel card)
@@ -299,7 +299,7 @@ internal static class CardEditorTemporaryExtraEffectController
 			}
 			if (!card.IsMutable || card.HasBeenRemovedFromState)
 			{
-				Log.Info($"[CardEditor][TempCostGrantCleanup] dropping key={card?.Id} mutable={card?.IsMutable} removed={card?.HasBeenRemovedFromState} grants={state.Grants.Count}");
+				CardEditorMod.VerboseLog($"[CardEditor][TempCostGrantCleanup] dropping key={card?.Id} mutable={card?.IsMutable} removed={card?.HasBeenRemovedFromState} grants={state.Grants.Count}");
 				schedule.States.Remove(card);
 				continue;
 			}

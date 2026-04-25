@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Collections.Generic;
+using Godot;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardLibrary;
 using MegaCrit.Sts2.Core.Models;
 
@@ -69,6 +70,22 @@ public static class CardEditorUiState
 		}
 		_updateFilterMethod ??= typeof(NCardLibrary).GetMethod("UpdateFilter", BindingFlags.Instance | BindingFlags.NonPublic);
 		_updateFilterMethod?.Invoke(library, new object[] { false });
+		SyncLibraryChrome(library);
+		Callable.From(() =>
+		{
+			if (GodotObject.IsInstanceValid(library))
+			{
+				SyncLibraryChrome(library);
+			}
+		}).CallDeferred();
+	}
+
+	private static void SyncLibraryChrome(NCardLibrary library)
+	{
+		CardEditorBaseDeckPanelHooks.Sync(library);
+		CardEditorPresetPanelHooks.Sync(library);
+		CardEditorBaseDeckBookmarkHooks.Sync(library);
+		CardEditorBaseDeckBookmarkHooks.SyncDeferred(library);
 	}
 
 	public static void SetLastLibrary(NCardLibrary? library)

@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using PowerCmd = SlayTheSpire2Mod.CardEditor.CardEditorPowerCmdCompat;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -112,15 +113,16 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 		foreach (CardExtraEffect effect in effects)
 		{
-			if (effect == null
-				|| !effect.AsPower
-				|| !CardEditorExtraEffects.IsValidEffectAmount(effect.Kind, effect.Amount)
-				|| !CardEditorExtraEffects.SupportsAsPower(effect.Kind))
+			CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+			if (normalizedEffect == null
+				|| !normalizedEffect.AsPower
+				|| !CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount)
+				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind))
 			{
 				continue;
 			}
 
-			CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(effect);
+			CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(normalizedEffect);
 			stored.AsPower = true;
 
 			Entries.Add(new PowerEffectEntry
@@ -217,7 +219,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			&& creature.IsAlive
 			&& owner != null
 			&& !ReferenceEquals(creature, owner)
-			&& owner.CombatState?.GetOpponentsOf(owner).Contains(creature) == true;
+			&& owner.CombatState.AsCombatState()?.GetOpponentsOf(owner).Contains(creature) == true;
 	}
 
 	private Creature? ResolveRememberedEnemyTarget(PowerEffectEntry entry, CombatState combatState, CardPlay triggerPlay)
@@ -288,7 +290,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		return CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect) switch
 		{
 			CardExtraEffectPowerTriggerFrom.Self => ReferenceEquals(effectiveEventActor, owner),
-			CardExtraEffectPowerTriggerFrom.AnyEnemy => owner.CombatState?.GetOpponentsOf(owner).Contains(effectiveEventActor) == true,
+			CardExtraEffectPowerTriggerFrom.AnyEnemy => owner.CombatState.AsCombatState()?.GetOpponentsOf(owner).Contains(effectiveEventActor) == true,
 			CardExtraEffectPowerTriggerFrom.AnyAlly => effectiveEventActor.Side == owner.Side && !ReferenceEquals(effectiveEventActor, owner),
 			CardExtraEffectPowerTriggerFrom.Anyone => true,
 			_ => ReferenceEquals(effectiveEventActor, owner)
@@ -418,7 +420,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.OrbEvoked, eventActor: eventActor, amount: 1);
 	}
 
-	public override Task AfterCardGeneratedForCombat(CardModel card, bool addedByPlayer)
+	public override Task AfterCardGeneratedForCombat(CardModel card, Player? creator)
 	{
 		try
 		{
@@ -427,7 +429,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				return Task.CompletedTask;
 			}
 
-			CombatState? combatState = CombatState;
+			CombatState? combatState = CombatState.AsCombatState();
 			Creature? owner = Owner;
 			if (combatState == null || owner == null)
 			{
@@ -456,7 +458,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
-			CombatState combatState = CombatState;
+			CombatState? combatState = CombatState.AsCombatState();
 			if (combatState == null || choiceContext == null)
 			{
 				return;
@@ -576,7 +578,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
-			CombatState combatState = CombatState;
+			CombatState? combatState = CombatState.AsCombatState();
 			if (combatState == null || choiceContext == null)
 			{
 				return;
@@ -664,11 +666,11 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		}
 	}
 
-	public override async Task AfterAttack(AttackCommand command)
+	public override async Task AfterAttack(PlayerChoiceContext choiceContext, AttackCommand command)
 	{
 		try
 		{
-			CombatState combatState = CombatState;
+			CombatState? combatState = CombatState.AsCombatState();
 			if (combatState == null)
 			{
 				return;
@@ -687,13 +689,10 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				return;
 			}
 
-			ulong? netId = LocalContext.NetId;
-			if (!netId.HasValue)
+			if (choiceContext == null)
 			{
 				return;
 			}
-
-			HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(this, netId.Value, combatState, GameActionType.Combat);
 
 			foreach (PowerEffectEntry entry in Entries.ToList())
 			{
@@ -832,7 +831,7 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 {
 	try
 	{
-		CombatState combatState = CombatState;
+		CombatState? combatState = CombatState.AsCombatState();
 		if (combatState == null)
 		{
 			return;
@@ -898,7 +897,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 {
 	try
 	{
-		CombatState combatState = CombatState;
+		CombatState? combatState = CombatState.AsCombatState();
 		if (combatState == null)
 		{
 			return;
@@ -976,7 +975,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 	{
 		try
 		{
-			CombatState combatState = CombatState;
+			CombatState? combatState = CombatState.AsCombatState();
 			if (combatState == null || choiceContext == null)
 			{
 				return;

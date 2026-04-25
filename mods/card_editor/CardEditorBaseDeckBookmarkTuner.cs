@@ -92,7 +92,7 @@ internal static class CardEditorBaseDeckBookmarkTuning
 
 	private static void ApplyChange()
 	{
-		Log.Info($"[CardEditor][BaseDeckBookmarkTuner] {Describe()}");
+		CardEditorMod.VerboseLog($"[CardEditor][BaseDeckBookmarkTuner] {Describe()}");
 		CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
 	}
 }

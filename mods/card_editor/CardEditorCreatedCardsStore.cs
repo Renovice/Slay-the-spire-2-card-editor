@@ -65,6 +65,7 @@ internal static class CardEditorCreatedCardsStore
 	public static int SlotCount { get; private set; } = DefaultSlotCount;
 	public static int ConfiguredSlotCount { get; private set; } = DefaultSlotCount;
 	private const string CardArtFolderName = "card art";
+	private static readonly ModelId DefaultPortraitSourceCardId = new("CARD", "STRIKE_IRONCLAD");
 
 	private static readonly Dictionary<ModelId, CardEditorCreatedCardDefinition> _definitions = new();
 	private static readonly Dictionary<ModelId, CardEditorCreatedCardDefinition> _draftDefinitions = new();
@@ -112,7 +113,7 @@ internal static class CardEditorCreatedCardsStore
 		draft.Enabled = enabled;
 		draft.Title = title?.Trim() ?? string.Empty;
 		draft.Pool = pool;
-		draft.PoolTitle = NormalizePoolTitle(poolTitle) ?? GetPoolModel(pool).Title;
+		draft.PoolTitle = ResolvePoolTitleForStorage(pool, poolTitle);
 		if (TryParsePoolTitleAsLegacyEnum(draft.PoolTitle, out CardEditorCreatedCardPool parsedPool))
 		{
 			draft.Pool = parsedPool;
@@ -197,7 +198,7 @@ internal static class CardEditorCreatedCardsStore
 		}
 		catch
 		{
-			return new List<string> { GetDefaultPoolModel().Title };
+			return new List<string> { GetPoolTitleFallback(CardEditorCreatedCardPool.Ironclad) };
 		}
 	}
 
@@ -475,7 +476,7 @@ internal static class CardEditorCreatedCardsStore
 		}
 		def.Title = title?.Trim() ?? string.Empty;
 		def.Pool = pool;
-		def.PoolTitle = NormalizePoolTitle(poolTitle) ?? GetPoolModel(pool).Title;
+		def.PoolTitle = ResolvePoolTitleForStorage(pool, poolTitle);
 		if (TryParsePoolTitleAsLegacyEnum(def.PoolTitle, out CardEditorCreatedCardPool parsedPool))
 		{
 			def.Pool = parsedPool;
@@ -757,12 +758,12 @@ internal static class CardEditorCreatedCardsStore
 					Enabled = false,
 					Title = $"Custom Card {i.ToString("D2", System.Globalization.CultureInfo.InvariantCulture)}",
 					Pool = CardEditorCreatedCardPool.Ironclad,
-					PoolTitle = GetDefaultPoolModel().Title,
+					PoolTitle = GetPoolTitleFallback(CardEditorCreatedCardPool.Ironclad),
 					Rarity = CardRarity.Common,
 					Type = CardType.Attack,
 					TargetType = TargetType.AnyEnemy,
 					EffectSourceCardIds = new List<ModelId>(),
-					PortraitSourceCardId = ModelDb.GetId<StrikeIronclad>(),
+					PortraitSourceCardId = DefaultPortraitSourceCardId,
 					FullArt = false,
 					Finish = CardEditorVisualFinish.None,
 					Override = new CardOverride()
@@ -850,6 +851,23 @@ internal static class CardEditorCreatedCardsStore
 
 	private static CardPoolModel GetDefaultPoolModel()
 	{
+		if (TryGetPoolModel(CardEditorCreatedCardPool.Ironclad, out CardPoolModel pool))
+		{
+			return pool;
+		}
+
+		try
+		{
+			CardPoolModel? first = ModelDb.AllCardPools.FirstOrDefault(poolModel => poolModel != null);
+			if (first != null)
+			{
+				return first;
+			}
+		}
+		catch
+		{
+		}
+
 		return GetPoolModel(CardEditorCreatedCardPool.Ironclad);
 	}
 
@@ -860,12 +878,46 @@ internal static class CardEditorCreatedCardsStore
 			return resolvedByTitle;
 		}
 
-		if (definition != null)
+		if (definition != null && TryGetPoolModel(definition.Pool, out CardPoolModel resolvedByEnum))
 		{
-			return GetPoolModel(definition.Pool);
+			return resolvedByEnum;
 		}
 
 		return GetDefaultPoolModel();
+	}
+
+	private static string ResolvePoolTitleForStorage(CardEditorCreatedCardPool pool, string? poolTitle)
+	{
+		string? normalized = NormalizePoolTitle(poolTitle);
+		if (!string.IsNullOrWhiteSpace(normalized))
+		{
+			return normalized;
+		}
+
+		if (TryGetPoolModel(pool, out CardPoolModel resolved) && !string.IsNullOrWhiteSpace(resolved.Title))
+		{
+			return resolved.Title.Trim();
+		}
+
+		return GetPoolTitleFallback(pool);
+	}
+
+	private static string GetPoolTitleFallback(CardEditorCreatedCardPool pool)
+	{
+		return pool switch
+		{
+			CardEditorCreatedCardPool.Silent => "Silent",
+			CardEditorCreatedCardPool.Defect => "Defect",
+			CardEditorCreatedCardPool.Regent => "Regent",
+			CardEditorCreatedCardPool.Necrobinder => "Necrobinder",
+			CardEditorCreatedCardPool.Colorless => "Colorless",
+			CardEditorCreatedCardPool.Curse => "Curse",
+			CardEditorCreatedCardPool.Status => "Status",
+			CardEditorCreatedCardPool.Token => "Token",
+			CardEditorCreatedCardPool.Event => "Event",
+			CardEditorCreatedCardPool.Quest => "Quest",
+			_ => "Ironclad"
+		};
 	}
 
 	private static string? NormalizePoolTitle(string? poolTitle)
@@ -878,12 +930,18 @@ internal static class CardEditorCreatedCardsStore
 		string? normalized = NormalizePoolTitle(poolTitle);
 		if (!string.IsNullOrWhiteSpace(normalized))
 		{
-			CardPoolModel? resolved = ModelDb.AllCardPools.FirstOrDefault(candidate =>
-				candidate != null && string.Equals(candidate.Title, normalized, StringComparison.OrdinalIgnoreCase));
-			if (resolved != null)
+			try
 			{
-				pool = resolved;
-				return true;
+				CardPoolModel? resolved = ModelDb.AllCardPools.FirstOrDefault(candidate =>
+					candidate != null && string.Equals(candidate.Title, normalized, StringComparison.OrdinalIgnoreCase));
+				if (resolved != null)
+				{
+					pool = resolved;
+					return true;
+				}
+			}
+			catch
+			{
 			}
 		}
 
@@ -902,7 +960,14 @@ internal static class CardEditorCreatedCardsStore
 
 		foreach (CardEditorCreatedCardPool candidate in Enum.GetValues<CardEditorCreatedCardPool>())
 		{
-			if (string.Equals(GetPoolModel(candidate).Title, normalized, StringComparison.OrdinalIgnoreCase))
+			if (string.Equals(GetPoolTitleFallback(candidate), normalized, StringComparison.OrdinalIgnoreCase))
+			{
+				pool = candidate;
+				return true;
+			}
+
+			if (TryGetPoolModel(candidate, out CardPoolModel model)
+				&& string.Equals(model.Title, normalized, StringComparison.OrdinalIgnoreCase))
 			{
 				pool = candidate;
 				return true;
@@ -916,6 +981,20 @@ internal static class CardEditorCreatedCardsStore
 
 		pool = CardEditorCreatedCardPool.Ironclad;
 		return false;
+	}
+
+	private static bool TryGetPoolModel(CardEditorCreatedCardPool pool, out CardPoolModel model)
+	{
+		try
+		{
+			model = GetPoolModel(pool);
+			return model != null;
+		}
+		catch
+		{
+			model = null!;
+			return false;
+		}
 	}
 
 	private static CardPoolModel GetPoolModel(CardEditorCreatedCardPool pool)

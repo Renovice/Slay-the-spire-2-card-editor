@@ -221,6 +221,22 @@ public static class CardEditorOverrides
 		return false;
 	}
 
+	internal static bool TryGetRuntimeCloneSourceOverride(CardModel? card, out CardOverride overrideData)
+	{
+		if (TryGetInstanceOverride(card, out overrideData))
+		{
+			return true;
+		}
+
+		if (card != null)
+		{
+			return _overrides.TryGetValue(card.Id, out overrideData);
+		}
+
+		overrideData = null!;
+		return false;
+	}
+
 	internal static void MarkEnergyCostJustUpgraded(CardModel card)
 	{
 		if (card == null)
@@ -263,7 +279,7 @@ public static class CardEditorOverrides
 
 	internal static bool TryGetEffectiveOverride(CardModel? card, out CardOverride overrideData)
 	{
-		if (card != null && _instanceOverrides.TryGetValue(card, out overrideData))
+		if (TryGetInstanceOverride(card, out overrideData))
 		{
 			return true;
 		}
@@ -271,6 +287,34 @@ public static class CardEditorOverrides
 		if (card != null)
 		{
 			return _overrides.TryGetValue(card.Id, out overrideData);
+		}
+
+		overrideData = null!;
+		return false;
+	}
+
+	private static bool TryGetInstanceOverride(CardModel? card, out CardOverride overrideData)
+	{
+		CardModel? cursor = card;
+		for (int i = 0; i < 8 && cursor != null; i++)
+		{
+			if (_instanceOverrides.TryGetValue(cursor, out overrideData))
+			{
+				return true;
+			}
+
+			try
+			{
+				if (!cursor.IsClone || cursor.CloneOf == null)
+				{
+					break;
+				}
+				cursor = cursor.CloneOf;
+			}
+			catch
+			{
+				break;
+			}
 		}
 
 		overrideData = null!;
@@ -1028,9 +1072,9 @@ public static class CardEditorOverrides
 
 		try
 		{
-			if (card.CombatState != null && (card.Pile?.Type ?? PileType.None) == PileType.Hand)
+			if (card.CombatState.AsCombatState() != null && (card.Pile?.Type ?? PileType.None) == PileType.Hand)
 			{
-				CardEditorExtraEffects.ApplyIntrinsicTimedCardCostsLessOnEnterHand(card.CombatState, card);
+				CardEditorExtraEffects.ApplyIntrinsicTimedCardCostsLessOnEnterHand(card.CombatState.AsCombatState(), card);
 			}
 		}
 		catch

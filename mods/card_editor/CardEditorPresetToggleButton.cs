@@ -122,7 +122,7 @@ public partial class NCardEditorPresetToggleButton : Control
 		float x = Math.Max(0f, viewportSize.X - CardEditorPresetButtonTuning.ButtonOffsetX - CardEditorPresetButtonTuning.ButtonWidth);
 		float y = CardEditorPresetButtonTuning.ButtonOffsetY;
 		_button.Position = new Vector2(x, y);
-		Log.Info($"[CardEditor][PresetButton] StandalonePosition viewport=({viewportSize.X:0},{viewportSize.Y:0}) pos=({x:0},{y:0}) size=({CardEditorPresetButtonTuning.ButtonWidth:0},{CardEditorPresetButtonTuning.ButtonHeight:0})");
+		CardEditorMod.VerboseLog($"[CardEditor][PresetButton] StandalonePosition viewport=({viewportSize.X:0},{viewportSize.Y:0}) pos=({x:0},{y:0}) size=({CardEditorPresetButtonTuning.ButtonWidth:0},{CardEditorPresetButtonTuning.ButtonHeight:0})");
 	}
 
 	private void OnTriggered()

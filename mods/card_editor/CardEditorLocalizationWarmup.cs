@@ -510,7 +510,7 @@ value.none
 			CardEditorLoc.Prewarm(_editorKeys);
 			WarmKeywordTitles();
 			WarmEnumLabels();
-			Log.Info($"[CardEditor] Localization warmup complete: lang={LocManager.Instance.Language} keys={_editorKeys.Length} time={stopwatch.ElapsedMilliseconds}ms");
+			CardEditorMod.VerboseLog($"[CardEditor] Localization warmup complete: lang={LocManager.Instance.Language} keys={_editorKeys.Length} time={stopwatch.ElapsedMilliseconds}ms");
 		}
 		catch (Exception ex)
 		{

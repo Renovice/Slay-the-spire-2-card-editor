@@ -46,13 +46,12 @@ namespace SlayTheSpire2Mod.CardEditor;
 public static class CardEditorMod
 {
 	private const string HarmonyId = "slaythespire2.card_editor";
-	private static readonly bool VerboseEditorLogging = false;
 
-	internal static bool IsVerboseEditorLogging => VerboseEditorLogging;
+	internal static bool IsVerboseEditorLogging => CardEditorPerformanceSettings.VerboseLogging;
 
 	internal static void VerboseLog(string message)
 	{
-		if (!VerboseEditorLogging)
+		if (!IsVerboseEditorLogging)
 		{
 			return;
 		}
@@ -99,7 +98,7 @@ public static class CardEditorMod
 					var prefix = typeof(GetDescriptionForPile_ManualPatch).GetMethod(nameof(GetDescriptionForPile_ManualPatch.Prefix), BindingFlags.Static | BindingFlags.Public);
 					var postfix = typeof(GetDescriptionForPile_ManualPatch).GetMethod(nameof(GetDescriptionForPile_ManualPatch.Postfix), BindingFlags.Static | BindingFlags.Public);
 					harmony.Patch(privateMethod, prefix: new HarmonyMethod(prefix) { priority = Priority.First }, postfix: new HarmonyMethod(postfix));
-					Log.Info("[CardEditor] Patched PRIVATE GetDescriptionForPile(3-param) successfully");
+					VerboseLog("[CardEditor] Patched PRIVATE GetDescriptionForPile(3-param) successfully");
 				}
 				else
 				{
@@ -184,7 +183,10 @@ public static class CardEditorMod
 		string owners = infoAfter == null || infoAfter.Owners.Count == 0
 			? "<none>"
 			: string.Join(", ", infoAfter.Owners.Distinct());
-		Log.Info($"[CardEditor][IgnoreDamageDebug] EnsurePatched {label} alreadyPatched={alreadyPatched} owners={owners}");
+		if (CardEditorIgnoreEffectHelpers.VerboseDebugEnabled)
+		{
+			Log.Info($"[CardEditor][IgnoreDamageDebug] EnsurePatched {label} alreadyPatched={alreadyPatched} owners={owners}");
+		}
 	}
 
 	private static void RegisterCreatedCardsInPools()
@@ -260,8 +262,19 @@ public static class CardEditorMod
 [HarmonyPatch(typeof(CardModel), nameof(CardModel.ToMutable))]
 public static class CardModel_ToMutable_Patch
 {
-	public static void Postfix(CardModel __result)
+	public static void Postfix(CardModel __instance, CardModel __result)
 	{
+		if (__result == null)
+		{
+			return;
+		}
+
+		if (CardEditorOverrides.TryGetRuntimeCloneSourceOverride(__instance, out CardOverride overrideData))
+		{
+			CardEditorOverrides.ApplyOverrideToCard(__result, CardEditorOverrides.Clone(overrideData));
+			return;
+		}
+
 		CardEditorOverrides.ApplyTo(__result);
 	}
 }
@@ -1630,7 +1643,7 @@ public static class MainMenu_Ready_Patch
 				CardEditorOverrides.ReplaceAll(overrides);
 				CardEditorBaseDeckStore.ImportSnapshot(baseDecks);
 				CardEditorBaseDeckUiState.EnsureValidCharacter();
-				Log.Info($"[CardEditor] Auto-loaded preset at startup: '{editorPresetName}' ({overrides.Count} cards, {baseDecks.Count} base decks)");
+				CardEditorMod.VerboseLog($"[CardEditor] Auto-loaded preset at startup: '{editorPresetName}' ({overrides.Count} cards, {baseDecks.Count} base decks)");
 			}
 		}
 		catch (Exception ex)
@@ -1643,7 +1656,7 @@ public static class MainMenu_Ready_Patch
 			if (CardEditorCreatorPresetStore.TryLoadStartupPreset(out string creatorPresetName, out Dictionary<ModelId, CardEditorCreatedCardDefinition> defs))
 			{
 				CardEditorCreatedCardsStore.ImportSnapshot(defs);
-				Log.Info($"[CardEditor] Auto-loaded creator preset at startup: '{creatorPresetName}' ({defs.Count} cards)");
+				CardEditorMod.VerboseLog($"[CardEditor] Auto-loaded creator preset at startup: '{creatorPresetName}' ({defs.Count} cards)");
 			}
 		}
 		catch (Exception ex)
@@ -1758,7 +1771,7 @@ public static class MainMenu_Ready_Patch
 
 	private static void OpenCreator(NMainMenu menu)
 	{
-		Log.Info("[CardEditor] OpenCreator: Setting Mode = Creator");
+		CardEditorMod.VerboseLog("[CardEditor] OpenCreator: Setting Mode = Creator");
 		CardEditorLibrarySelectionState.ClearSelections();
 		CardEditorUiState.Mode = CardEditorLibraryMode.Creator;
 		NCardLibrary library = menu.SubmenuStack.GetSubmenuType<NCardLibrary>();
@@ -1767,7 +1780,7 @@ public static class MainMenu_Ready_Patch
 		{
 			library.Initialize(runState);
 		}
-		Log.Info("[CardEditor] OpenCreator: Pushing library (deferred)");
+		CardEditorMod.VerboseLog("[CardEditor] OpenCreator: Pushing library (deferred)");
 		Callable.From(() => menu.SubmenuStack.Push(library)).CallDeferred();
 	}
 }
@@ -1863,7 +1876,7 @@ public static class CardLibrary_ShowCardDetail_Patch
 			Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
 
 			ulong openElapsedMs = Time.GetTicksMsec() - openStartMs;
-			Log.Info($"[CardEditor][Perf] OpenEditorPopup card={cardId} elapsedMs={openElapsedMs}");
+			CardEditorMod.VerboseLog($"[CardEditor][Perf] OpenEditorPopup card={cardId} elapsedMs={openElapsedMs}");
 		}
 		catch (Exception ex)
 		{
@@ -1983,7 +1996,7 @@ internal static class CardEditorPresetPanelHooks
 		bool shouldShowStandaloneButton = CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive;
 		if (CardEditorMod.IsVerboseEditorLogging)
 		{
-			Log.Info($"[CardEditor][PresetButton] Sync mode={CardEditorUiState.Mode} shouldShowPanel={shouldShowPanel} shouldShowStandalone={shouldShowStandaloneButton} panelExists={panel != null} buttonExists={toggleButton != null} baseDeckPanelExists={baseDeckPanel != null} open={IsOpen(library)}");
+			CardEditorMod.VerboseLog($"[CardEditor][PresetButton] Sync mode={CardEditorUiState.Mode} shouldShowPanel={shouldShowPanel} shouldShowStandalone={shouldShowStandaloneButton} panelExists={panel != null} buttonExists={toggleButton != null} baseDeckPanelExists={baseDeckPanel != null} open={IsOpen(library)}");
 		}
 		if (shouldShowPanel)
 		{
@@ -2340,14 +2353,21 @@ public static class InspectCardScreen_Open_Patch
 	{
 		if (CardEditorUiState.IsActive)
 		{
-			Log.Info("[CardEditor] Blocking InspectCardScreen.Open");
+			CardEditorMod.VerboseLog("[CardEditor] Blocking InspectCardScreen.Open");
 			return false;
 		}
 		return true;
 	}
 }
 
-[HarmonyPatch(typeof(PowerCmd), nameof(PowerCmd.Apply), typeof(PowerModel), typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature), typeof(decimal), typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature), typeof(CardModel), typeof(bool))]
+[HarmonyPatch(typeof(PowerCmd), nameof(PowerCmd.Apply),
+	typeof(PlayerChoiceContext),
+	typeof(PowerModel),
+	typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature),
+	typeof(decimal),
+	typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature),
+	typeof(CardModel),
+	typeof(bool))]
 public static class PowerCmd_Apply_Patch
 {
 	private static readonly ModelId _resonanceId = ModelDb.GetId<Resonance>();
@@ -2398,7 +2418,13 @@ public static class PowerCmd_Apply_Patch
 	}
 }
 
-[HarmonyPatch(typeof(PowerCmd), nameof(PowerCmd.ModifyAmount), typeof(PowerModel), typeof(decimal), typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature), typeof(CardModel), typeof(bool))]
+[HarmonyPatch(typeof(PowerCmd), nameof(PowerCmd.ModifyAmount),
+	typeof(PlayerChoiceContext),
+	typeof(PowerModel),
+	typeof(decimal),
+	typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature),
+	typeof(CardModel),
+	typeof(bool))]
 public static class PowerCmd_ModifyAmount_Patch
 {
 	public static void Prefix(PowerModel power, ref decimal offset, CardModel? cardSource)
@@ -2471,7 +2497,7 @@ internal static class CardEditorCreatedCards_OnPlay_RunExtraEffects_Patch
 		{
 			return;
 		}
-		CombatState? combatState = cardPlay?.Card?.CombatState;
+		CombatState? combatState = cardPlay?.Card?.CombatState.AsCombatState();
 		if (combatState == null)
 		{
 			return;
@@ -2803,6 +2829,7 @@ public static class Hook_AfterTurnEnd_Patch
 				CardEditorTemporaryExtraEffectController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryEnchantmentController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryReplayController.OnAfterPlayerTurnEnd(combatState);
+				CardEditorTemporarySelfScalingController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorMatchingCardAuraController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorCardTypeCostAuras.OnAfterPlayerTurnEnd(combatState);
 				CardEditorDrawnGeneratedCostController.OnAfterPlayerTurnEnd(combatState);
@@ -2845,6 +2872,7 @@ public static class Hook_AfterCombatEnd_ClearScheduledEffects_Patch
 				CardEditorTemporaryExtraEffectController.Clear(combatState);
 				CardEditorTemporaryEnchantmentController.Clear(combatState);
 				CardEditorTemporaryReplayController.Clear(combatState);
+				CardEditorTemporarySelfScalingController.Clear(combatState);
 				CardEditorMatchingCardAuraController.Clear(combatState);
 				CardEditorCardTypeCostAuras.Clear(combatState);
 				CardEditorDrawnGeneratedCostController.Clear(combatState);

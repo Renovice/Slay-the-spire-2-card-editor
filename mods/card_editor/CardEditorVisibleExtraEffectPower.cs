@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Entities.Creatures;
@@ -34,7 +37,18 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 
 	public CardExtraEffect? SourceEffect => _sourceEffect;
 
-	public override LocString Title => _sourceCard?.TitleLocString ?? base.Title;
+	public override LocString Title
+	{
+		get
+		{
+			if (!string.IsNullOrWhiteSpace(_sourceEffect?.CustomPowerName))
+			{
+				return CreateRuntimeTitleLocString(_sourceEffect.CustomPowerName.Trim());
+			}
+
+			return _sourceCard?.TitleLocString ?? base.Title;
+		}
+	}
 
 	public override PowerType Type => PowerType.Buff;
 
@@ -138,6 +152,28 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 		return base.Title.GetFormattedText();
 	}
 
+	internal string GetDefaultTooltipTitle()
+	{
+		if (!string.IsNullOrWhiteSpace(_sourceCard?.Title))
+		{
+			return _sourceCard.Title.Trim();
+		}
+
+		try
+		{
+			string? title = _sourceCard?.TitleLocString.GetFormattedText();
+			if (!string.IsNullOrWhiteSpace(title))
+			{
+				return title.Trim();
+			}
+		}
+		catch
+		{
+		}
+
+		return string.Empty;
+	}
+
 	private void ApplyPayload(PendingPayload? payload)
 	{
 		if (payload == null)
@@ -150,5 +186,29 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 		_sourceEffect = payload.Effect;
 		_visibleAmount = payload.VisibleAmount;
 		_showAmountLabel = payload.ShowAmountLabel;
+	}
+
+	private static LocString CreateRuntimeTitleLocString(string title)
+	{
+		string safeTitle = string.IsNullOrWhiteSpace(title) ? "Card Editor Power" : title.Trim();
+		string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(safeTitle)));
+		string titleKey = "CARD_EDITOR.RUNTIME_POWER_TITLE." + hash;
+
+		if (LocManager.Instance != null)
+		{
+			try
+			{
+				LocTable table = LocManager.Instance.GetTable("extensions");
+				table.MergeWith(new Dictionary<string, string>
+				{
+					[titleKey] = safeTitle
+				});
+			}
+			catch
+			{
+			}
+		}
+
+		return new LocString("extensions", titleKey);
 	}
 }

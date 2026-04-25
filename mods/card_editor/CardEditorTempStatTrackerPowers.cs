@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
+using PowerCmd = SlayTheSpire2Mod.CardEditor.CardEditorPowerCmdCompat;
 
 namespace SlayTheSpire2Mod.CardEditor;
 

@@ -362,7 +362,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 		try
 		{
-			CombatState? combatState = createdCard.CombatState ?? cardPlay?.Card?.CombatState;
+			CombatState? combatState = createdCard.CombatState.AsCombatState() ?? cardPlay?.Card?.CombatState.AsCombatState();
 			if (combatState != null)
 			{
 				IReadOnlyList<CardExtraEffect> borrowedEffects = CardEditorExtraEffects.GetRuntimeEffectsForBorrowedSource(combatState, createdCard, effectSourceId, customKeywordFilter);
@@ -642,12 +642,12 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			return null;
 		}
 
-		CombatState? hostCombatState = createdCard.CombatState ?? createdCard.Owner?.Creature?.CombatState;
+		CombatState? hostCombatState = createdCard.CombatState.AsCombatState() ?? createdCard.Owner?.Creature?.CombatState.AsCombatState();
 		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
 		Dictionary<string, RuntimeVanillaEffectSourceState> states = _runtimeVanillaEffectSourceStates.GetOrCreateValue(createdCard);
 		if (states.TryGetValue(stateKey, out RuntimeVanillaEffectSourceState? state)
 			&& state?.SourceCard != null
-			&& state.CombatState == hostCombatState)
+			&& state.CombatState.AsCombatState() == hostCombatState)
 		{
 			return state.SourceCard;
 		}
@@ -675,7 +675,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 
 		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
-		CombatState? hostCombatState = createdCard.CombatState ?? createdCard.Owner?.Creature?.CombatState;
+		CombatState? hostCombatState = createdCard.CombatState.AsCombatState() ?? createdCard.Owner?.Creature?.CombatState.AsCombatState();
 		if (!_runtimeVanillaEffectSourceStates.TryGetValue(createdCard, out Dictionary<string, RuntimeVanillaEffectSourceState>? states))
 		{
 			return false;
@@ -686,7 +686,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			return false;
 		}
 
-		if (state.CombatState != hostCombatState)
+		if (state.CombatState.AsCombatState() != hostCombatState)
 		{
 			states.Remove(stateKey);
 			return false;
@@ -718,7 +718,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 		try
 		{
-			if ((hostCard.CombatState != null || hostCard.Owner?.Creature?.CombatState != null)
+			if ((hostCard.CombatState.AsCombatState() != null || hostCard.Owner?.Creature?.CombatState.AsCombatState() != null)
 				&& effectSourceCard.UpgradePreviewType != CardUpgradePreviewType.Combat)
 			{
 				effectSourceCard.UpgradePreviewType = CardUpgradePreviewType.Combat;

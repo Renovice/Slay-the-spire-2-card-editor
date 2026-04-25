@@ -431,7 +431,7 @@ internal static class CardEditorCustomPortraitLoader
 				return;
 			}
 		}
-		Log.Info($"[CardEditor] {message}");
+		CardEditorMod.VerboseLog($"[CardEditor] {message}");
 	}
 }
 

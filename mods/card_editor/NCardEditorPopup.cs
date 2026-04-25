@@ -33,6 +33,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private static readonly string _bodyFontPath = "res://themes/kreon_regular_glyph_space_one.tres";
 	private const string _cardGridScenePath = "res://scenes/cards/card_grid.tscn";
 	private static readonly Vector2 _fieldMinSize = new Vector2(0, 44);
+	private const string SelfScalingDynamicVarTargetPrefix = "var|";
+	private const string SelfScalingEffectRowTargetPrefix = "effect|";
 	private static readonly Vector2 _numericFieldMinSize = new Vector2(250, 44);
 	private static readonly Vector2 _amountFieldMinSize = new Vector2(90, 44);
 	private static readonly Vector2 _spinButtonMinSize = new Vector2(34, 20);
@@ -120,6 +122,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private bool _isBatchEdit;
 	private bool _preserveDraftOnClose;
 	private bool _rebuildPrebuiltPopupOnClose;
+	private bool _warmOppositePrebuiltPopupOnClose;
 	private bool _isPersistentPopupCacheEntry;
 	private bool _allowPersistentPopupReuseOnClose;
 	private bool _uiDirtySinceOpen;
@@ -299,6 +302,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private const string EffectFormSlotMetaKey = "card_editor_effect_form_slot";
 	private const string EffectFormSlotIndexMetaKey = "card_editor_effect_form_slot_index";
 	private const string EffectFormCompactPairMetaKey = "card_editor_effect_form_compact_pair";
+	private const string ScalingBaseAmountAutoMetaKey = "card_editor_scaling_base_amount_auto";
 	private const string UnifiedEffectVariantGroupMetaKey = "card_editor_unified_effect_variant_group";
 	private const string UnifiedEffectVariantUpdatingMetaKey = "card_editor_unified_effect_variant_updating";
 	private const string UnifiedEffectModeGroupMetaKey = "card_editor_unified_effect_mode_group";
@@ -483,7 +487,63 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	internal static void TryQueueUiWarmup(Node? owner = null)
 	{
+		if (!CardEditorPerformanceSettings.PreloadEditorPopupsOnLaunch)
+		{
+			_uiWarmupComplete = true;
+			CardEditorMod.VerboseLog("[CardEditor] Startup popup preload skipped: PreloadEditorPopupsOnLaunch is false in card_editor_settings.txt.");
+			return;
+		}
+
 		RunUiWarmup();
+	}
+
+	internal static void InvalidateLocalizationSensitiveCaches()
+	{
+		try
+		{
+			int popupCount = _prebuiltPopupCache.Count;
+			foreach (NCardEditorPopup popup in _prebuiltPopupCache.Values.ToList())
+			{
+				if (popup == null
+					|| !GodotObject.IsInstanceValid(popup)
+					|| popup.IsQueuedForDeletion())
+				{
+					continue;
+				}
+
+				popup._allowPersistentPopupReuseOnClose = false;
+				popup._rebuildPrebuiltPopupOnClose = true;
+				if (!popup.Visible)
+				{
+					popup.ReleasePreviewNodeResources();
+					popup.QueueFreeSafely();
+				}
+			}
+
+			_prebuiltPopupCache.Clear();
+			_queuedPrebuiltPopupKeys.Clear();
+			_prebuiltPopupBuildQueue.Clear();
+			_queuedPrebuiltPopupHydrationKeys.Clear();
+			_prebuiltPopupHydrationQueue.Clear();
+			_prebuiltPopupBuildScheduled = false;
+			_prebuiltPopupHydrationScheduled = false;
+			_uiWarmupComplete = false;
+
+			_cachedCardPickerOverrideRevision = -1;
+			_cachedCardPickerCreatedRevision = -1;
+			_cachedCardPickerDraftRevision = -1;
+			_cachedCardPickerIdTexts = null;
+			_cachedCardPickerEntries = null;
+
+			if (popupCount > 0)
+			{
+				Log.Info($"[CardEditor] Invalidated localized popup cache entries={popupCount}");
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed invalidating localized popup caches: {ex}");
+		}
 	}
 
 	private static void RunUiWarmup()
@@ -532,7 +592,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			}
 
 			ulong totalElapsedMs = Time.GetTicksMsec() - warmupStartMs;
-			Log.Info($"[CardEditor][Perf] PrebuiltPopupWarmup totalMs={totalElapsedMs} queued={queued} built={built} hydratedSteps={hydratedSteps} cacheSize={_prebuiltPopupCache.Count}");
+			CardEditorMod.VerboseLog($"[CardEditor][Perf] PrebuiltPopupWarmup totalMs={totalElapsedMs} queued={queued} built={built} hydratedSteps={hydratedSteps} cacheSize={_prebuiltPopupCache.Count}");
 			_uiWarmupComplete = true;
 		}
 		catch (Exception ex)
@@ -644,6 +704,20 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	{
 		QueuePrebuiltPopupBuild(cardId, isUpgradeEditor);
 		ScheduleQueuedPrebuiltPopupBuilds();
+	}
+
+	private static void QueueBackgroundPrebuiltPopupWarmup(ModelId cardId, bool isUpgradeEditor, double additionalDelaySeconds = 0.0)
+	{
+		if (!CardEditorPerformanceSettings.BackgroundPopupWarmupAfterDirtyClose
+			|| cardId == null
+			|| cardId == ModelId.none)
+		{
+			return;
+		}
+
+		QueuePrebuiltPopupBuild(cardId, isUpgradeEditor);
+		double delaySeconds = Math.Max(0.0, CardEditorPerformanceSettings.BackgroundPopupWarmupDelaySeconds + additionalDelaySeconds);
+		ScheduleQueuedPrebuiltPopupBuilds(delaySeconds);
 	}
 
 	private static void InvalidatePrebuiltPopupCacheEntry(ModelId cardId, bool isUpgradeEditor, bool queueRebuild = false, NCardEditorPopup? skipPopup = null)
@@ -946,7 +1020,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_preserveDraftOnClose = false;
 		_rebuildPrebuiltPopupOnClose = true;
 		Visible = true;
-		EnsurePendingPopupHydrationCompleted();
+		if (CardEditorPerformanceSettings.IncrementalPopupHydrationOnOpen)
+		{
+			SchedulePendingPopupHydrationAfterOpen();
+		}
+		else
+		{
+			EnsurePendingPopupHydrationCompleted();
+		}
 	}
 
 	private void PreparePersistentPopupForOpen(Action onApplied, Vector2? preferredPanelSize)
@@ -972,7 +1053,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		OffsetBottom = 0f;
 		ConnectWindowSizeSignal();
 		EnsurePreviewNodeReady();
-		EnsurePendingPopupHydrationCompleted();
+		if (CardEditorPerformanceSettings.IncrementalPopupHydrationOnOpen)
+		{
+			SchedulePendingPopupHydrationAfterOpen();
+		}
+		else
+		{
+			EnsurePendingPopupHydrationCompleted();
+		}
 		QueuePopupLayout();
 		Callable.From(ForceLayoutRefreshNow).CallDeferred();
 		GrabPersistentPopupFocusSoon();
@@ -2366,6 +2454,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	{
 		public string StableEffectId { get; set; } = string.Empty;
 		public string? SelfScalingTargetEffectId { get; set; }
+		public string? SelfScalingDynamicVarKey { get; set; }
+		public CardExtraEffectSelfScalingField SelfScalingSelectedField { get; set; } = CardExtraEffectSelfScalingField.Amount;
 		public List<string> SelfScalingTargetEffectIds { get; set; } = new();
 		public string? AmountSourceEffectId { get; set; }
 		public List<string> AmountSourceEffectIds { get; set; } = new();
@@ -2483,8 +2573,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public OptionButton SelfScalingOperationSelect { get; init; } = null!;
 		public Control SelfScalingModeRow { get; init; } = null!;
 		public OptionButton SelfScalingModeSelect { get; init; } = null!;
+		public Control SelfScalingRecipientRow { get; init; } = null!;
+		public OptionButton SelfScalingRecipientSelect { get; init; } = null!;
 		public Control SelfScalingTargetTypeRow { get; init; } = null!;
 		public OptionButton SelfScalingTargetTypeSelect { get; init; } = null!;
+		public Control SelfScalingNumberSelectionRow { get; init; } = null!;
+		public OptionButton SelfScalingNumberSelectionSelect { get; init; } = null!;
+		public Control SelfScalingNumberFilterRow { get; init; } = null!;
+		public OptionButton SelfScalingNumberFilterSelect { get; init; } = null!;
 		public Control SelfScalingFieldRow { get; init; } = null!;
 		public OptionButton SelfScalingFieldSelect { get; init; } = null!;
 		public Control SelfScalingTargetEffectRow { get; init; } = null!;
@@ -2729,6 +2825,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public Control CountEnemyIntentRow { get; init; } = null!;
 		public OptionButton CountEnemyIntentSelect { get; init; } = null!;
 		public KeywordTickbox ScalingBaseTickbox { get; init; } = null!;
+		public Control ScalingBaseAmountPair { get; init; } = null!;
+		public LineEdit ScalingBaseAmountField { get; init; } = null!;
 	}
 
 	private sealed class PendingExtraEffectRow
@@ -3801,46 +3899,75 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			return;
 		}
 
-		if (xTickbox.IsTicked)
+		string modeMetaKey = metaKeyPreviousXPlusText + "_active";
+		bool hadPreviousMode = field.HasMeta(modeMetaKey);
+		bool wasXMode = false;
+		if (hadPreviousMode)
 		{
-			string plus = "0";
-			if (field.HasMeta(metaKeyPreviousXPlusText))
+			Variant modeMeta = field.GetMeta(modeMetaKey);
+			if (modeMeta.VariantType != Variant.Type.Nil)
 			{
-				Variant meta = field.GetMeta(metaKeyPreviousXPlusText);
-				if (meta.VariantType != Variant.Type.Nil)
-				{
-					string raw = meta.ToString();
-					if (!string.IsNullOrWhiteSpace(raw))
-					{
-						plus = raw.Trim();
-					}
-				}
+				string rawMode = modeMeta.ToString();
+				wasXMode = string.Equals(rawMode, "1", StringComparison.Ordinal)
+					|| string.Equals(rawMode, "true", StringComparison.OrdinalIgnoreCase);
+			}
+		}
+
+		string ReadTextMeta(string key, string fallback)
+		{
+			if (!field.HasMeta(key))
+			{
+				return fallback;
 			}
 
-			if (!string.Equals((field.Text ?? string.Empty).Trim(), plus, StringComparison.Ordinal))
+			Variant meta = field.GetMeta(key);
+			if (meta.VariantType == Variant.Type.Nil)
+			{
+				return fallback;
+			}
+
+			string text = meta.ToString();
+			return string.IsNullOrWhiteSpace(text) ? fallback : text.Trim();
+		}
+
+		if (xTickbox.IsTicked)
+		{
+			if (!hadPreviousMode)
+			{
+				field.SetMeta(metaKeyPreviousXPlusText, ReadTextMeta(metaKeyPreviousXPlusText, field.Text ?? "0"));
+			}
+			else if (!wasXMode)
 			{
 				field.SetMeta(metaKeyPreviousNonXText, field.Text ?? string.Empty);
 			}
+			else
+			{
+				field.SetMeta(metaKeyPreviousXPlusText, field.Text ?? string.Empty);
+			}
 
+			string plus = ReadTextMeta(metaKeyPreviousXPlusText, "0");
 			field.Text = plus;
+			field.SetMeta(modeMetaKey, "1");
 			field.Editable = true;
 			SetSpinEnabled(field, enabled: true);
 		}
 		else
 		{
-			field.SetMeta(metaKeyPreviousXPlusText, field.Text ?? string.Empty);
-
-			string restored = string.Empty;
-			if (field.HasMeta(metaKeyPreviousNonXText))
+			if (!hadPreviousMode)
 			{
-				Variant meta = field.GetMeta(metaKeyPreviousNonXText);
-				if (meta.VariantType != Variant.Type.Nil)
-				{
-					restored = meta.ToString();
-				}
+				field.SetMeta(metaKeyPreviousNonXText, field.Text ?? string.Empty);
+			}
+			else if (wasXMode)
+			{
+				field.SetMeta(metaKeyPreviousXPlusText, field.Text ?? string.Empty);
+				field.Text = ReadTextMeta(metaKeyPreviousNonXText, string.Empty);
+			}
+			else
+			{
+				field.SetMeta(metaKeyPreviousNonXText, field.Text ?? string.Empty);
 			}
 
-			field.Text = restored.Trim();
+			field.SetMeta(modeMetaKey, "0");
 			field.Editable = true;
 			SetSpinEnabled(field, enabled: true);
 		}
@@ -4801,6 +4928,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		if (control == row.CardMatchRow) return "Match";
 		if (control == row.CountRow) return "Scaling";
 		if (control == row.CountCardFilterRow) return "Filter";
+		if (control == row.ScalingBaseAmountPair) return "Base";
 		if (control == row.CountAmountRow) return "AmountMode";
 		if (control == row.CountOrbFilterRow) return "Orb";
 		if (control == row.GrantFilterRow) return "GrantFilter";
@@ -4868,6 +4996,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 				row.KeywordGroupRow,
 				row.CountRow,
 				row.CountCardFilterRow,
+				row.ScalingBaseAmountPair,
 				row.CountAmountRow,
 				row.GrantFilterRow,
 				row.PowerConditionRow,
@@ -4882,7 +5011,11 @@ public partial class NCardEditorPopup : Control, IScreenContext
 				row.PowerCustomNameRow,
 				row.PowerCustomDescriptionRow,
 				row.SelfScalingOperationRow,
+				row.SelfScalingModeRow,
+				row.SelfScalingRecipientRow,
 				row.SelfScalingTargetTypeRow,
+				row.SelfScalingNumberSelectionRow,
+				row.SelfScalingNumberFilterRow,
 				row.SelfScalingFieldRow,
 				row.SelfScalingTargetEffectRow,
 				row.AmountSourceModeRow,
@@ -7591,9 +7724,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				foreach (CardExtraEffect? effect in upgradeEffects)
 				{
-					if (effect != null && CardEditorExtraEffects.IsValidEffectAmount(effect.Kind, effect.Amount))
+					CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+					if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
 					{
-						QueueExistingExtraEffectRowForHydration(effect);
+						QueueExistingExtraEffectRowForHydration(normalizedEffect);
 					}
 				}
 			}
@@ -7610,9 +7744,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				foreach (CardExtraEffect effect in baseEffects)
 				{
-					if (effect != null && CardEditorExtraEffects.IsValidEffectAmount(effect.Kind, effect.Amount))
+					CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+					if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
 					{
-						QueueExistingExtraEffectRowForHydration(effect);
+						QueueExistingExtraEffectRowForHydration(normalizedEffect);
 					}
 				}
 			}
@@ -7770,6 +7905,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	{
 		CompletePendingExistingExtraEffectRowsNow();
 		CompleteDeferredCreatedEffectValueRowsNow();
+	}
+
+	private void SchedulePendingPopupHydrationAfterOpen()
+	{
+		_manualPrebuiltPopupWarmupHydration = false;
+		UpdateExtraEffectHydrationUiState();
+		EnsurePendingExistingExtraEffectRowsHydrationScheduled();
+		ScheduleCreatedEffectValueRowsRefresh();
 	}
 
 	private void TrackExtraEffectHydrationButton(Button? button)
@@ -8658,14 +8801,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		grantModeSelect.TooltipText = CardEditorLoc.T("tooltip.selectionMode", "Card selection mode");
 		foreach (CardExtraEffectCardSelectionMode mode in Enum.GetValues<CardExtraEffectCardSelectionMode>())
 		{
-			if (CardEditorExtraEffects.IsOrderedPileSelectionMode(mode))
+			if (CardEditorExtraEffects.IsOrderedPileSelectionMode(mode)
+				|| mode == CardExtraEffectCardSelectionMode.EachPile)
 			{
 				continue;
 			}
 			grantModeSelect.AddItem(CardEditorExtraEffects.CardSelectionModeLabel(mode));
 		}
 		int grantModeIndex = effect != null ? (int)effect.CardSelectionMode : (int)CardExtraEffectCardSelectionMode.Choose;
-		if (grantModeIndex < 0 || grantModeIndex >= Enum.GetValues<CardExtraEffectCardSelectionMode>().Length)
+		if (grantModeIndex < 0 || grantModeIndex >= grantModeSelect.ItemCount)
 		{
 			grantModeIndex = 0;
 		}
@@ -9480,6 +9624,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		display.CardCostsLessTurns = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CardCostsLessTurns, numericFieldsAreDeltas);
 		display.CountTurns = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CountTurns, numericFieldsAreDeltas);
 		display.CountConditionAmount = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CountConditionAmount, numericFieldsAreDeltas);
+		if (upgradeEffect != null)
+		{
+			int baseHistoryStart = CardEditorExtraEffects.ResolveHistoryScalingBaseAmount(baseEffect, baseEffect.Amount);
+			int upgradeHistoryStartDelta = numericFieldsAreDeltas
+				? upgradeEffect.HistoryScalingBaseAmount.GetValueOrDefault()
+				: CardEditorExtraEffects.ResolveHistoryScalingBaseAmount(upgradeEffect, upgradeEffect.Amount) - baseHistoryStart;
+			display.HistoryScalingBaseAmount = upgradeHistoryStartDelta == 0 ? null : upgradeHistoryStartDelta;
+		}
 		display.CardGrantTurns = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CardGrantTurns, numericFieldsAreDeltas);
 		display.CardSelectionCount = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CardSelectionCount, numericFieldsAreDeltas);
 
@@ -9543,6 +9695,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		effect = CardEditorExtraEffects.NormalizeLegacyOrbChannelEffect(effect);
 		effect = CardEditorExtraEffects.NormalizeLegacyEvokeOrbsEffect(effect);
 		effect = CardEditorExtraEffects.NormalizeLegacyOrbSlotEffect(effect);
+		effect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
 		effect = CardEditorExtraEffects.NormalizeSelfPileAutoEffect(effect);
 		string stableEffectId = !string.IsNullOrWhiteSpace(effect?.EffectId)
 			? effect!.EffectId!.Trim()
@@ -10429,14 +10582,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		grantModeSelect.TooltipText = CardEditorLoc.T("tooltip.selectionMode", "Card selection mode");
 		foreach (CardExtraEffectCardSelectionMode mode in Enum.GetValues<CardExtraEffectCardSelectionMode>())
 		{
-			if (CardEditorExtraEffects.IsOrderedPileSelectionMode(mode))
+			if (CardEditorExtraEffects.IsOrderedPileSelectionMode(mode)
+				|| mode == CardExtraEffectCardSelectionMode.EachPile)
 			{
 				continue;
 			}
 			grantModeSelect.AddItem(CardEditorExtraEffects.CardSelectionModeLabel(mode));
 		}
 		int grantModeIndex = effect != null ? (int)effect.CardSelectionMode : (int)CardExtraEffectCardSelectionMode.Choose;
-		if (grantModeIndex < 0 || grantModeIndex >= Enum.GetValues<CardExtraEffectCardSelectionMode>().Length)
+		if (grantModeIndex < 0 || grantModeIndex >= grantModeSelect.ItemCount)
 		{
 			grantModeIndex = 0;
 		}
@@ -10882,7 +11036,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
 		};
 		StyleInput(powerCustomNameField);
-		powerCustomNameField.TooltipText = CardEditorLoc.T("tooltip.powerCustomName", "Optional override for the visible power's hover title. Leave blank to keep the generated/default title.");
+		powerCustomNameField.TooltipText = CardEditorLoc.T("tooltip.powerCustomName", "Optional override for the visible power's hover title. Leave blank to use the card name.");
 		powerCustomNameField.TextChanged += _ => QueuePreviewUpdate();
 
 		HBoxContainer powerCustomNameRow = CreateEffectWideRow(
@@ -10932,9 +11086,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		StyleInput(selfScalingModeSelect);
 		ConstrainOptionButtonPopup(selfScalingModeSelect);
-		selfScalingModeSelect.TooltipText = CardEditorLoc.T("tooltip.selfScalingMode", "Choose whether this scaling lasts for the current combat or permanently for the run.");
+		selfScalingModeSelect.TooltipText = CardEditorLoc.T("tooltip.selfScalingMode", "Choose whether this scaling lasts for the current combat or for the rest of the run.");
 		selfScalingModeSelect.AddItem(CardEditorLoc.T("selfScaling.mode.thisCombat", "This Combat"), (int)UnifiedSelfScalingMode.ThisCombat);
-		selfScalingModeSelect.AddItem(CardEditorLoc.T("selfScaling.mode.permanent", "Permanent"), (int)UnifiedSelfScalingMode.Permanent);
+		selfScalingModeSelect.AddItem(CardEditorLoc.T("selfScaling.mode.permanent", "Rest of Run"), (int)UnifiedSelfScalingMode.Permanent);
 		selfScalingModeSelect.Select(effect?.Kind == CardExtraEffectKind.PersistentSelfScaling
 			? (int)UnifiedSelfScalingMode.Permanent
 			: (int)UnifiedSelfScalingMode.ThisCombat);
@@ -10946,6 +11100,27 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		SetEffectFormRowLabelTooltip(selfScalingModeRow, selfScalingModeSelect.TooltipText);
 		selfScalingModeRow.Visible = false;
 
+		OptionButton selfScalingRecipientSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(_effectFormColumnWidths[1], _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		StyleInput(selfScalingRecipientSelect);
+		ConstrainOptionButtonPopup(selfScalingRecipientSelect);
+		selfScalingRecipientSelect.TooltipText = CardEditorLoc.T("tooltip.selfScalingRecipient", "Choose which card(s) this self-scaling mutates. Selected/matching modes use the card pile and filter controls below.");
+		selfScalingRecipientSelect.AddItem(CardEditorLoc.T("selfScaling.recipient.thisCard", "This Card"), (int)CardExtraEffectSelfScalingRecipientMode.ThisCard);
+		selfScalingRecipientSelect.AddItem(CardEditorLoc.T("selfScaling.recipient.selectedCards", "Selected Cards"), (int)CardExtraEffectSelfScalingRecipientMode.SelectedCards);
+		selfScalingRecipientSelect.AddItem(CardEditorLoc.T("selfScaling.recipient.matchingCards", "Matching / Exact Cards"), (int)CardExtraEffectSelfScalingRecipientMode.MatchingCards);
+		selfScalingRecipientSelect.AddItem(CardEditorLoc.T("selfScaling.recipient.thisAndSelected", "This + Selected"), (int)CardExtraEffectSelfScalingRecipientMode.ThisAndSelectedCards);
+		selfScalingRecipientSelect.AddItem(CardEditorLoc.T("selfScaling.recipient.thisAndMatching", "This + Matching"), (int)CardExtraEffectSelfScalingRecipientMode.ThisAndMatchingCards);
+		selfScalingRecipientSelect.Select((int)(effect?.SelfScalingRecipientMode ?? CardExtraEffectSelfScalingRecipientMode.ThisCard));
+		selfScalingRecipientSelect.ItemSelected += _ => QueuePreviewUpdate();
+		HBoxContainer selfScalingRecipientRow = CreateEffectFormRow(
+			CardEditorLoc.T("row.selfScalingRecipient", "Recipient"),
+			selfScalingRecipientSelect);
+		SetEffectFormRowLabelTooltip(selfScalingRecipientRow, selfScalingRecipientSelect.TooltipText);
+		selfScalingRecipientRow.Visible = false;
+
 		OptionButton selfScalingTargetTypeSelect = new OptionButton
 		{
 			CustomMinimumSize = new Vector2(_effectFormColumnWidths[1], _fieldMinSize.Y),
@@ -10953,15 +11128,77 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		StyleInput(selfScalingTargetTypeSelect);
 		ConstrainOptionButtonPopup(selfScalingTargetTypeSelect);
-		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.baseDamage", "Base Damage"), (int)CardExtraEffectSelfScalingTargetType.BaseDamage);
-		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.baseBlock", "Base Block"), (int)CardExtraEffectSelfScalingTargetType.BaseBlock);
-		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.effectRowAmount", "Effect Row Amount"), (int)CardExtraEffectSelfScalingTargetType.EffectRowAmount);
-		selfScalingTargetTypeSelect.Select((int)(effect?.SelfScalingTargetType ?? CardExtraEffectSelfScalingTargetType.BaseDamage));
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.number", "Number"), (int)CardExtraEffectSelfScalingTargetType.DynamicVar);
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.allNumbers", "All Effect Numbers"), (int)CardExtraEffectSelfScalingTargetType.AllNumbers);
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.allNumbersRepeats", "All Numbers + Repeats"), (int)CardExtraEffectSelfScalingTargetType.AllNumbersIncludingRepeats);
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.allGameplayNumbers", "All Gameplay Numbers"), (int)CardExtraEffectSelfScalingTargetType.AllGameplayNumbers);
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.allGameplayNumbersRepeats", "Gameplay + Repeats"), (int)CardExtraEffectSelfScalingTargetType.AllGameplayNumbersIncludingRepeats);
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.repeatCounts", "Repeat Counts"), (int)CardExtraEffectSelfScalingTargetType.RepeatCounts);
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.energyCost", "Energy Cost"), (int)CardExtraEffectSelfScalingTargetType.EnergyCost);
+		selfScalingTargetTypeSelect.AddItem(CardEditorLoc.T("selfScaling.target.starCost", "Star Cost"), (int)CardExtraEffectSelfScalingTargetType.StarCost);
+		CardExtraEffectSelfScalingTargetType initialSelfScalingTargetType = effect?.SelfScalingTargetType ?? CardExtraEffectSelfScalingTargetType.DynamicVar;
+		int initialSelfScalingTargetMode = initialSelfScalingTargetType is CardExtraEffectSelfScalingTargetType.AllNumbers
+			or CardExtraEffectSelfScalingTargetType.AllNumbersIncludingRepeats
+			or CardExtraEffectSelfScalingTargetType.AllGameplayNumbers
+			or CardExtraEffectSelfScalingTargetType.AllGameplayNumbersIncludingRepeats
+			or CardExtraEffectSelfScalingTargetType.RepeatCounts
+			or CardExtraEffectSelfScalingTargetType.EnergyCost
+			or CardExtraEffectSelfScalingTargetType.StarCost
+			? (int)initialSelfScalingTargetType
+			: (int)CardExtraEffectSelfScalingTargetType.DynamicVar;
+		int initialSelfScalingTargetIndex = selfScalingTargetTypeSelect.GetItemIndex(initialSelfScalingTargetMode);
+		selfScalingTargetTypeSelect.Select(initialSelfScalingTargetIndex >= 0 ? initialSelfScalingTargetIndex : 0);
 		selfScalingTargetTypeSelect.ItemSelected += _ => QueuePreviewUpdate();
 		HBoxContainer selfScalingTargetTypeRow = CreateEffectFormRow(
 			CardEditorLoc.T("row.selfScalingTarget", "Target"),
 			selfScalingTargetTypeSelect);
 		selfScalingTargetTypeRow.Visible = false;
+
+		OptionButton selfScalingNumberSelectionSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(_effectFormColumnWidths[1], _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		StyleInput(selfScalingNumberSelectionSelect);
+		ConstrainOptionButtonPopup(selfScalingNumberSelectionSelect);
+		selfScalingNumberSelectionSelect.TooltipText = CardEditorLoc.T("tooltip.selfScalingNumberSelection", "Choose whether to mutate every matching number, only the first matching number, or one random matching number on each recipient card.");
+		selfScalingNumberSelectionSelect.AddItem(CardEditorLoc.T("selfScaling.numberSelection.all", "All Matching"), (int)CardExtraEffectSelfScalingNumberSelectionMode.All);
+		selfScalingNumberSelectionSelect.AddItem(CardEditorLoc.T("selfScaling.numberSelection.first", "First Matching"), (int)CardExtraEffectSelfScalingNumberSelectionMode.First);
+		selfScalingNumberSelectionSelect.AddItem(CardEditorLoc.T("selfScaling.numberSelection.random", "Random Matching"), (int)CardExtraEffectSelfScalingNumberSelectionMode.Random);
+		int initialNumberSelectionMode = (int)(effect?.SelfScalingNumberSelectionMode ?? CardExtraEffectSelfScalingNumberSelectionMode.All);
+		int initialNumberSelectionIndex = selfScalingNumberSelectionSelect.GetItemIndex(initialNumberSelectionMode);
+		selfScalingNumberSelectionSelect.Select(initialNumberSelectionIndex >= 0 ? initialNumberSelectionIndex : 0);
+		selfScalingNumberSelectionSelect.ItemSelected += _ => QueuePreviewUpdate();
+		HBoxContainer selfScalingNumberSelectionRow = CreateEffectFormRow(
+			CardEditorLoc.T("row.selfScalingNumberSelection", "Numbers"),
+			selfScalingNumberSelectionSelect);
+		SetEffectFormRowLabelTooltip(selfScalingNumberSelectionRow, selfScalingNumberSelectionSelect.TooltipText);
+		selfScalingNumberSelectionRow.Visible = false;
+
+		OptionButton selfScalingNumberFilterSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(_effectFormColumnWidths[1], _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		StyleInput(selfScalingNumberFilterSelect);
+		ConstrainOptionButtonPopup(selfScalingNumberFilterSelect);
+		selfScalingNumberFilterSelect.TooltipText = CardEditorLoc.T("tooltip.selfScalingNumberFilter", "Optional: only mutate numbers belonging to matching effect rows or matching vanilla dynamic variables, such as Damage, Block, Weak, or cost modification effects.");
+		foreach (CardExtraEffectCountCardFilter filter in Enum.GetValues<CardExtraEffectCountCardFilter>())
+		{
+			selfScalingNumberFilterSelect.AddItem(CardEditorExtraEffects.CountCardFilterLabel(filter));
+		}
+		int initialNumberFilter = (int)(effect?.SelfScalingNumberFilter ?? CardExtraEffectCountCardFilter.Any);
+		if (initialNumberFilter < 0 || initialNumberFilter >= Enum.GetValues<CardExtraEffectCountCardFilter>().Length)
+		{
+			initialNumberFilter = (int)CardExtraEffectCountCardFilter.Any;
+		}
+		selfScalingNumberFilterSelect.Select(initialNumberFilter);
+		selfScalingNumberFilterSelect.ItemSelected += _ => QueuePreviewUpdate();
+		HBoxContainer selfScalingNumberFilterRow = CreateEffectFormRow(
+			CardEditorLoc.T("row.selfScalingNumberFilter", "Number Filter"),
+			selfScalingNumberFilterSelect);
+		SetEffectFormRowLabelTooltip(selfScalingNumberFilterRow, selfScalingNumberFilterSelect.TooltipText);
+		selfScalingNumberFilterRow.Visible = false;
 
 		OptionButton selfScalingFieldSelect = new OptionButton
 		{
@@ -10991,7 +11228,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		ConstrainOptionButtonPopup(selfScalingTargetEffectSelect);
 		selfScalingTargetEffectSelect.ItemSelected += _ => QueuePreviewUpdate();
 		HBoxContainer selfScalingTargetEffectRow = CreateEffectFormRow(
-			CardEditorLoc.T("row.selfScalingTargetEffect", "Effect Row"),
+			CardEditorLoc.T("row.selfScalingTargetNumber", "Number"),
 			selfScalingTargetEffectSelect);
 		selfScalingTargetEffectRow.Visible = false;
 
@@ -11115,6 +11352,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				&& (CardExtraEffectValueSourceMode)amountValueSourceModeSelect.GetItemId(amountValueSourceModeSelect.Selected) == CardExtraEffectValueSourceMode.PowerStatus;
 			amountValueSourceKindSelect.Visible = !usesPowerStatus;
 			amountValueSourcePowerSelect.Visible = usesPowerStatus;
+			if (usesPowerStatus)
+			{
+				EnsureExtraEffectPowerSelectPopulated(amountValueSourcePowerSelect);
+				amountValueSourceValueCell.QueueSort();
+			}
 			QueuePreviewUpdate();
 		};
 		amountValueSourceAggregationSelect.Disabled = (effect?.ValueSourceActor ?? CardExtraEffectValueSourceActor.Self)
@@ -11122,6 +11364,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool initialUsesPowerStatus = (effect?.ValueSourceMode ?? CardExtraEffectValueSourceMode.Common) == CardExtraEffectValueSourceMode.PowerStatus;
 		amountValueSourceKindSelect.Visible = !initialUsesPowerStatus;
 		amountValueSourcePowerSelect.Visible = initialUsesPowerStatus;
+		if (initialUsesPowerStatus)
+		{
+			EnsureExtraEffectPowerSelectPopulated(amountValueSourcePowerSelect);
+		}
 
 		HBoxContainer amountValueSourceRow = CreateEffectFormRow(
 			CardEditorLoc.T("row.amountValueSource", "Value Source"),
@@ -11365,8 +11611,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		cardCostsLessModeSelect.Select(cardCostsLessModeIndex);
 
+		CardExtraEffectCardCostsLessDuration initialCardCostsLessDuration =
+			CardEditorExtraEffects.IsSelfScalingKind(effect?.Kind ?? initialSelectedKind)
+				? GetInitialSelfScalingDuration(effect)
+				: effect?.CardCostsLessDuration ?? CardExtraEffectCardCostsLessDuration.Permanent;
 		(OptionButton cardCostsLessDurationSelect, NMegaLineEdit cardCostsLessTurnsField, Control cardCostsLessTurnsSpin) = CreateExtraEffectDurationControls(
-			effect?.CardCostsLessDuration ?? CardExtraEffectCardCostsLessDuration.Permanent,
+			initialCardCostsLessDuration,
 			CardExtraEffectCardCostsLessDuration.Permanent,
 			effect?.CardCostsLessTurns ?? 2,
 			minTurns: 1,
@@ -13418,10 +13668,32 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		Label scalingBaseLabel = new Label { Text = CardEditorLoc.T("scaling.includeBase", "Include Base") };
 		StyleBodyLabel(scalingBaseLabel);
 		KeywordTickbox scalingBaseTickbox = new KeywordTickbox(scalingBaseTickboxVisuals, scalingBaseLabel, effect?.HistoryScalingIncludesBase ?? false);
-		scalingBaseTickbox.TooltipText = CardEditorLoc.T("tooltip.scalingIncludeBase", "When Scaling is enabled, also apply the base amount even if the count is zero (base + base*count).");
+		scalingBaseTickbox.TooltipText = CardEditorLoc.T("tooltip.scalingIncludeBase", "When Scaling is enabled, also apply a starting base amount even if the count is zero (Base + Amount*count).");
 		scalingBaseTickbox.Toggled += QueuePreviewUpdate;
 		scalingBaseTickbox.Visible = false;
 		scalingToggleRow.AddChild(scalingBaseTickbox);
+		int initialHistoryScalingBaseAmount = effect?.HistoryScalingBaseAmount
+			?? (isUpgradeDeltaRow ? 0 : Math.Max(0, effect?.Amount ?? 0));
+		NMegaLineEdit scalingBaseAmountField = new NMegaLineEdit
+		{
+			Text = initialHistoryScalingBaseAmount.ToString(CultureInfo.InvariantCulture),
+			CustomMinimumSize = _amountFieldMinSize
+		};
+		scalingBaseAmountField.Alignment = HorizontalAlignment.Center;
+		scalingBaseAmountField.TooltipText = CardEditorLoc.T("tooltip.scalingBaseAmount", "Starting amount used by Include Base. Leave unchanged to mirror Amount; edit it to make Base and per-count Amount different.");
+		scalingBaseAmountField.SetMeta(ScalingBaseAmountAutoMetaKey, effect?.HistoryScalingBaseAmount == null);
+		StyleInput(scalingBaseAmountField);
+		scalingBaseAmountField.TextChanged += _ =>
+		{
+			scalingBaseAmountField.SetMeta(ScalingBaseAmountAutoMetaKey, false);
+			QueuePreviewUpdate();
+		};
+		decimal scalingBaseAmountMin = isUpgradeDeltaRow ? -999m : 0m;
+		Control scalingBaseAmountSpin = CreateSpinButtons(scalingBaseAmountField, step: 1m, minValue: scalingBaseAmountMin, maxValue: 999m, isInteger: true);
+		HBoxContainer scalingBaseAmountPair = CreateEffectFormRow(
+			CardEditorLoc.T("scaling.baseAmount", "Base"),
+			CreateEffectCompactValuePair(scalingBaseAmountSpin, scalingBaseAmountField));
+		scalingBaseAmountPair.Visible = false;
 		scalingToggleRow.AddChild(keywordGroupRow);
 		scalingToggleRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
@@ -13749,6 +14021,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		advancedPropertyGrid.AddThemeConstantOverride("separation", 8);
 		advancedPropertyGrid.AddChild(countRow);
 		advancedPropertyGrid.AddChild(filterRow);
+		advancedPropertyGrid.AddChild(scalingBaseAmountPair);
 		advancedPropertyGrid.AddChild(countAmountRow);
 		advancedPropertyGrid.AddChild(grantRow);
 		advancedPropertyGrid.AddChild(grantCountRow);
@@ -13766,7 +14039,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		advancedPropertyGrid.AddChild(powerCustomDescriptionRow);
 		advancedPropertyGrid.AddChild(selfScalingOperationRow);
 		advancedPropertyGrid.AddChild(selfScalingModeRow);
+		advancedPropertyGrid.AddChild(selfScalingRecipientRow);
 		advancedPropertyGrid.AddChild(selfScalingTargetTypeRow);
+		advancedPropertyGrid.AddChild(selfScalingNumberSelectionRow);
+		advancedPropertyGrid.AddChild(selfScalingNumberFilterRow);
 		advancedPropertyGrid.AddChild(selfScalingTargetEffectRow);
 		advancedPropertyGrid.AddChild(amountSourceModeRow);
 		advancedPropertyGrid.AddChild(amountSourceEffectRow);
@@ -13819,6 +14095,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			StableEffectId = stableEffectId,
 			SelfScalingTargetEffectId = effect?.SelfScalingTargetEffectId,
+			SelfScalingDynamicVarKey = effect?.SelfScalingDynamicVarKey,
+			SelfScalingSelectedField = effect?.SelfScalingField ?? CardExtraEffectSelfScalingField.Amount,
 			AmountSourceEffectId = effect?.AmountSourceEffectId,
 			IsUpgradeDeltaRow = isUpgradeDeltaRow,
 			Container = effectPanel,
@@ -13944,8 +14222,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			SelfScalingOperationSelect = selfScalingOperationSelect,
 			SelfScalingModeRow = selfScalingModeRow,
 			SelfScalingModeSelect = selfScalingModeSelect,
+			SelfScalingRecipientRow = selfScalingRecipientRow,
+			SelfScalingRecipientSelect = selfScalingRecipientSelect,
 			SelfScalingTargetTypeRow = selfScalingTargetTypeRow,
 			SelfScalingTargetTypeSelect = selfScalingTargetTypeSelect,
+			SelfScalingNumberSelectionRow = selfScalingNumberSelectionRow,
+			SelfScalingNumberSelectionSelect = selfScalingNumberSelectionSelect,
+			SelfScalingNumberFilterRow = selfScalingNumberFilterRow,
+			SelfScalingNumberFilterSelect = selfScalingNumberFilterSelect,
 			SelfScalingFieldRow = selfScalingFieldRow,
 			SelfScalingFieldSelect = selfScalingFieldSelect,
 			SelfScalingTargetEffectRow = selfScalingTargetEffectRow,
@@ -14164,8 +14448,22 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CountEnemyStatusPowerSelect = countEnemyStatusPowerSelect,
 			CountEnemyIntentRow = enemyIntentRow,
 			CountEnemyIntentSelect = countEnemyIntentSelect,
-			ScalingBaseTickbox = scalingBaseTickbox
+			ScalingBaseTickbox = scalingBaseTickbox,
+			ScalingBaseAmountPair = scalingBaseAmountPair,
+			ScalingBaseAmountField = scalingBaseAmountField
 		};
+
+		if (effect?.SelfScalingTargetType == CardExtraEffectSelfScalingTargetType.BaseDamage)
+		{
+			effectRow.SelfScalingDynamicVarKey ??= "Damage";
+			effectRow.SelfScalingTargetEffectId = null;
+		}
+		else if (effect?.SelfScalingTargetType == CardExtraEffectSelfScalingTargetType.BaseBlock)
+		{
+			effectRow.SelfScalingDynamicVarKey ??= "Block";
+			effectRow.SelfScalingTargetEffectId = null;
+		}
+
 		_extraEffectRows.Add(effectRow);
 		RefreshAllSelfScalingTargetOptions();
 		RefreshAllAmountSourceOptions();
@@ -14194,13 +14492,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			UpdateExtraEffectCustomRows(effectRow);
 			UpdateExtraEffectPropertyGridOrder(effectRow);
 		};
+		selfScalingRecipientSelect.ItemSelected += _ =>
+		{
+			UpdateExtraEffectCustomRows(effectRow);
+			UpdateExtraEffectPropertyGridOrder(effectRow);
+			QueuePreviewUpdate();
+		};
 		selfScalingTargetTypeSelect.ItemSelected += _ =>
 		{
 			UpdateExtraEffectCustomRows(effectRow);
 			UpdateExtraEffectPropertyGridOrder(effectRow);
+			QueuePreviewUpdate();
 		};
 		selfScalingFieldSelect.ItemSelected += _ =>
 		{
+			effectRow.SelfScalingSelectedField = GetSelectedSelfScalingField(effectRow);
 			RefreshSelfScalingTargetOptions(effectRow);
 			UpdateExtraEffectCustomRows(effectRow);
 			QueuePreviewUpdate();
@@ -14208,9 +14514,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		selfScalingTargetEffectSelect.ItemSelected += _ =>
 		{
 			int selected = selfScalingTargetEffectSelect.Selected;
-			effectRow.SelfScalingTargetEffectId = selected <= 0 || selected - 1 >= effectRow.SelfScalingTargetEffectIds.Count
+			string? encodedTarget = selected <= 0 || selected - 1 >= effectRow.SelfScalingTargetEffectIds.Count
 				? null
 				: effectRow.SelfScalingTargetEffectIds[selected - 1];
+			ApplySelfScalingEncodedTarget(effectRow, encodedTarget);
 			RefreshSelfScalingFieldOptions(effectRow);
 			UpdateExtraEffectCustomRows(effectRow);
 			QueuePreviewUpdate();
@@ -14246,6 +14553,17 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (definitionIndex >= 0 && definitionIndex < CardEditorExtraEffects.Definitions.Count)
 			{
 				CardExtraEffectDefinition newDef = CardEditorExtraEffects.Definitions[definitionIndex];
+				if (newDef.Kind == CardExtraEffectKind.SelfScaling
+					&& effectRow.CardCostsLessDurationSelect != null
+					&& GodotObject.IsInstanceValid(effectRow.CardCostsLessDurationSelect))
+				{
+					int thisCombatIndex = (int)CardExtraEffectCardCostsLessDuration.ThisCombat;
+					if (thisCombatIndex >= 0 && thisCombatIndex < effectRow.CardCostsLessDurationSelect.ItemCount)
+					{
+						effectRow.CardCostsLessDurationSelect.Select(thisCombatIndex);
+						UpdateCardCostsLessTurnsEnabled(effectRow);
+					}
+				}
 				if (int.TryParse(effectRow.AmountField.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int curAmt))
 				{
 					if (!CardEditorExtraEffects.IsValidEffectAmount(newDef.Kind, curAmt))
@@ -14443,6 +14761,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			UpdateExtraEffectScalingRowVisibility(effectRow);
 			UpdateExtraEffectCountTurnsEnabled(effectRow);
+			QueuePreviewUpdate();
+		};
+		scalingBaseTickbox.Toggled += () =>
+		{
+			UpdateExtraEffectScalingRowVisibility(effectRow);
 			QueuePreviewUpdate();
 		};
 		countModeSelect.ItemSelected += _ =>
@@ -15572,6 +15895,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			modes.Add(CardExtraEffectCardSelectionMode.Top);
 			modes.Add(CardExtraEffectCardSelectionMode.Bottom);
 		}
+		if (kind == CardExtraEffectKind.UpgradeCardsInPile && pile == CardExtraEffectCardPile.AllPiles)
+		{
+			modes.Add(CardExtraEffectCardSelectionMode.EachPile);
+		}
 
 		select.Clear();
 		foreach (CardExtraEffectCardSelectionMode mode in modes)
@@ -15673,9 +16000,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		if (row.AmountValueSourceKindSelect != null && GodotObject.IsInstanceValid(row.AmountValueSourceKindSelect)
 			&& row.AmountValueSourcePowerSelect != null && GodotObject.IsInstanceValid(row.AmountValueSourcePowerSelect))
 		{
-			bool usesPowerStatus = GetSelectedValueSourceMode(row) == CardExtraEffectValueSourceMode.PowerStatus;
-			row.AmountValueSourceKindSelect.Visible = !usesPowerStatus;
+			bool usesPowerStatus = usesValueSourceAmount && GetSelectedValueSourceMode(row) == CardExtraEffectValueSourceMode.PowerStatus;
+			row.AmountValueSourceKindSelect.Visible = usesValueSourceAmount && !usesPowerStatus;
 			row.AmountValueSourcePowerSelect.Visible = usesPowerStatus;
+			if (usesPowerStatus)
+			{
+				EnsureExtraEffectPowerSelectPopulated(row.AmountValueSourcePowerSelect);
+			}
 		}
 		if (row.AmountValueSourceAggregationSelect != null && GodotObject.IsInstanceValid(row.AmountValueSourceAggregationSelect))
 		{
@@ -16044,6 +16375,108 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return CardEditorExtraEffects.SupportsSelfScalingEffectRowField(candidate, field);
 	}
 
+	private static string EncodeSelfScalingDynamicVarTarget(string key)
+		=> SelfScalingDynamicVarTargetPrefix + key;
+
+	private static string EncodeSelfScalingEffectRowTarget(string effectId, CardExtraEffectSelfScalingField field)
+		=> SelfScalingEffectRowTargetPrefix + effectId + "|" + field;
+
+	private static bool TryDecodeSelfScalingEffectRowTarget(string encodedTarget, out string effectId, out CardExtraEffectSelfScalingField field)
+	{
+		effectId = string.Empty;
+		field = CardExtraEffectSelfScalingField.Amount;
+		if (string.IsNullOrWhiteSpace(encodedTarget) || !encodedTarget.StartsWith(SelfScalingEffectRowTargetPrefix, StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		string payload = encodedTarget.Substring(SelfScalingEffectRowTargetPrefix.Length);
+		string[] parts = payload.Split(new[] { '|' }, 2);
+		if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || !Enum.TryParse(parts[1], out field))
+		{
+			return false;
+		}
+
+		effectId = parts[0];
+		return true;
+	}
+
+	private static string? GetEncodedSelfScalingTarget(ExtraEffectRow row)
+	{
+		if (!string.IsNullOrWhiteSpace(row.SelfScalingDynamicVarKey))
+		{
+			return EncodeSelfScalingDynamicVarTarget(row.SelfScalingDynamicVarKey.Trim());
+		}
+
+		if (!string.IsNullOrWhiteSpace(row.SelfScalingTargetEffectId))
+		{
+			return EncodeSelfScalingEffectRowTarget(row.SelfScalingTargetEffectId.Trim(), row.SelfScalingSelectedField);
+		}
+
+		return null;
+	}
+
+	private static void ApplySelfScalingEncodedTarget(ExtraEffectRow row, string? encodedTarget)
+	{
+		row.SelfScalingDynamicVarKey = null;
+		row.SelfScalingTargetEffectId = null;
+
+		if (string.IsNullOrWhiteSpace(encodedTarget))
+		{
+			return;
+		}
+
+		if (encodedTarget.StartsWith(SelfScalingDynamicVarTargetPrefix, StringComparison.Ordinal))
+		{
+			string key = encodedTarget.Substring(SelfScalingDynamicVarTargetPrefix.Length).Trim();
+			row.SelfScalingDynamicVarKey = string.IsNullOrWhiteSpace(key) ? null : key;
+			return;
+		}
+
+		if (TryDecodeSelfScalingEffectRowTarget(encodedTarget, out string effectId, out CardExtraEffectSelfScalingField field))
+		{
+			row.SelfScalingTargetEffectId = effectId;
+			row.SelfScalingSelectedField = field;
+			if (row.SelfScalingFieldSelect != null && GodotObject.IsInstanceValid(row.SelfScalingFieldSelect))
+			{
+				int fieldIndex = row.SelfScalingFieldSelect.GetItemIndex((int)field);
+				if (fieldIndex >= 0)
+				{
+					row.SelfScalingFieldSelect.Select(fieldIndex);
+				}
+			}
+		}
+	}
+
+	private static string GetSelfScalingFieldLabelForUi(CardExtraEffectSelfScalingField field)
+	{
+		string fallback = field switch
+		{
+			CardExtraEffectSelfScalingField.Amount => "Amount",
+			CardExtraEffectSelfScalingField.Repeat => "Repeat",
+			CardExtraEffectSelfScalingField.SecondaryAmount => "Secondary Amount",
+			CardExtraEffectSelfScalingField.Threshold => "Threshold",
+			CardExtraEffectSelfScalingField.Duration => "Duration",
+			_ => field.ToString()
+		};
+		return CardEditorLoc.Enum("selfScalingField", field, fallback);
+	}
+
+	private static int GetSelfScalingFieldPreviewValue(ExtraEffectRow row, CardExtraEffectSelfScalingField field)
+	{
+		return field switch
+		{
+			CardExtraEffectSelfScalingField.Amount => ParseIntOrDefault(row.AmountField?.Text, 0),
+			CardExtraEffectSelfScalingField.Repeat => ParseIntOrDefault(row.RepeatCountField?.Text, 1),
+			CardExtraEffectSelfScalingField.SecondaryAmount => ParseIntOrDefault(row.ConditionalBonusAmountField?.Text, 0),
+			CardExtraEffectSelfScalingField.Threshold => ParseIntOrDefault(row.CountConditionField?.Text, 0),
+			CardExtraEffectSelfScalingField.Duration => Math.Max(
+				Math.Max(ParseIntOrDefault(row.TriggerMaxTurnsField?.Text, 0), ParseIntOrDefault(row.GrantTurnsField?.Text, 0)),
+				Math.Max(ParseIntOrDefault(row.EnchantmentTurnsField?.Text, 0), ParseIntOrDefault(row.CardCostsLessTurnsField?.Text, 0))),
+			_ => 0
+		};
+	}
+
 	private void RefreshSelfScalingFieldOptions(ExtraEffectRow targetRow)
 	{
 		if (targetRow?.SelfScalingFieldSelect == null || !GodotObject.IsInstanceValid(targetRow.SelfScalingFieldSelect))
@@ -16052,7 +16485,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		OptionButton select = targetRow.SelfScalingFieldSelect;
-		CardExtraEffectSelfScalingField desiredField = GetSelectedSelfScalingField(targetRow);
+		CardExtraEffectSelfScalingField desiredField = targetRow.SelfScalingSelectedField;
 		ExtraEffectRow? candidateRow = FindExtraEffectRowByStableId(targetRow.SelfScalingTargetEffectId);
 
 		select.Clear();
@@ -16092,6 +16525,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			selectedIndex = 0;
 		}
 		select.Select(selectedIndex);
+		if (selectedIndex >= 0 && selectedIndex < select.ItemCount)
+		{
+			int selectedId = select.GetItemId(selectedIndex);
+			if (Enum.IsDefined(typeof(CardExtraEffectSelfScalingField), selectedId))
+			{
+				targetRow.SelfScalingSelectedField = (CardExtraEffectSelfScalingField)selectedId;
+			}
+		}
 	}
 
 	private void RefreshSelfScalingTargetOptions(ExtraEffectRow targetRow)
@@ -16104,8 +16545,34 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		OptionButton select = targetRow.SelfScalingTargetEffectSelect;
 		select.Clear();
 		targetRow.SelfScalingTargetEffectIds = new List<string>();
-		select.AddItem(CardEditorLoc.T("selfScaling.target.none", "Select Effect Row"), -1);
-		CardExtraEffectSelfScalingField selectedField = GetSelectedSelfScalingField(targetRow);
+		select.AddItem(CardEditorLoc.T("selfScaling.target.none", "Select Number"), -1);
+
+		void AddTarget(string encodedTarget, string label)
+		{
+			targetRow.SelfScalingTargetEffectIds.Add(encodedTarget);
+			select.AddItem(label, targetRow.SelfScalingTargetEffectIds.Count - 1);
+		}
+
+		int numberIndex = 1;
+		if (_previewCard?.DynamicVars != null)
+		{
+			foreach ((string key, var dynamicVar) in _previewCard.DynamicVars)
+			{
+				if (string.IsNullOrWhiteSpace(key))
+				{
+					continue;
+				}
+
+				string label = CardEditorLoc.F(
+					"selfScaling.target.dynamicVarLabel",
+					$"{numberIndex}. Vanilla: {key} ({dynamicVar.BaseValue.ToString(CultureInfo.InvariantCulture)})",
+					("Index", numberIndex.ToString(CultureInfo.InvariantCulture)),
+					("Var", key),
+					("Value", dynamicVar.BaseValue.ToString(CultureInfo.InvariantCulture)));
+				AddTarget(EncodeSelfScalingDynamicVarTarget(key), label);
+				numberIndex++;
+			}
+		}
 
 		foreach (ExtraEffectRow candidate in _extraEffectRows)
 		{
@@ -16116,21 +16583,35 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				continue;
 			}
 
-			if (!DoesExtraEffectRowSupportSelfScalingField(candidate, selectedField))
-			{
-				continue;
-			}
-
+			int rowIndex = _extraEffectRows.IndexOf(candidate) + 1;
 			CardExtraEffectKind candidateKind = GetCurrentResolvedExtraEffectKind(candidate);
-			targetRow.SelfScalingTargetEffectIds.Add(candidate.StableEffectId);
-			string label = $"{targetRow.SelfScalingTargetEffectIds.Count}. {GetEffectKindLabel(candidateKind)}";
-			select.AddItem(label, targetRow.SelfScalingTargetEffectIds.Count - 1);
+			foreach (CardExtraEffectSelfScalingField field in Enum.GetValues<CardExtraEffectSelfScalingField>())
+			{
+				if (!DoesExtraEffectRowSupportSelfScalingField(candidate, field))
+				{
+					continue;
+				}
+
+				string fieldLabel = GetSelfScalingFieldLabelForUi(field);
+				int value = GetSelfScalingFieldPreviewValue(candidate, field);
+				string label = CardEditorLoc.F(
+					"selfScaling.target.effectRowFieldLabel",
+					$"{numberIndex}. Row {rowIndex}: {GetEffectKindLabel(candidateKind)} {fieldLabel} ({value})",
+					("Index", numberIndex.ToString(CultureInfo.InvariantCulture)),
+					("Row", rowIndex.ToString(CultureInfo.InvariantCulture)),
+					("Kind", GetEffectKindLabel(candidateKind)),
+					("Field", fieldLabel),
+					("Value", value.ToString(CultureInfo.InvariantCulture)));
+				AddTarget(EncodeSelfScalingEffectRowTarget(candidate.StableEffectId, field), label);
+				numberIndex++;
+			}
 		}
 
 		int selectedIndex = 0;
-		if (!string.IsNullOrWhiteSpace(targetRow.SelfScalingTargetEffectId))
+		string? desiredTarget = GetEncodedSelfScalingTarget(targetRow);
+		if (!string.IsNullOrWhiteSpace(desiredTarget))
 		{
-			int storedIndex = targetRow.SelfScalingTargetEffectIds.FindIndex(id => string.Equals(id, targetRow.SelfScalingTargetEffectId, StringComparison.Ordinal));
+			int storedIndex = targetRow.SelfScalingTargetEffectIds.FindIndex(id => string.Equals(id, desiredTarget, StringComparison.Ordinal));
 			if (storedIndex >= 0)
 			{
 				selectedIndex = storedIndex + 1;
@@ -16138,8 +16619,23 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			else
 			{
 				targetRow.SelfScalingTargetEffectId = null;
+				targetRow.SelfScalingDynamicVarKey = null;
 			}
 		}
+
+		if (selectedIndex == 0 && targetRow.SelfScalingTargetEffectIds.Count > 0)
+		{
+			int damageIndex = targetRow.SelfScalingTargetEffectIds.FindIndex(id =>
+				id.StartsWith(SelfScalingDynamicVarTargetPrefix, StringComparison.Ordinal)
+				&& string.Equals(id.Substring(SelfScalingDynamicVarTargetPrefix.Length), "Damage", StringComparison.OrdinalIgnoreCase));
+			selectedIndex = damageIndex >= 0 ? damageIndex + 1 : 1;
+			ApplySelfScalingEncodedTarget(targetRow, targetRow.SelfScalingTargetEffectIds[selectedIndex - 1]);
+			if (desiredTarget == null)
+			{
+				RefreshSelfScalingFieldOptions(targetRow);
+			}
+		}
+
 		select.Select(selectedIndex);
 		RefreshSelfScalingFieldOptions(targetRow);
 	}
@@ -16648,7 +17144,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		if (kind == CardExtraEffectKind.SelfScaling)
 		{
-			return GetSelectedSelfScalingMode(row) == UnifiedSelfScalingMode.Permanent
+			return GetSelectedCardCostsLessDuration(row) == CardExtraEffectCardCostsLessDuration.Permanent
 				? CardExtraEffectKind.PersistentSelfScaling
 				: CardExtraEffectKind.SelfScaling;
 		}
@@ -16861,7 +17357,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		DisableOptionButton(row.GeneratedTypeSelect);
 		DisableOptionButton(row.GeneratedCustomTagSelect);
 		DisableOptionButton(row.SelfScalingOperationSelect);
+		DisableOptionButton(row.SelfScalingRecipientSelect);
 		DisableOptionButton(row.SelfScalingTargetTypeSelect);
+		DisableOptionButton(row.SelfScalingNumberSelectionSelect);
+		DisableOptionButton(row.SelfScalingNumberFilterSelect);
 		DisableOptionButton(row.SelfScalingFieldSelect);
 		DisableOptionButton(row.SelfScalingTargetEffectSelect);
 		DisableOptionButton(row.AmountSourceModeSelect);
@@ -16951,12 +17450,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		if (!asPower && trigger == CardExtraEffectTrigger.OnCountEvent)
 		{
-			int onPlayIndex = row.TriggerSelect.GetItemIndex((int)CardExtraEffectTrigger.OnPlay);
-			if (onPlayIndex >= 0)
+			if (supportsAsPower)
 			{
-				row.TriggerSelect.Select(onPlayIndex);
+				row.PowerTickbox.SetTickedSilent(true);
+				asPower = true;
 			}
-			trigger = CardExtraEffectTrigger.OnPlay;
+			else
+			{
+				int onPlayIndex = row.TriggerSelect.GetItemIndex((int)CardExtraEffectTrigger.OnPlay);
+				if (onPlayIndex >= 0)
+				{
+					row.TriggerSelect.Select(onPlayIndex);
+				}
+				trigger = CardExtraEffectTrigger.OnPlay;
+			}
 		}
 
 		bool isUpgradeUnifiedKind = kind is CardExtraEffectKind.CreatedCardsUpgraded
@@ -17027,6 +17534,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool isCardTypeCostAura = IsCardTypeCostModifierKind(kind);
 		bool isDrawnGeneratedCost = IsDrawnGeneratedCostModifierKind(kind);
 		bool isAnyCostChange = isSelfCardCostsLess || isCardTypeCostAura || isDrawnGeneratedCost || isDrawCardsThatCostLess;
+		CardExtraEffectSelfScalingRecipientMode selfScalingRecipientMode = isSelfScaling
+			? GetSelectedSelfScalingRecipientMode(row)
+			: CardExtraEffectSelfScalingRecipientMode.ThisCard;
+		bool selfScalingUsesRecipientSelection = isSelfScaling && SelfScalingRecipientUsesSelection(selfScalingRecipientMode);
 
 		bool canGrantToCard = CardEditorExtraEffects.SupportsGrantToCard(kind)
 			&& !isCreatedCardModifier
@@ -17058,7 +17569,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		bool grantToCard = isGrantExtraEffect || (row.GrantTickbox.Visible && row.GrantTickbox.IsTicked);
-		row.GrantRow.SetMeta("card_editor_force_grant_row", isGrantExtraEffect);
+		row.GrantRow.SetMeta("card_editor_force_grant_row", isGrantExtraEffect || selfScalingUsesRecipientSelection);
 
 		bool supportsRepeat = kind != CardExtraEffectKind.RunEffectSourceCard && CardEditorExtraEffects.SupportsRepeat(kind);
 		bool showRepeat = supportsRepeat;
@@ -17222,7 +17733,23 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		row.CreatedCostRow.Visible = isCreatedCost;
 		row.CreatedCostResourceRow.Visible = isCreatedCost;
 		row.CardCostsLessModifierRow.Visible = isCreatedCost || isAnyCostChange;
-		row.CardCostsLessRow.Visible = isAnyCostChange || isUpgradeAura;
+		row.CardCostsLessRow.Visible = isAnyCostChange || isUpgradeAura || isSelfScaling;
+		if (isSelfScaling)
+		{
+			SetEffectFormRowLabelText(row.CardCostsLessRow, CardEditorLoc.T("row.selfScalingMode", "Persistence"));
+			if (row.CardCostsLessDurationSelect != null && GodotObject.IsInstanceValid(row.CardCostsLessDurationSelect))
+			{
+				row.CardCostsLessDurationSelect.TooltipText = CardEditorLoc.T("tooltip.selfScalingMode", "Choose how long this self-scaling mutation lasts.");
+			}
+			if (row.CardCostsLessTurnsField != null && GodotObject.IsInstanceValid(row.CardCostsLessTurnsField))
+			{
+				row.CardCostsLessTurnsField.TooltipText = CardEditorLoc.T("tooltip.selfScalingTurns", "How many turns the self-scaling mutation lasts (when Persistence = X Turns).");
+			}
+		}
+		else
+		{
+			SetEffectFormRowLabelText(row.CardCostsLessRow, CardEditorLoc.T("drawCost.less", "Reduce Cost"));
+		}
 		if (isUpgradeAura
 			&& row.CardCostsLessDurationSelect != null
 			&& GodotObject.IsInstanceValid(row.CardCostsLessDurationSelect)
@@ -17242,11 +17769,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (row.CardCostsLessKindSelect != null && GodotObject.IsInstanceValid(row.CardCostsLessKindSelect))
 		{
-			row.CardCostsLessKindSelect.Visible = row.CardCostsLessRow.Visible && usesUnifiedCardCostSelector;
+			row.CardCostsLessKindSelect.Visible = row.CardCostsLessRow.Visible && usesUnifiedCardCostSelector && !isSelfScaling;
 		}
 		if (row.CardCostsLessModeSelect != null && GodotObject.IsInstanceValid(row.CardCostsLessModeSelect))
 		{
-			row.CardCostsLessModeSelect.Visible = row.CardCostsLessRow.Visible && usesUnifiedCardCostSelector && isSelfCardCostsLess;
+			row.CardCostsLessModeSelect.Visible = row.CardCostsLessRow.Visible && usesUnifiedCardCostSelector && isSelfCardCostsLess && !isSelfScaling;
 		}
 		if (row.CardCostsLessLabel != null && GodotObject.IsInstanceValid(row.CardCostsLessLabel))
 		{
@@ -17518,11 +18045,27 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (row.SelfScalingModeRow != null && GodotObject.IsInstanceValid(row.SelfScalingModeRow))
 		{
-			row.SelfScalingModeRow.Visible = isSelfScaling;
+			row.SelfScalingModeRow.Visible = false;
+		}
+		if (row.SelfScalingRecipientRow != null && GodotObject.IsInstanceValid(row.SelfScalingRecipientRow))
+		{
+			row.SelfScalingRecipientRow.Visible = isSelfScaling;
 		}
 		if (row.SelfScalingTargetTypeRow != null && GodotObject.IsInstanceValid(row.SelfScalingTargetTypeRow))
 		{
 			row.SelfScalingTargetTypeRow.Visible = isSelfScaling;
+		}
+		CardExtraEffectSelfScalingTargetType selectedSelfScalingTargetType = isSelfScaling
+			? GetSelectedSelfScalingTargetType(row)
+			: CardExtraEffectSelfScalingTargetType.DynamicVar;
+		bool selfScalingUsesNumberSlots = SelfScalingTargetUsesNumberSlotOptions(selectedSelfScalingTargetType);
+		if (row.SelfScalingNumberSelectionRow != null && GodotObject.IsInstanceValid(row.SelfScalingNumberSelectionRow))
+		{
+			row.SelfScalingNumberSelectionRow.Visible = isSelfScaling && selfScalingUsesNumberSlots;
+		}
+		if (row.SelfScalingNumberFilterRow != null && GodotObject.IsInstanceValid(row.SelfScalingNumberFilterRow))
+		{
+			row.SelfScalingNumberFilterRow.Visible = isSelfScaling && selfScalingUsesNumberSlots;
 		}
 		if (row.SelfScalingFieldRow != null && GodotObject.IsInstanceValid(row.SelfScalingFieldRow))
 		{
@@ -17530,8 +18073,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				RefreshSelfScalingFieldOptions(row);
 			}
-			row.SelfScalingFieldRow.Visible = isSelfScaling
-				&& GetSelectedSelfScalingTargetType(row) == CardExtraEffectSelfScalingTargetType.EffectRowAmount;
+			row.SelfScalingFieldRow.Visible = false;
 		}
 		if (row.SelfScalingTargetEffectRow != null && GodotObject.IsInstanceValid(row.SelfScalingTargetEffectRow))
 		{
@@ -17540,7 +18082,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				RefreshSelfScalingTargetOptions(row);
 			}
 			row.SelfScalingTargetEffectRow.Visible = isSelfScaling
-				&& GetSelectedSelfScalingTargetType(row) == CardExtraEffectSelfScalingTargetType.EffectRowAmount;
+				&& selectedSelfScalingTargetType is not (CardExtraEffectSelfScalingTargetType.AllNumbers
+					or CardExtraEffectSelfScalingTargetType.AllNumbersIncludingRepeats
+					or CardExtraEffectSelfScalingTargetType.AllGameplayNumbers
+					or CardExtraEffectSelfScalingTargetType.AllGameplayNumbersIncludingRepeats
+					or CardExtraEffectSelfScalingTargetType.RepeatCounts
+					or CardExtraEffectSelfScalingTargetType.EnergyCost
+					or CardExtraEffectSelfScalingTargetType.StarCost);
 		}
 		if (row.OrbScopeSelect != null && GodotObject.IsInstanceValid(row.OrbScopeSelect))
 		{
@@ -17781,6 +18329,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				|| isExhaustCards
 				|| isTransformCards
 				|| grantToCard
+				|| selfScalingUsesRecipientSelection
 				|| isGrantKeywordToPile
 				|| isUpgradeDeckCards
 				|| isDrawCards;
@@ -17817,6 +18366,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			bool supportsSelectionSourceToggle = CardEditorExtraEffects.SupportsIncludingSourceCardInSelection(kind)
 				&& (grantToCard
+					|| selfScalingUsesRecipientSelection
 					|| kind is CardExtraEffectKind.GrantReplay or CardExtraEffectKind.EnchantCard
 					|| (row.MoveCardsRow != null && GodotObject.IsInstanceValid(row.MoveCardsRow) && row.MoveCardsRow.Visible));
 			row.SelectionSourceToggleRow.Visible = supportsSelectionSourceToggle;
@@ -17829,8 +18379,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			bool grantRowEnabled = row.GrantRow != null
 				&& GodotObject.IsInstanceValid(row.GrantRow)
 				&& row.GrantRow.Visible;
-			bool supportsFutureMatchingCards = CardEditorExtraEffects.SupportsFutureMatchingCardAura(kind, grantRowEnabled)
-				&& (kind == CardExtraEffectKind.GrantKeywordToPile || grantRowEnabled);
+			bool supportsFutureMatchingCards = CardEditorExtraEffects.SupportsFutureMatchingCardAura(kind, grantToCard)
+				&& (kind == CardExtraEffectKind.GrantKeywordToPile || grantToCard);
 			row.FutureMatchingCardsRow.Visible = supportsFutureMatchingCards;
 
 			bool futureMatchingCards = supportsFutureMatchingCards && row.FutureMatchingCardsTickbox.IsTicked;
@@ -17886,7 +18436,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool isEnchantCard = kind == CardExtraEffectKind.EnchantCard;
 		bool isGrantKeywordToPile = kind == CardExtraEffectKind.GrantKeywordToPile;
 		bool forcedVisible = row.GrantRow.HasMeta("card_editor_force_grant_row") && (bool)row.GrantRow.GetMeta("card_editor_force_grant_row");
-		bool grantRowEnabled = forcedVisible || (row.GrantTickbox.Visible && row.GrantTickbox.IsTicked);
+		bool grantTicked = row.GrantTickbox.Visible && row.GrantTickbox.IsTicked;
+		bool grantRowEnabled = forcedVisible || grantTicked;
+		bool forcedSelfScalingRecipientSelection = forcedVisible && CardEditorExtraEffects.IsSelfScalingKind(kind) && !grantTicked;
 		row.GrantRow.Visible = grantRowEnabled;
 		if (!grantRowEnabled)
 		{
@@ -17915,7 +18467,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			? CardExtraEffectCardGrantDuration.ThisTurn
 			: (CardExtraEffectCardGrantDuration)selected;
 
-		bool showDurationRow = isGrantKeywordToPile || (grantRowEnabled && !isEnchantCard);
+		bool showDurationRow = isGrantKeywordToPile || (grantRowEnabled && !isEnchantCard && !forcedSelfScalingRecipientSelection);
 		if (row.GrantDurationRow != null && GodotObject.IsInstanceValid(row.GrantDurationRow))
 		{
 			row.GrantDurationRow.Visible = showDurationRow;
@@ -18118,20 +18670,46 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			|| (row.BranchTickbox != null && GodotObject.IsInstanceValid(row.BranchTickbox) && row.BranchTickbox.Visible)
 			|| (row.RepeatRow != null && GodotObject.IsInstanceValid(row.RepeatRow) && row.RepeatRow.Visible)
 			|| (row.KeywordGroupRow != null && GodotObject.IsInstanceValid(row.KeywordGroupRow) && row.KeywordGroupRow.Visible);
+		bool showCountLogic = isScalingStage || (supportsScaling && row.ScalingTickbox.IsTicked) || conditionalBonusUsesHistoryCount;
 		row.ScalingTickbox.Visible = supportsScaling;
 		row.ScalingToggleRow.Visible = showHeaderRow;
-		row.ScalingRow.Visible = isScalingStage || (supportsScaling && row.ScalingTickbox.IsTicked) || conditionalBonusUsesHistoryCount;
+		row.ScalingRow.Visible = showCountLogic;
+		if (row.CountRow != null && GodotObject.IsInstanceValid(row.CountRow))
+		{
+			row.CountRow.Visible = showCountLogic;
+		}
 		if (row.CountModeSelect != null && GodotObject.IsInstanceValid(row.CountModeSelect))
 		{
-			row.CountModeSelect.Visible = row.ScalingRow.Visible && !isConditionalAutoFromPile && supportsScaling && row.ScalingTickbox.IsTicked;
+			row.CountModeSelect.Visible = showCountLogic && !isConditionalAutoFromPile && supportsScaling && row.ScalingTickbox.IsTicked;
 		}
 
 		bool showScalingBase = !isScalingStage
-			&& row.ScalingRow.Visible
+			&& showCountLogic
 			&& row.ScalingTickbox.IsTicked
 			&& GetSelectedScaleMode(row, kind) == CardExtraEffectScaleMode.PerHistoryCount
 			&& CardEditorExtraEffects.SupportsHistoryScaling(kind);
 		row.ScalingBaseTickbox.Visible = showScalingBase;
+		bool amountFieldVisible = row.AmountField != null
+			&& GodotObject.IsInstanceValid(row.AmountField)
+			&& row.AmountField.Visible;
+		bool showScalingBaseAmount = showScalingBase && row.ScalingBaseTickbox.IsTicked && amountFieldVisible;
+		if (row.ScalingBaseAmountPair != null && GodotObject.IsInstanceValid(row.ScalingBaseAmountPair))
+		{
+			row.ScalingBaseAmountPair.Visible = showScalingBaseAmount;
+		}
+		if (row.ScalingBaseAmountField != null && GodotObject.IsInstanceValid(row.ScalingBaseAmountField))
+		{
+			if (showScalingBaseAmount
+				&& row.ScalingBaseAmountField.HasMeta(ScalingBaseAmountAutoMetaKey)
+				&& row.ScalingBaseAmountField.GetMeta(ScalingBaseAmountAutoMetaKey).AsBool()
+				&& row.AmountField != null
+				&& GodotObject.IsInstanceValid(row.AmountField))
+			{
+				row.ScalingBaseAmountField.Text = row.IsUpgradeDeltaRow ? "0" : row.AmountField.Text;
+				row.ScalingBaseAmountField.SetMeta(ScalingBaseAmountAutoMetaKey, true);
+			}
+			SetSpinFieldState(row.ScalingBaseAmountField, visible: showScalingBaseAmount, enabled: showScalingBaseAmount);
+		}
 
 		if (!supportsScaling)
 		{
@@ -18642,6 +19220,36 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return selected == 1 ? CardExtraEffectScaleMode.ConditionOnly : CardExtraEffectScaleMode.PerHistoryCount;
 	}
 
+	private static bool IsHistoryScalingBaseEnabled(ExtraEffectRow row)
+	{
+		return row?.ScalingBaseTickbox != null
+			&& GodotObject.IsInstanceValid(row.ScalingBaseTickbox)
+			&& row.ScalingBaseTickbox.Visible
+			&& row.ScalingBaseTickbox.IsTicked;
+	}
+
+	private static int? GetSelectedHistoryScalingBaseAmount(ExtraEffectRow row, int coefficientAmount)
+	{
+		if (!IsHistoryScalingBaseEnabled(row)
+			|| row.ScalingBaseAmountField == null
+			|| !GodotObject.IsInstanceValid(row.ScalingBaseAmountField)
+			|| !row.ScalingBaseAmountField.Visible)
+		{
+			return null;
+		}
+
+		if (row.ScalingBaseAmountField.HasMeta(ScalingBaseAmountAutoMetaKey)
+			&& row.ScalingBaseAmountField.GetMeta(ScalingBaseAmountAutoMetaKey).AsBool())
+		{
+			return null;
+		}
+
+		int fallback = row.IsUpgradeDeltaRow ? 0 : Math.Max(0, coefficientAmount);
+		int min = row.IsUpgradeDeltaRow ? -999 : 0;
+		int value = Math.Clamp(ParseIntOrDefault(row.ScalingBaseAmountField.Text, fallback), min, 999);
+		return value == fallback ? null : value;
+	}
+
 	private static CardExtraEffectCountEvent GetSelectedCountEvent(ExtraEffectRow row)
 	{
 		int selected = row.CountEventSelect.Selected;
@@ -19119,6 +19727,25 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			: UnifiedSelfScalingMode.ThisCombat;
 	}
 
+	private static CardExtraEffectSelfScalingRecipientMode GetSelectedSelfScalingRecipientMode(ExtraEffectRow row)
+	{
+		if (row.SelfScalingRecipientSelect == null || !GodotObject.IsInstanceValid(row.SelfScalingRecipientSelect) || row.SelfScalingRecipientSelect.Selected < 0)
+		{
+			return CardExtraEffectSelfScalingRecipientMode.ThisCard;
+		}
+
+		int id = row.SelfScalingRecipientSelect.GetItemId(row.SelfScalingRecipientSelect.Selected);
+		return Enum.IsDefined(typeof(CardExtraEffectSelfScalingRecipientMode), id)
+			? (CardExtraEffectSelfScalingRecipientMode)id
+			: CardExtraEffectSelfScalingRecipientMode.ThisCard;
+	}
+
+	private static bool SelfScalingRecipientUsesSelection(CardExtraEffectSelfScalingRecipientMode mode)
+		=> mode is CardExtraEffectSelfScalingRecipientMode.SelectedCards
+			or CardExtraEffectSelfScalingRecipientMode.MatchingCards
+			or CardExtraEffectSelfScalingRecipientMode.ThisAndSelectedCards
+			or CardExtraEffectSelfScalingRecipientMode.ThisAndMatchingCards;
+
 	private static CardExtraEffectStatusToStatusMode GetSelectedStatusToStatusMode(ExtraEffectRow row)
 	{
 		if (row.StatusToStatusModeSelect == null || !GodotObject.IsInstanceValid(row.StatusToStatusModeSelect) || row.StatusToStatusModeSelect.Selected < 0)
@@ -19469,6 +20096,24 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return CardExtraEffectCardCostsLessDuration.Permanent;
 		}
 		return (CardExtraEffectCardCostsLessDuration)selected;
+	}
+
+	private static CardExtraEffectCardCostsLessDuration GetInitialSelfScalingDuration(CardExtraEffect? effect)
+	{
+		if (effect?.Kind == CardExtraEffectKind.PersistentSelfScaling)
+		{
+			return CardExtraEffectCardCostsLessDuration.Permanent;
+		}
+		if (effect == null)
+		{
+			return CardExtraEffectCardCostsLessDuration.ThisCombat;
+		}
+
+		// Legacy non-persistent self-scaling rows predate this duration field, so their default enum value
+		// (Permanent) should still load as the old behavior: this combat only.
+		return effect.CardCostsLessDuration == CardExtraEffectCardCostsLessDuration.Permanent
+			? CardExtraEffectCardCostsLessDuration.ThisCombat
+			: effect.CardCostsLessDuration;
 	}
 
 	private static CardExtraEffectCardCostsLessMode GetSelectedCardCostsLessMode(ExtraEffectRow row)
@@ -20086,36 +20731,112 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private static CardExtraEffectSelfScalingTargetType GetSelectedSelfScalingTargetType(ExtraEffectRow row)
 	{
+		CardExtraEffectSelfScalingTargetType selectedMode = CardExtraEffectSelfScalingTargetType.DynamicVar;
 		if (row.SelfScalingTargetTypeSelect == null || !GodotObject.IsInstanceValid(row.SelfScalingTargetTypeSelect))
 		{
-			return CardExtraEffectSelfScalingTargetType.BaseDamage;
+			selectedMode = CardExtraEffectSelfScalingTargetType.DynamicVar;
 		}
-		int selected = row.SelfScalingTargetTypeSelect.Selected;
-		if (selected < 0 || selected >= row.SelfScalingTargetTypeSelect.ItemCount)
+		else
 		{
-			return CardExtraEffectSelfScalingTargetType.BaseDamage;
+			int selected = row.SelfScalingTargetTypeSelect.Selected;
+			if (selected >= 0 && selected < row.SelfScalingTargetTypeSelect.ItemCount)
+			{
+				int id = row.SelfScalingTargetTypeSelect.GetItemId(selected);
+				if (Enum.IsDefined(typeof(CardExtraEffectSelfScalingTargetType), id))
+				{
+					selectedMode = (CardExtraEffectSelfScalingTargetType)id;
+				}
+			}
 		}
-		int id = row.SelfScalingTargetTypeSelect.GetItemId(selected);
-		return Enum.IsDefined(typeof(CardExtraEffectSelfScalingTargetType), id)
-			? (CardExtraEffectSelfScalingTargetType)id
-			: CardExtraEffectSelfScalingTargetType.BaseDamage;
+
+		if (selectedMode is CardExtraEffectSelfScalingTargetType.AllNumbers
+			or CardExtraEffectSelfScalingTargetType.AllNumbersIncludingRepeats
+			or CardExtraEffectSelfScalingTargetType.AllGameplayNumbers
+			or CardExtraEffectSelfScalingTargetType.AllGameplayNumbersIncludingRepeats
+			or CardExtraEffectSelfScalingTargetType.RepeatCounts
+			or CardExtraEffectSelfScalingTargetType.EnergyCost
+			or CardExtraEffectSelfScalingTargetType.StarCost)
+		{
+			return selectedMode;
+		}
+
+		if (!string.IsNullOrWhiteSpace(row.SelfScalingTargetEffectId))
+		{
+			return CardExtraEffectSelfScalingTargetType.EffectRowAmount;
+		}
+
+		return CardExtraEffectSelfScalingTargetType.DynamicVar;
+	}
+
+	private static bool SelfScalingTargetUsesNumberSlotOptions(CardExtraEffectSelfScalingTargetType targetType)
+	{
+		return targetType is CardExtraEffectSelfScalingTargetType.AllNumbers
+			or CardExtraEffectSelfScalingTargetType.AllNumbersIncludingRepeats
+			or CardExtraEffectSelfScalingTargetType.AllGameplayNumbers
+			or CardExtraEffectSelfScalingTargetType.AllGameplayNumbersIncludingRepeats
+			or CardExtraEffectSelfScalingTargetType.RepeatCounts;
+	}
+
+	private static CardExtraEffectSelfScalingNumberSelectionMode GetSelectedSelfScalingNumberSelectionMode(ExtraEffectRow row)
+	{
+		if (row.SelfScalingNumberSelectionSelect == null || !GodotObject.IsInstanceValid(row.SelfScalingNumberSelectionSelect))
+		{
+			return CardExtraEffectSelfScalingNumberSelectionMode.All;
+		}
+
+		int selected = row.SelfScalingNumberSelectionSelect.Selected;
+		if (selected < 0 || selected >= row.SelfScalingNumberSelectionSelect.ItemCount)
+		{
+			return CardExtraEffectSelfScalingNumberSelectionMode.All;
+		}
+
+		int id = row.SelfScalingNumberSelectionSelect.GetItemId(selected);
+		return Enum.IsDefined(typeof(CardExtraEffectSelfScalingNumberSelectionMode), id)
+			? (CardExtraEffectSelfScalingNumberSelectionMode)id
+			: CardExtraEffectSelfScalingNumberSelectionMode.All;
+	}
+
+	private static CardExtraEffectCountCardFilter GetSelectedSelfScalingNumberFilter(ExtraEffectRow row)
+	{
+		if (row.SelfScalingNumberFilterSelect == null || !GodotObject.IsInstanceValid(row.SelfScalingNumberFilterSelect))
+		{
+			return CardExtraEffectCountCardFilter.Any;
+		}
+
+		int selected = row.SelfScalingNumberFilterSelect.Selected;
+		if (selected < 0 || selected >= row.SelfScalingNumberFilterSelect.ItemCount)
+		{
+			return CardExtraEffectCountCardFilter.Any;
+		}
+
+		int id = row.SelfScalingNumberFilterSelect.GetItemId(selected);
+		if (Enum.IsDefined(typeof(CardExtraEffectCountCardFilter), id))
+		{
+			return (CardExtraEffectCountCardFilter)id;
+		}
+
+		return Enum.IsDefined(typeof(CardExtraEffectCountCardFilter), selected)
+			? (CardExtraEffectCountCardFilter)selected
+			: CardExtraEffectCountCardFilter.Any;
 	}
 
 	private static CardExtraEffectSelfScalingField GetSelectedSelfScalingField(ExtraEffectRow row)
 	{
 		if (row.SelfScalingFieldSelect == null || !GodotObject.IsInstanceValid(row.SelfScalingFieldSelect))
 		{
-			return CardExtraEffectSelfScalingField.Amount;
+			return row.SelfScalingSelectedField;
 		}
 		int selected = row.SelfScalingFieldSelect.Selected;
 		if (selected < 0 || selected >= row.SelfScalingFieldSelect.ItemCount)
 		{
-			return CardExtraEffectSelfScalingField.Amount;
+			return row.SelfScalingSelectedField;
 		}
 		int id = row.SelfScalingFieldSelect.GetItemId(selected);
-		return Enum.IsDefined(typeof(CardExtraEffectSelfScalingField), id)
+		CardExtraEffectSelfScalingField selectedField = Enum.IsDefined(typeof(CardExtraEffectSelfScalingField), id)
 			? (CardExtraEffectSelfScalingField)id
-			: CardExtraEffectSelfScalingField.Amount;
+			: row.SelfScalingSelectedField;
+		row.SelfScalingSelectedField = selectedField;
+		return selectedField;
 	}
 
 	private static CardExtraEffectCardMatchMode GetSelectedCardMatchMode(ExtraEffectRow row)
@@ -22148,6 +22869,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 				bool grantToCard = (resolvedKind == CardExtraEffectKind.RunEffectSourceCard && def.Kind == CardExtraEffectKind.MoveCardsBetweenPiles)
 					|| (row.GrantTickbox.Visible && row.GrantTickbox.IsTicked);
+				bool selfScalingRecipientUsesSelection = CardEditorExtraEffects.IsSelfScalingKind(resolvedKind)
+					&& SelfScalingRecipientUsesSelection(GetSelectedSelfScalingRecipientMode(row));
+				bool usesGrantSelectionControls = grantToCard || selfScalingRecipientUsesSelection;
 				CardExtraEffectCardSelectionMode selectionMode = CardExtraEffectCardSelectionMode.Choose;
 				CardExtraEffectCardPile selectionPile = CardExtraEffectCardPile.Hand;
 				CardExtraEffectCardGrantDuration grantDuration = CardExtraEffectCardGrantDuration.ThisTurn;
@@ -22159,20 +22883,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				bool repeatIsX = row.RepeatRow != null && row.RepeatRow.Visible && row.RepeatXTickbox != null && row.RepeatXTickbox.IsTicked;
 				int repeatCount = ParseIntOrDefault(row.RepeatCountField?.Text, repeatIsX ? 0 : 1);
 				repeatCount = repeatIsX ? Math.Clamp(repeatCount, 0, 99) : Math.Clamp(repeatCount, 1, 99);
-				bool selectionCountIsX = grantToCard && row.GrantCountRow != null && row.GrantCountRow.Visible && row.GrantCountXTickbox != null && row.GrantCountXTickbox.IsTicked;
-				int selectionCount = grantToCard && row.GrantCountRow != null && row.GrantCountRow.Visible
+				bool selectionCountIsX = usesGrantSelectionControls && row.GrantCountRow != null && row.GrantCountRow.Visible && row.GrantCountXTickbox != null && row.GrantCountXTickbox.IsTicked;
+				int selectionCount = usesGrantSelectionControls && row.GrantCountRow != null && row.GrantCountRow.Visible
 					? Math.Clamp(ParseIntOrDefault(row.GrantCountField?.Text, selectionCountIsX ? 0 : 1), 0, 99)
 					: 1;
 				bool usesSelectionFilters = UsesCardSelectionFilterControls(resolvedKind);
 				bool usesDedicatedDrawTargetFilters = resolvedKind is CardExtraEffectKind.DrawCards or CardExtraEffectKind.DrawCardsThatCostLess;
 				bool usesSharedSelectionFilters = usesSelectionFilters && !usesDedicatedDrawTargetFilters;
-				CardGeneratedCardPool selectionPool = grantToCard
+				CardGeneratedCardPool selectionPool = usesGrantSelectionControls
 					? GetSelectedGrantCountPool(row)
 					: (usesDedicatedDrawTargetFilters ? GetSelectedDrawTargetPool(row) : (usesSharedSelectionFilters ? GetSelectedTriggerCardPool(row) : CardGeneratedCardPool.All));
-				CardGeneratedCardType selectionType = grantToCard
+				CardGeneratedCardType selectionType = usesGrantSelectionControls
 					? GetSelectedGrantCountType(row)
 					: (usesDedicatedDrawTargetFilters ? GetSelectedDrawTargetType(row) : (usesSharedSelectionFilters ? GetSelectedTriggerCardType(row) : CardGeneratedCardType.Any));
-				CardExtraEffectCountCardFilter selectionFilter = grantToCard
+				CardExtraEffectCountCardFilter selectionFilter = usesGrantSelectionControls
 					? GetSelectedGrantCountFilter(row)
 					: (usesDedicatedDrawTargetFilters ? GetSelectedDrawTargetFilter(row) : (usesSharedSelectionFilters ? GetSelectedTriggerCardFilter(row) : CardExtraEffectCountCardFilter.Any));
 				int drawCostLessDelta = 0;
@@ -22255,7 +22979,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.DrawPile);
 					}
 				}
-				else if (grantToCard)
+				else if (usesGrantSelectionControls)
 				{
 					selectionPile = GetSelectedCardPile(row.GrantPileSelect, CardExtraEffectCardPile.Hand);
 					selectionMode = GetSelectedCardSelectionMode(row.GrantModeSelect, CardExtraEffectCardSelectionMode.Choose);
@@ -22497,7 +23221,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					createdCardsCostDuration,
 					GetSelectedCardCostsLessModifier(row));
 
-				effects.Add(new CardExtraEffect
+				CardExtraEffect builtEffect = new CardExtraEffect
 				{
 					EffectId = row.StableEffectId,
 					Kind = resolvedKind,
@@ -22563,7 +23287,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CountPowerId = countPowerId,
 					CountEnemyIntent = GetSelectedCountEnemyIntent(row),
 					CountOnlyBlockCards = GetSelectedCountFilter(row) == CardExtraEffectCountCardFilter.GainBlock,
-					HistoryScalingIncludesBase = row.ScalingBaseTickbox != null && row.ScalingBaseTickbox.IsTicked,
+					HistoryScalingIncludesBase = IsHistoryScalingBaseEnabled(row),
+					HistoryScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, amount),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,
@@ -22785,7 +23510,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					SelfScalingOperation = GetSelectedSelfScalingOperation(row),
 					SelfScalingTargetType = GetSelectedSelfScalingTargetType(row),
 					SelfScalingField = GetSelectedSelfScalingField(row),
+					SelfScalingRecipientMode = GetSelectedSelfScalingRecipientMode(row),
+					SelfScalingNumberSelectionMode = GetSelectedSelfScalingNumberSelectionMode(row),
+					SelfScalingNumberFilter = GetSelectedSelfScalingNumberFilter(row),
 					SelfScalingTargetEffectId = row.SelfScalingTargetEffectId,
+					SelfScalingDynamicVarKey = row.SelfScalingDynamicVarKey,
 					CostFilterEnabled = row.CostFilterTickbox != null && GodotObject.IsInstanceValid(row.CostFilterTickbox) && row.CostFilterTickbox.IsTicked,
 					CostFilterMode = row.CostFilterModeSelect != null && GodotObject.IsInstanceValid(row.CostFilterModeSelect)
 						? (CardExtraEffectCostFilterMode)Math.Clamp(row.CostFilterModeSelect.Selected, 0, Enum.GetValues<CardExtraEffectCostFilterMode>().Length - 1)
@@ -22795,7 +23524,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					NameFilterText = row.NameFilterField != null && GodotObject.IsInstanceValid(row.NameFilterField)
 						? (string.IsNullOrWhiteSpace(row.NameFilterField.Text) ? null : row.NameFilterField.Text.Trim())
 						: null
-				});
+				};
+				effects.Add(CardEditorExtraEffects.NormalizeSignedEffectAmount(builtEffect) ?? builtEffect);
 			}
 			if (effects.Any(e => e != null))
 			{
@@ -23254,6 +23984,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 				bool grantToCard = (resolvedKind == CardExtraEffectKind.RunEffectSourceCard && def.Kind == CardExtraEffectKind.MoveCardsBetweenPiles)
 					|| (row.GrantTickbox.Visible && row.GrantTickbox.IsTicked);
+				bool selfScalingRecipientUsesSelection = CardEditorExtraEffects.IsSelfScalingKind(resolvedKind)
+					&& SelfScalingRecipientUsesSelection(GetSelectedSelfScalingRecipientMode(row));
+				bool usesGrantSelectionControls = grantToCard || selfScalingRecipientUsesSelection;
 				CardExtraEffectCardSelectionMode selectionMode = CardExtraEffectCardSelectionMode.Choose;
 				CardExtraEffectCardPile selectionPile = CardExtraEffectCardPile.Hand;
 				CardExtraEffectCardGrantDuration grantDuration = CardExtraEffectCardGrantDuration.ThisTurn;
@@ -23269,20 +24002,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					isDeltaRow,
 					minAbsolute: repeatIsX ? 0 : 1,
 					maxAbsolute: 99);
-				bool selectionCountIsX = grantToCard && row.GrantCountRow != null && row.GrantCountRow.Visible && row.GrantCountXTickbox != null && row.GrantCountXTickbox.IsTicked;
-				int selectionCount = grantToCard && row.GrantCountRow != null && row.GrantCountRow.Visible
+				bool selectionCountIsX = usesGrantSelectionControls && row.GrantCountRow != null && row.GrantCountRow.Visible && row.GrantCountXTickbox != null && row.GrantCountXTickbox.IsTicked;
+				int selectionCount = usesGrantSelectionControls && row.GrantCountRow != null && row.GrantCountRow.Visible
 					? ParseExtraEffectNumericField(row.GrantCountField, absoluteDefault: selectionCountIsX ? 0 : 1, isDeltaRow, minAbsolute: 0, maxAbsolute: 99)
 					: (isDeltaRow ? 0 : 1);
 				bool usesSelectionFilters = UsesCardSelectionFilterControls(resolvedKind);
 				bool usesDedicatedDrawTargetFilters = resolvedKind is CardExtraEffectKind.DrawCards or CardExtraEffectKind.DrawCardsThatCostLess;
 				bool usesSharedSelectionFilters = usesSelectionFilters && !usesDedicatedDrawTargetFilters;
-				CardGeneratedCardPool selectionPool = grantToCard
+				CardGeneratedCardPool selectionPool = usesGrantSelectionControls
 					? GetSelectedGrantCountPool(row)
 					: (usesDedicatedDrawTargetFilters ? GetSelectedDrawTargetPool(row) : (usesSharedSelectionFilters ? GetSelectedTriggerCardPool(row) : CardGeneratedCardPool.All));
-				CardGeneratedCardType selectionType = grantToCard
+				CardGeneratedCardType selectionType = usesGrantSelectionControls
 					? GetSelectedGrantCountType(row)
 					: (usesDedicatedDrawTargetFilters ? GetSelectedDrawTargetType(row) : (usesSharedSelectionFilters ? GetSelectedTriggerCardType(row) : CardGeneratedCardType.Any));
-				CardExtraEffectCountCardFilter selectionFilter = grantToCard
+				CardExtraEffectCountCardFilter selectionFilter = usesGrantSelectionControls
 					? GetSelectedGrantCountFilter(row)
 					: (usesDedicatedDrawTargetFilters ? GetSelectedDrawTargetFilter(row) : (usesSharedSelectionFilters ? GetSelectedTriggerCardFilter(row) : CardExtraEffectCountCardFilter.Any));
 				int drawCostLessDelta = 0;
@@ -23365,7 +24098,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.DrawPile);
 					}
 				}
-				else if (grantToCard)
+				else if (usesGrantSelectionControls)
 				{
 					selectionPile = GetSelectedCardPile(row.GrantPileSelect, CardExtraEffectCardPile.Hand);
 					selectionMode = GetSelectedCardSelectionMode(row.GrantModeSelect, CardExtraEffectCardSelectionMode.Choose);
@@ -23697,7 +24430,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CountPowerId = countPowerId,
 					CountEnemyIntent = GetSelectedCountEnemyIntent(row),
 					CountOnlyBlockCards = GetSelectedCountFilter(row) == CardExtraEffectCountCardFilter.GainBlock,
-					HistoryScalingIncludesBase = row.ScalingBaseTickbox != null && row.ScalingBaseTickbox.IsTicked,
+					HistoryScalingIncludesBase = IsHistoryScalingBaseEnabled(row),
+					HistoryScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, savedAmount),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,
@@ -23919,7 +24653,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					SelfScalingOperation = GetSelectedSelfScalingOperation(row),
 					SelfScalingTargetType = GetSelectedSelfScalingTargetType(row),
 					SelfScalingField = GetSelectedSelfScalingField(row),
+					SelfScalingRecipientMode = GetSelectedSelfScalingRecipientMode(row),
+					SelfScalingNumberSelectionMode = GetSelectedSelfScalingNumberSelectionMode(row),
+					SelfScalingNumberFilter = GetSelectedSelfScalingNumberFilter(row),
 					SelfScalingTargetEffectId = row.SelfScalingTargetEffectId,
+					SelfScalingDynamicVarKey = row.SelfScalingDynamicVarKey,
 					CostFilterEnabled = row.CostFilterTickbox != null && GodotObject.IsInstanceValid(row.CostFilterTickbox) && row.CostFilterTickbox.IsTicked,
 					CostFilterMode = row.CostFilterModeSelect != null && GodotObject.IsInstanceValid(row.CostFilterModeSelect)
 						? (CardExtraEffectCostFilterMode)Math.Clamp(row.CostFilterModeSelect.Selected, 0, Enum.GetValues<CardExtraEffectCostFilterMode>().Length - 1)
@@ -23930,12 +24668,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						? (string.IsNullOrWhiteSpace(row.NameFilterField.Text) ? null : row.NameFilterField.Text.Trim())
 						: null
 				};
+				upgradeEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(upgradeEffect) ?? upgradeEffect;
 
 				if (isDeltaRow)
 				{
 					CardExtraEffect? baseEffect = (baseExtraEffects != null && rowIndex >= 0 && rowIndex < baseExtraEffects.Count)
 						? baseExtraEffects[rowIndex]
 						: null;
+					baseEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(baseEffect);
 
 					bool meaningful = baseEffect != null && baseEffect.Kind == upgradeEffect.Kind
 						? CardEditorExtraEffects.HasMeaningfulUpgradeBaseSlotDelta(baseEffect, upgradeEffect, secondaryNumericFieldsAreDeltas: true)
@@ -24298,11 +25038,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardEditorOverrides.ApplyToExistingCards(_cardId);
 		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		_onApplied?.Invoke();
-		InvalidatePrebuiltPopupCacheEntry(_cardId, isUpgradeEditor: !_isUpgradeEditor, queueRebuild: true);
-		_allowPersistentPopupReuseOnClose = false;
-		_rebuildPrebuiltPopupOnClose = true;
+		InvalidatePrebuiltPopupCacheEntry(_cardId, isUpgradeEditor: !_isUpgradeEditor, queueRebuild: false);
+		RefreshPersistentPopupSnapshotAfterApply();
+		_warmOppositePrebuiltPopupOnClose = false;
+		_allowPersistentPopupReuseOnClose = true;
+		_rebuildPrebuiltPopupOnClose = false;
 		_uiDirtySinceOpen = false;
 		Close();
+	}
+
+	private void RefreshPersistentPopupSnapshotAfterApply()
+	{
+		_openingEffectiveOverride = CardEditorOverrides.TryGetEffectiveOverride(_cardId, out CardOverride effectiveOverride)
+			? CardEditorOverrides.Clone(effectiveOverride)
+			: null;
+		_upgradeBaseline = null;
 	}
 
 	private void ApplyBatchExtraEffects()
@@ -24450,6 +25200,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		_onApplied?.Invoke();
+		_allowPersistentPopupReuseOnClose = false;
+		_rebuildPrebuiltPopupOnClose = true;
 		Close();
 	}
 
@@ -24737,6 +25489,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			&& _allowPersistentPopupReuseOnClose
 			&& !_uiDirtySinceOpen
 			&& !string.IsNullOrWhiteSpace(_persistentPopupCacheKey);
+		bool warmPrebuiltPopupAfterClose = _isPersistentPopupCacheEntry
+			&& !reusePersistentPopup
+			&& !_preserveDraftOnClose
+			&& _cardId != ModelId.none;
 
 		if (!_preserveDraftOnClose)
 		{
@@ -24752,8 +25508,17 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (rebuildPrebuiltPopupOnClose)
 		{
-			InvalidatePrebuiltPopupCacheEntry(_cardId, _isUpgradeEditor, queueRebuild: true, skipPopup: this);
+			InvalidatePrebuiltPopupCacheEntry(_cardId, _isUpgradeEditor, queueRebuild: false, skipPopup: this);
 		}
+		if (warmPrebuiltPopupAfterClose)
+		{
+			QueueBackgroundPrebuiltPopupWarmup(_cardId, _isUpgradeEditor);
+			if (_warmOppositePrebuiltPopupOnClose)
+			{
+				QueueBackgroundPrebuiltPopupWarmup(_cardId, !_isUpgradeEditor, additionalDelaySeconds: 0.12);
+			}
+		}
+		_warmOppositePrebuiltPopupOnClose = false;
 		if (reusePersistentPopup)
 		{
 			Visible = false;
@@ -25985,6 +26750,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		string title = rawTitle.Trim();
+		if (Enum.TryParse(title, ignoreCase: true, out CardEditorCreatedCardPool createdPool))
+		{
+			string fallback = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(title.ToLowerInvariant());
+			return CardEditorLoc.Enum("creatorPool", createdPool, fallback);
+		}
+
 		return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(title.ToLowerInvariant());
 	}
 }

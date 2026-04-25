@@ -15,7 +15,14 @@ public static class CardEditorExternalLocalization
 	private static bool _subscribed;
 	private static readonly IReadOnlyDictionary<string, string[]> _languageAliases = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
 	{
-		["zhs"] = ["chinese"],
+		["zhs"] = ["zh", "zh_cn", "zh-cn", "chinese", "zht", "zh_tw", "zh-tw", "traditional_chinese"],
+		["zh"] = ["zhs", "zh_cn", "zh-cn", "chinese", "zht", "zh_tw", "zh-tw", "traditional_chinese"],
+		["zh_cn"] = ["zhs", "zh", "zh-cn", "chinese"],
+		["zh-cn"] = ["zhs", "zh", "zh_cn", "chinese"],
+		["zht"] = ["zhs", "zh", "zh_tw", "zh-tw", "traditional_chinese", "chinese"],
+		["zh_tw"] = ["zhs", "zh", "zht", "zh-tw", "traditional_chinese", "chinese"],
+		["zh-tw"] = ["zhs", "zh", "zht", "zh_tw", "traditional_chinese", "chinese"],
+		["traditional_chinese"] = ["zhs", "zh", "zht", "zh_tw", "zh-tw", "chinese"],
 		["kor"] = ["ko", "ko_kr", "ko-kr", "korean"],
 		["ko"] = ["kor", "ko_kr", "ko-kr", "korean"],
 		["ko_kr"] = ["kor", "ko", "ko-kr", "korean"],
@@ -82,43 +89,91 @@ public static class CardEditorExternalLocalization
 			return;
 		}
 
-		// Merge localization in order: base file first, then any user override. This avoids
-		// confusion when multiple files exist and a user edits the "wrong" one.
+		// Merge editable files after the game's normal loc load. These files are intentionally
+		// outside the PCK so users can translate them without rebuilding the mod package.
 		List<string> searchDirs = BuildSearchDirectories(modDir, language);
 
-		MergeTableFromExisting(searchDirs, "extensions.loc", "extensions");
-		MergeTableFromExisting(searchDirs, "settings_ui.loc", "settings_ui");
+		MergeTableFromExisting(searchDirs, "extensions.loc", "extensions", "CARD_EDITOR.");
+		MergeTableFromExisting(searchDirs, "settings_ui.loc", "settings_ui", requiredKeyPrefix: null);
 
 		// Runtime tweaks for vanilla strings we want to parameterize (no external files needed).
 		CardEditorTargetedDiscardLocalizationOverrides.TryApply();
 		CardEditorLoc.InvalidateCache();
 		CardEditorLocalizationWarmup.WarmCurrentLanguage();
+		NCardEditorPopup.InvalidateLocalizationSensitiveCaches();
 	}
 
 	private static List<string> BuildSearchDirectories(string modDir, string language)
 	{
-		HashSet<string> searchDirs = new(StringComparer.OrdinalIgnoreCase)
-		{
-			Path.Combine(modDir, "localization", language)
-		};
+		List<string> searchDirs = [];
+		HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
-		if (_languageAliases.TryGetValue(language, out string[]? aliases))
+		void AddDir(string dir)
 		{
-			foreach (string alias in aliases)
+			if (string.IsNullOrWhiteSpace(dir))
 			{
-				searchDirs.Add(Path.Combine(modDir, "localization", alias));
+				return;
+			}
+
+			string normalized;
+			try
+			{
+				normalized = Path.GetFullPath(dir);
+			}
+			catch
+			{
+				normalized = dir;
+			}
+
+			if (seen.Add(normalized))
+			{
+				searchDirs.Add(normalized);
 			}
 		}
 
-		if (string.Equals(language, "zhs", StringComparison.OrdinalIgnoreCase))
+		void AddLanguageDirs(string locRoot, string lang)
 		{
-			searchDirs.Add(Path.Combine(modDir, "chinese"));
+			AddDir(Path.Combine(locRoot, lang));
+			if (_languageAliases.TryGetValue(lang, out string[]? aliases))
+			{
+				foreach (string alias in aliases)
+				{
+					AddDir(Path.Combine(locRoot, alias));
+				}
+			}
 		}
 
-		return searchDirs.ToList();
+		string externalLocRoot = Path.Combine(modDir, "localization");
+		AddLanguageDirs(externalLocRoot, language);
+
+		// Legacy Chinese installs used localization/extensions.loc directly. Keep it as a final
+		// override so existing user-edited Simplified/Traditional Chinese files keep working.
+		if (IsChineseLanguage(language))
+		{
+			AddDir(externalLocRoot);
+			AddDir(Path.Combine(modDir, "chinese"));
+		}
+
+		// Support mistaken nested extractions like mods/card_editor/card_editor/localization/zhs.
+		AddLanguageDirs(Path.Combine(modDir, "card_editor", "localization"), language);
+
+		return searchDirs;
 	}
 
-	private static void MergeTableFromExisting(IReadOnlyList<string> searchDirs, string fileName, string tableName)
+	private static bool IsChineseLanguage(string language)
+	{
+		return string.Equals(language, "zhs", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "zh", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "zh_cn", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "zh-cn", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "zht", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "zh_tw", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "zh-tw", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "chinese", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(language, "traditional_chinese", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static void MergeTableFromExisting(IReadOnlyList<string> searchDirs, string fileName, string tableName, string? requiredKeyPrefix)
 	{
 		foreach (string dir in searchDirs)
 		{
@@ -134,12 +189,15 @@ public static class CardEditorExternalLocalization
 				continue;
 			}
 
-			Dictionary<string, string> filtered = dict
-				.Where(kvp => kvp.Key.StartsWith("CARD_EDITOR.", StringComparison.Ordinal))
-				.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+			Dictionary<string, string> filtered = requiredKeyPrefix == null
+				? dict
+				: dict
+					.Where(kvp => kvp.Key.StartsWith(requiredKeyPrefix, StringComparison.Ordinal))
+					.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
 			if (filtered.Count == 0)
 			{
+				Log.Warn($"[CardEditor] External localization file had no usable keys for table='{tableName}' path='{path}'");
 				continue;
 			}
 
@@ -147,7 +205,7 @@ public static class CardEditorExternalLocalization
 			{
 				LocTable table = LocManager.Instance!.GetTable(tableName);
 				table.MergeWith(filtered);
-				Log.Info($"[CardEditor] Loaded external localization override: {tableName} ({Path.GetFileName(path)})");
+				CardEditorMod.VerboseLog($"[CardEditor] Loaded external localization override: table={tableName} entries={filtered.Count} path='{path}'");
 			}
 			catch (Exception ex)
 			{

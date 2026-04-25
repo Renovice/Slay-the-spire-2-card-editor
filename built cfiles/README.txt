@@ -35,10 +35,13 @@ If you use the Creator and want to pick your own portrait art:
 3) In Creator -> Art dropdown, pick: "Custom: <filename>"
 
 LOCALIZATION / TRANSLATION
-- To translate the mod without rebuilding the .pck, edit:
+- Localization is external on purpose; the PCK should not be edited for translations.
+- To translate the mod, edit:
   ...\mods\card_editor\localization\<lang>\extensions.loc
   ...\mods\card_editor\localization\<lang>\settings_ui.loc
 - Example: Simplified Chinese = `zhs`
+- Korean = `kor`
+- The game log prints the exact external localization file path loaded by Card Editor.
 
 NOTES
 - Linux/Steam Deck is case-sensitive: keep folder/file casing exactly as shipped.

@@ -119,7 +119,6 @@ internal static class NCard_UpdateEnergyCostVisuals_CardEditorHiddenCost_Patch
 	public static void Postfix(NCard __instance)
 	{
 		CardModel? card = __instance?.Model;
-		CombatState? state = card?.CombatState;
 		if (__instance == null || card == null)
 		{
 			return;
@@ -138,7 +137,9 @@ internal static class NCard_UpdateEnergyCostVisuals_CardEditorHiddenCost_Patch
 		}
 
 		// Outside combat (e.g. compendium), allow negative base costs to hide the energy icon just like curses.
-		if (state == null)
+		// Use pile state instead of CardModel.CombatState; the getter changed ABI in v0.104 and crashed old builds.
+		bool isCombatCard = card.Pile?.IsCombatPile ?? false;
+		if (!isCombatCard)
 		{
 			decimal baseCost = card.EnergyCost.GetWithModifiers(CostModifiers.None);
 			CardEditorEnergyCostVisibilityHelper.SetEnergyCostHidden(__instance, baseCost < 0m);

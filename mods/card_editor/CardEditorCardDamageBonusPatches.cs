@@ -28,9 +28,9 @@ internal static class Hook_ModifyDamageInternal_CardDamageBonus_Patch
 	{
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
 		CombatState? effectiveCombatState = combatState
-			?? effectiveSource?.CombatState
-			?? dealer?.CombatState
-			?? target?.CombatState;
+			?? effectiveSource?.CombatState.AsCombatState()
+			?? dealer?.CombatState.AsCombatState()
+			?? target?.CombatState.AsCombatState();
 		if (effectiveCombatState == null || effectiveSource == null)
 		{
 			return;

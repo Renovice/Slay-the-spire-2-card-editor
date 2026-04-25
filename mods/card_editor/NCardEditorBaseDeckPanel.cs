@@ -84,7 +84,11 @@ public partial class NCardEditorBaseDeckPanel : Control
 	{
 		bool baseDeckMode = CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive;
 		bool presetOnlyMode = CardEditorUiState.IsEditorActive || CardEditorUiState.IsCreatorActive;
-		bool modalOpen = NModalContainer.Instance?.OpenModal != null;
+		bool modalOpen = CardEditorBaseDeckPanelHooks.IsBlockingModalOpen();
+		if (modalOpen)
+		{
+			CardEditorBaseDeckPanelHooks.SyncDeferred(_library);
+		}
 		Visible = (baseDeckMode || presetOnlyMode) && !modalOpen;
 		if (!Visible)
 		{
@@ -208,17 +212,17 @@ public partial class NCardEditorBaseDeckPanel : Control
 			return;
 		}
 
-		Log.Info($"[CardEditor][ConfirmPopup] Reset button pressed mode={CardEditorUiState.Mode} panelVisible={Visible} resetButtonVisible={_resetButton?.Visible}");
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Reset button pressed mode={CardEditorUiState.Mode} panelVisible={Visible} resetButtonVisible={_resetButton?.Visible}");
 		bool confirmed = await CardEditorConfirmPopup.ShowConfirmation(
 			"Reset Base Deck?",
 			"Revert this character's base deck to the vanilla starter deck?");
-		Log.Info($"[CardEditor][ConfirmPopup] Reset button confirmation result={confirmed}");
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Reset button confirmation result={confirmed}");
 		if (!confirmed)
 		{
 			return;
 		}
 
-		Log.Info("[CardEditor][ConfirmPopup] Reset confirmed; invoking ResetEditedDeck().");
+		CardEditorMod.VerboseLog("[CardEditor][ConfirmPopup] Reset confirmed; invoking ResetEditedDeck().");
 		CardEditorBaseDeckUiState.ResetEditedDeck();
 		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 	}
@@ -232,6 +236,57 @@ public partial class NCardEditorBaseDeckPanel : Control
 
 internal static class CardEditorBaseDeckPanelHooks
 {
+	private const string DeferredSyncMetaKey = "card_editor_base_deck_panel_deferred_sync";
+
+	public static bool IsBlockingModalOpen()
+	{
+		object? openModal = NModalContainer.Instance?.OpenModal;
+		if (openModal == null)
+		{
+			return false;
+		}
+
+		if (openModal is CanvasItem modalCanvas)
+		{
+			return GodotObject.IsInstanceValid(modalCanvas) && modalCanvas.IsInsideTree() && modalCanvas.Visible;
+		}
+
+		if (openModal is Node modalNode)
+		{
+			return GodotObject.IsInstanceValid(modalNode) && modalNode.IsInsideTree();
+		}
+
+		Control? focusedControl = NModalContainer.Instance?.OpenModal?.DefaultFocusedControl;
+		return focusedControl != null
+			&& GodotObject.IsInstanceValid(focusedControl)
+			&& focusedControl.IsInsideTree()
+			&& focusedControl.Visible;
+	}
+
+	public static void SyncDeferred(NCardLibrary library)
+	{
+		if (library == null || !GodotObject.IsInstanceValid(library))
+		{
+			return;
+		}
+		if (library.HasMeta(DeferredSyncMetaKey) && library.GetMeta(DeferredSyncMetaKey).AsBool())
+		{
+			return;
+		}
+
+		library.SetMeta(DeferredSyncMetaKey, true);
+		Callable.From(() =>
+		{
+			if (!GodotObject.IsInstanceValid(library))
+			{
+				return;
+			}
+
+			library.SetMeta(DeferredSyncMetaKey, false);
+			Sync(library);
+		}).CallDeferred();
+	}
+
 	public static void Sync(NCardLibrary library)
 	{
 		if (library == null)
@@ -245,8 +300,9 @@ internal static class CardEditorBaseDeckPanelHooks
 			CardEditorUiState.IsBaseDeckAddActive ||
 			CardEditorUiState.IsEditorActive ||
 			CardEditorUiState.IsCreatorActive;
-		if (NModalContainer.Instance?.OpenModal != null)
+		if (IsBlockingModalOpen())
 		{
+			SyncDeferred(library);
 			shouldShow = false;
 		}
 		if (shouldShow)

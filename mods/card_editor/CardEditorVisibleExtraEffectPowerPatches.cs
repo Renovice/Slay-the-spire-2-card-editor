@@ -80,9 +80,10 @@ internal static class CardEditorVisibleExtraEffectPowerPatches
 			return effect.CustomPowerName.Trim();
 		}
 
-		if (!string.IsNullOrWhiteSpace(effect?.CustomKeywordName))
+		string defaultTitle = mirror.GetDefaultTooltipTitle();
+		if (!string.IsNullOrWhiteSpace(defaultTitle))
 		{
-			return effect.CustomKeywordName.Trim();
+			return defaultTitle.Trim();
 		}
 
 		try
@@ -108,9 +109,9 @@ internal static class CardEditorVisibleExtraEffectPowerPatches
 			}
 		}
 
-		if (!string.IsNullOrWhiteSpace(mirror.SourceCard?.Title))
+		if (!string.IsNullOrWhiteSpace(effect?.CustomKeywordName))
 		{
-			return mirror.SourceCard.Title.Trim();
+			return effect.CustomKeywordName.Trim();
 		}
 
 		try

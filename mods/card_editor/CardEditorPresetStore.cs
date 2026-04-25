@@ -1312,7 +1312,11 @@ internal static class CardEditorPresetStore
 		public string? SelfScalingOperation { get; set; }
 		public string? SelfScalingTargetType { get; set; }
 		public string? SelfScalingField { get; set; }
+		public string? SelfScalingRecipientMode { get; set; }
+		public string? SelfScalingNumberSelectionMode { get; set; }
+		public string? SelfScalingNumberFilter { get; set; }
 		public string? SelfScalingTargetEffectId { get; set; }
+		public string? SelfScalingDynamicVarKey { get; set; }
 
 		public sealed class ChooseOneOptionDto
 		{
@@ -1579,7 +1583,11 @@ internal static class CardEditorPresetStore
 				SelfScalingOperation = effect.SelfScalingOperation.ToString(),
 				SelfScalingTargetType = effect.SelfScalingTargetType.ToString(),
 				SelfScalingField = effect.SelfScalingField.ToString(),
-				SelfScalingTargetEffectId = effect.SelfScalingTargetEffectId
+				SelfScalingRecipientMode = effect.SelfScalingRecipientMode.ToString(),
+				SelfScalingNumberSelectionMode = effect.SelfScalingNumberSelectionMode.ToString(),
+				SelfScalingNumberFilter = effect.SelfScalingNumberFilter.ToString(),
+				SelfScalingTargetEffectId = effect.SelfScalingTargetEffectId,
+				SelfScalingDynamicVarKey = effect.SelfScalingDynamicVarKey
 			};
 		}
 
@@ -2376,9 +2384,27 @@ internal static class CardEditorPresetStore
 			{
 				effect.SelfScalingField = parsedSelfScalingField;
 			}
+			if (!string.IsNullOrWhiteSpace(SelfScalingRecipientMode)
+				&& Enum.TryParse(SelfScalingRecipientMode, out CardExtraEffectSelfScalingRecipientMode parsedSelfScalingRecipientMode))
+			{
+				effect.SelfScalingRecipientMode = parsedSelfScalingRecipientMode;
+			}
+			if (!string.IsNullOrWhiteSpace(SelfScalingNumberSelectionMode)
+				&& Enum.TryParse(SelfScalingNumberSelectionMode, out CardExtraEffectSelfScalingNumberSelectionMode parsedSelfScalingNumberSelectionMode))
+			{
+				effect.SelfScalingNumberSelectionMode = parsedSelfScalingNumberSelectionMode;
+			}
+			if (!string.IsNullOrWhiteSpace(SelfScalingNumberFilter)
+				&& Enum.TryParse(SelfScalingNumberFilter, out CardExtraEffectCountCardFilter parsedSelfScalingNumberFilter))
+			{
+				effect.SelfScalingNumberFilter = parsedSelfScalingNumberFilter;
+			}
 			effect.SelfScalingTargetEffectId = string.IsNullOrWhiteSpace(SelfScalingTargetEffectId)
 				? null
 				: SelfScalingTargetEffectId.Trim();
+			effect.SelfScalingDynamicVarKey = string.IsNullOrWhiteSpace(SelfScalingDynamicVarKey)
+				? null
+				: SelfScalingDynamicVarKey.Trim();
 
 			effect.CostFilterEnabled = CostFilterEnabled;
 			if (!string.IsNullOrWhiteSpace(CostFilterMode)

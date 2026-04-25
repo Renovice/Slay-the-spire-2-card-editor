@@ -1137,11 +1137,11 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 
-		Log.Info($"[CardEditor][ConfirmPopup] Delete preset requested for '{name}'");
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Delete preset requested for '{name}'");
 		bool confirmed = await CardEditorConfirmPopup.ShowConfirmation(
 			"Delete Preset?",
 			$"Delete preset \"{name}\"?\n\nThis cannot be undone.");
-		Log.Info($"[CardEditor][ConfirmPopup] Delete preset confirmation result={confirmed} preset='{name}'");
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Delete preset confirmation result={confirmed} preset='{name}'");
 		if (!confirmed)
 		{
 			Log.Info($"[CardEditor] Delete preset cancelled for '{name}'");

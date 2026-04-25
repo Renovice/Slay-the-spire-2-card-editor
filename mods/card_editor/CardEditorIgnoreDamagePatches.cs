@@ -24,7 +24,7 @@ internal static class CreatureCmd_Damage_IgnoreProps_Patch
 {
 	public static void Prefix(ref ValueProp props, Creature? dealer, CardModel? cardSource)
 	{
-		CombatState? combatState = CardEditorCardPlayContext.Current?.Card?.CombatState ?? cardSource?.CombatState ?? dealer?.CombatState;
+		CombatState? combatState = CardEditorCardPlayContext.Current?.Card?.CombatState.AsCombatState() ?? cardSource?.CombatState.AsCombatState() ?? dealer?.CombatState.AsCombatState();
 		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target: null))
 		{
 			props |= ValueProp.Unblockable;
