@@ -240,19 +240,21 @@ internal static class CardEditorBaseDeckBookmarkHooks
 
 	private static Control Create(NCardLibrary library)
 	{
-		_buttonTexture ??= TryLoadLooseTextureOverride("base deck texture",
-		[
-			CustomBaseTextureOverrideFileName,
-			LegacyRedTailFileName
-		]) ?? GD.Load<Texture2D>(BackButtonTexturePath);
-		_outlineTexture ??= TryLoadLooseTextureOverride("base deck outline",
-		[
-			CustomOutlineTextureOverrideFileName,
-			LegacyWhiteBackgroundFileName
-		]) ?? GD.Load<Texture2D>(BackButtonOutlineTexturePath);
-		_outlineMaterial ??= GD.Load<Material>(SharedAdditiveMaterialPath);
-		_hsvShader ??= GD.Load<Shader>(HsvShaderPath);
-		_labelFont ??= GD.Load<Font>(LabelFontPath);
+		CardEditorGodotResourceCache.GetOrReload(ref _buttonTexture, () =>
+			TryLoadLooseTextureOverride("base deck texture",
+			[
+				CustomBaseTextureOverrideFileName,
+				LegacyRedTailFileName
+			]) ?? GD.Load<Texture2D>(BackButtonTexturePath));
+		CardEditorGodotResourceCache.GetOrReload(ref _outlineTexture, () =>
+			TryLoadLooseTextureOverride("base deck outline",
+			[
+				CustomOutlineTextureOverrideFileName,
+				LegacyWhiteBackgroundFileName
+			]) ?? GD.Load<Texture2D>(BackButtonOutlineTexturePath));
+		CardEditorGodotResourceCache.Load(ref _outlineMaterial, SharedAdditiveMaterialPath);
+		CardEditorGodotResourceCache.Load(ref _hsvShader, HsvShaderPath);
+		CardEditorGodotResourceCache.Load(ref _labelFont, LabelFontPath);
 
 		Control root = new()
 		{

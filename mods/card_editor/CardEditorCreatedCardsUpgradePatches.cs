@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -46,7 +47,8 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsUpgraded
 			return;
 		}
 
-		IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetEffectsForDescription(sourceCard, isUpgradePreview: false);
+		CombatState? combatState = sourceCard.CombatState.AsCombatState() ?? list[0].Owner?.Creature?.CombatState.AsCombatState();
+		IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetRuntimeEffectsForExecution(combatState, sourceCard);
 		if (effects == null || effects.Count == 0)
 		{
 			return;

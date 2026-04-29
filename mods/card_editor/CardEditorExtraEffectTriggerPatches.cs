@@ -28,16 +28,18 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides)
-		{
-			return;
-		}
 		__result = RunAfter(__result, runState, combatState);
 	}
 
 	private static async Task RunAfter(Task original, IRunState runState, CombatState combatState)
 	{
 		await original;
+		CardEditorRunSelfScalingState.RestoreForCombat(combatState);
+
+		if (!CardEditorOverrides.HasAnyOverrides)
+		{
+			return;
+		}
 
 		ulong? netId = LocalContext.NetId;
 		if (!netId.HasValue)

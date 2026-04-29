@@ -470,15 +470,15 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 	private void BuildUi()
 	{
-		_headerFont ??= TryLoadFont(_headerFontPath);
-		_bodyFont ??= TryLoadFont(_bodyFontPath);
-		_actionButtonTexture ??= GD.Load<Texture2D>(_actionButtonTexturePath);
-		_actionButtonOutlineTexture ??= GD.Load<Texture2D>(_actionButtonOutlineTexturePath);
-		_actionButtonFont ??= TryLoadFont(_actionButtonFontPath);
-		_actionButtonTheme ??= GD.Load<Theme>(_actionButtonThemePath);
-		_actionButtonOutlineMaterial ??= GD.Load<Material>(_actionButtonOutlineMaterialPath);
-		_actionButtonShader ??= GD.Load<Shader>(_actionButtonShaderPath);
-		_tickboxScene ??= GD.Load<PackedScene>(_tickboxScenePath);
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, _headerFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, _bodyFontPath);
+		CardEditorGodotResourceCache.Load(ref _actionButtonTexture, _actionButtonTexturePath);
+		CardEditorGodotResourceCache.Load(ref _actionButtonOutlineTexture, _actionButtonOutlineTexturePath);
+		CardEditorGodotResourceCache.TryLoad(ref _actionButtonFont, _actionButtonFontPath);
+		CardEditorGodotResourceCache.Load(ref _actionButtonTheme, _actionButtonThemePath);
+		CardEditorGodotResourceCache.Load(ref _actionButtonOutlineMaterial, _actionButtonOutlineMaterialPath);
+		CardEditorGodotResourceCache.Load(ref _actionButtonShader, _actionButtonShaderPath);
+		CardEditorGodotResourceCache.Load(ref _tickboxScene, _tickboxScenePath);
 		_popupShell = CreatePopupShell();
 		if (_popupShell != null)
 		{
@@ -621,7 +621,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	{
 		try
 		{
-			_popupShellTexture ??= GD.Load<Texture2D>(_popupShellTexturePath);
+			CardEditorGodotResourceCache.Load(ref _popupShellTexture, _popupShellTexturePath);
 			if (_popupShellTexture == null)
 			{
 				return null;
@@ -862,7 +862,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 	private void StyleSpinnerButton(Button button)
 	{
-		_headerFont ??= TryLoadFont(_headerFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, _headerFontPath);
 		if (_headerFont != null)
 		{
 			button.AddThemeFontOverride("font", _headerFont);
@@ -1339,18 +1339,6 @@ public partial class NCardEditorPresetPanel : PanelContainer
 				_presetSelect.Select(i);
 				return;
 			}
-		}
-	}
-
-	private static Font? TryLoadFont(string path)
-	{
-		try
-		{
-			return GD.Load<Font>(path);
-		}
-		catch
-		{
-			return null;
 		}
 	}
 

@@ -57,6 +57,7 @@ public static class CardModel_GetDescriptionForUpgradePreview_CreatedCards_Patch
 		}
 
 		__result = CreatedCardTextBuilder.Build(__instance, __instance.CurrentTarget, isUpgradePreview: true);
+		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.CreatedGetDescriptionForUpgradePreview.prefix", __instance, PileType.None, isUpgradePreview: true, __result);
 		return false;
 	}
 }

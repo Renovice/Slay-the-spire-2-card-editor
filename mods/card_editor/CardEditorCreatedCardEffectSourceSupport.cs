@@ -436,6 +436,25 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 		try
 		{
+			CardPlay previewPlay = new CardPlay
+			{
+				Card = createdCard,
+				Target = target,
+				ResultPile = createdCard.Pile?.Type ?? PileType.None,
+				Resources = new ResourceInfo
+				{
+					EnergySpent = 0,
+					EnergyValue = 0,
+					StarsSpent = 0,
+					StarValue = 0
+				},
+				IsAutoPlay = true,
+				PlayIndex = 0,
+				PlayCount = 1
+			};
+			using IDisposable playScope = CardEditorCardPlayContext.PushScoped(previewPlay);
+			using IDisposable sourceScope = CardEditorEffectSourceContext.PushScoped(effectSourceCard);
+
 			string keywordFilter = customKeywordFilter?.Trim() ?? string.Empty;
 			if (!string.IsNullOrWhiteSpace(keywordFilter))
 			{

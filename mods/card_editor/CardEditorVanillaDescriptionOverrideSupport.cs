@@ -1,6 +1,7 @@
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models;
+using System.Linq;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -30,12 +31,14 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		TemporaryStatDurationDescriptionFix.TryFix(card, ref description);
 		TargetTypeOverrideDescriptionFix.TryFix(card, ref description);
 
+		bool modifiedBaseTextApplied = false;
 		if (!SuppressModifiedBaseTextOverride)
 		{
-			TryApplyModifiedBaseText(card, ref description, target, isUpgradePreview);
+			modifiedBaseTextApplied = TryApplyModifiedBaseText(card, ref description, target, isUpgradePreview);
 		}
 
-		if (!SuppressExtraEffectDescriptionAppend)
+		if (!SuppressExtraEffectDescriptionAppend
+			&& !ShouldTreatModifiedBaseTextAsFullDescription(card, description, target, isUpgradePreview, modifiedBaseTextApplied))
 		{
 			CardEditorExtraEffects.TryAppendDescription(card, ref description, target, isUpgradePreview);
 		}
@@ -45,6 +48,16 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 
 	public static string BuildEditableBaseDescription(CardModel card, Creature? target = null)
 	{
+		return BuildEditableDescription(card, target, includeExtraEffects: false);
+	}
+
+	public static string BuildEditableFullDescription(CardModel card, Creature? target = null)
+	{
+		return BuildEditableDescription(card, target, includeExtraEffects: true);
+	}
+
+	private static string BuildEditableDescription(CardModel card, Creature? target, bool includeExtraEffects)
+	{
 		if (card == null)
 		{
 			return string.Empty;
@@ -53,7 +66,7 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		bool previousSuppressModifiedBase = SuppressModifiedBaseTextOverride;
 		bool previousSuppressExtraEffects = SuppressExtraEffectDescriptionAppend;
 		SuppressModifiedBaseTextOverride = true;
-		SuppressExtraEffectDescriptionAppend = true;
+		SuppressExtraEffectDescriptionAppend = !includeExtraEffects;
 		try
 		{
 			return card.GetDescriptionForPile(PileType.None, target) ?? string.Empty;
@@ -69,11 +82,11 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		}
 	}
 
-	private static void TryApplyModifiedBaseText(CardModel card, ref string description, Creature? target, bool isUpgradePreview)
+	private static bool TryApplyModifiedBaseText(CardModel card, ref string description, Creature? target, bool isUpgradePreview)
 	{
 		if (card == null)
 		{
-			return;
+			return false;
 		}
 
 		CardOverride? overrideData = null;
@@ -91,23 +104,136 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		bool wantsUpgradeText = isUpgradePreview || card.IsUpgraded;
 		if (wantsUpgradeText && overrideData?.Upgrade?.ModifiedBaseTextEnabled == true)
 		{
+			string referenceDescription = GetModifiedTextReferenceDescription(card, description, target, isUpgradePreview);
 			string upgradedDescription = CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(
 				overrideData.Upgrade.ModifiedBaseText ?? string.Empty,
-				description);
+				referenceDescription);
 			description = isUpgradePreview
 				? CardEditorDescriptionNumberHighlighter.HighlightChangedNumbers(
 					BuildBaseModifiedTextForUpgradePreview(card, target, overrideData) ?? string.Empty,
 					upgradedDescription)
 				: upgradedDescription;
-			return;
+			return true;
 		}
 
 		if (!wantsUpgradeText && overrideData?.ModifiedBaseTextEnabled == true)
 		{
+			string referenceDescription = GetModifiedTextReferenceDescription(card, description, target, isUpgradePreview);
 			description = CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(
 				overrideData.ModifiedBaseText ?? string.Empty,
-				description);
+				referenceDescription);
+			return true;
 		}
+
+		return false;
+	}
+
+	private static bool ShouldTreatModifiedBaseTextAsFullDescription(
+		CardModel card,
+		string modifiedDescription,
+		Creature? target,
+		bool isUpgradePreview,
+		bool modifiedBaseTextApplied)
+	{
+		if (!modifiedBaseTextApplied || card == null || string.IsNullOrWhiteSpace(modifiedDescription))
+		{
+			return false;
+		}
+
+		try
+		{
+			if (HasEditableFullDescriptionAppend(card, target, isUpgradePreview))
+			{
+				return true;
+			}
+
+			string baseOnlyDescription = isUpgradePreview
+				? BuildEditableBaseDescriptionForUpgradePreview(card, target)
+				: BuildEditableBaseDescription(card, target);
+			return CountNonEmptyLines(modifiedDescription) > CountNonEmptyLines(baseOnlyDescription);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static string GetModifiedTextReferenceDescription(CardModel card, string currentDescription, Creature? target, bool isUpgradePreview)
+	{
+		if (!HasEditableFullDescriptionAppend(card, target, isUpgradePreview))
+		{
+			return currentDescription;
+		}
+
+		return isUpgradePreview
+			? BuildEditableFullDescriptionForUpgradePreview(card, target)
+			: BuildEditableFullDescription(card, target);
+	}
+
+	private static bool HasEditableFullDescriptionAppend(CardModel card, Creature? target, bool isUpgradePreview)
+	{
+		try
+		{
+			return CardEditorExtraEffects.HasAppendableDescriptionLines(card, target, isUpgradePreview);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static string BuildEditableBaseDescriptionForUpgradePreview(CardModel upgradedCard, Creature? target)
+	{
+		bool previousSuppressModifiedBase = SuppressModifiedBaseTextOverride;
+		bool previousSuppressExtraEffects = SuppressExtraEffectDescriptionAppend;
+		SuppressModifiedBaseTextOverride = true;
+		SuppressExtraEffectDescriptionAppend = true;
+		try
+		{
+			return upgradedCard.GetDescriptionForUpgradePreview() ?? string.Empty;
+		}
+		catch
+		{
+			return string.Empty;
+		}
+		finally
+		{
+			SuppressModifiedBaseTextOverride = previousSuppressModifiedBase;
+			SuppressExtraEffectDescriptionAppend = previousSuppressExtraEffects;
+		}
+	}
+
+	private static string BuildEditableFullDescriptionForUpgradePreview(CardModel upgradedCard, Creature? target)
+	{
+		bool previousSuppressModifiedBase = SuppressModifiedBaseTextOverride;
+		bool previousSuppressExtraEffects = SuppressExtraEffectDescriptionAppend;
+		SuppressModifiedBaseTextOverride = true;
+		SuppressExtraEffectDescriptionAppend = false;
+		try
+		{
+			return upgradedCard.GetDescriptionForUpgradePreview() ?? string.Empty;
+		}
+		catch
+		{
+			return string.Empty;
+		}
+		finally
+		{
+			SuppressModifiedBaseTextOverride = previousSuppressModifiedBase;
+			SuppressExtraEffectDescriptionAppend = previousSuppressExtraEffects;
+		}
+	}
+
+	private static int CountNonEmptyLines(string text)
+	{
+		if (string.IsNullOrWhiteSpace(text))
+		{
+			return 0;
+		}
+
+		return text
+			.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries)
+			.Count(line => !string.IsNullOrWhiteSpace(line));
 	}
 
 	private static string? BuildBaseModifiedTextForUpgradePreview(CardModel upgradedCard, Creature? target, CardOverride overrideData)

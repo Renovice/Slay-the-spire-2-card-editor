@@ -12,7 +12,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorPresetStore
 {
-	private const int CurrentVersion = 10;
+	private const int CurrentVersion = 13;
 	private const string PresetExtension = ".json";
 	private const string SettingsPath = "user://card_editor/presets_settings.json";
 
@@ -1145,9 +1145,13 @@ internal static class CardEditorPresetStore
 						parsed.Add(null!);
 						continue;
 					}
-					if (fileVersion < 10 && ExtraEffectNumericFieldsAreDeltas && dto.HistoryScalingCountStep == 1)
+					if (fileVersion < 12)
 					{
-						effect.HistoryScalingCountStep = 0;
+						NormalizeLegacyRepeatScaling(effect, dto, ExtraEffectNumericFieldsAreDeltas);
+					}
+					if (fileVersion < 13 && ExtraEffectNumericFieldsAreDeltas)
+					{
+						NormalizeLegacyDeltaDefaults(effect, dto);
 					}
 					parsed.Add(effect);
 				}
@@ -1158,6 +1162,46 @@ internal static class CardEditorPresetStore
 			}
 
 			return result;
+		}
+
+		private static void NormalizeLegacyRepeatScaling(CardExtraEffect effect, CardExtraEffectDto dto, bool numericFieldsAreDeltas)
+		{
+			if (effect == null
+				|| effect.ScaleMode != CardExtraEffectScaleMode.RepeatByCount
+				|| dto.RepeatScalingExtraTimes != 0
+				|| dto.HistoryScalingCountStep == 0
+				|| dto.HistoryScalingCountStep == 1)
+			{
+				return;
+			}
+
+			effect.RepeatScalingExtraTimes = Math.Clamp(dto.HistoryScalingCountStep, numericFieldsAreDeltas ? -99 : 1, 99);
+			effect.HistoryScalingCountStep = numericFieldsAreDeltas ? 0 : 1;
+		}
+
+		private static void NormalizeLegacyDeltaDefaults(CardExtraEffect effect, CardExtraEffectDto dto)
+		{
+			// Older versions could persist one-based UI defaults in upgrade delta rows. In delta mode those fields are additive,
+			// so a stored default of 1 turns an unchanged "per 5" count into "per 6" after the upgrade is merged.
+			if (dto.HistoryScalingCountStep == 1)
+			{
+				effect.HistoryScalingCountStep = 0;
+			}
+
+			if (dto.RepeatScalingExtraTimes == 1)
+			{
+				effect.RepeatScalingExtraTimes = 0;
+			}
+
+			if (dto.CountConditionAmount == 1)
+			{
+				effect.CountConditionAmount = 0;
+			}
+
+			if (dto.BranchCountConditionAmount == 1)
+			{
+				effect.BranchCountConditionAmount = 0;
+			}
 		}
 	}
 
@@ -1218,6 +1262,7 @@ internal static class CardEditorPresetStore
 		public bool HistoryScalingIncludesBase { get; set; }
 		public int? HistoryScalingBaseAmount { get; set; }
 		public int HistoryScalingCountStep { get; set; }
+		public int RepeatScalingExtraTimes { get; set; }
 		public bool DisableOnUpgrade { get; set; }
 
 		public bool GrantToCard { get; set; }
@@ -1494,6 +1539,9 @@ internal static class CardEditorPresetStore
 				HistoryScalingCountStep = numericFieldsAreDeltas
 					? effect.HistoryScalingCountStep
 					: CardEditorExtraEffects.ResolveHistoryScalingCountStep(effect),
+				RepeatScalingExtraTimes = numericFieldsAreDeltas
+					? effect.RepeatScalingExtraTimes
+					: CardEditorExtraEffects.ResolveRepeatScalingExtraTimes(effect),
 				DisableOnUpgrade = effect.DisableOnUpgrade,
 				GrantToCard = effect.GrantToCard,
 				CardSelectionMode = effect.CardSelectionMode.ToString(),
@@ -1916,6 +1964,9 @@ internal static class CardEditorPresetStore
 			effect.HistoryScalingCountStep = numericFieldsAreDeltas
 				? Math.Clamp(HistoryScalingCountStep, -999, 999)
 				: HistoryScalingCountStep <= 0 ? 1 : Math.Clamp(HistoryScalingCountStep, 1, 999);
+			effect.RepeatScalingExtraTimes = numericFieldsAreDeltas
+				? Math.Clamp(RepeatScalingExtraTimes, -99, 99)
+				: RepeatScalingExtraTimes <= 0 ? 1 : Math.Clamp(RepeatScalingExtraTimes, 1, 99);
 
 			effect.GrantToCard = GrantToCard;
 			effect.RepeatIsX = RepeatIsX;

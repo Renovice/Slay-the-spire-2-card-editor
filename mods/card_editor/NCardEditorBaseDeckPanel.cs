@@ -57,12 +57,12 @@ public partial class NCardEditorBaseDeckPanel : Control
 
 	private void BuildUi()
 	{
-		_buttonTexture ??= GD.Load<Texture2D>(_buttonTexturePath);
-		_buttonOutlineTexture ??= GD.Load<Texture2D>(_buttonOutlineTexturePath);
-		_labelFont ??= GD.Load<Font>(_fontPath);
-		_labelTheme ??= GD.Load<Theme>(_labelThemePath);
-		_outlineMaterial ??= GD.Load<Material>(_outlineMaterialPath);
-		_hsvShader ??= GD.Load<Shader>(_shaderPath);
+		CardEditorGodotResourceCache.Load(ref _buttonTexture, _buttonTexturePath);
+		CardEditorGodotResourceCache.Load(ref _buttonOutlineTexture, _buttonOutlineTexturePath);
+		CardEditorGodotResourceCache.Load(ref _labelFont, _fontPath);
+		CardEditorGodotResourceCache.Load(ref _labelTheme, _labelThemePath);
+		CardEditorGodotResourceCache.Load(ref _outlineMaterial, _outlineMaterialPath);
+		CardEditorGodotResourceCache.Load(ref _hsvShader, _shaderPath);
 
 		_addButton = CreateActionButton("Add", AddButtonTint, OnAddPressed);
 		AddChild(_addButton);

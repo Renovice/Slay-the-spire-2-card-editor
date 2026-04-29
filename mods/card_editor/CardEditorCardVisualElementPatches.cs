@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 
 namespace SlayTheSpire2Mod.CardEditor;
@@ -122,7 +123,21 @@ internal static class CardEditorCardVisualElementController
 		snapshot.EnergyLabelVisible = GetVisible(cardNode, _energyLabelField);
 		snapshot.UnplayableEnergyIconVisible = GetVisible(cardNode, _unplayableEnergyIconField);
 		snapshot.AncientTextBgVisible = GetVisible(cardNode, _ancientTextBgField);
+		NormalizeCostSnapshot(cardNode, snapshot);
 		snapshot.IsCaptured = true;
+	}
+
+	private static void NormalizeCostSnapshot(NCard cardNode, VisibilitySnapshot snapshot)
+	{
+		CardModel? model = cardNode.Model;
+		if (model?.EnergyCost == null)
+		{
+			return;
+		}
+
+		bool shouldShowEnergy = model.EnergyCost.CostsX || model.EnergyCost.GetWithModifiers(CostModifiers.All) >= 0;
+		snapshot.EnergyIconVisible = shouldShowEnergy;
+		snapshot.EnergyLabelVisible = shouldShowEnergy;
 	}
 
 	private static void RestoreSnapshot(NCard cardNode, VisibilitySnapshot snapshot)

@@ -327,6 +327,7 @@ public static class CardModel_UpgradeInternal_Patch
 		{
 			return;
 		}
+		CardEditorUpgradeDeltaDebugLog.LogCardState("UpgradeInternal.Prefix.overrideFound", __instance, overrideData);
 
 		int preUpgradeLevel = __instance.CurrentUpgradeLevel;
 		bool shouldCapture = preUpgradeLevel == 0 || overrideData.EndlessUpgrades == true;
@@ -394,6 +395,7 @@ public static class CardModel_UpgradeInternal_Patch
 		{
 			return;
 		}
+		CardEditorUpgradeDeltaDebugLog.LogCardState("UpgradeInternal.Postfix.overrideFound", __instance, overrideData);
 
 		CardUpgradeOverride upgrade = overrideData.Upgrade;
 		bool isFirstUpgrade = __state.PreUpgradeLevel == 0 && __instance.CurrentUpgradeLevel == 1;
@@ -420,6 +422,7 @@ public static class CardModel_UpgradeInternal_Patch
 		}
 
 		ApplyFirstUpgradeOnlyAdjustments(__instance, upgrade);
+		CardEditorUpgradeDeltaDebugLog.LogCardState("UpgradeInternal.Postfix.afterFirstUpgradeAdjustments", __instance, overrideData);
 
 		try
 		{
@@ -569,12 +572,14 @@ public static class GetDescriptionForPile_ManualPatch
 {
 	public static bool Prefix(CardModel __instance, object? __1, MegaCrit.Sts2.Core.Entities.Creatures.Creature? __2, ref string __result)
 	{
+		CardEditorRunSelfScalingState.TryRestoreCard(__instance);
 		if (__instance is not CardEditorCreatedCardBase)
 		{
 			return true; // Continue to original for non-created cards
 		}
 
 		__result = CreatedCardTextBuilder.Build(__instance, __2, isUpgradePreview: IsUpgradePreview(__1));
+		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.PrivateGetDescriptionForPile.created", __instance, PileType.None, IsUpgradePreview(__1), __result);
 		return false; // Skip original for created cards
 	}
 
@@ -586,6 +591,7 @@ public static class GetDescriptionForPile_ManualPatch
 		}
 
 		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, __2, isUpgradePreview: IsUpgradePreview(__1));
+		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.PrivateGetDescriptionForPile.postfix", __instance, PileType.None, IsUpgradePreview(__1), __result);
 	}
 
 	private static bool IsUpgradePreview(object? previewType)
@@ -607,12 +613,14 @@ public static class CardModel_GetDescriptionForPile_Patch
 	[HarmonyPriority(Priority.First)]
 	public static bool Prefix(CardModel __instance, MegaCrit.Sts2.Core.Entities.Creatures.Creature? target, ref string __result)
 	{
+		CardEditorRunSelfScalingState.TryRestoreCard(__instance);
 		if (__instance is not CardEditorCreatedCardBase)
 		{
 			return true; // Continue to original for non-created cards
 		}
 
 		__result = CreatedCardTextBuilder.Build(__instance, target, isUpgradePreview: false);
+		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.PublicGetDescriptionForPile.created", __instance, PileType.None, isUpgradePreview: false, __result);
 		return false; // Skip original for created cards
 	}
 
@@ -624,12 +632,18 @@ public static class CardModel_GetDescriptionForPile_Patch
 		}
 
 		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, target, isUpgradePreview: false);
+		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.PublicGetDescriptionForPile.postfix", __instance, pileType, isUpgradePreview: false, __result);
 	}
 }
 
 [HarmonyPatch(typeof(CardModel), nameof(CardModel.GetDescriptionForUpgradePreview))]
 public static class CardModel_GetDescriptionForUpgradePreview_Patch
 {
+	public static void Prefix(CardModel __instance)
+	{
+		CardEditorRunSelfScalingState.TryRestoreCard(__instance);
+	}
+
 	public static void Postfix(CardModel __instance, ref string __result)
 	{
 		if (__instance is CardEditorCreatedCardBase)
@@ -638,6 +652,22 @@ public static class CardModel_GetDescriptionForUpgradePreview_Patch
 		}
 
 		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, __instance.CurrentTarget, isUpgradePreview: true);
+		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.GetDescriptionForUpgradePreview.postfix", __instance, PileType.None, isUpgradePreview: true, __result);
+	}
+}
+
+[HarmonyPatch(typeof(NCard), nameof(NCard.UpdateVisuals))]
+internal static class NCard_UpdateVisuals_RunSelfScalingRestore_Patch
+{
+	public static void Prefix(NCard __instance)
+	{
+		try
+		{
+			CardEditorRunSelfScalingState.TryRestoreCard(__instance?.Model);
+		}
+		catch
+		{
+		}
 	}
 }
 
@@ -1919,6 +1949,7 @@ public static class CardLibrary_ShowCardDetail_Patch
 
 			CardModel canonical = ModelDb.GetById<CardModel>(cardId);
 			CardModel preview = CardEditorOverrides.BuildPreview(canonical);
+			Log.Info($"[CardEditor][PopupLag] OpenFromLibrary start card={cardId} t={Time.GetTicksMsec()}");
 			NCardEditorPopup popup = NCardEditorPopup.GetOrCreatePersistentPopup(preview, onApplied);
 
 			CardEditorMod.VerboseLog("[CardEditor] Opening persistent popup from cache host");
@@ -1935,6 +1966,7 @@ public static class CardLibrary_ShowCardDetail_Patch
 			Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
 
 			ulong openElapsedMs = Time.GetTicksMsec() - openStartMs;
+			Log.Info($"[CardEditor][PopupLag] OpenFromLibrary end card={cardId} elapsedMs={openElapsedMs} popupParent={(popup.GetParent() != null)}");
 			CardEditorMod.VerboseLog($"[CardEditor][Perf] OpenEditorPopup card={cardId} elapsedMs={openElapsedMs}");
 		}
 		catch (Exception ex)
@@ -2419,18 +2451,21 @@ public static class InspectCardScreen_Open_Patch
 	}
 }
 
-[HarmonyPatch(typeof(PowerCmd), nameof(PowerCmd.Apply),
-	typeof(PlayerChoiceContext),
-	typeof(PowerModel),
-	typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature),
-	typeof(decimal),
-	typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature),
-	typeof(CardModel),
-	typeof(bool))]
+[HarmonyPatch]
 public static class PowerCmd_Apply_Patch
 {
 	private static readonly ModelId _resonanceId = ModelDb.GetId<Resonance>();
 	private static readonly ModelId _strengthPowerId = ModelDb.GetId<StrengthPower>();
+
+	private static MethodBase TargetMethod()
+	{
+		MethodInfo? method = CardEditorPowerCmdCompat.FindApplyPowerMethod();
+		if (method == null)
+		{
+			throw new MissingMethodException(typeof(PowerCmd).FullName, nameof(PowerCmd.Apply));
+		}
+		return method;
+	}
 
 	public static void Prefix(PowerModel power, ref decimal amount, CardModel? cardSource)
 	{
@@ -2477,15 +2512,19 @@ public static class PowerCmd_Apply_Patch
 	}
 }
 
-[HarmonyPatch(typeof(PowerCmd), nameof(PowerCmd.ModifyAmount),
-	typeof(PlayerChoiceContext),
-	typeof(PowerModel),
-	typeof(decimal),
-	typeof(MegaCrit.Sts2.Core.Entities.Creatures.Creature),
-	typeof(CardModel),
-	typeof(bool))]
+[HarmonyPatch]
 public static class PowerCmd_ModifyAmount_Patch
 {
+	private static MethodBase TargetMethod()
+	{
+		MethodInfo? method = CardEditorPowerCmdCompat.FindModifyAmountMethod();
+		if (method == null)
+		{
+			throw new MissingMethodException(typeof(PowerCmd).FullName, nameof(PowerCmd.ModifyAmount));
+		}
+		return method;
+	}
+
 	public static void Prefix(PowerModel power, ref decimal offset, CardModel? cardSource)
 	{
 		CardModel? durationSourceCard = cardSource;

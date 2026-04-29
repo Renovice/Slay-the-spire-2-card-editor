@@ -311,6 +311,7 @@ internal static class CardEditorMultiplayerSync
 	private static CardEditorMultiplayerLocalBackup? _localBackup;
 	private static bool _requestedInitialSync;
 	private static bool _forceImmediateBroadcast;
+	private static bool _remoteSyncActive;
 	private static int _lastAppliedSequence;
 	private static int _lastSeenOverrideRevision = -1;
 	private static int _lastSeenBaseDeckRevision = -1;
@@ -325,7 +326,20 @@ internal static class CardEditorMultiplayerSync
 
 	public static bool IsHostSession => _netService?.Type == NetGameType.Host;
 
-	public static bool IsSyncEnabledForCurrentSession => IsBoundToMultiplayerSession && CardEditorMultiplayerSettings.MultiplayerSyncEnabled;
+	public static bool IsSyncEnabledForCurrentSession
+	{
+		get
+		{
+			if (!IsBoundToMultiplayerSession)
+			{
+				return false;
+			}
+
+			return _netService?.Type == NetGameType.Client
+				? _remoteSyncActive || CardEditorMultiplayerSettings.MultiplayerSyncEnabled
+				: CardEditorMultiplayerSettings.MultiplayerSyncEnabled;
+		}
+	}
 
 	public static bool CanEditSharedState()
 	{
@@ -368,6 +382,7 @@ internal static class CardEditorMultiplayerSync
 		_forceImmediateBroadcast = _netService.Type == NetGameType.Host && CardEditorMultiplayerSettings.MultiplayerSyncEnabled;
 		_lastAppliedSequence = 0;
 		_remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
+		_remoteSyncActive = false;
 		CaptureRevisionCheckpoint();
 		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Bound to {_netService.Type} service netId={_netService.NetId}");
 	}
@@ -389,18 +404,20 @@ internal static class CardEditorMultiplayerSync
 
 	public static void NotifySharedStateMutatedLocally()
 	{
-		if (!IsSyncEnabledForCurrentSession || _netService == null)
+		if (_netService == null)
 		{
 			return;
 		}
 
-		if (_netService.Type == NetGameType.Host)
+		if (_netService.Type == NetGameType.Host && CardEditorMultiplayerSettings.MultiplayerSyncEnabled)
 		{
 			_forceImmediateBroadcast = true;
 			return;
 		}
 
-		if (_netService.Type == NetGameType.Client && _remoteAuthorityMode == CardEditorMultiplayerAuthorityMode.AnyPlayer)
+		if (_netService.Type == NetGameType.Client
+			&& _remoteSyncActive
+			&& _remoteAuthorityMode == CardEditorMultiplayerAuthorityMode.AnyPlayer)
 		{
 			SendEditRequestToHost();
 		}
@@ -431,7 +448,7 @@ internal static class CardEditorMultiplayerSync
 
 		if (_netService.Type == NetGameType.Client)
 		{
-			if (CardEditorMultiplayerSettings.MultiplayerSyncEnabled && !_requestedInitialSync)
+			if (!_requestedInitialSync)
 			{
 				_requestedInitialSync = true;
 				_netService.SendMessage(new CardEditorMultiplayerSyncRequestMessage());
@@ -545,11 +562,14 @@ internal static class CardEditorMultiplayerSync
 
 			if (syncTickbox != null)
 			{
-				syncTickbox.IsTicked = CardEditorMultiplayerSettings.MultiplayerSyncEnabled;
+				bool displayedSyncEnabled = _netService?.Type == NetGameType.Client
+					? _remoteSyncActive || CardEditorMultiplayerSettings.MultiplayerSyncEnabled
+					: CardEditorMultiplayerSettings.MultiplayerSyncEnabled;
+				syncTickbox.IsTicked = displayedSyncEnabled;
 			}
 
 			CardEditorMultiplayerAuthorityMode displayedAuthorityMode = GetDisplayedAuthorityMode();
-			bool authorityInteractive = CardEditorMultiplayerSettings.MultiplayerSyncEnabled && CanChangeAuthorityModeSetting();
+			bool authorityInteractive = IsSyncEnabledForCurrentSession && CanChangeAuthorityModeSetting();
 
 			if (authorityTickbox != null)
 			{
@@ -581,7 +601,7 @@ internal static class CardEditorMultiplayerSync
 
 	private static CardEditorMultiplayerAuthorityMode GetDisplayedAuthorityMode()
 	{
-		if (_netService?.Type == NetGameType.Client && CardEditorMultiplayerSettings.MultiplayerSyncEnabled)
+		if (_netService?.Type == NetGameType.Client && _remoteSyncActive)
 		{
 			return _remoteAuthorityMode;
 		}
@@ -927,6 +947,7 @@ internal static class CardEditorMultiplayerSync
 		_forceImmediateBroadcast = false;
 		_lastAppliedSequence = 0;
 		_remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
+		_remoteSyncActive = false;
 	}
 
 	private static void OnServiceDisconnected(NetErrorInfo info)
@@ -947,7 +968,7 @@ internal static class CardEditorMultiplayerSync
 
 	private static void OnSnapshotReceived(CardEditorMultiplayerSnapshotMessage message, ulong senderId)
 	{
-		if (_netService?.Type != NetGameType.Client || !CardEditorMultiplayerSettings.MultiplayerSyncEnabled)
+		if (_netService?.Type != NetGameType.Client)
 		{
 			return;
 		}
@@ -966,6 +987,7 @@ internal static class CardEditorMultiplayerSync
 		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Applying authoritative snapshot seq={message.Sequence} from host={senderId}.");
 		ApplyState(state, preserveLocalState: true);
 		_remoteAuthorityMode = state.AuthorityMode;
+		_remoteSyncActive = true;
 		_lastAppliedSequence = message.Sequence;
 	}
 

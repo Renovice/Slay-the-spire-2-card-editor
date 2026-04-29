@@ -14,7 +14,7 @@ internal enum CardEditorMultiplayerAuthorityMode
 
 internal sealed class CardEditorMultiplayerSettingsData
 {
-	public bool MultiplayerSyncEnabled { get; set; } = false;
+	public bool MultiplayerSyncEnabled { get; set; } = true;
 	public CardEditorMultiplayerAuthorityMode AuthorityMode { get; set; } = CardEditorMultiplayerAuthorityMode.HostOnly;
 }
 

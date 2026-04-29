@@ -73,7 +73,7 @@ public abstract class CardEditorCreatedCardBase : CardModel
 
 			try
 			{
-				foreach (CardExtraEffect effect in CardEditorExtraEffects.GetEffectsForDescription(this, isUpgradePreview: false))
+				foreach (CardExtraEffect effect in CardEditorExtraEffects.GetRuntimeEffectsForExecution(null, this))
 				{
 					if (effect != null && effect.Kind == CardExtraEffectKind.GainBlock && effect.Amount > 0)
 					{

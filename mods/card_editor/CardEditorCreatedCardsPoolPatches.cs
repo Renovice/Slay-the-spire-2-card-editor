@@ -47,7 +47,7 @@ public static class CardPoolModel_GetUnlockedCards_CreatedCardsFilter_Patch
 				return true;
 			}
 
-			return created.Pool.Id != pool.Id;
+			return !IsSamePool(created.Pool, pool);
 		}
 
 		static IEnumerable<ModelId> GetVanillaCardsThatShouldBeInPool(CardPoolModel pool)
@@ -83,12 +83,47 @@ public static class CardPoolModel_GetUnlockedCards_CreatedCardsFilter_Patch
 			}
 		}
 
+		static IEnumerable<ModelId> GetCreatedCardsThatShouldBeInPool(CardPoolModel pool)
+		{
+			if (pool == null)
+			{
+				yield break;
+			}
+
+			foreach (ModelId id in CardEditorCreatedCardsStore.GetAllCreatedCardIds())
+			{
+				if (!CardEditorCreatedCardsStore.IsEnabled(id))
+				{
+					continue;
+				}
+
+				CardPoolModel createdPool = CardEditorCreatedCardsStore.GetPoolForCard(id);
+				if (IsSamePool(createdPool, pool))
+				{
+					yield return id;
+				}
+			}
+		}
+
 		if (__result is List<CardModel> list)
 		{
 			list.RemoveAll(c => ShouldRemove(__instance, c));
 
 			HashSet<ModelId> present = new HashSet<ModelId>(list.Select(c => c.Id));
 			foreach (ModelId id in GetVanillaCardsThatShouldBeInPool(__instance))
+			{
+				if (!present.Add(id))
+				{
+					continue;
+				}
+				CardModel? card = ModelDb.GetByIdOrNull<CardModel>(id);
+				if (card != null)
+				{
+					list.Add(card);
+				}
+			}
+
+			foreach (ModelId id in GetCreatedCardsThatShouldBeInPool(__instance))
 			{
 				if (!present.Add(id))
 				{
@@ -119,6 +154,36 @@ public static class CardPoolModel_GetUnlockedCards_CreatedCardsFilter_Patch
 				filtered.Add(card);
 			}
 		}
+
+		foreach (ModelId id in GetCreatedCardsThatShouldBeInPool(__instance))
+		{
+			if (!filteredIds.Add(id))
+			{
+				continue;
+			}
+			CardModel? card = ModelDb.GetByIdOrNull<CardModel>(id);
+			if (card != null)
+			{
+				filtered.Add(card);
+			}
+		}
 		__result = filtered;
+	}
+
+	private static bool IsSamePool(CardPoolModel? left, CardPoolModel? right)
+	{
+		if (left == null || right == null)
+		{
+			return false;
+		}
+
+		if (left == right || left.Id == right.Id)
+		{
+			return true;
+		}
+
+		return !string.IsNullOrWhiteSpace(left.Title)
+			&& !string.IsNullOrWhiteSpace(right.Title)
+			&& string.Equals(left.Title.Trim(), right.Title.Trim(), System.StringComparison.OrdinalIgnoreCase);
 	}
 }

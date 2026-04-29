@@ -96,6 +96,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private static readonly Queue<string> _prebuiltPopupHydrationQueue = new();
 	private static bool _prebuiltPopupBuildScheduled;
 	private static bool _prebuiltPopupHydrationScheduled;
+	private static int _popupLagLogSequence;
 
 	private sealed class PrebuiltPopupRequest
 	{
@@ -111,6 +112,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 
 		Log.Info(message);
+	}
+
+	private static void PopupLagLog(string message)
+	{
+		int sequence = System.Threading.Interlocked.Increment(ref _popupLagLogSequence);
+		Log.Info($"[CardEditor][PopupLag] #{sequence} t={Time.GetTicksMsec()} {message}");
 	}
 
 	private CardModel _previewCard = null!;
@@ -150,6 +157,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private bool _manualPrebuiltPopupWarmupHydration;
 	private Control? _specificCardPickerOverlay;
 	private Control? _keywordPickerOverlay;
+	private Control? _rewardPoolPickerOverlay;
 	private Label? _cardNameLabel;
 	private OptionButton _cardTypeSelect = null!;
 	private OptionButton? _targetTypeSelect;
@@ -251,6 +259,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private TextEdit? _createdCustomTextField;
 	private KeywordTickbox? _createdCustomTextUpgradedTickbox;
 	private TextEdit? _createdCustomTextUpgradedField;
+	private KeywordTickbox? _createdCustomRewardPoolsTickbox;
+	private OptionButton? _createdRewardBucketSelect;
+	private readonly List<CardEditorRewardPoolBucket> _createdRewardBucketOptions = new();
+	private OptionButton? _createdRewardInjectionModeSelect;
+	private readonly List<CardEditorRewardPoolInjectionMode> _createdRewardInjectionModeOptions = new();
+	private readonly Dictionary<string, KeywordTickbox> _createdRewardPoolChecks = new(StringComparer.OrdinalIgnoreCase);
+	private readonly HashSet<string> _createdRewardPoolSelectedIds = new(StringComparer.OrdinalIgnoreCase);
+	private Button? _createdRewardPoolPickerButton;
 
 	private KeywordTickbox? _vanillaEnabledTickbox;
 	private LineEdit? _vanillaTitleField;
@@ -442,17 +458,21 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	internal static NCardEditorPopup GetOrCreatePersistentPopup(CardModel previewCard, Action onApplied, bool isUpgradeEditor = false, Vector2? preferredPanelSize = null)
 	{
+		ulong startMs = Time.GetTicksMsec();
 		string cacheKey = GetPrebuiltPopupCacheKey(previewCard.Id, isUpgradeEditor);
 		if (_prebuiltPopupCache.TryGetValue(cacheKey, out NCardEditorPopup? existing)
 			&& existing != null
 			&& GodotObject.IsInstanceValid(existing)
 			&& !existing.IsQueuedForDeletion())
 		{
+			PopupLagLog($"GetOrCreatePersistentPopup HIT card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} visible={existing.Visible} inTree={existing.IsInsideTree()} pendingRows={existing._pendingExistingExtraEffectRows.Count} createdPending={existing._createdEffectValueRowsPending} dirty={existing._uiDirtySinceOpen}");
 			existing.PreparePersistentPopupForOpen(onApplied, preferredPanelSize);
 			HidePersistentPopupsExcept(existing);
+			PopupLagLog($"GetOrCreatePersistentPopup HIT done card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs}");
 			return existing;
 		}
 
+		PopupLagLog($"GetOrCreatePersistentPopup MISS card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} cacheSize={_prebuiltPopupCache.Count} queuedBuilds={_prebuiltPopupBuildQueue.Count} queuedHydration={_prebuiltPopupHydrationQueue.Count}");
 		Control? cacheHost = EnsurePrebuiltPopupCacheHost();
 		NCardEditorPopup popup = new NCardEditorPopup();
 		popup.Initialize(previewCard, onApplied, useModalContainer: false, isUpgradeEditor, preferredPanelSize);
@@ -468,6 +488,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_prebuiltPopupCache[cacheKey] = popup;
 		popup.PreparePersistentPopupForOpen(onApplied, preferredPanelSize);
 		HidePersistentPopupsExcept(popup);
+		PopupLagLog($"GetOrCreatePersistentPopup MISS built card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRows={popup._pendingExistingExtraEffectRows.Count} createdPending={popup._createdEffectValueRowsPending}");
 		return popup;
 	}
 
@@ -573,6 +594,11 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			{
 				QueuePrebuiltPopupBuild(createdId, isUpgradeEditor: false);
 				queued++;
+				if (ShouldWarmUpgradePopup(createdId))
+				{
+					QueuePrebuiltPopupBuild(createdId, isUpgradeEditor: true);
+					queued++;
+				}
 			}
 
 			int built = 0;
@@ -708,6 +734,43 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		ScheduleQueuedPrebuiltPopupBuilds();
 	}
 
+	private static void QueuePrebuiltPopupRebuildDeferred(ModelId cardId, bool isUpgradeEditor, NCardEditorPopup? skipPopup = null, double delaySeconds = 0.08)
+	{
+		if (cardId == null || cardId == ModelId.none)
+		{
+			return;
+		}
+
+		InvalidatePrebuiltPopupCacheEntry(cardId, isUpgradeEditor, queueRebuild: false, skipPopup);
+		QueuePrebuiltPopupBuild(cardId, isUpgradeEditor);
+		ScheduleQueuedPrebuiltPopupBuilds(Math.Max(0.0, delaySeconds));
+		PopupLagLog($"QueueRebuildPrebuiltDeferred card={cardId} mode={(isUpgradeEditor ? "upgrade" : "base")} delayMs={(int)(Math.Max(0.0, delaySeconds) * 1000.0)}");
+	}
+
+	private static void RefreshCachedPopupAfterApplyOrQueueBuild(ModelId cardId, bool isUpgradeEditor, NCardEditorPopup? skipPopup = null)
+	{
+		if (cardId == null || cardId == ModelId.none)
+		{
+			return;
+		}
+
+		string cacheKey = GetPrebuiltPopupCacheKey(cardId, isUpgradeEditor);
+		if (_prebuiltPopupCache.TryGetValue(cacheKey, out NCardEditorPopup? existingPopup)
+			&& existingPopup != null
+			&& GodotObject.IsInstanceValid(existingPopup)
+			&& !existingPopup.IsQueuedForDeletion()
+			&& !ReferenceEquals(existingPopup, skipPopup))
+		{
+			existingPopup.RefreshCachedPopupSnapshotAfterExternalApply();
+			_queuedPrebuiltPopupKeys.Remove(cacheKey);
+			_queuedPrebuiltPopupHydrationKeys.Remove(cacheKey);
+			PopupLagLog($"Apply kept-cached-popup card={cardId} mode={(isUpgradeEditor ? "upgrade" : "base")} pendingRows={existingPopup._pendingExistingExtraEffectRows.Count} createdPending={existingPopup._createdEffectValueRowsPending}");
+			return;
+		}
+
+		QueuePrebuiltPopupRebuildDeferred(cardId, isUpgradeEditor, skipPopup, delaySeconds: 1.25);
+	}
+
 	private static void QueueBackgroundPrebuiltPopupWarmup(ModelId cardId, bool isUpgradeEditor, double additionalDelaySeconds = 0.0)
 	{
 		if (!CardEditorPerformanceSettings.BackgroundPopupWarmupAfterDirtyClose
@@ -750,6 +813,124 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			QueuePrebuiltPopupRebuild(cardId, isUpgradeEditor);
 		}
+	}
+
+	private static void RebuildPrebuiltPopupNow(ModelId cardId, bool isUpgradeEditor, NCardEditorPopup? skipPopup = null)
+	{
+		if (cardId == null || cardId == ModelId.none)
+		{
+			return;
+		}
+
+		Control? cacheHost = EnsurePrebuiltPopupCacheHost();
+		if (cacheHost == null || !GodotObject.IsInstanceValid(cacheHost))
+		{
+			return;
+		}
+
+		string cacheKey = GetPrebuiltPopupCacheKey(cardId, isUpgradeEditor);
+		InvalidatePrebuiltPopupCacheEntry(cardId, isUpgradeEditor, queueRebuild: false, skipPopup);
+		CardModel? preview = BuildPrebuiltPopupPreview(cardId, isUpgradeEditor);
+		if (preview == null)
+		{
+			return;
+		}
+
+		ulong startMs = Time.GetTicksMsec();
+		NCardEditorPopup popup = new NCardEditorPopup();
+		popup.Initialize(preview, () => { }, useModalContainer: false, isUpgradeEditor, preferredPanelSize: null);
+		popup._isPersistentPopupCacheEntry = true;
+		popup._persistentPopupCacheKey = cacheKey;
+		popup._allowPersistentPopupReuseOnClose = true;
+		popup._uiDirtySinceOpen = false;
+		popup._manualPrebuiltPopupWarmupHydration = true;
+		popup.Visible = false;
+		popup.EnsureUiBuilt();
+		cacheHost.AddChild(popup);
+		popup.EnsurePendingPopupHydrationCompleted();
+		popup.ForceLayoutRefreshNow();
+		popup.ReleasePreviewNodeResources();
+		popup._manualPrebuiltPopupWarmupHydration = false;
+		popup._rebuildPrebuiltPopupOnClose = false;
+		popup._uiDirtySinceOpen = false;
+		_prebuiltPopupCache[cacheKey] = popup;
+		PopupLagLog($"RebuildPrebuiltNow card={cardId} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} rows={popup._extraEffectRows.Count}");
+	}
+
+	private static void RebuildReadyPopupsAfterApply(ModelId cardId, NCardEditorPopup? skipPopup = null, bool keepSkipPopupCacheEntry = false)
+	{
+		if (cardId == null || cardId == ModelId.none)
+		{
+			return;
+		}
+
+		bool skipBase = keepSkipPopupCacheEntry
+			&& skipPopup != null
+			&& GodotObject.IsInstanceValid(skipPopup)
+			&& !skipPopup.IsQueuedForDeletion()
+			&& !skipPopup._isUpgradeEditor;
+		bool skipUpgrade = keepSkipPopupCacheEntry
+			&& skipPopup != null
+			&& GodotObject.IsInstanceValid(skipPopup)
+			&& !skipPopup.IsQueuedForDeletion()
+			&& skipPopup._isUpgradeEditor;
+
+		if (!skipBase)
+		{
+			RefreshCachedPopupAfterApplyOrQueueBuild(cardId, isUpgradeEditor: false, skipPopup);
+		}
+		if (ShouldWarmUpgradePopup(cardId) && !skipUpgrade)
+		{
+			RefreshCachedPopupAfterApplyOrQueueBuild(cardId, isUpgradeEditor: true, skipPopup);
+		}
+	}
+
+	private void RegisterCurrentPopupAsFreshCacheEntryAfterApply()
+	{
+		if (_cardId == null || _cardId == ModelId.none)
+		{
+			return;
+		}
+
+		string cacheKey = GetPrebuiltPopupCacheKey(_cardId, _isUpgradeEditor);
+		if (_prebuiltPopupCache.TryGetValue(cacheKey, out NCardEditorPopup? existingPopup)
+			&& existingPopup != null
+			&& GodotObject.IsInstanceValid(existingPopup)
+			&& !existingPopup.IsQueuedForDeletion()
+			&& !ReferenceEquals(existingPopup, this))
+		{
+			existingPopup.Visible = false;
+			existingPopup.ReleasePreviewNodeResources();
+			existingPopup.QueueFreeSafely();
+		}
+
+		_queuedPrebuiltPopupKeys.Remove(cacheKey);
+		_queuedPrebuiltPopupHydrationKeys.Remove(cacheKey);
+		_prebuiltPopupCache[cacheKey] = this;
+
+		_isPersistentPopupCacheEntry = true;
+		_persistentPopupCacheKey = cacheKey;
+		_allowPersistentPopupReuseOnClose = true;
+		_preserveDraftOnClose = false;
+		_rebuildPrebuiltPopupOnClose = false;
+		_warmOppositePrebuiltPopupOnClose = false;
+		_manualPrebuiltPopupWarmupHydration = false;
+		_uiDirtySinceOpen = false;
+		_useModalContainer = false;
+
+		Control? cacheHost = EnsurePrebuiltPopupCacheHost();
+		if (cacheHost != null && GodotObject.IsInstanceValid(cacheHost) && !ReferenceEquals(GetParent(), cacheHost))
+		{
+			GetParent()?.RemoveChild(this);
+			cacheHost.AddChild(this);
+		}
+
+		SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+		OffsetLeft = 0f;
+		OffsetTop = 0f;
+		OffsetRight = 0f;
+		OffsetBottom = 0f;
+		PopupLagLog($"Apply kept-popup card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} cacheKey={cacheKey}");
 	}
 
 	private static void ScheduleQueuedPrebuiltPopupBuilds(double delaySeconds = 0.0)
@@ -954,6 +1135,24 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		return count;
 	}
 
+	private static bool ShouldWarmUpgradePopup(ModelId cardId)
+	{
+		if (cardId == null || cardId == ModelId.none)
+		{
+			return false;
+		}
+
+		if (CardEditorOverrides.TryGetEffectiveOverride(cardId, out CardOverride effectiveOverride)
+			&& effectiveOverride.Upgrade != null
+			&& !effectiveOverride.Upgrade.IsEmpty())
+		{
+			return true;
+		}
+
+		return CardEditorCreatedCardsStore.IsCreatedCardId(cardId)
+			&& CardEditorCreatedCardsStore.IsCustomTextUpgradedEnabled(cardId);
+	}
+
 	private void Initialize(CardModel previewCard, Action onApplied, bool useModalContainer, bool isUpgradeEditor, Vector2? preferredPanelSize)
 	{
 		_previewCard = previewCard;
@@ -1034,6 +1233,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void PreparePersistentPopupForOpen(Action onApplied, Vector2? preferredPanelSize)
 	{
+		ulong startMs = Time.GetTicksMsec();
+		PopupLagLog($"PreparePersistent start card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} visible={Visible} inTree={IsInsideTree()} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending} dirty={_uiDirtySinceOpen} incremental={CardEditorPerformanceSettings.IncrementalPopupHydrationOnOpen}");
 		_onApplied = onApplied;
 		_useModalContainer = false;
 		_requestedPanelSize = preferredPanelSize.HasValue && preferredPanelSize.Value.X > 0f && preferredPanelSize.Value.Y > 0f
@@ -1066,6 +1267,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		QueuePopupLayout();
 		Callable.From(ForceLayoutRefreshNow).CallDeferred();
 		GrabPersistentPopupFocusSoon();
+		PopupLagLog($"PreparePersistent end card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending} dirty={_uiDirtySinceOpen}");
 	}
 
 	private void GrabPersistentPopupFocusSoon()
@@ -1489,8 +1691,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_suppressPreviewUpdate = true;
 		try
 		{
-			_headerFont ??= TryLoadFont(_headerFontPath);
-			_bodyFont ??= TryLoadFont(_bodyFontPath);
+			CardEditorGodotResourceCache.TryLoad(ref _headerFont, _headerFontPath);
+			CardEditorGodotResourceCache.TryLoad(ref _bodyFont, _bodyFontPath);
 			UpgradeBaseline? upgradeBaseline = _isUpgradeEditor ? GetUpgradeBaseline() : null;
 			_baselineTags = !_isUpgradeEditor ? ComputeBaselineTags() : null;
 
@@ -2764,6 +2966,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 		public Control OstyActionRow { get; init; } = null!;
 		public OptionButton OstyActionSelect { get; init; } = null!;
+		public Control CreatureCommandRow { get; init; } = null!;
+		public OptionButton CreatureCommandSelect { get; init; } = null!;
 
 		public Control GrantedKeywordRow { get; init; } = null!;
 		public OptionButton GrantedKeywordSelect { get; init; } = null!;
@@ -2833,6 +3037,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public KeywordTickbox ScalingBaseTickbox { get; init; } = null!;
 		public Control ScalingBaseAmountPair { get; init; } = null!;
 		public LineEdit ScalingBaseAmountField { get; init; } = null!;
+		public Control RepeatScalingExtraTimesRow { get; init; } = null!;
+		public LineEdit RepeatScalingExtraTimesField { get; init; } = null!;
 		public Control ScalingCountStepRow { get; init; } = null!;
 		public LineEdit ScalingCountStepField { get; init; } = null!;
 	}
@@ -3089,19 +3295,6 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 	}
 
-
-	private static Font? TryLoadFont(string path)
-	{
-		try
-		{
-			return GD.Load<Font>(path);
-		}
-		catch
-		{
-			return null;
-		}
-	}
-
 	private PanelContainer CreateEditorPanel(float bgAlpha = 0.88f, int borderWidth = 1)
 	{
 		PanelContainer panel = new PanelContainer
@@ -3160,7 +3353,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void StylePanelTitleLabel(Label label)
 	{
-		_headerFont ??= TryLoadFont(_headerFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, _headerFontPath);
 		if (_headerFont != null)
 		{
 			label.AddThemeFontOverride("font", _headerFont);
@@ -3173,7 +3366,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void StyleHeaderLabel(Label label)
 	{
-		_headerFont ??= TryLoadFont(_headerFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, _headerFontPath);
 		if (_headerFont != null)
 		{
 			label.AddThemeFontOverride("font", _headerFont);
@@ -3186,7 +3379,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void StyleSectionLabel(Label label)
 	{
-		_headerFont ??= TryLoadFont(_headerFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, _headerFontPath);
 		if (_headerFont != null)
 		{
 			label.AddThemeFontOverride("font", _headerFont);
@@ -3199,7 +3392,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void StyleBodyLabel(Control control)
 	{
-		_bodyFont ??= TryLoadFont(_bodyFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, _bodyFontPath);
 		if (_bodyFont != null)
 		{
 			control.AddThemeFontOverride("font", _bodyFont);
@@ -3212,7 +3405,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void StyleHintLabel(Label label)
 	{
-		_bodyFont ??= TryLoadFont(_bodyFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, _bodyFontPath);
 		if (_bodyFont != null)
 		{
 			label.AddThemeFontOverride("font", _bodyFont);
@@ -3303,7 +3496,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void StyleInput(Control control)
 	{
-		_bodyFont ??= TryLoadFont(_bodyFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, _bodyFontPath);
 		if (_bodyFont != null)
 		{
 			control.AddThemeFontOverride("font", _bodyFont);
@@ -4048,6 +4241,26 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		return row;
 	}
 
+	private HBoxContainer CreateBoundedButtonRow(string labelText, float fieldWidth, Button button)
+	{
+		HBoxContainer row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		row.AddThemeConstantOverride("separation", 10);
+		Label label = new Label { Text = labelText, CustomMinimumSize = new Vector2(_labelWidth, 0) };
+		StyleBodyLabel(label);
+		HBoxContainer slot = new HBoxContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+			CustomMinimumSize = new Vector2(fieldWidth, 0)
+		};
+		button.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		button.CustomMinimumSize = new Vector2(fieldWidth, _fieldMinSize.Y);
+		slot.AddChild(button);
+		row.AddChild(label);
+		row.AddChild(slot);
+		row.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+		return row;
+	}
+
 	private HBoxContainer CreateBoundedDropdownRowWithTrailingTickbox(
 		string labelText,
 		float fieldWidth,
@@ -4280,8 +4493,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private static PackedScene GetTickboxScene()
 	{
-		_tickboxScene ??= GD.Load<PackedScene>("res://scenes/ui/tickbox.tscn");
-		return _tickboxScene;
+		CardEditorGodotResourceCache.Load(ref _tickboxScene, "res://scenes/ui/tickbox.tscn");
+		return _tickboxScene!;
 	}
 
 	private Control InstantiateTickboxVisuals(PackedScene? tickboxScene = null)
@@ -4938,6 +5151,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		if (control == row.CountCardFilterRow) return "Filter";
 		if (control == row.ScalingBaseAmountPair) return "Base";
 		if (control == row.ScalingCountStepRow) return "PerCount";
+		if (control == row.RepeatScalingExtraTimesRow) return "ExtraTimes";
 		if (control == row.CountAmountRow) return "AmountMode";
 		if (control == row.CountOrbFilterRow) return "Orb";
 		if (control == row.GrantFilterRow) return "GrantFilter";
@@ -5007,6 +5221,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 				row.CountCardFilterRow,
 				row.ScalingBaseAmountPair,
 				row.ScalingCountStepRow,
+				row.RepeatScalingExtraTimesRow,
 				row.CountAmountRow,
 				row.GrantFilterRow,
 				row.PowerConditionRow,
@@ -6220,7 +6435,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 			CardModel preview = ModelDb.GetById<CardModel>(_cardId).ToMutable();
 			CardEditorOverrides.ApplyOverrideToCard(preview, draft);
-			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableBaseDescription(preview, preview.CurrentTarget);
+			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
 		}
 		catch
 		{
@@ -6420,6 +6635,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		BuildReplayCountUi(rightColumn);
 		BuildEnchantmentAndAfflictionUi(rightColumn);
+		BuildCreatedRewardPoolsUi(rightColumn, def);
 
 		Label cosmeticsLabel = new Label { Text = CardEditorLoc.T("section.cosmetics", "Cosmetics") };
 		StyleSectionLabel(cosmeticsLabel);
@@ -6527,6 +6743,288 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(_createdCustomTextField);
 		_createdCustomTextField.TextChanged += OnCustomTextChanged;
 		rightColumn.AddChild(_createdCustomTextField);
+	}
+
+	private void BuildCreatedRewardPoolsUi(VBoxContainer rightColumn, CardEditorCreatedCardDefinition def)
+	{
+		_createdRewardPoolSelectedIds.Clear();
+		foreach (string id in def.CustomRewardPoolIds ?? new List<string>())
+		{
+			if (CardEditorRewardPoolRegistry.IsKnownPoolId(id))
+			{
+				_createdRewardPoolSelectedIds.Add(id.Trim());
+			}
+		}
+		_createdRewardPoolChecks.Clear();
+
+		Label header = new Label { Text = CardEditorLoc.T("section.rewardPools", "Reward Pools") };
+		StyleSectionLabel(header);
+		rightColumn.AddChild(header);
+
+		HBoxContainer enabledRow = CreateTickboxRow(
+			CardEditorLoc.T("field.customRewardPools", "Custom Reward Pools"),
+			def.CustomRewardPoolsEnabled,
+			out KeywordTickbox enabledTickbox,
+			OnCreatedCardMetaChanged);
+		enabledRow.TooltipText = CardEditorLoc.T("tooltip.customRewardPools", "When enabled, this created card can be injected into selected vanilla event reward pools.");
+		_createdCustomRewardPoolsTickbox = enabledTickbox;
+		enabledTickbox.TooltipText = enabledRow.TooltipText;
+		rightColumn.AddChild(enabledRow);
+
+		HBoxContainer bucketRow = CreateBoundedDropdownRow(CardEditorLoc.T("field.rewardBucket", "Reward Bucket"), _creatorDropdownWidth, out OptionButton bucketSelect);
+		_createdRewardBucketSelect = bucketSelect;
+		_createdRewardBucketOptions.Clear();
+		foreach (CardEditorRewardPoolBucket bucket in Enum.GetValues<CardEditorRewardPoolBucket>())
+		{
+			int itemIndex = bucketSelect.ItemCount;
+			bucketSelect.AddItem(GetRewardBucketLabel(bucket));
+			bucketSelect.SetItemTooltip(itemIndex, GetRewardBucketTooltip(bucket));
+			_createdRewardBucketOptions.Add(bucket);
+		}
+		int bucketIndex = _createdRewardBucketOptions.IndexOf(def.RewardPoolBucket);
+		if (bucketIndex < 0)
+		{
+			bucketIndex = 0;
+		}
+		bucketSelect.Select(bucketIndex);
+		bucketSelect.TooltipText = GetRewardBucketTooltip(_createdRewardBucketOptions[bucketIndex]);
+		bucketRow.TooltipText = CardEditorLoc.T("tooltip.rewardBucket", "Controls which vanilla rarity bucket this card counts as when an event reward is rarity-filtered.");
+		bucketSelect.ItemSelected += _ =>
+		{
+			bucketSelect.TooltipText = GetRewardBucketTooltip(GetSelectedRewardBucket());
+			OnCreatedCardMetaChanged();
+		};
+		rightColumn.AddChild(bucketRow);
+
+		HBoxContainer injectionRow = CreateBoundedDropdownRow(CardEditorLoc.T("field.rewardInjection", "Injection Mode"), _creatorDropdownWidth, out OptionButton injectionSelect);
+		_createdRewardInjectionModeSelect = injectionSelect;
+		_createdRewardInjectionModeOptions.Clear();
+		foreach (CardEditorRewardPoolInjectionMode mode in Enum.GetValues<CardEditorRewardPoolInjectionMode>())
+		{
+			int itemIndex = injectionSelect.ItemCount;
+			injectionSelect.AddItem(GetRewardInjectionModeLabel(mode));
+			injectionSelect.SetItemTooltip(itemIndex, GetRewardInjectionTooltip(mode));
+			_createdRewardInjectionModeOptions.Add(mode);
+		}
+		int modeIndex = _createdRewardInjectionModeOptions.IndexOf(def.RewardPoolInjectionMode);
+		if (modeIndex < 0)
+		{
+			modeIndex = 0;
+		}
+		injectionSelect.Select(modeIndex);
+		injectionSelect.TooltipText = GetRewardInjectionTooltip(_createdRewardInjectionModeOptions[modeIndex]);
+		injectionRow.TooltipText = CardEditorLoc.T("tooltip.rewardInjection", "Controls how aggressively this card is inserted when a selected vanilla reward pool appears.");
+		injectionSelect.ItemSelected += _ =>
+		{
+			injectionSelect.TooltipText = GetRewardInjectionTooltip(GetSelectedRewardInjectionMode());
+			OnCreatedCardMetaChanged();
+		};
+		rightColumn.AddChild(injectionRow);
+
+		Button pickerButton = new Button
+		{
+			CustomMinimumSize = new Vector2(_creatorDropdownWidth, _fieldMinSize.Y),
+			TooltipText = CardEditorLoc.T("tooltip.pickRewardPools", "Open the vanilla event reward-pool picker.")
+		};
+		StyleInput(pickerButton);
+		pickerButton.Pressed += OpenRewardPoolPicker;
+		_createdRewardPoolPickerButton = pickerButton;
+		UpdateCreatedRewardPoolPickerButtonText();
+		rightColumn.AddChild(CreateBoundedButtonRow(CardEditorLoc.T("field.rewardPools", "Pools"), _creatorDropdownWidth, pickerButton));
+	}
+
+	private void UpdateCreatedRewardPoolPickerButtonText()
+	{
+		if (_createdRewardPoolPickerButton == null || !GodotObject.IsInstanceValid(_createdRewardPoolPickerButton))
+		{
+			return;
+		}
+
+		int count = _createdRewardPoolSelectedIds.Count;
+		_createdRewardPoolPickerButton.Text = count <= 0
+			? CardEditorLoc.T("ui.rewardPools.none", "Select Reward Pools")
+			: CardEditorLoc.F("ui.rewardPools.selected", $"Reward Pools ({count.ToString(CultureInfo.InvariantCulture)})", ("Count", count));
+	}
+
+	private void OpenRewardPoolPicker()
+	{
+		EnsurePendingPopupHydrationCompleted();
+		if ((_rewardPoolPickerOverlay != null && GodotObject.IsInstanceValid(_rewardPoolPickerOverlay))
+			|| (_keywordPickerOverlay != null && GodotObject.IsInstanceValid(_keywordPickerOverlay))
+			|| (_specificCardPickerOverlay != null && GodotObject.IsInstanceValid(_specificCardPickerOverlay)))
+		{
+			return;
+		}
+
+		Control overlay = new Control
+		{
+			Name = "RewardPoolPickerOverlay",
+			MouseFilter = MouseFilterEnum.Stop,
+			ZIndex = 250,
+			Visible = true
+		};
+		overlay.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+		ColorRect backstop = new ColorRect
+		{
+			Name = "Backstop",
+			Color = new Color(0, 0, 0, 0.85f),
+			MouseFilter = MouseFilterEnum.Stop
+		};
+		backstop.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+		overlay.AddChild(backstop);
+
+		PanelContainer panel = new PanelContainer
+		{
+			Name = "Panel",
+			MouseFilter = MouseFilterEnum.Stop
+		};
+		panel.AnchorLeft = 0.08f;
+		panel.AnchorTop = 0.08f;
+		panel.AnchorRight = 0.92f;
+		panel.AnchorBottom = 0.92f;
+		panel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+		{
+			BgColor = new Color(0.05f, 0.05f, 0.05f, 0.97f),
+			BorderWidthLeft = 2,
+			BorderWidthRight = 2,
+			BorderWidthTop = 2,
+			BorderWidthBottom = 2,
+			BorderColor = new Color(0.9f, 0.75f, 0.2f, 1f),
+			CornerRadiusTopLeft = 6,
+			CornerRadiusTopRight = 6,
+			CornerRadiusBottomLeft = 6,
+			CornerRadiusBottomRight = 6,
+			ContentMarginLeft = 16,
+			ContentMarginRight = 16,
+			ContentMarginTop = 16,
+			ContentMarginBottom = 16
+		});
+
+		VBoxContainer root = new VBoxContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			SizeFlagsVertical = Control.SizeFlags.ExpandFill
+		};
+		root.AddThemeConstantOverride("separation", 10);
+		panel.AddChild(root);
+
+		HBoxContainer headerRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		headerRow.AddThemeConstantOverride("separation", 10);
+		root.AddChild(headerRow);
+
+		Label title = new Label { Text = CardEditorLoc.T("ui.rewardPools.title", "Select Reward Pools") };
+		StyleSectionLabel(title);
+		title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		headerRow.AddChild(title);
+
+		Button closeButton = new Button
+		{
+			Text = CardEditorLoc.T("ui.done", "Done"),
+			CustomMinimumSize = new Vector2(120, _fieldMinSize.Y)
+		};
+		StyleInput(closeButton);
+		headerRow.AddChild(closeButton);
+
+		Label hint = new Label
+		{
+			Text = CardEditorLoc.T("ui.rewardPools.hint", "Pick the vanilla event reward screens where this card is allowed to appear."),
+			AutowrapMode = TextServer.AutowrapMode.WordSmart
+		};
+		StyleHintLabel(hint);
+		root.AddChild(hint);
+
+		ScrollContainer scroll = new ScrollContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			SizeFlagsVertical = Control.SizeFlags.ExpandFill
+		};
+		root.AddChild(scroll);
+
+		GridContainer grid = new GridContainer
+		{
+			Columns = 2,
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		grid.AddThemeConstantOverride("h_separation", 12);
+		grid.AddThemeConstantOverride("v_separation", 8);
+		scroll.AddChild(grid);
+
+		foreach (CardEditorRewardPoolDefinition pool in CardEditorRewardPoolRegistry.All)
+		{
+			string capturedId = pool.Id;
+			PanelContainer cell = CreateEditorPanel(bgAlpha: 0.48f);
+			cell.CustomMinimumSize = new Vector2(420, 56);
+			cell.TooltipText = GetRewardPoolTooltip(pool);
+
+			MarginContainer margin = new MarginContainer();
+			margin.AddThemeConstantOverride("margin_left", 8);
+			margin.AddThemeConstantOverride("margin_top", 6);
+			margin.AddThemeConstantOverride("margin_right", 8);
+			margin.AddThemeConstantOverride("margin_bottom", 6);
+			cell.AddChild(margin);
+
+			HBoxContainer row = new HBoxContainer
+			{
+				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+			};
+			row.AddThemeConstantOverride("separation", 8);
+			margin.AddChild(row);
+
+			KeywordTickbox tickbox = CreateStandaloneKeywordTickbox(_createdRewardPoolSelectedIds.Contains(capturedId));
+			tickbox.TooltipText = cell.TooltipText;
+			tickbox.Toggled += () =>
+			{
+				if (tickbox.IsTicked)
+				{
+					_createdRewardPoolSelectedIds.Add(capturedId);
+				}
+				else
+				{
+					_createdRewardPoolSelectedIds.Remove(capturedId);
+				}
+				UpdateCreatedRewardPoolPickerButtonText();
+				OnCreatedCardMetaChanged();
+			};
+			_createdRewardPoolChecks[capturedId] = tickbox;
+			row.AddChild(tickbox);
+
+			Label label = new Label
+			{
+				Text = pool.Title,
+				AutowrapMode = TextServer.AutowrapMode.WordSmart,
+				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+				VerticalAlignment = VerticalAlignment.Center,
+				TooltipText = cell.TooltipText
+			};
+			StyleBodyLabel(label);
+			row.AddChild(label);
+			grid.AddChild(cell);
+		}
+
+		void CloseOverlay()
+		{
+			if (_rewardPoolPickerOverlay != null && GodotObject.IsInstanceValid(_rewardPoolPickerOverlay))
+			{
+				_rewardPoolPickerOverlay.QueueFreeSafely();
+			}
+			_rewardPoolPickerOverlay = null;
+			_createdRewardPoolChecks.Clear();
+		}
+
+		closeButton.Pressed += CloseOverlay;
+		backstop.GuiInput += input =>
+		{
+			if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+			{
+				CloseOverlay();
+				overlay.AcceptEvent();
+			}
+		};
+
+		overlay.AddChild(panel);
+		AddChild(overlay);
+		_rewardPoolPickerOverlay = overlay;
 	}
 
 	private void OnCreatedArtSearchChanged()
@@ -6717,7 +7215,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				TryUpgradeForPreview(preview);
 			}
 
-			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableBaseDescription(preview, preview.CurrentTarget);
+			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
 		}
 		catch
 		{
@@ -7062,7 +7560,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		Dictionary<string, float>? fp = _createdFinishParams.Count > 0 ? new Dictionary<string, float>(_createdFinishParams) : null;
 
-		CardEditorCreatedCardsStore.SetDraftMeta(_cardId, enabled, title, pool, poolTitle, rarity, type, target, effectSourceIds, placement, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp);
+		CardEditorCreatedCardsStore.SetDraftMeta(_cardId, enabled, title, pool, poolTitle, rarity, type, target, effectSourceIds, placement, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp, _createdCustomRewardPoolsTickbox?.IsTicked ?? false, GetSelectedCreatedRewardPoolIds(), GetSelectedRewardBucket(), GetSelectedRewardInjectionMode());
 		if (_cardNameLabel != null && GodotObject.IsInstanceValid(_cardNameLabel))
 		{
 			_cardNameLabel.Text = CardEditorCreatedCardsStore.GetTitleForCard(_cardId);
@@ -7794,9 +8292,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				{
 					CardExtraEffect baseEffect = baseEffects[i];
 					CardExtraEffect? upgradeEffect = i < alignedUpgradeEffects.Length ? alignedUpgradeEffects[i] : null;
+					CardExtraEffect displayEffect = BuildUpgradeDeltaRowEffect(baseEffect, upgradeEffect, numericFieldsAreDeltas);
+					CardEditorUpgradeDeltaDebugLog.LogUpgradeEditorRow(
+						"UpgradeEditor.HydrateDeltaRow",
+						_cardId.ToString(),
+						i,
+						baseEffect,
+						upgradeEffect,
+						displayEffect,
+						numericFieldsAreDeltas);
 
 					QueueExistingExtraEffectRowForHydration(
-						BuildUpgradeDeltaRowEffect(baseEffect, upgradeEffect, numericFieldsAreDeltas),
+						displayEffect,
 						isUpgradeDeltaRow: true);
 				}
 
@@ -7991,8 +8498,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void EnsurePendingPopupHydrationCompleted()
 	{
+		int pendingRowsBefore = _pendingExistingExtraEffectRows.Count;
+		bool createdPendingBefore = _createdEffectValueRowsPending;
+		ulong startMs = Time.GetTicksMsec();
+		PopupLagLog($"ForceHydration start card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} pendingRows={pendingRowsBefore} createdPending={createdPendingBefore} existingHydrating={_existingExtraEffectHydrating} previewQueued={_previewUpdateQueued}");
 		CompletePendingExistingExtraEffectRowsNow();
 		CompleteDeferredCreatedEffectValueRowsNow();
+		PopupLagLog($"ForceHydration end card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRowsBefore={pendingRowsBefore} pendingRowsAfter={_pendingExistingExtraEffectRows.Count} createdPendingBefore={createdPendingBefore} createdPendingAfter={_createdEffectValueRowsPending} rowsBuilt={_pendingExistingExtraEffectRowBuilt}/{_pendingExistingExtraEffectRowTotal}");
 	}
 
 	private void SchedulePendingPopupHydrationAfterOpen()
@@ -8160,6 +8672,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		ulong rowElapsedMs = Time.GetTicksMsec() - rowStartMs;
 			PerfLog($"[CardEditor][Perf] HydrateExtraEffectRow card={_cardId} kind={pending.Effect.Kind} elapsedMs={rowElapsedMs} row={_pendingExistingExtraEffectRowBuilt}/{_pendingExistingExtraEffectRowTotal}");
+		if (rowElapsedMs >= 12)
+		{
+			PopupLagLog($"AsyncHydrateRow card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} kind={pending.Effect.Kind} elapsedMs={rowElapsedMs} row={_pendingExistingExtraEffectRowBuilt}/{_pendingExistingExtraEffectRowTotal} pendingLeft={_pendingExistingExtraEffectRows.Count}");
+		}
 
 		UpdateExtraEffectHydrationUiState();
 		if (_pendingExistingExtraEffectRows.Count > 0)
@@ -8176,7 +8692,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		_existingExtraEffectHydrating = false;
 		ClearExistingExtraEffectLoadingLabels();
 		FinalizeExtraEffectRowStructureRefresh();
-		QueuePreviewUpdate();
+		QueueProgrammaticPreviewUpdate("ExistingExtraEffectHydration");
 		ScheduleCreatedEffectValueRowsRefresh();
 		UpdateExtraEffectHydrationUiState();
 	}
@@ -8188,6 +8704,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
+		int rowsBefore = _pendingExistingExtraEffectRows.Count;
+		ulong startMs = Time.GetTicksMsec();
 		_existingExtraEffectHydrationScheduled = false;
 		_existingExtraEffectHydrating = true;
 		bool previousBulkInitializingExtraEffectRows = _bulkInitializingExtraEffectRows;
@@ -8208,6 +8726,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		FinalizePendingExistingExtraEffectRowsHydration();
+		PopupLagLog($"ForceHydrateRowsNow card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} rowsBefore={rowsBefore} rowsBuilt={_pendingExistingExtraEffectRowBuilt}/{_pendingExistingExtraEffectRowTotal}");
 	}
 
 	private bool HydrateSinglePendingExistingExtraEffectRowNow()
@@ -9722,10 +10241,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			display.HistoryScalingCountStep = numericFieldsAreDeltas
 				? upgradeEffect.HistoryScalingCountStep
 				: CardEditorExtraEffects.ResolveHistoryScalingCountStep(upgradeEffect) - CardEditorExtraEffects.ResolveHistoryScalingCountStep(baseEffect);
+			display.RepeatScalingExtraTimes = numericFieldsAreDeltas
+				? upgradeEffect.RepeatScalingExtraTimes
+				: CardEditorExtraEffects.ResolveRepeatScalingExtraTimes(upgradeEffect) - CardEditorExtraEffects.ResolveRepeatScalingExtraTimes(baseEffect);
 		}
 		else
 		{
 			display.HistoryScalingCountStep = 0;
+			display.RepeatScalingExtraTimes = 0;
 		}
 		display.CardGrantTurns = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CardGrantTurns, numericFieldsAreDeltas);
 		display.CardSelectionCount = GetUpgradeDisplayNumericValue(baseEffect, upgradeEffect, e => e.CardSelectionCount, numericFieldsAreDeltas);
@@ -11930,6 +12453,33 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		ostyActionRow.AddChild(ostyActionSelect);
 		ostyActionRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
+		HBoxContainer creatureCommandRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+		creatureCommandRow.AddThemeConstantOverride("separation", 10);
+
+		OptionButton creatureCommandSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(180, _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		StyleInput(creatureCommandSelect);
+		ConstrainOptionButtonPopup(creatureCommandSelect);
+		creatureCommandSelect.TooltipText = CardEditorLoc.T("tooltip.creatureCommand", "Choose which non-power creature state or command to apply.");
+		IReadOnlyList<CardEditorExtraEffects.CreatureCommandSpec> creatureCommandSpecs = CardEditorExtraEffects.GetCreatureCommandSpecs();
+		foreach (CardEditorExtraEffects.CreatureCommandSpec command in creatureCommandSpecs)
+		{
+			creatureCommandSelect.AddItem(command.Label);
+		}
+		string desiredCreatureCommandId = CardEditorExtraEffects.GetEffectiveCreatureCommandId(effect);
+		int creatureCommandIndex = creatureCommandSpecs.ToList().FindIndex(spec => string.Equals(spec.Id, desiredCreatureCommandId, StringComparison.Ordinal));
+		if (creatureCommandIndex < 0)
+		{
+			creatureCommandIndex = 0;
+		}
+		creatureCommandSelect.Select(creatureCommandIndex);
+
+		creatureCommandRow.AddChild(creatureCommandSelect);
+		creatureCommandRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+
 		HBoxContainer grantedKeywordRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
 		grantedKeywordRow.AddThemeConstantOverride("separation", 10);
 
@@ -13341,15 +13891,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		StyleInput(countModeSelect);
 		ConstrainOptionButtonPopup(countModeSelect);
-		countModeSelect.TooltipText = CardEditorLoc.T("tooltip.countMode", "Choose whether this count source scales the amount or only gates the effect.");
-		foreach (CardExtraEffectScaleMode mode in new[] { CardExtraEffectScaleMode.PerHistoryCount, CardExtraEffectScaleMode.ConditionOnly })
+		countModeSelect.TooltipText = CardEditorLoc.T("tooltip.countMode", "Choose whether this count source scales the amount, scales repeat times, or only gates the effect.");
+		foreach (CardExtraEffectScaleMode mode in new[] { CardExtraEffectScaleMode.PerHistoryCount, CardExtraEffectScaleMode.RepeatByCount, CardExtraEffectScaleMode.ConditionOnly })
 		{
-			countModeSelect.AddItem(CardEditorExtraEffects.ScaleModeLabel(mode));
+			countModeSelect.AddItem(CardEditorExtraEffects.ScaleModeLabel(mode), (int)mode);
 		}
-		CardExtraEffectScaleMode selectedCountMode = effect?.ScaleMode is CardExtraEffectScaleMode.PerHistoryCount or CardExtraEffectScaleMode.ConditionOnly
+		CardExtraEffectScaleMode selectedCountMode = effect?.ScaleMode is CardExtraEffectScaleMode.PerHistoryCount or CardExtraEffectScaleMode.RepeatByCount or CardExtraEffectScaleMode.ConditionOnly
 			? effect.ScaleMode
 			: CardExtraEffectScaleMode.PerHistoryCount;
-		countModeSelect.Select(selectedCountMode == CardExtraEffectScaleMode.ConditionOnly ? 1 : 0);
+		int selectedCountModeIndex = countModeSelect.GetItemIndex((int)selectedCountMode);
+		countModeSelect.Select(selectedCountModeIndex >= 0 ? selectedCountModeIndex : 0);
 
 		OptionButton countEventSelect = new OptionButton
 		{
@@ -13790,6 +14341,25 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CreateEffectCompactValuePair(scalingBaseAmountSpin, scalingBaseAmountField));
 		scalingBaseAmountPair.Visible = false;
 
+		int initialRepeatScalingExtraTimes = isUpgradeDeltaRow
+			? effect?.RepeatScalingExtraTimes ?? 0
+			: CardEditorExtraEffects.ResolveRepeatScalingExtraTimes(effect);
+		NMegaLineEdit repeatScalingExtraTimesField = new NMegaLineEdit
+		{
+			Text = initialRepeatScalingExtraTimes.ToString(CultureInfo.InvariantCulture),
+			CustomMinimumSize = _amountFieldMinSize
+		};
+		repeatScalingExtraTimesField.Alignment = HorizontalAlignment.Center;
+		repeatScalingExtraTimesField.TooltipText = CardEditorLoc.T("tooltip.scalingRepeatExtraTimes", "How many additional repeats this effect gains for each scaling step.");
+		StyleInput(repeatScalingExtraTimesField);
+		repeatScalingExtraTimesField.TextChanged += _ => QueuePreviewUpdate();
+		decimal repeatScalingExtraTimesMin = isUpgradeDeltaRow ? -99m : 1m;
+		Control repeatScalingExtraTimesSpin = CreateSpinButtons(repeatScalingExtraTimesField, step: 1m, minValue: repeatScalingExtraTimesMin, maxValue: 99m, isInteger: true);
+		HBoxContainer repeatScalingExtraTimesRow = CreateEffectFormRow(
+			CardEditorLoc.T("scaling.extraTimes", "Extra Times"),
+			CreateEffectCompactValuePair(repeatScalingExtraTimesSpin, repeatScalingExtraTimesField));
+		repeatScalingExtraTimesRow.Visible = false;
+
 		int initialHistoryScalingCountStep = isUpgradeDeltaRow
 			? effect?.HistoryScalingCountStep ?? 0
 			: CardEditorExtraEffects.ResolveHistoryScalingCountStep(effect);
@@ -14137,6 +14707,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		advancedPropertyGrid.AddChild(filterRow);
 		advancedPropertyGrid.AddChild(scalingBaseAmountPair);
 		advancedPropertyGrid.AddChild(scalingCountStepRow);
+		advancedPropertyGrid.AddChild(repeatScalingExtraTimesRow);
 		advancedPropertyGrid.AddChild(countAmountRow);
 		advancedPropertyGrid.AddChild(grantRow);
 		advancedPropertyGrid.AddChild(grantCountRow);
@@ -14471,6 +15042,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			OrbFollowUpSelect = orbFollowUpSelect,
 			OstyActionRow = ostyActionRow,
 			OstyActionSelect = ostyActionSelect,
+			CreatureCommandRow = creatureCommandRow,
+			CreatureCommandSelect = creatureCommandSelect,
 			GrantedKeywordRow = grantedKeywordRow,
 			GrantedKeywordSelect = grantedKeywordSelect,
 			MultiplyStatRow = multiplyStatRow,
@@ -14566,6 +15139,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			ScalingBaseTickbox = scalingBaseTickbox,
 			ScalingBaseAmountPair = scalingBaseAmountPair,
 			ScalingBaseAmountField = scalingBaseAmountField,
+			RepeatScalingExtraTimesRow = repeatScalingExtraTimesRow,
+			RepeatScalingExtraTimesField = repeatScalingExtraTimesField,
 			ScalingCountStepRow = scalingCountStepRow,
 			ScalingCountStepField = scalingCountStepField
 		};
@@ -15114,6 +15689,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			ConfigureExtraEffectTargets(effectRow, null);
 			QueuePreviewUpdate();
 		};
+		creatureCommandSelect.ItemSelected += _ =>
+		{
+			UpdateExtraEffectCustomRows(effectRow);
+			QueuePreviewUpdate();
+		};
 		generatedPoolSelect.ItemSelected += _ => QueuePreviewUpdate();
 		generatedTypeSelect.ItemSelected += _ => QueuePreviewUpdate();
 		upgradeVariantSelect.ItemSelected += _ =>
@@ -15321,6 +15901,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		wrapper.AddChild(cardGenerationVariantRow);
 		wrapper.AddChild(orbRow);
 		wrapper.AddChild(ostyActionRow);
+		wrapper.AddChild(creatureCommandRow);
 		wrapper.AddChild(grantedKeywordRow);
 		wrapper.AddChild(multiplyStatRow);
 		wrapper.AddChild(enchantmentRow);
@@ -16143,7 +16724,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		}
 
-		bool hideAmountControls = IsAmountlessExtraEffectKind(kind);
+		bool hideAmountControls = IsAmountlessExtraEffectKind(kind)
+			|| (kind == CardExtraEffectKind.CreatureCommand && !CardEditorExtraEffects.CreatureCommandUsesAmount(GetSelectedCreatureCommandId(row)));
 		if (hideAmountControls)
 		{
 			row.AmountField.Text = definition.DefaultAmount.ToString(CultureInfo.InvariantCulture);
@@ -17436,6 +18018,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		DisableOptionButton(row.OrbTypeSelect);
 		DisableOptionButton(row.OrbSelectionSelect);
 		DisableOptionButton(row.OrbFollowUpSelect);
+		DisableOptionButton(row.CreatureCommandSelect);
 		DisableOptionButton(row.MultiplyStatSelect);
 		DisableOptionButton(row.StatusSourceModeSelect);
 		DisableOptionButton(row.StatusSourcePowerSelect);
@@ -17632,6 +18215,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			or CardExtraEffectKind.FetchSpecificCardToHand;
 		bool isOrbAction = kind == CardExtraEffectKind.OrbAction;
 		bool isOstyAction = kind == CardExtraEffectKind.OstyAction;
+		bool isCreatureCommand = kind == CardExtraEffectKind.CreatureCommand;
 		bool isMultiplyStatStatus = kind == CardExtraEffectKind.MultiplyStatStatus;
 		bool isGainStatusEqualToStatus = kind == CardExtraEffectKind.GainStatusEqualToStatus;
 		bool isEnchantCard = kind == CardExtraEffectKind.EnchantCard;
@@ -18034,6 +18618,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		if (row.OstyActionRow != null && GodotObject.IsInstanceValid(row.OstyActionRow))
 		{
 			row.OstyActionRow.Visible = isOstyAction;
+		}
+		if (row.CreatureCommandRow != null && GodotObject.IsInstanceValid(row.CreatureCommandRow))
+		{
+			row.CreatureCommandRow.Visible = isCreatureCommand;
 		}
 		if (row.GrantedKeywordRow != null && GodotObject.IsInstanceValid(row.GrantedKeywordRow))
 		{
@@ -18775,20 +19363,22 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			and not CardExtraEffectKind.RunEffectSourceCard
 			and not CardExtraEffectKind.ChooseOneEffectSource
 			and not CardExtraEffectKind.ScalingStage;
+		bool supportsRepeatScaling = kind != CardExtraEffectKind.RunEffectSourceCard && CardEditorExtraEffects.SupportsRepeat(kind);
+		bool supportsCountLogic = supportsScaling || supportsRepeatScaling;
 		bool conditionalBonusUsesHistoryCount = row.ConditionalBonusRow != null
 			&& GodotObject.IsInstanceValid(row.ConditionalBonusRow)
 			&& row.ConditionalBonusRow.Visible
 			&& GetSelectedConditionalBonusConditionType(row) == CardExtraEffectBranchConditionType.HistoryCount;
 
-		bool showHeaderRow = supportsScaling
+		bool showHeaderRow = supportsCountLogic
 			|| conditionalBonusUsesHistoryCount
 			|| (row.PowerTickbox != null && GodotObject.IsInstanceValid(row.PowerTickbox) && row.PowerTickbox.Visible)
 			|| (row.GrantTickbox != null && GodotObject.IsInstanceValid(row.GrantTickbox) && row.GrantTickbox.Visible)
 			|| (row.BranchTickbox != null && GodotObject.IsInstanceValid(row.BranchTickbox) && row.BranchTickbox.Visible)
 			|| (row.RepeatRow != null && GodotObject.IsInstanceValid(row.RepeatRow) && row.RepeatRow.Visible)
 			|| (row.KeywordGroupRow != null && GodotObject.IsInstanceValid(row.KeywordGroupRow) && row.KeywordGroupRow.Visible);
-		bool showCountLogic = isScalingStage || (supportsScaling && row.ScalingTickbox.IsTicked) || conditionalBonusUsesHistoryCount;
-		row.ScalingTickbox.Visible = supportsScaling;
+		bool showCountLogic = isScalingStage || (supportsCountLogic && row.ScalingTickbox.IsTicked) || conditionalBonusUsesHistoryCount;
+		row.ScalingTickbox.Visible = supportsCountLogic;
 		row.ScalingToggleRow.Visible = showHeaderRow;
 		row.ScalingRow.Visible = showCountLogic;
 		if (row.CountRow != null && GodotObject.IsInstanceValid(row.CountRow))
@@ -18797,20 +19387,24 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (row.CountModeSelect != null && GodotObject.IsInstanceValid(row.CountModeSelect))
 		{
-			row.CountModeSelect.Visible = showCountLogic && !isConditionalAutoFromPile && supportsScaling && row.ScalingTickbox.IsTicked;
+			row.CountModeSelect.Visible = showCountLogic && !isConditionalAutoFromPile && supportsCountLogic && row.ScalingTickbox.IsTicked;
 		}
 
+		CardExtraEffectScaleMode selectedScaleMode = GetSelectedScaleMode(row, kind);
 		bool showHistoryScalingKnobs = !isScalingStage
 			&& showCountLogic
 			&& row.ScalingTickbox.IsTicked
-			&& GetSelectedScaleMode(row, kind) == CardExtraEffectScaleMode.PerHistoryCount
-			&& CardEditorExtraEffects.SupportsHistoryScaling(kind);
-		bool showScalingBase = showHistoryScalingKnobs;
+			&& ((selectedScaleMode == CardExtraEffectScaleMode.PerHistoryCount && CardEditorExtraEffects.SupportsHistoryScaling(kind))
+				|| (selectedScaleMode == CardExtraEffectScaleMode.RepeatByCount && supportsRepeatScaling));
+		bool showScalingBase = showHistoryScalingKnobs && selectedScaleMode == CardExtraEffectScaleMode.PerHistoryCount;
 		row.ScalingBaseTickbox.Visible = showScalingBase;
 		bool amountFieldVisible = row.AmountField != null
 			&& GodotObject.IsInstanceValid(row.AmountField)
 			&& row.AmountField.Visible;
-		bool showScalingBaseAmount = showScalingBase && row.ScalingBaseTickbox.IsTicked && amountFieldVisible;
+		bool showScalingBaseAmount = selectedScaleMode == CardExtraEffectScaleMode.PerHistoryCount
+			&& showScalingBase
+			&& row.ScalingBaseTickbox.IsTicked
+			&& amountFieldVisible;
 		if (row.ScalingBaseAmountPair != null && GodotObject.IsInstanceValid(row.ScalingBaseAmountPair))
 		{
 			row.ScalingBaseAmountPair.Visible = showScalingBaseAmount;
@@ -18831,13 +19425,24 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		if (row.ScalingCountStepRow != null && GodotObject.IsInstanceValid(row.ScalingCountStepRow))
 		{
 			row.ScalingCountStepRow.Visible = showHistoryScalingKnobs;
+			SetEffectFormRowLabelText(row.ScalingCountStepRow, CardEditorLoc.T("scaling.countStep", "Per Count"));
 		}
 		if (row.ScalingCountStepField != null && GodotObject.IsInstanceValid(row.ScalingCountStepField))
 		{
+			row.ScalingCountStepField.TooltipText = CardEditorLoc.T("tooltip.scalingCountStep", "How many counted units make one scaling step. Example: Per Count 10 with Block Lost means 10 Block lost = 1 step, 20 = 2 steps. Threshold still checks the raw count.");
 			SetSpinFieldState(row.ScalingCountStepField, visible: showHistoryScalingKnobs, enabled: showHistoryScalingKnobs);
 		}
+		bool showRepeatScalingExtraTimes = showHistoryScalingKnobs && selectedScaleMode == CardExtraEffectScaleMode.RepeatByCount;
+		if (row.RepeatScalingExtraTimesRow != null && GodotObject.IsInstanceValid(row.RepeatScalingExtraTimesRow))
+		{
+			row.RepeatScalingExtraTimesRow.Visible = showRepeatScalingExtraTimes;
+		}
+		if (row.RepeatScalingExtraTimesField != null && GodotObject.IsInstanceValid(row.RepeatScalingExtraTimesField))
+		{
+			SetSpinFieldState(row.RepeatScalingExtraTimesField, visible: showRepeatScalingExtraTimes, enabled: showRepeatScalingExtraTimes);
+		}
 
-		if (!supportsScaling)
+		if (!supportsCountLogic)
 		{
 			row.ScalingTickbox.MouseFilter = MouseFilterEnum.Ignore;
 		}
@@ -19332,7 +19937,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			and not CardExtraEffectKind.GeneratedCardsUpgraded
 			and not CardExtraEffectKind.CardsInPileUpgradedAura;
 		supportsScaling = supportsScaling && kind != CardExtraEffectKind.MultiplyStatStatus;
-		if (!supportsScaling || !row.ScalingTickbox.IsTicked)
+		bool supportsRepeatScaling = kind != CardExtraEffectKind.RunEffectSourceCard && CardEditorExtraEffects.SupportsRepeat(kind);
+		if ((!supportsScaling && !supportsRepeatScaling) || !row.ScalingTickbox.IsTicked)
 		{
 			return CardExtraEffectScaleMode.None;
 		}
@@ -19343,7 +19949,27 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		int selected = row.CountModeSelect.Selected;
-		return selected == 1 ? CardExtraEffectScaleMode.ConditionOnly : CardExtraEffectScaleMode.PerHistoryCount;
+		CardExtraEffectScaleMode mode = CardExtraEffectScaleMode.PerHistoryCount;
+		if (selected >= 0)
+		{
+			int id = row.CountModeSelect.GetItemId(selected);
+			if (Enum.IsDefined(typeof(CardExtraEffectScaleMode), id))
+			{
+				mode = (CardExtraEffectScaleMode)id;
+			}
+		}
+
+		if (mode == CardExtraEffectScaleMode.RepeatByCount && !supportsRepeatScaling)
+		{
+			return supportsScaling ? CardExtraEffectScaleMode.PerHistoryCount : CardExtraEffectScaleMode.None;
+		}
+
+		if (mode == CardExtraEffectScaleMode.PerHistoryCount && !supportsScaling)
+		{
+			return supportsRepeatScaling ? CardExtraEffectScaleMode.RepeatByCount : CardExtraEffectScaleMode.None;
+		}
+
+		return mode == CardExtraEffectScaleMode.None ? CardExtraEffectScaleMode.PerHistoryCount : mode;
 	}
 
 	private static bool IsHistoryScalingBaseEnabled(ExtraEffectRow row)
@@ -19391,6 +20017,23 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			isDeltaRow: row.IsUpgradeDeltaRow,
 			minAbsolute: 1,
 			maxAbsolute: 999);
+	}
+
+	private static int GetSelectedRepeatScalingExtraTimes(ExtraEffectRow row)
+	{
+		if (row?.RepeatScalingExtraTimesField == null
+			|| !GodotObject.IsInstanceValid(row.RepeatScalingExtraTimesField)
+			|| !row.RepeatScalingExtraTimesField.Visible)
+		{
+			return row?.IsUpgradeDeltaRow == true ? 0 : 1;
+		}
+
+		return ParseExtraEffectNumericField(
+			row.RepeatScalingExtraTimesField,
+			absoluteDefault: 1,
+			isDeltaRow: row.IsUpgradeDeltaRow,
+			minAbsolute: 1,
+			maxAbsolute: 99);
 	}
 
 	private static CardExtraEffectCountEvent GetSelectedCountEvent(ExtraEffectRow row)
@@ -20836,6 +21479,17 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return (CardExtraEffectOstyAction)selected;
 	}
 
+	private static string GetSelectedCreatureCommandId(ExtraEffectRow row)
+	{
+		int selected = row.CreatureCommandSelect.Selected;
+		IReadOnlyList<CardEditorExtraEffects.CreatureCommandSpec> specs = CardEditorExtraEffects.GetCreatureCommandSpecs();
+		if (selected < 0 || selected >= specs.Count)
+		{
+			return "Stun";
+		}
+		return specs[selected].Id;
+	}
+
 	private static CardKeyword GetSelectedGrantedKeyword(ExtraEffectRow row)
 	{
 		if (row.GrantedKeywordSelect == null || !GodotObject.IsInstanceValid(row.GrantedKeywordSelect))
@@ -21307,7 +21961,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = _spinButtonMinSize,
 			MouseFilter = MouseFilterEnum.Stop
 		};
-		_headerFont ??= TryLoadFont(_headerFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, _headerFontPath);
 		if (_headerFont != null)
 		{
 			button.AddThemeFontOverride("font", _headerFont);
@@ -22014,7 +22668,26 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			return;
 		}
+		if (!_uiDirtySinceOpen)
+		{
+			PopupLagLog($"Dirty card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} reason=QueuePreviewUpdate pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending}");
+		}
 		_uiDirtySinceOpen = true;
+		QueuePreviewRefresh();
+	}
+
+	private void QueueProgrammaticPreviewUpdate(string reason)
+	{
+		if (_suppressPreviewUpdate)
+		{
+			return;
+		}
+		PopupLagLog($"Refresh card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} reason={reason} dirty={_uiDirtySinceOpen} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending}");
+		QueuePreviewRefresh();
+	}
+
+	private void QueuePreviewRefresh()
+	{
 		if (_previewUpdateQueued)
 		{
 			return;
@@ -22046,6 +22719,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			UpgradeBaseline baseline = GetUpgradeBaseline();
 			CardUpgradeOverride draftUpgrade = BuildUpgradeOverrideFromUiDeltas(baseline);
+			CardEditorUpgradeDeltaDebugLog.LogUpgradeBuilt(
+				"UpgradeEditor.UpdatePreview.Draft",
+				_cardId.ToString(),
+				draftUpgrade,
+				GetEffectivePopupOverride()?.ExtraEffects);
 
 			CardModel upgradedPreview = CardEditorOverrides.BuildPreview(canonical);
 			bool prevSuppress = CardEditorOverrides.SuppressUpgradeOverrides;
@@ -22060,12 +22738,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 
 			ApplyUpgradeOverridePreview(upgradedPreview, draftUpgrade, baseline);
+			CardEditorUpgradeDeltaDebugLog.LogCardState("UpgradeEditor.UpdatePreview.AfterApplyUpgradeOverridePreview", upgradedPreview);
 
 			CardOverride draftForDescription = GetEffectivePopupOverride() != null
 				? CardEditorOverrides.Clone(GetEffectivePopupOverride()!)
 				: new CardOverride();
 			draftForDescription.Upgrade = draftUpgrade.IsEmpty() ? null : draftUpgrade;
 			CardEditorUiState.SetDraftOverride(_cardId, draftForDescription);
+			CardEditorUpgradeDeltaDebugLog.LogCardState("UpgradeEditor.UpdatePreview.DraftForDescription", upgradedPreview, draftForDescription);
 
 			_previewCard = upgradedPreview;
 			_cardPreviewNode.Model = upgradedPreview;
@@ -23433,6 +24113,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					HistoryScalingIncludesBase = IsHistoryScalingBaseEnabled(row),
 					HistoryScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, amount),
 					HistoryScalingCountStep = GetSelectedHistoryScalingCountStep(row),
+					RepeatScalingExtraTimes = GetSelectedRepeatScalingExtraTimes(row),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,
@@ -23639,6 +24320,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					BranchCountConditionAmount = branchCountConditionAmount,
 					BranchEffect = branchEffect,
 					OstyAction = resolvedKind == CardExtraEffectKind.OstyAction ? GetSelectedOstyAction(row) : default,
+					CreatureCommandId = resolvedKind == CardExtraEffectKind.CreatureCommand ? GetSelectedCreatureCommandId(row) : null,
 					GrantedKeyword = resolvedKind == CardExtraEffectKind.GrantKeywordToPile ? GetSelectedGrantedKeyword(row) : default,
 					CardMatchMode = GetSelectedCardMatchMode(row),
 					MatchCardId = row.MatchCardIdField != null && GodotObject.IsInstanceValid(row.MatchCardIdField)
@@ -24583,6 +25265,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					HistoryScalingIncludesBase = IsHistoryScalingBaseEnabled(row),
 					HistoryScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, savedAmount),
 					HistoryScalingCountStep = GetSelectedHistoryScalingCountStep(row),
+					RepeatScalingExtraTimes = GetSelectedRepeatScalingExtraTimes(row),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,
@@ -24789,6 +25472,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					BranchCountConditionAmount = branchCountConditionAmount,
 					BranchEffect = branchEffect,
 					OstyAction = resolvedKind == CardExtraEffectKind.OstyAction ? GetSelectedOstyAction(row) : default,
+					CreatureCommandId = resolvedKind == CardExtraEffectKind.CreatureCommand ? GetSelectedCreatureCommandId(row) : null,
 					GrantedKeyword = resolvedKind == CardExtraEffectKind.GrantKeywordToPile ? GetSelectedGrantedKeyword(row) : default,
 					CardMatchMode = GetSelectedCardMatchMode(row),
 					MatchCardId = row.MatchCardIdField != null && GodotObject.IsInstanceValid(row.MatchCardIdField)
@@ -24831,12 +25515,33 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					bool meaningful = baseEffect != null && baseEffect.Kind == upgradeEffect.Kind
 						? CardEditorExtraEffects.HasMeaningfulUpgradeBaseSlotDelta(baseEffect, upgradeEffect, secondaryNumericFieldsAreDeltas: true)
 						: CardEditorExtraEffects.HasMeaningfulUpgradeBaseSlotDelta(upgradeEffect, secondaryNumericFieldsAreDeltas: true);
+					CardEditorUpgradeDeltaDebugLog.LogUpgradeEditorDraftRow(
+						"UpgradeEditor.BuildDraftDeltaRow",
+						_cardId.ToString(),
+						rowIndex,
+						baseEffect,
+						upgradeEffect,
+						isDeltaRow: true,
+						numericFieldsAreDeltas: true,
+						meaningful);
 
 					if (!meaningful)
 					{
 						effects.Add(null!);
 						continue;
 					}
+				}
+				else
+				{
+					CardEditorUpgradeDeltaDebugLog.LogUpgradeEditorDraftRow(
+						"UpgradeEditor.BuildDraftAbsoluteRow",
+						_cardId.ToString(),
+						rowIndex,
+						baseEffect: null,
+						upgradeEffect,
+						isDeltaRow: false,
+						numericFieldsAreDeltas: true,
+						meaningful: true);
 				}
 
 				effects.Add(upgradeEffect);
@@ -24846,6 +25551,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				upgrade.ExtraEffectNumericFieldsAreDeltas = true;
 				upgrade.ExtraEffects = effects;
 			}
+			CardEditorUpgradeDeltaDebugLog.LogUpgradeBuilt(
+				"UpgradeEditor.BuildDraftComplete",
+				_cardId.ToString(),
+				upgrade,
+				baseExtraEffects);
 		}
 
 		return upgrade;
@@ -25118,13 +25828,25 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void OnApplyPressed()
 	{
-		EnsurePendingPopupHydrationCompleted();
+		ulong startMs = Time.GetTicksMsec();
+		PopupLagLog($"Apply start card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} dirty={_uiDirtySinceOpen} batch={_isBatchEdit} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending} persistent={_isPersistentPopupCacheEntry}");
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
 			Log.Info("[CardEditor][MultiplayerSync] Blocked popup apply because shared-state editing is host-controlled.");
 			return;
 		}
 
+		if (!_uiDirtySinceOpen && !_isBatchEdit)
+		{
+			_warmOppositePrebuiltPopupOnClose = false;
+			_allowPersistentPopupReuseOnClose = true;
+			_rebuildPrebuiltPopupOnClose = false;
+			PopupLagLog($"Apply fast-close card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs}");
+			Close();
+			return;
+		}
+
+		EnsurePendingPopupHydrationCompleted();
 		if (_isBatchEdit)
 		{
 			ApplyBatchExtraEffects();
@@ -25189,12 +25911,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardEditorOverrides.ApplyToExistingCards(_cardId);
 		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		_onApplied?.Invoke();
-		InvalidatePrebuiltPopupCacheEntry(_cardId, isUpgradeEditor: !_isUpgradeEditor, queueRebuild: false);
 		RefreshPersistentPopupSnapshotAfterApply();
+		RegisterCurrentPopupAsFreshCacheEntryAfterApply();
+		RebuildReadyPopupsAfterApply(_cardId, skipPopup: this, keepSkipPopupCacheEntry: true);
 		_warmOppositePrebuiltPopupOnClose = false;
 		_allowPersistentPopupReuseOnClose = true;
 		_rebuildPrebuiltPopupOnClose = false;
 		_uiDirtySinceOpen = false;
+		PopupLagLog($"Apply committed card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs}");
 		Close();
 	}
 
@@ -25204,6 +25928,25 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			? CardEditorOverrides.Clone(effectiveOverride)
 			: null;
 		_upgradeBaseline = null;
+	}
+
+	private void RefreshCachedPopupSnapshotAfterExternalApply()
+	{
+		_openingEffectiveOverride = CardEditorOverrides.TryGetEffectiveOverride(_cardId, out CardOverride effectiveOverride)
+			? CardEditorOverrides.Clone(effectiveOverride)
+			: null;
+		_upgradeBaseline = null;
+		_uiDirtySinceOpen = false;
+		_allowPersistentPopupReuseOnClose = true;
+		_rebuildPrebuiltPopupOnClose = false;
+		_warmOppositePrebuiltPopupOnClose = false;
+		_manualPrebuiltPopupWarmupHydration = false;
+
+		CardModel? refreshedPreview = BuildPrebuiltPopupPreview(_cardId, _isUpgradeEditor);
+		if (refreshedPreview != null)
+		{
+			_previewCard = refreshedPreview;
+		}
 	}
 
 	private void ApplyBatchExtraEffects()
@@ -25376,6 +26119,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private CardModel BuildPreviewForModeSwitch(bool upgradePreview)
 	{
+		ulong startMs = Time.GetTicksMsec();
 		CardModel canonical = ModelDb.GetById<CardModel>(_cardId);
 		CardModel preview = canonical.ToMutable();
 		CardOverride? effectiveOverride = GetEffectivePopupOverride();
@@ -25393,6 +26137,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			TryUpgradeForPreview(preview);
 		}
 
+		PopupLagLog($"BuildPreviewForModeSwitch card={_cardId} targetMode={(upgradePreview ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} hasEffectiveOverride={effectiveOverride != null}");
 		return preview;
 	}
 
@@ -25448,6 +26193,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void StoreDraftForModeSwitch()
 	{
+		ulong startMs = Time.GetTicksMsec();
+		PopupLagLog($"StoreDraft start card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending}");
 		if (_isUpgradeEditor)
 		{
 			UpgradeBaseline baseline = GetUpgradeBaseline();
@@ -25457,6 +26204,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				: new CardOverride();
 			effectiveOverride.Upgrade = draftUpgrade.IsEmpty() ? null : draftUpgrade;
 			CardEditorUiState.SetDraftOverride(_cardId, effectiveOverride);
+			PopupLagLog($"StoreDraft end card={_cardId} mode=upgrade elapsedMs={Time.GetTicksMsec() - startMs}");
 			return;
 		}
 
@@ -25467,62 +26215,117 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			draft.Upgrade = existingUpgrade;
 		}
 		CardEditorUiState.SetDraftOverride(_cardId, draft);
+		PopupLagLog($"StoreDraft end card={_cardId} mode=base elapsedMs={Time.GetTicksMsec() - startMs}");
 	}
 
 	private void OpenUpgradeEditor()
 	{
-		EnsurePendingPopupHydrationCompleted();
+		ulong startMs = Time.GetTicksMsec();
 		if (_isBatchEdit)
 		{
 			return;
 		}
 
-		ForceLayoutRefreshNow();
-		StoreDraftForModeSwitch();
-		_preserveDraftOnClose = true;
-		_allowPersistentPopupReuseOnClose = false;
+		bool hasUnsavedUiChanges = _uiDirtySinceOpen;
+		PopupLagLog($"SwitchStart base->upgrade card={_cardId} dirty={hasUnsavedUiChanges} persistent={_isPersistentPopupCacheEntry} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending} visible={Visible} inTree={IsInsideTree()} cacheSize={_prebuiltPopupCache.Count}");
+		if (hasUnsavedUiChanges)
+		{
+			EnsurePendingPopupHydrationCompleted();
+			ForceLayoutRefreshNow();
+			StoreDraftForModeSwitch();
+		}
+		_preserveDraftOnClose = hasUnsavedUiChanges;
+		bool canUsePersistentModeSwitch = _isPersistentPopupCacheEntry && !hasUnsavedUiChanges;
+		_allowPersistentPopupReuseOnClose = true;
 		Vector2 preferredSwitchPanelSize = GetPreferredSwitchPanelSize();
 		if (_verbosePerfLogging)
 		{
 			Log.Info($"[CardEditor] Switch base->upgrade runtime={_panelRuntimeSize} preferred={_preferredPanelSize} target={preferredSwitchPanelSize}");
 		}
 		CardModel upgraded = BuildPreviewForModeSwitch(upgradePreview: true);
-		NCardEditorPopup popup = Create(
-			upgraded,
-			_onApplied ?? (() => { }),
-			useModalContainer: _useModalContainer,
-			isUpgradeEditor: true,
-			preferredPanelSize: preferredSwitchPanelSize);
-		Callable.From(() => ShowPopup(popup)).CallDeferred();
+		if (canUsePersistentModeSwitch)
+		{
+			PopupLagLog($"SwitchRoute base->upgrade card={_cardId} route=persistent elapsedBeforeRouteMs={Time.GetTicksMsec() - startMs}");
+			OpenPersistentModeSwitchPopup(upgraded, isUpgradeEditor: true, preferredSwitchPanelSize);
+		}
+		else
+		{
+			PopupLagLog($"SwitchRoute base->upgrade card={_cardId} route=fresh-create elapsedBeforeRouteMs={Time.GetTicksMsec() - startMs}");
+			NCardEditorPopup popup = Create(
+				upgraded,
+				_onApplied ?? (() => { }),
+				useModalContainer: _useModalContainer,
+				isUpgradeEditor: true,
+				preferredPanelSize: preferredSwitchPanelSize);
+			Callable.From(() => ShowPopup(popup)).CallDeferred();
+		}
+		PopupLagLog($"SwitchEnd base->upgrade card={_cardId} elapsedMs={Time.GetTicksMsec() - startMs}");
 		Close();
 	}
 
 	private void OpenBaseEditor()
 	{
-		EnsurePendingPopupHydrationCompleted();
+		ulong startMs = Time.GetTicksMsec();
 		if (_isBatchEdit)
 		{
 			return;
 		}
 
-		ForceLayoutRefreshNow();
-		StoreDraftForModeSwitch();
-		_preserveDraftOnClose = true;
-		_allowPersistentPopupReuseOnClose = false;
+		bool hasUnsavedUiChanges = _uiDirtySinceOpen;
+		PopupLagLog($"SwitchStart upgrade->base card={_cardId} dirty={hasUnsavedUiChanges} persistent={_isPersistentPopupCacheEntry} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending} visible={Visible} inTree={IsInsideTree()} cacheSize={_prebuiltPopupCache.Count}");
+		if (hasUnsavedUiChanges)
+		{
+			EnsurePendingPopupHydrationCompleted();
+			ForceLayoutRefreshNow();
+			StoreDraftForModeSwitch();
+		}
+		_preserveDraftOnClose = hasUnsavedUiChanges;
+		bool canUsePersistentModeSwitch = _isPersistentPopupCacheEntry && !hasUnsavedUiChanges;
+		_allowPersistentPopupReuseOnClose = true;
 		Vector2 preferredSwitchPanelSize = GetPreferredSwitchPanelSize();
 		if (_verbosePerfLogging)
 		{
 			Log.Info($"[CardEditor] Switch upgrade->base runtime={_panelRuntimeSize} preferred={_preferredPanelSize} target={preferredSwitchPanelSize}");
 		}
 		CardModel basePreview = BuildPreviewForModeSwitch(upgradePreview: false);
-		NCardEditorPopup popup = Create(
-			basePreview,
-			_onApplied ?? (() => { }),
-			useModalContainer: _useModalContainer,
-			isUpgradeEditor: false,
-			preferredPanelSize: preferredSwitchPanelSize);
-		Callable.From(() => ShowPopup(popup)).CallDeferred();
+		if (canUsePersistentModeSwitch)
+		{
+			PopupLagLog($"SwitchRoute upgrade->base card={_cardId} route=persistent elapsedBeforeRouteMs={Time.GetTicksMsec() - startMs}");
+			OpenPersistentModeSwitchPopup(basePreview, isUpgradeEditor: false, preferredSwitchPanelSize);
+		}
+		else
+		{
+			PopupLagLog($"SwitchRoute upgrade->base card={_cardId} route=fresh-create elapsedBeforeRouteMs={Time.GetTicksMsec() - startMs}");
+			NCardEditorPopup popup = Create(
+				basePreview,
+				_onApplied ?? (() => { }),
+				useModalContainer: _useModalContainer,
+				isUpgradeEditor: false,
+				preferredPanelSize: preferredSwitchPanelSize);
+			Callable.From(() => ShowPopup(popup)).CallDeferred();
+		}
+		PopupLagLog($"SwitchEnd upgrade->base card={_cardId} elapsedMs={Time.GetTicksMsec() - startMs}");
 		Close();
+	}
+
+	private void OpenPersistentModeSwitchPopup(CardModel preview, bool isUpgradeEditor, Vector2 preferredSwitchPanelSize)
+	{
+		ulong startMs = Time.GetTicksMsec();
+		PopupLagLog($"OpenPersistentModeSwitch start card={_cardId} targetMode={(isUpgradeEditor ? "upgrade" : "base")} cacheSize={_prebuiltPopupCache.Count}");
+		NCardEditorPopup popup = GetOrCreatePersistentPopup(
+			preview,
+			_onApplied ?? (() => { }),
+			isUpgradeEditor,
+			preferredSwitchPanelSize);
+		if (popup.GetParent() == null)
+		{
+			NGame.Instance?.AddChildSafely(popup);
+		}
+		popup.ForceLayoutRefreshNow();
+		Callable.From(popup.ForceLayoutRefreshNow).CallDeferred();
+		CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary();
+		Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
+		PopupLagLog($"OpenPersistentModeSwitch end card={_cardId} targetMode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} popupPendingRows={popup._pendingExistingExtraEffectRows.Count} popupDirty={popup._uiDirtySinceOpen}");
 	}
 
 	private void ShowPopup(NCardEditorPopup popup)
@@ -25634,16 +26437,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void Close()
 	{
+		ulong startMs = Time.GetTicksMsec();
 		bool rebuildPrebuiltPopupOnClose = _rebuildPrebuiltPopupOnClose;
 		_rebuildPrebuiltPopupOnClose = false;
 		bool reusePersistentPopup = _isPersistentPopupCacheEntry
 			&& _allowPersistentPopupReuseOnClose
-			&& !_uiDirtySinceOpen
+			&& (!_uiDirtySinceOpen || _preserveDraftOnClose)
 			&& !string.IsNullOrWhiteSpace(_persistentPopupCacheKey);
 		bool warmPrebuiltPopupAfterClose = _isPersistentPopupCacheEntry
 			&& !reusePersistentPopup
 			&& !_preserveDraftOnClose
 			&& _cardId != ModelId.none;
+		PopupLagLog($"Close start card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} reuse={reusePersistentPopup} persistent={_isPersistentPopupCacheEntry} allowReuse={_allowPersistentPopupReuseOnClose} dirty={_uiDirtySinceOpen} preserveDraft={_preserveDraftOnClose} rebuild={rebuildPrebuiltPopupOnClose} warm={warmPrebuiltPopupAfterClose} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending}");
 
 		if (!_preserveDraftOnClose)
 		{
@@ -25683,6 +26488,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				CardEditorLibrarySelectionState.RefreshVisibleHighlights(reuseLibrary);
 				Callable.From(() => CardEditorLibrarySelectionState.RefreshVisibleHighlights(reuseLibrary)).CallDeferred();
 			}
+			PopupLagLog($"Close reused card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs}");
 			return;
 		}
 		if (_cardPreviewNode != null && GodotObject.IsInstanceValid(_cardPreviewNode))
@@ -25707,6 +26513,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CardEditorLibrarySelectionState.RefreshVisibleHighlights(library);
 			Callable.From(() => CardEditorLibrarySelectionState.RefreshVisibleHighlights(library)).CallDeferred();
 		}
+		PopupLagLog($"Close freed card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs}");
 	}
 
 	private static IEnumerable<ModelId> EnumerateCardPickerIds()
@@ -26889,8 +27696,38 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		Dictionary<string, float>? fp = _createdFinishParams.Count > 0 ? new Dictionary<string, float>(_createdFinishParams) : null;
 
-		CardEditorCreatedCardsStore.SetMeta(_cardId, title, pool, poolTitle, rarity, type, targetType, effectSourceIds, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp);
+		CardEditorCreatedCardsStore.SetMeta(_cardId, title, pool, poolTitle, rarity, type, targetType, effectSourceIds, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp, _createdCustomRewardPoolsTickbox?.IsTicked ?? false, GetSelectedCreatedRewardPoolIds(), GetSelectedRewardBucket(), GetSelectedRewardInjectionMode());
 		CardEditorCreatedCardsStore.SetEnabled(_cardId, enabled);
+	}
+
+	private List<string> GetSelectedCreatedRewardPoolIds()
+	{
+		return _createdRewardPoolSelectedIds
+			.Where(CardEditorRewardPoolRegistry.IsKnownPoolId)
+			.OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	private CardEditorRewardPoolBucket GetSelectedRewardBucket()
+	{
+		if (_createdRewardBucketSelect != null
+			&& _createdRewardBucketSelect.Selected >= 0
+			&& _createdRewardBucketSelect.Selected < _createdRewardBucketOptions.Count)
+		{
+			return _createdRewardBucketOptions[_createdRewardBucketSelect.Selected];
+		}
+		return CardEditorRewardPoolBucket.SameAsCard;
+	}
+
+	private CardEditorRewardPoolInjectionMode GetSelectedRewardInjectionMode()
+	{
+		if (_createdRewardInjectionModeSelect != null
+			&& _createdRewardInjectionModeSelect.Selected >= 0
+			&& _createdRewardInjectionModeSelect.Selected < _createdRewardInjectionModeOptions.Count)
+		{
+			return _createdRewardInjectionModeOptions[_createdRewardInjectionModeSelect.Selected];
+		}
+		return CardEditorRewardPoolInjectionMode.AddToPool;
 	}
 
 	private static string ToDisplayTitle(string? rawTitle)
@@ -26908,5 +27745,68 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(title.ToLowerInvariant());
+	}
+
+	private static string GetRewardBucketLabel(CardEditorRewardPoolBucket bucket)
+	{
+		return bucket switch
+		{
+			CardEditorRewardPoolBucket.SameAsCard => CardEditorLoc.T("rewardBucket.sameAsCard", "Same As Card"),
+			CardEditorRewardPoolBucket.Common => CardEditorLoc.T("rewardBucket.common", "Common"),
+			CardEditorRewardPoolBucket.Uncommon => CardEditorLoc.T("rewardBucket.uncommon", "Uncommon"),
+			CardEditorRewardPoolBucket.Rare => CardEditorLoc.T("rewardBucket.rare", "Rare"),
+			CardEditorRewardPoolBucket.Event => CardEditorLoc.T("rewardBucket.event", "Event"),
+			_ => bucket.ToString()
+		};
+	}
+
+	private static string GetRewardBucketTooltip(CardEditorRewardPoolBucket bucket)
+	{
+		return bucket switch
+		{
+			CardEditorRewardPoolBucket.SameAsCard => CardEditorLoc.T("rewardBucketTooltip.sameAsCard", "Use the card's own rarity as its reward bucket."),
+			CardEditorRewardPoolBucket.Common => CardEditorLoc.T("rewardBucketTooltip.common", "Treat this card as a Common option for rarity-filtered event rewards."),
+			CardEditorRewardPoolBucket.Uncommon => CardEditorLoc.T("rewardBucketTooltip.uncommon", "Treat this card as an Uncommon option for rarity-filtered event rewards."),
+			CardEditorRewardPoolBucket.Rare => CardEditorLoc.T("rewardBucketTooltip.rare", "Treat this card as a Rare option for rarity-filtered event rewards."),
+			CardEditorRewardPoolBucket.Event => CardEditorLoc.T("rewardBucketTooltip.event", "Treat this card as an Event option. Event cards are allowed through rarity filters."),
+			_ => bucket.ToString()
+		};
+	}
+
+	private static string GetRewardInjectionModeLabel(CardEditorRewardPoolInjectionMode mode)
+	{
+		return mode switch
+		{
+			CardEditorRewardPoolInjectionMode.AddToPool => CardEditorLoc.T("rewardInjection.addToPool", "Add To Pool"),
+			CardEditorRewardPoolInjectionMode.ForceInclude => CardEditorLoc.T("rewardInjection.forceInclude", "Force Include"),
+			CardEditorRewardPoolInjectionMode.ReplacePool => CardEditorLoc.T("rewardInjection.replacePool", "Replace Pool"),
+			_ => mode.ToString()
+		};
+	}
+
+	private static string GetRewardInjectionTooltip(CardEditorRewardPoolInjectionMode mode)
+	{
+		return mode switch
+		{
+			CardEditorRewardPoolInjectionMode.AddToPool => CardEditorLoc.T("rewardInjectionTooltip.addToPool", "Adds this card as another random option in the selected vanilla pool. It can appear, but is not guaranteed."),
+			CardEditorRewardPoolInjectionMode.ForceInclude => CardEditorLoc.T("rewardInjectionTooltip.forceInclude", "When the selected vanilla pool appears, replace one visible reward option with this card."),
+			CardEditorRewardPoolInjectionMode.ReplacePool => CardEditorLoc.T("rewardInjectionTooltip.replacePool", "When the selected vanilla pool appears, replace the whole reward list with eligible custom cards from that pool."),
+			_ => mode.ToString()
+		};
+	}
+
+	private static string GetRewardPoolTooltip(CardEditorRewardPoolDefinition pool)
+	{
+		string group = string.IsNullOrWhiteSpace(pool.Group)
+			? CardEditorLoc.T("section.rewardPoolsOther", "Other")
+			: pool.Group!;
+		string rarity = pool.RarityHint.HasValue && pool.RarityHint.Value != CardRarity.None
+			? CardEditorLoc.Enum("rarity", pool.RarityHint.Value, pool.RarityHint.Value.ToString())
+			: CardEditorLoc.T("value.any", "Any");
+		return CardEditorLoc.F(
+			"rewardPool.tooltip",
+			$"{group} reward pool. Rarity hint: {rarity}.",
+			("Group", group),
+			("Rarity", rarity));
 	}
 }

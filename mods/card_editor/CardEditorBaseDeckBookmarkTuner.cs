@@ -174,7 +174,7 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 
 	private static Button CreateToggleButton(NCardLibrary library)
 	{
-		_bodyFont ??= TryLoadFont(BodyFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, BodyFontPath);
 
 		Button button = new()
 		{
@@ -206,8 +206,8 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 
 	private static PanelContainer CreatePanel(NCardLibrary library)
 	{
-		_headerFont ??= TryLoadFont(HeaderFontPath);
-		_bodyFont ??= TryLoadFont(BodyFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, HeaderFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, BodyFontPath);
 
 		PanelContainer panel = new()
 		{
@@ -313,7 +313,7 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 
 	private static Button CreateActionButton(string text, Action onPressed)
 	{
-		_bodyFont ??= TryLoadFont(BodyFontPath);
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, BodyFontPath);
 
 		Button button = new()
 		{
@@ -390,15 +390,4 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 		Sync(library);
 	}
 
-	private static Font? TryLoadFont(string path)
-	{
-		try
-		{
-			return GD.Load<Font>(path);
-		}
-		catch
-		{
-			return null;
-		}
-	}
 }

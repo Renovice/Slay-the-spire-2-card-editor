@@ -532,6 +532,7 @@ public static class CardEditorOverrides
 	{
 		CardModel preview = canonicalCard.ToMutable();
 		ApplyTo(preview);
+		CardEditorUpgradeDeltaDebugLog.LogCardState("Overrides.BuildPreview.afterApplyTo", preview);
 		return preview;
 	}
 
@@ -563,6 +564,7 @@ public static class CardEditorOverrides
 
 	private static void ApplyOverride(CardModel card, CardOverride overrideData)
 	{
+		CardEditorUpgradeDeltaDebugLog.LogCardState("Overrides.ApplyOverride.before", card, overrideData);
 		SetInstanceOverride(card, overrideData);
 
 		if (!string.IsNullOrWhiteSpace(overrideData.PoolTitle))
@@ -1017,6 +1019,7 @@ public static class CardEditorOverrides
 	private static void ApplyToExistingCardInstance(CardModel card)
 	{
 		RefreshCardAfterUpgradeStateChanged(card);
+		CardEditorRunSelfScalingState.TryRestoreCard(card, cardAlreadyRebased: true);
 	}
 
 	internal static void RefreshCardAfterUpgradeStateChanged(CardModel card)

@@ -824,7 +824,7 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsCostLess
 			return;
 		}
 
-		IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetEffectsForDescription(sourceCard, isUpgradePreview: false);
+		IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetRuntimeEffectsForExecution(combatState, sourceCard);
 		if (effects == null || effects.Count == 0)
 		{
 			return;

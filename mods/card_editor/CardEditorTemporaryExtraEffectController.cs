@@ -227,6 +227,21 @@ internal static class CardEditorTemporaryExtraEffectController
 		CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(effect);
 		stored.GrantToCard = false;
 
+		foreach (ExtraEffectGrant grant in state.Grants)
+		{
+			if (grant?.Effect == null || !CardEditorExtraEffects.IsDuplicateGrantedEffect(grant.Effect, stored))
+			{
+				continue;
+			}
+
+			if (grant.Duration == duration && remainingTurns > 0)
+			{
+				grant.RemainingTurns = Math.Max(grant.RemainingTurns, remainingTurns);
+			}
+			CardEditorMod.VerboseLog($"[CardEditor][TempEffectGrant] duplicate ignored card={card.Id} key={key?.Id} kind={stored.Kind} effectId={stored.EffectId} duration={duration}");
+			return;
+		}
+
 		state.Grants.Add(new ExtraEffectGrant
 		{
 			Effect = stored,

@@ -234,6 +234,10 @@ internal static class CardEditorMatchingCardAuraController
 			CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(grant.Effect);
 			stored.GrantToCard = false;
 			effects ??= new List<CardExtraEffect>();
+			if (effects.Any(existing => CardEditorExtraEffects.IsDuplicateGrantedEffect(existing, stored)))
+			{
+				continue;
+			}
 			effects.Add(stored);
 		}
 
@@ -300,6 +304,22 @@ internal static class CardEditorMatchingCardAuraController
 		{
 			state = new PlayerState();
 			schedule.States[owner] = state;
+		}
+
+		foreach (AuraGrant existing in state.Grants)
+		{
+			if (existing == null
+				|| existing.Kind != grant.Kind
+				|| !CardEditorExtraEffects.IsDuplicateGrantedEffect(existing.Effect, grant.Effect))
+			{
+				continue;
+			}
+
+			if (grant.RemainingTurns > 0)
+			{
+				existing.RemainingTurns = Math.Max(existing.RemainingTurns, grant.RemainingTurns);
+			}
+			return;
 		}
 
 		state.Grants.Add(grant);

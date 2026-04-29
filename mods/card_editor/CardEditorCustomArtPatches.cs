@@ -36,11 +36,18 @@ internal static class CardEditorCustomPortraitLoader
 
 		if (CardEditorCreatedCardsStore.IsCreatedCardId(cardId))
 		{
-			if (!CardEditorCreatedCardsStore.TryGetCustomPortraitAbsolutePath(cardId, out string createdAbsolutePath))
+			if (CardEditorCreatedCardsStore.TryGetCustomPortraitAbsolutePath(cardId, out string createdAbsolutePath))
 			{
-				return false;
+				return TryGetOrLoadTexture(createdAbsolutePath, cardId, out texture);
 			}
-			return TryGetOrLoadTexture(createdAbsolutePath, cardId, out texture);
+
+			ModelId? sourceCardId = CardEditorCreatedCardsStore.GetPortraitSourceCardId(cardId);
+			if (sourceCardId != null && sourceCardId != ModelId.none)
+			{
+				return TryGetPortraitFromSourceCard(sourceCardId, out texture);
+			}
+
+			return false;
 		}
 
 		if (!CardEditorOverrides.TryGetEffectiveOverride(cardId, out CardOverride overrideData))

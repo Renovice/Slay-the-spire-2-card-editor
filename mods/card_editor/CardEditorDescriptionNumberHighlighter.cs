@@ -11,6 +11,18 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorDescriptionNumberHighlighter
 {
+	private readonly struct RenderedNumberToken
+	{
+		public RenderedNumberToken(string plainText, string renderedText)
+		{
+			PlainText = plainText;
+			RenderedText = renderedText;
+		}
+
+		public string PlainText { get; }
+		public string RenderedText { get; }
+	}
+
 	private static readonly Lazy<HashSet<string>> _runtimeKeywordLineKeys = new Lazy<HashSet<string>>(BuildRuntimeKeywordLineKeys);
 	private static readonly Lazy<HashSet<string>> _runtimeReplayLineKeys = new Lazy<HashSet<string>>(BuildRuntimeReplayLineKeys);
 
@@ -21,12 +33,82 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return template;
 		}
 
-		List<string> referenceTokens = ExtractVisibleNumberTokens(referenceDescription, includeHighlightedNumbers: true);
+		string? lineMatched = TryApplyLiveNumbersByMatchingLines(template, referenceDescription);
+		if (lineMatched != null)
+		{
+			return lineMatched;
+		}
+
+		List<RenderedNumberToken> referenceTokens = ExtractRenderedNumberTokens(referenceDescription);
 		if (referenceTokens.Count == 0)
 		{
 			return template;
 		}
 
+		return ApplyRenderedNumberTokens(template, referenceTokens);
+	}
+
+	private static string? TryApplyLiveNumbersByMatchingLines(string template, string referenceDescription)
+	{
+		string[] templateLines = SplitDescriptionLines(template);
+		string[] referenceLines = SplitDescriptionLines(referenceDescription);
+		if (templateLines.Length <= 1 || referenceLines.Length <= 1)
+		{
+			return null;
+		}
+
+		Dictionary<string, List<RenderedNumberToken>> referenceTokensByLineKey = new Dictionary<string, List<RenderedNumberToken>>(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> duplicateKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (string referenceLine in referenceLines)
+		{
+			string key = NormalizeVisibleLineWithoutNumbers(referenceLine);
+			if (string.IsNullOrWhiteSpace(key))
+			{
+				continue;
+			}
+
+			List<RenderedNumberToken> tokens = ExtractRenderedNumberTokens(referenceLine);
+			if (tokens.Count == 0)
+			{
+				continue;
+			}
+
+			if (referenceTokensByLineKey.ContainsKey(key))
+			{
+				duplicateKeys.Add(key);
+				continue;
+			}
+
+			referenceTokensByLineKey[key] = tokens;
+		}
+
+		if (referenceTokensByLineKey.Count == 0)
+		{
+			return null;
+		}
+
+		bool matchedAny = false;
+		List<string> renderedLines = new List<string>(templateLines.Length);
+		foreach (string templateLine in templateLines)
+		{
+			string key = NormalizeVisibleLineWithoutNumbers(templateLine);
+			if (!string.IsNullOrWhiteSpace(key)
+				&& !duplicateKeys.Contains(key)
+				&& referenceTokensByLineKey.TryGetValue(key, out List<RenderedNumberToken>? lineTokens))
+			{
+				renderedLines.Add(ApplyRenderedNumberTokens(templateLine, lineTokens));
+				matchedAny = true;
+				continue;
+			}
+
+			renderedLines.Add(templateLine);
+		}
+
+		return matchedAny ? string.Join('\n', renderedLines) : null;
+	}
+
+	private static string ApplyRenderedNumberTokens(string template, IReadOnlyList<RenderedNumberToken> referenceTokens)
+	{
 		StringBuilder builder = new StringBuilder(template.Length + 16);
 		int tokenIndex = 0;
 		int highlightDepth = 0;
@@ -42,7 +124,7 @@ internal static class CardEditorDescriptionNumberHighlighter
 			if (highlightDepth == 0 && imageDepth == 0 && TryReadNumericToken(template, i, out int tokenEndExclusive))
 			{
 				builder.Append(tokenIndex < referenceTokens.Count
-					? referenceTokens[tokenIndex]
+					? referenceTokens[tokenIndex].RenderedText
 					: template.AsSpan(i, tokenEndExclusive - i));
 				tokenIndex++;
 				i = tokenEndExclusive;
@@ -381,6 +463,58 @@ internal static class CardEditorDescriptionNumberHighlighter
 		return tokens;
 	}
 
+	private static List<RenderedNumberToken> ExtractRenderedNumberTokens(string text)
+	{
+		List<RenderedNumberToken> tokens = new List<RenderedNumberToken>();
+		string? activeHighlightTag = null;
+		int imageDepth = 0;
+
+		for (int i = 0; i < text.Length;)
+		{
+			if (TryReadTag(text, i, out string tag, out int tagEndExclusive))
+			{
+				UpdateRenderedTokenTagState(tag, ref activeHighlightTag, ref imageDepth);
+				i = tagEndExclusive;
+				continue;
+			}
+
+			if (imageDepth == 0 && TryReadNumericToken(text, i, out int tokenEndExclusive))
+			{
+				string plainText = text.Substring(i, tokenEndExclusive - i);
+				string renderedText = activeHighlightTag == null
+					? plainText
+					: $"[{activeHighlightTag}]{plainText}[/{activeHighlightTag}]";
+				tokens.Add(new RenderedNumberToken(plainText, renderedText));
+				i = tokenEndExclusive;
+				continue;
+			}
+
+			i++;
+		}
+
+		return tokens;
+	}
+
+	private static bool TryReadTag(string text, int index, out string tag, out int endExclusive)
+	{
+		tag = string.Empty;
+		endExclusive = index;
+		if (index < 0 || index >= text.Length || text[index] != '[')
+		{
+			return false;
+		}
+
+		int tagEnd = text.IndexOf(']', index);
+		if (tagEnd < 0)
+		{
+			return false;
+		}
+
+		tag = text.Substring(index, tagEnd - index + 1);
+		endExclusive = tagEnd + 1;
+		return true;
+	}
+
 	private static bool TryAppendTag(string text, ref int index, StringBuilder builder, ref int highlightDepth, ref int imageDepth)
 	{
 		if (index < 0 || index >= text.Length || text[index] != '[')
@@ -478,6 +612,31 @@ internal static class CardEditorDescriptionNumberHighlighter
 			|| tag.Equals("[/red]", StringComparison.OrdinalIgnoreCase))
 		{
 			highlightDepth = highlightDepth > 0 ? highlightDepth - 1 : 0;
+		}
+		else if (tag.StartsWith("[img", StringComparison.OrdinalIgnoreCase))
+		{
+			imageDepth++;
+		}
+		else if (tag.Equals("[/img]", StringComparison.OrdinalIgnoreCase))
+		{
+			imageDepth = imageDepth > 0 ? imageDepth - 1 : 0;
+		}
+	}
+
+	private static void UpdateRenderedTokenTagState(string tag, ref string? activeHighlightTag, ref int imageDepth)
+	{
+		if (tag.Equals("[green]", StringComparison.OrdinalIgnoreCase))
+		{
+			activeHighlightTag = "green";
+		}
+		else if (tag.Equals("[red]", StringComparison.OrdinalIgnoreCase))
+		{
+			activeHighlightTag = "red";
+		}
+		else if (tag.Equals("[/green]", StringComparison.OrdinalIgnoreCase)
+			|| tag.Equals("[/red]", StringComparison.OrdinalIgnoreCase))
+		{
+			activeHighlightTag = null;
 		}
 		else if (tag.StartsWith("[img", StringComparison.OrdinalIgnoreCase))
 		{

@@ -34,6 +34,22 @@ internal enum CardEditorEffectSourcePlacement
 	AfterCustomEffects = 1
 }
 
+internal enum CardEditorRewardPoolBucket
+{
+	SameAsCard = 0,
+	Common = 1,
+	Uncommon = 2,
+	Rare = 3,
+	Event = 4
+}
+
+internal enum CardEditorRewardPoolInjectionMode
+{
+	AddToPool = 0,
+	ForceInclude = 1,
+	ReplacePool = 2
+}
+
 internal sealed class CardEditorCreatedCardDefinition
 {
 	public bool Enabled { get; set; }
@@ -54,6 +70,10 @@ internal sealed class CardEditorCreatedCardDefinition
 	public string? CustomText { get; set; }
 	public bool CustomTextUpgradedEnabled { get; set; }
 	public string? CustomTextUpgraded { get; set; }
+	public bool CustomRewardPoolsEnabled { get; set; }
+	public List<string> CustomRewardPoolIds { get; set; } = new();
+	public CardEditorRewardPoolBucket RewardPoolBucket { get; set; } = CardEditorRewardPoolBucket.SameAsCard;
+	public CardEditorRewardPoolInjectionMode RewardPoolInjectionMode { get; set; } = CardEditorRewardPoolInjectionMode.AddToPool;
 	public CardOverride Override { get; set; } = new CardOverride();
 }
 
@@ -75,7 +95,7 @@ internal static class CardEditorCreatedCardsStore
 	public static int Revision { get; private set; }
 	internal static bool PersistenceSuspended { get; set; }
 
-	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
+	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null, bool customRewardPoolsEnabled = false, List<string>? customRewardPoolIds = null, CardEditorRewardPoolBucket rewardPoolBucket = CardEditorRewardPoolBucket.SameAsCard, CardEditorRewardPoolInjectionMode rewardPoolInjectionMode = CardEditorRewardPoolInjectionMode.AddToPool)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? persistent))
@@ -105,6 +125,10 @@ internal static class CardEditorCreatedCardsStore
 				CustomText = persistent.CustomText,
 				CustomTextUpgradedEnabled = persistent.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = persistent.CustomTextUpgraded,
+				CustomRewardPoolsEnabled = persistent.CustomRewardPoolsEnabled,
+				CustomRewardPoolIds = new List<string>(persistent.CustomRewardPoolIds),
+				RewardPoolBucket = persistent.RewardPoolBucket,
+				RewardPoolInjectionMode = persistent.RewardPoolInjectionMode,
 				Override = persistent.Override
 			};
 			_draftDefinitions[cardId] = draft;
@@ -130,6 +154,10 @@ internal static class CardEditorCreatedCardsStore
 		draft.FinishParams = finishParams != null ? new Dictionary<string, float>(finishParams) : null;
 		draft.CustomTextEnabled = customTextEnabled;
 		draft.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
+		draft.CustomRewardPoolsEnabled = customRewardPoolsEnabled;
+		draft.CustomRewardPoolIds = NormalizeRewardPoolIds(customRewardPoolIds);
+		draft.RewardPoolBucket = rewardPoolBucket;
+		draft.RewardPoolInjectionMode = rewardPoolInjectionMode;
 	}
 
 	public static void ClearDraftMeta(ModelId cardId)
@@ -349,6 +377,12 @@ internal static class CardEditorCreatedCardsStore
 		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.CustomPortraitFile : null;
 	}
 
+	public static ModelId? GetPortraitSourceCardId(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.PortraitSourceCardId : null;
+	}
+
 	public static IReadOnlyList<string> ListCustomPortraitFiles()
 	{
 		try
@@ -466,7 +500,7 @@ internal static class CardEditorCreatedCardsStore
 		Save();
 	}
 
-	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null)
+	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null, bool customRewardPoolsEnabled = false, List<string>? customRewardPoolIds = null, CardEditorRewardPoolBucket rewardPoolBucket = CardEditorRewardPoolBucket.SameAsCard, CardEditorRewardPoolInjectionMode rewardPoolInjectionMode = CardEditorRewardPoolInjectionMode.AddToPool)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? def))
@@ -492,8 +526,36 @@ internal static class CardEditorCreatedCardsStore
 		def.FinishParams = finishParams != null ? new Dictionary<string, float>(finishParams) : null;
 		def.CustomTextEnabled = customTextEnabled;
 		def.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
+		def.CustomRewardPoolsEnabled = customRewardPoolsEnabled;
+		def.CustomRewardPoolIds = NormalizeRewardPoolIds(customRewardPoolIds);
+		def.RewardPoolBucket = rewardPoolBucket;
+		def.RewardPoolInjectionMode = rewardPoolInjectionMode;
 		Revision++;
 		Save();
+	}
+
+	public static bool AreCustomRewardPoolsEnabled(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) && def.CustomRewardPoolsEnabled;
+	}
+
+	public static IReadOnlyList<string> GetCustomRewardPoolIds(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.CustomRewardPoolIds : Array.Empty<string>();
+	}
+
+	public static CardEditorRewardPoolBucket GetRewardPoolBucket(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.RewardPoolBucket : CardEditorRewardPoolBucket.SameAsCard;
+	}
+
+	public static CardEditorRewardPoolInjectionMode GetRewardPoolInjectionMode(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.RewardPoolInjectionMode : CardEditorRewardPoolInjectionMode.AddToPool;
 	}
 
 	public static string? GetCustomText(ModelId cardId)
@@ -578,6 +640,10 @@ internal static class CardEditorCreatedCardsStore
 				CustomText = persistent.CustomText,
 				CustomTextUpgradedEnabled = persistent.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = persistent.CustomTextUpgraded,
+				CustomRewardPoolsEnabled = persistent.CustomRewardPoolsEnabled,
+				CustomRewardPoolIds = new List<string>(persistent.CustomRewardPoolIds),
+				RewardPoolBucket = persistent.RewardPoolBucket,
+				RewardPoolInjectionMode = persistent.RewardPoolInjectionMode,
 				Override = persistent.Override
 			};
 			_draftDefinitions[cardId] = draft;
@@ -1029,6 +1095,30 @@ internal static class CardEditorCreatedCardsStore
 		}
 	}
 
+	private static List<string> NormalizeRewardPoolIds(IEnumerable<string>? rewardPoolIds)
+	{
+		List<string> result = new();
+		if (rewardPoolIds == null)
+		{
+			return result;
+		}
+
+		HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+		foreach (string? rawId in rewardPoolIds)
+		{
+			string? id = rawId?.Trim();
+			if (string.IsNullOrWhiteSpace(id) || !CardEditorRewardPoolRegistry.IsKnownPoolId(id))
+			{
+				continue;
+			}
+			if (seen.Add(id))
+			{
+				result.Add(id);
+			}
+		}
+		return result;
+	}
+
 	private static List<ModelId> NormalizeEffectSourceCardIds(ModelId createdCardId, List<ModelId>? effectSourceCardIds)
 	{
 		if (effectSourceCardIds == null || effectSourceCardIds.Count == 0)
@@ -1090,6 +1180,10 @@ internal static class CardEditorCreatedCardsStore
 			CustomText = source.CustomText,
 			CustomTextUpgradedEnabled = source.CustomTextUpgradedEnabled,
 			CustomTextUpgraded = source.CustomTextUpgraded,
+			CustomRewardPoolsEnabled = source.CustomRewardPoolsEnabled,
+			CustomRewardPoolIds = new List<string>(source.CustomRewardPoolIds),
+			RewardPoolBucket = source.RewardPoolBucket,
+			RewardPoolInjectionMode = source.RewardPoolInjectionMode,
 			Override = source.Override ?? new CardOverride()
 		};
 	}
@@ -1115,6 +1209,10 @@ internal static class CardEditorCreatedCardsStore
 		public string? CustomText { get; set; }
 		public bool? CustomTextUpgradedEnabled { get; set; }
 		public string? CustomTextUpgraded { get; set; }
+		public bool? CustomRewardPoolsEnabled { get; set; }
+		public List<string>? CustomRewardPoolIds { get; set; }
+		public string? RewardPoolBucket { get; set; }
+		public string? RewardPoolInjectionMode { get; set; }
 		public CardEditorPresetStore.CardOverrideDto? Override { get; set; }
 
 		public static CreatedCardDto FromDefinition(CardEditorCreatedCardDefinition def)
@@ -1141,6 +1239,10 @@ internal static class CardEditorCreatedCardsStore
 				CustomText = def.CustomText,
 				CustomTextUpgradedEnabled = def.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = def.CustomTextUpgraded,
+				CustomRewardPoolsEnabled = def.CustomRewardPoolsEnabled,
+				CustomRewardPoolIds = def.CustomRewardPoolIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+				RewardPoolBucket = def.RewardPoolBucket.ToString(),
+				RewardPoolInjectionMode = def.RewardPoolInjectionMode.ToString(),
 				Override = CardEditorPresetStore.CardOverrideDto.FromOverride(def.Override ?? new CardOverride())
 			};
 		}
@@ -1238,6 +1340,21 @@ internal static class CardEditorCreatedCardsStore
 			if (CustomTextUpgraded != null)
 			{
 				def.CustomTextUpgraded = string.IsNullOrWhiteSpace(CustomTextUpgraded) ? string.Empty : CustomTextUpgraded;
+			}
+
+			def.CustomRewardPoolsEnabled = CustomRewardPoolsEnabled ?? false;
+			def.CustomRewardPoolIds = NormalizeRewardPoolIds(CustomRewardPoolIds);
+
+			if (!string.IsNullOrWhiteSpace(RewardPoolBucket)
+				&& Enum.TryParse(RewardPoolBucket, ignoreCase: true, out CardEditorRewardPoolBucket parsedBucket))
+			{
+				def.RewardPoolBucket = parsedBucket;
+			}
+
+			if (!string.IsNullOrWhiteSpace(RewardPoolInjectionMode)
+				&& Enum.TryParse(RewardPoolInjectionMode, ignoreCase: true, out CardEditorRewardPoolInjectionMode parsedMode))
+			{
+				def.RewardPoolInjectionMode = parsedMode;
 			}
 
 			if (Override != null)
