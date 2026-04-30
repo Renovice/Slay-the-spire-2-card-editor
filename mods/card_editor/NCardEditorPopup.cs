@@ -2852,6 +2852,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public OptionButton IgnoreVariantSelect { get; init; } = null!;
 		public Control AutoActionVariantRow { get; init; } = null!;
 		public OptionButton AutoActionVariantSelect { get; init; } = null!;
+		public Control AutoActionEffectRowsRow { get; init; } = null!;
+		public LineEdit AutoActionEffectRowsField { get; init; } = null!;
 		public Control CardActionVariantRow { get; init; } = null!;
 		public OptionButton CardActionVariantSelect { get; init; } = null!;
 		public Control CardGenerationVariantRow { get; init; } = null!;
@@ -3157,7 +3159,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private enum UnifiedAutoActionVariant
 	{
 		PlayFromPile = 0,
-		DrawFromPile = 1
+		DrawFromPile = 1,
+		RunEffectRows = 2
 	}
 
 	private enum UnifiedEffectGroup
@@ -12558,9 +12561,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		StyleInput(autoActionVariantSelect);
 		ConstrainOptionButtonPopup(autoActionVariantSelect);
-		autoActionVariantSelect.TooltipText = CardEditorLoc.T("tooltip.autoAction", "Choose whether this auto action plays the card from the pile or draws it into your hand.");
+		autoActionVariantSelect.TooltipText = CardEditorLoc.T("tooltip.autoAction", "Choose whether this auto action plays the card, draws it, or runs selected effect rows while it stays in the pile.");
 		autoActionVariantSelect.AddItem(CardEditorLoc.T("autoAction.variant.play", "Play From Pile"));
 		autoActionVariantSelect.AddItem(CardEditorLoc.T("autoAction.variant.draw", "Draw From Pile"));
+		autoActionVariantSelect.AddItem(CardEditorLoc.T("autoAction.variant.runRows", "Run Effect Rows"));
 		int autoActionVariantIndex = effect != null ? (int)GetUnifiedAutoActionVariant(effect.Kind) : (int)UnifiedAutoActionVariant.PlayFromPile;
 		if (autoActionVariantIndex < 0 || autoActionVariantIndex >= autoActionVariantSelect.ItemCount)
 		{
@@ -12571,6 +12575,27 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		autoActionVariantRow.AddChild(autoActionVariantLabel);
 		autoActionVariantRow.AddChild(autoActionVariantSelect);
 		autoActionVariantRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+
+		HBoxContainer autoActionEffectRowsRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
+		autoActionEffectRowsRow.AddThemeConstantOverride("separation", 10);
+
+		Label autoActionEffectRowsLabel = new Label { Text = CardEditorLoc.T("autoAction.effectRows", "Effect Rows"), CustomMinimumSize = new Vector2(120, 0) };
+		StyleBodyLabel(autoActionEffectRowsLabel);
+
+		LineEdit autoActionEffectRowsField = new LineEdit
+		{
+			Text = effect?.AutoActionEffectIds ?? string.Empty,
+			PlaceholderText = CardEditorLoc.T("autoAction.effectRows.placeholder", "1, 2, 4"),
+			CustomMinimumSize = new Vector2(260, _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		StyleInput(autoActionEffectRowsField);
+		autoActionEffectRowsField.TooltipText = CardEditorLoc.T("tooltip.autoActionEffectRows", "For Run Effect Rows: enter effect row numbers or stable row IDs. Selected rows become payload-only and run when this auto action fires.");
+		autoActionEffectRowsField.TextChanged += _ => QueuePreviewUpdate();
+
+		autoActionEffectRowsRow.AddChild(autoActionEffectRowsLabel);
+		autoActionEffectRowsRow.AddChild(autoActionEffectRowsField);
+		autoActionEffectRowsRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
 		HBoxContainer cardActionVariantRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
 		cardActionVariantRow.AddThemeConstantOverride("separation", 10);
@@ -15103,6 +15128,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			KindDefinitionIndices = kindDefinitionIndices,
 			AutoActionVariantRow = autoActionVariantRow,
 			AutoActionVariantSelect = autoActionVariantSelect,
+			AutoActionEffectRowsRow = autoActionEffectRowsRow,
+			AutoActionEffectRowsField = autoActionEffectRowsField,
 			ScalingToggleRow = scalingToggleRow,
 			ScalingRow = scalingRow,
 			CountRow = countRow,
@@ -15897,6 +15924,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		wrapper.AddChild(advancedHeaderLabel);
 		wrapper.AddChild(ignoreVariantRow);
 		wrapper.AddChild(autoActionVariantRow);
+		wrapper.AddChild(autoActionEffectRowsRow);
 		wrapper.AddChild(cardActionVariantRow);
 		wrapper.AddChild(cardGenerationVariantRow);
 		wrapper.AddChild(orbRow);
@@ -16566,7 +16594,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			or CardExtraEffectKind.AutoPlaySelfFromPile
 			or CardExtraEffectKind.AutoDrawSelfFromPile
 			or CardExtraEffectKind.ConditionalAutoPlayFromPile
-			or CardExtraEffectKind.ConditionalAutoDrawFromPile;
+			or CardExtraEffectKind.ConditionalAutoDrawFromPile
+			or CardExtraEffectKind.ConditionalAutoRunEffects;
 	}
 
 	private static void RefreshMoveSelectionModeOptions(
@@ -16653,7 +16682,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private static bool IsHiddenUnifiedAutoActionKind(CardExtraEffectKind kind)
 	{
-		return kind == CardExtraEffectKind.ConditionalAutoDrawFromPile;
+		return kind is CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects;
 	}
 
 	private static bool IsAmountlessExtraEffectKind(CardExtraEffectKind kind)
@@ -17678,7 +17707,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			or CardExtraEffectKind.RemoveCardsFromDeck => CardExtraEffectKind.MoveCardsBetweenPiles,
 			CardExtraEffectKind.CopyCardsFromPileToDeck
 			or CardExtraEffectKind.CopyExactCardsFromPileToDeck => CardExtraEffectKind.AddRandomCardToHand,
-			CardExtraEffectKind.ConditionalAutoDrawFromPile => CardExtraEffectKind.ConditionalAutoPlayFromPile,
+			CardExtraEffectKind.ConditionalAutoDrawFromPile
+			or CardExtraEffectKind.ConditionalAutoRunEffects => CardExtraEffectKind.ConditionalAutoPlayFromPile,
 			CardExtraEffectKind.PersistentSelfScaling => CardExtraEffectKind.SelfScaling,
 			CardExtraEffectKind.CardStarCostsLess
 			or CardExtraEffectKind.CardTypeCostsLess
@@ -17738,6 +17768,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return kind switch
 		{
 			CardExtraEffectKind.ConditionalAutoDrawFromPile => UnifiedAutoActionVariant.DrawFromPile,
+			CardExtraEffectKind.ConditionalAutoRunEffects => UnifiedAutoActionVariant.RunEffectRows,
 			_ => UnifiedAutoActionVariant.PlayFromPile
 		};
 	}
@@ -17764,6 +17795,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return variant switch
 		{
 			UnifiedAutoActionVariant.DrawFromPile => CardExtraEffectKind.ConditionalAutoDrawFromPile,
+			UnifiedAutoActionVariant.RunEffectRows => CardExtraEffectKind.ConditionalAutoRunEffects,
 			_ => CardExtraEffectKind.ConditionalAutoPlayFromPile
 		};
 	}
@@ -18199,7 +18231,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool isPlayFromPile = kind == CardExtraEffectKind.PlayCardFromPile;
 		bool isAutoPlaySelfFromPile = kind == CardExtraEffectKind.AutoPlaySelfFromPile;
 		bool isAutoDrawSelfFromPile = kind == CardExtraEffectKind.AutoDrawSelfFromPile;
-		bool isConditionalAutoFromPile = kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile;
+		bool isConditionalAutoFromPile = kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects;
 		bool isDrawCardsThatCostLess = kind == CardExtraEffectKind.DrawCardsThatCostLess;
 		bool isTransformCards = kind == CardExtraEffectKind.TransformCards;
 		bool isChooseOneEffectSource = kind == CardExtraEffectKind.ChooseOneEffectSource;
@@ -18992,6 +19024,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			row.AutoActionVariantRow.Visible = isUnifiedAutoAction;
 		}
+		if (row.AutoActionEffectRowsRow != null && GodotObject.IsInstanceValid(row.AutoActionEffectRowsRow))
+		{
+			row.AutoActionEffectRowsRow.Visible = isUnifiedAutoAction && GetUnifiedAutoActionVariant(kind) == UnifiedAutoActionVariant.RunEffectRows;
+		}
 
 		if (row.CardGenerationVariantRow != null && GodotObject.IsInstanceValid(row.CardGenerationVariantRow))
 		{
@@ -19353,7 +19389,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardExtraEffectKind kind = GetResolvedExtraEffectKind(row, CardEditorExtraEffects.Definitions[kindIndex].Kind);
 		bool isScalingStage = kind == CardExtraEffectKind.ScalingStage;
 
-		bool isConditionalAutoFromPile = kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile;
+		bool isConditionalAutoFromPile = kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects;
 		bool supportsScaling = kind is not CardExtraEffectKind.CreatedCardsCostLess
 			and not CardExtraEffectKind.CreatedCardsUpgraded
 			and not CardExtraEffectKind.GeneratedCardsUpgraded
@@ -19943,7 +19979,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return CardExtraEffectScaleMode.None;
 		}
 
-		if (kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+		if (kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects)
 		{
 			return CardExtraEffectScaleMode.ConditionOnly;
 		}
@@ -19970,6 +20006,51 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		return mode == CardExtraEffectScaleMode.None ? CardExtraEffectScaleMode.PerHistoryCount : mode;
+	}
+
+	private string? ResolveAutoActionEffectIds(ExtraEffectRow row)
+	{
+		if (row?.AutoActionEffectRowsField == null || !GodotObject.IsInstanceValid(row.AutoActionEffectRowsField))
+		{
+			return null;
+		}
+
+		string text = row.AutoActionEffectRowsField.Text ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(text))
+		{
+			return null;
+		}
+
+		List<string> resolved = new List<string>();
+		foreach (string rawToken in text.Split(new[] { ',', ';', '|', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+		{
+			string token = rawToken.Trim();
+			if (string.IsNullOrWhiteSpace(token))
+			{
+				continue;
+			}
+
+			string? id = null;
+			if (int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out int rowNumber)
+				&& rowNumber >= 1
+				&& rowNumber <= _extraEffectRows.Count)
+			{
+				id = _extraEffectRows[rowNumber - 1]?.StableEffectId;
+			}
+			else
+			{
+				id = token;
+			}
+
+			if (!string.IsNullOrWhiteSpace(id)
+				&& !string.Equals(id, row.StableEffectId, StringComparison.Ordinal)
+				&& !resolved.Contains(id, StringComparer.Ordinal))
+			{
+				resolved.Add(id);
+			}
+		}
+
+		return resolved.Count == 0 ? null : string.Join(";", resolved);
 	}
 
 	private static bool IsHistoryScalingBaseEnabled(ExtraEffectRow row)
@@ -23746,7 +23827,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					or CardExtraEffectKind.AutoPlaySelfFromPile
 					or CardExtraEffectKind.AutoDrawSelfFromPile
 					or CardExtraEffectKind.ConditionalAutoPlayFromPile
-					or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+					or CardExtraEffectKind.ConditionalAutoDrawFromPile
+					or CardExtraEffectKind.ConditionalAutoRunEffects)
 				{
 					if (resolvedKind is CardExtraEffectKind.MoveCardsBetweenPiles
 						or CardExtraEffectKind.AddCopyOfThisCard
@@ -23792,7 +23874,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						or CardExtraEffectKind.AutoPlaySelfFromPile
 						or CardExtraEffectKind.AutoDrawSelfFromPile
 						or CardExtraEffectKind.ConditionalAutoPlayFromPile
-						or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+						or CardExtraEffectKind.ConditionalAutoDrawFromPile
+						or CardExtraEffectKind.ConditionalAutoRunEffects)
 					{
 						selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.Hand);
 						selectionMode = GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose);
@@ -24341,6 +24424,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					SelfScalingNumberFilter = GetSelectedSelfScalingNumberFilter(row),
 					SelfScalingTargetEffectId = row.SelfScalingTargetEffectId,
 					SelfScalingDynamicVarKey = row.SelfScalingDynamicVarKey,
+					AutoActionEffectIds = resolvedKind == CardExtraEffectKind.ConditionalAutoRunEffects ? ResolveAutoActionEffectIds(row) : null,
 					CostFilterEnabled = row.CostFilterTickbox != null && GodotObject.IsInstanceValid(row.CostFilterTickbox) && row.CostFilterTickbox.IsTicked,
 					CostFilterMode = row.CostFilterModeSelect != null && GodotObject.IsInstanceValid(row.CostFilterModeSelect)
 						? (CardExtraEffectCostFilterMode)Math.Clamp(row.CostFilterModeSelect.Selected, 0, Enum.GetValues<CardExtraEffectCostFilterMode>().Length - 1)
@@ -24874,7 +24958,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					or CardExtraEffectKind.AutoPlaySelfFromPile
 					or CardExtraEffectKind.AutoDrawSelfFromPile
 					or CardExtraEffectKind.ConditionalAutoPlayFromPile
-					or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+					or CardExtraEffectKind.ConditionalAutoDrawFromPile
+					or CardExtraEffectKind.ConditionalAutoRunEffects)
 				{
 					if (resolvedKind is CardExtraEffectKind.MoveCardsBetweenPiles
 						or CardExtraEffectKind.AddCopyOfThisCard
@@ -24920,7 +25005,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						or CardExtraEffectKind.AutoPlaySelfFromPile
 						or CardExtraEffectKind.AutoDrawSelfFromPile
 						or CardExtraEffectKind.ConditionalAutoPlayFromPile
-						or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+						or CardExtraEffectKind.ConditionalAutoDrawFromPile
+						or CardExtraEffectKind.ConditionalAutoRunEffects)
 					{
 						selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.Hand);
 						selectionMode = GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose);
@@ -25166,7 +25252,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					or CardExtraEffectKind.ScalingStage
 					|| (resolvedKind == CardExtraEffectKind.TransformCards && transformMode == CardExtraEffectTransformMode.SpecificCard);
 
-				bool isMergedSelfPileAuto = def.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile;
+				bool isMergedSelfPileAuto = def.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects;
 				CardExtraEffectScaleMode scaleMode = GetSelectedScaleMode(row, resolvedKind);
 				CardExtraEffectCountComparison countComparison = GetSelectedCountComparison(row);
 				int countConditionAmount = isDeltaRow
@@ -25493,6 +25579,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					SelfScalingNumberFilter = GetSelectedSelfScalingNumberFilter(row),
 					SelfScalingTargetEffectId = row.SelfScalingTargetEffectId,
 					SelfScalingDynamicVarKey = row.SelfScalingDynamicVarKey,
+					AutoActionEffectIds = resolvedKind == CardExtraEffectKind.ConditionalAutoRunEffects ? ResolveAutoActionEffectIds(row) : null,
 					CostFilterEnabled = row.CostFilterTickbox != null && GodotObject.IsInstanceValid(row.CostFilterTickbox) && row.CostFilterTickbox.IsTicked,
 					CostFilterMode = row.CostFilterModeSelect != null && GodotObject.IsInstanceValid(row.CostFilterModeSelect)
 						? (CardExtraEffectCostFilterMode)Math.Clamp(row.CostFilterModeSelect.Selected, 0, Enum.GetValues<CardExtraEffectCostFilterMode>().Length - 1)

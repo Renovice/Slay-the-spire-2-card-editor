@@ -109,6 +109,7 @@ public enum CardExtraEffectKind
 	AutoDrawSelfFromPile = 61,
 	ConditionalAutoPlayFromPile = 62,
 	ConditionalAutoDrawFromPile = 63,
+	ConditionalAutoRunEffects = 118,
 	LoseOrbSlots = 64,
 	OrbAction = 65,
 	UpgradeCardsInPile = 66,
@@ -1103,6 +1104,9 @@ public sealed class CardExtraEffect
 
 	// Stable identity for editor/runtime mutation targeting.
 	public string? EffectId { get; set; }
+
+	// Auto Action / Run Effect Rows: selected effect-row IDs to execute when the auto action fires.
+	public string? AutoActionEffectIds { get; set; }
 
 	// Runtime-only identity for named keyword/effect-source packages granted to cards.
 	public string? GrantPackageKey { get; set; }
@@ -2158,6 +2162,14 @@ internal static class CardEditorExtraEffects
 		{
 			Kind = CardExtraEffectKind.ConditionalAutoDrawFromPile,
 			Label = "Auto-Draw Self from Pile",
+			AllowedTargets = new [] { CardExtraEffectTarget.Self },
+			DefaultAmount = 1,
+			DefaultTarget = CardExtraEffectTarget.Self
+		},
+		new()
+		{
+			Kind = CardExtraEffectKind.ConditionalAutoRunEffects,
+			Label = "Auto-Run Effect Rows",
 			AllowedTargets = new [] { CardExtraEffectTarget.Self },
 			DefaultAmount = 1,
 			DefaultTarget = CardExtraEffectTarget.Self
@@ -3746,6 +3758,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			and not CardExtraEffectKind.AutoDrawSelfFromPile
 			and not CardExtraEffectKind.ConditionalAutoPlayFromPile
 			and not CardExtraEffectKind.ConditionalAutoDrawFromPile
+			and not CardExtraEffectKind.ConditionalAutoRunEffects
 			;
 	}
 
@@ -3762,6 +3775,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			and not CardExtraEffectKind.AutoDrawSelfFromPile
 			and not CardExtraEffectKind.ConditionalAutoPlayFromPile
 			and not CardExtraEffectKind.ConditionalAutoDrawFromPile
+			and not CardExtraEffectKind.ConditionalAutoRunEffects
 			and not CardExtraEffectKind.AddExactCopyOfThisCardToDeck
 			and not CardExtraEffectKind.CopyCardsFromPileToDeck
 			and not CardExtraEffectKind.CopyExactCardsFromPileToDeck
@@ -7185,10 +7199,15 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			toRender.AddRange(temporaryEffects.Select(e => (e, DescriptionUpgradeComparison.None, true)));
 		}
 
+		HashSet<string> autoActionPayloadIds = BuildAutoActionPayloadIdSet(toRender.Select(t => t.Effect));
 		List<DescriptionEffectLine> lines = new List<DescriptionEffectLine>();
 		foreach ((CardExtraEffect effect, DescriptionUpgradeComparison upgradeComparison, bool isTemporary) in toRender)
 		{
 			if (effect == null || !IsValidEffectAmount(effect.Kind, effect.Amount))
+			{
+				continue;
+			}
+			if (IsAutoActionPayloadEffect(effect, autoActionPayloadIds))
 			{
 				continue;
 			}
@@ -7223,6 +7242,57 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 
 		return MergeDescriptionEffectLines(lines);
+	}
+
+	private static HashSet<string> BuildAutoActionPayloadIdSet(IEnumerable<CardExtraEffect?> effects)
+	{
+		HashSet<string> ids = new HashSet<string>(StringComparer.Ordinal);
+		if (effects == null)
+		{
+			return ids;
+		}
+
+		foreach (CardExtraEffect? effect in effects)
+		{
+			if (effect?.Kind != CardExtraEffectKind.ConditionalAutoRunEffects)
+			{
+				continue;
+			}
+
+			foreach (string id in ParseAutoActionEffectIds(effect))
+			{
+				if (!string.Equals(id, effect.EffectId ?? string.Empty, StringComparison.Ordinal))
+				{
+					ids.Add(id);
+				}
+			}
+		}
+
+		return ids;
+	}
+
+	private static bool IsAutoActionPayloadEffect(CardExtraEffect? effect, HashSet<string>? autoActionPayloadIds)
+	{
+		return effect != null
+			&& autoActionPayloadIds != null
+			&& autoActionPayloadIds.Count > 0
+			&& !string.IsNullOrWhiteSpace(effect.EffectId)
+			&& autoActionPayloadIds.Contains(effect.EffectId);
+	}
+
+	private static List<string> ParseAutoActionEffectIds(CardExtraEffect? effect)
+	{
+		if (effect == null || string.IsNullOrWhiteSpace(effect.AutoActionEffectIds))
+		{
+			return new List<string>();
+		}
+
+		return effect.AutoActionEffectIds
+			.Split(new[] { ';', ',', '|', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+			.Select(id => id.Trim())
+			.Where(id => !string.IsNullOrWhiteSpace(id))
+			.Distinct(StringComparer.Ordinal)
+			.ToList();
 	}
 
 	internal static string? FormatSingleEffectLine(CardModel card, CardExtraEffect effect, Creature? target = null, bool isUpgradePreview = false)
@@ -8594,10 +8664,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		int remainingImmediateDamageEffects = 0;
 		List<CardExtraEffect>? deferredSelfScaling = null;
 		using IDisposable _ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
+		HashSet<string> autoActionPayloadIds = BuildAutoActionPayloadIdSet(effects);
 		if (ownerCreature != null)
 		{
 			remainingImmediateDamageEffects = effects.Count(e =>
 				e != null
+				&& !IsAutoActionPayloadEffect(e, autoActionPayloadIds)
 				&& !IsPowerEffect(e)
 				&& e.Trigger == CardExtraEffectTrigger.OnPlay
 				&& e.Timing == CardExtraEffectTiming.Immediate
@@ -8613,6 +8685,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		foreach (CardExtraEffect effect in effects)
 		{
 			if (effect == null
+				|| IsAutoActionPayloadEffect(effect, autoActionPayloadIds)
 				|| IsPowerEffect(effect)
 				|| !IsValidEffectAmount(effect.Kind, effect.Amount)
 				|| effect.Trigger != CardExtraEffectTrigger.OnPlay)
@@ -8855,6 +8928,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			{
 				return;
 			}
+			HashSet<string> autoActionPayloadIds = BuildAutoActionPayloadIdSet(effects);
 
 			CardPlay syntheticPlay = new CardPlay
 			{
@@ -8876,6 +8950,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			foreach (CardExtraEffect effect in effects)
 			{
 				if (effect == null
+					|| IsAutoActionPayloadEffect(effect, autoActionPayloadIds)
 					|| IsPowerEffect(effect)
 					|| !IsValidEffectAmount(effect.Kind, effect.Amount)
 					|| !DoesTurnBoundaryMatch(effect, boundary, side, card))
@@ -8884,7 +8959,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				}
 
 				CardExtraEffect? normalizedSelfPileAuto = NormalizeSelfPileAutoEffect(effect);
-				if (normalizedSelfPileAuto?.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+				if (normalizedSelfPileAuto?.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects)
 				{
 					if (await TryRunSelfPileAutoEffect(combatState, choiceContext, card, normalizedSelfPileAuto))
 					{
@@ -8932,9 +9007,14 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 
 		using IDisposable _ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
+		HashSet<string> autoActionPayloadIds = BuildAutoActionPayloadIdSet(effects);
 		foreach (CardExtraEffect effect in effects)
 		{
-			if (effect == null || IsPowerEffect(effect) || !IsValidEffectAmount(effect.Kind, effect.Amount) || effect.Trigger != trigger)
+			if (effect == null
+				|| IsAutoActionPayloadEffect(effect, autoActionPayloadIds)
+				|| IsPowerEffect(effect)
+				|| !IsValidEffectAmount(effect.Kind, effect.Amount)
+				|| effect.Trigger != trigger)
 			{
 				continue;
 			}
@@ -9091,6 +9171,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return;
 		}
 
+		await RunAutoRunEffectRowsFromPile(combatState, choiceContext, player, trigger);
+
 		PileType[] pilesToCheck = { PileType.Exhaust, PileType.Discard, PileType.Draw, PileType.Deck };
 		foreach (PileType pileType in pilesToCheck)
 		{
@@ -9104,6 +9186,62 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			foreach (CardModel card in snapshot)
 			{
 				await TryAutoDrawSelfFromPile(combatState, choiceContext, card, trigger);
+			}
+		}
+	}
+
+	public static async Task RunAutoRunEffectRowsFromPile(CombatState combatState, PlayerChoiceContext choiceContext, Player player, CardExtraEffectTrigger trigger)
+	{
+		if (combatState == null || choiceContext == null || player == null)
+		{
+			return;
+		}
+
+		PileType[] pilesToCheck = { PileType.Exhaust, PileType.Discard, PileType.Draw, PileType.Deck };
+		foreach (PileType pileType in pilesToCheck)
+		{
+			CardPile? pile = pileType.GetPile(player);
+			if (pile == null || pile.Cards.Count == 0)
+			{
+				continue;
+			}
+
+			List<CardModel> snapshot = pile.Cards.Where(c => c != null).ToList();
+			foreach (CardModel card in snapshot)
+			{
+				await TryAutoRunEffectRowsFromPile(combatState, choiceContext, card, trigger);
+			}
+		}
+	}
+
+	private static async Task TryAutoRunEffectRowsFromPile(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, CardExtraEffectTrigger trigger)
+	{
+		CardPile? cardPile = card.Pile;
+		if (cardPile == null || cardPile.Type == PileType.Hand || cardPile.Type == PileType.Play)
+		{
+			return;
+		}
+
+		List<CardExtraEffect> effects = new List<CardExtraEffect>();
+		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
+		{
+			CardExtraEffect? normalized = NormalizeSelfPileAutoEffect(e);
+			if (normalized?.Kind == CardExtraEffectKind.ConditionalAutoRunEffects)
+			{
+				effects.Add(normalized);
+			}
+		}
+
+		foreach (CardExtraEffect effect in effects)
+		{
+			if (!DoesTriggerMatch(effect, trigger, card))
+			{
+				continue;
+			}
+
+			if (await TryRunSelfPileAutoEffect(combatState, choiceContext, card, effect))
+			{
+				return;
 			}
 		}
 	}
@@ -9143,7 +9281,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 	private static async Task<bool> TryRunSelfPileAutoEffect(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, CardExtraEffect effect)
 	{
 		CardExtraEffect? normalized = NormalizeSelfPileAutoEffect(effect);
-		if (normalized?.Kind is not (CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile))
+		if (normalized?.Kind is not (CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects))
 		{
 			return false;
 		}
@@ -9188,12 +9326,79 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		{
 			await CardCmd.AutoPlay(choiceContext, card, null);
 		}
-		else
+		else if (normalized.Kind == CardExtraEffectKind.ConditionalAutoDrawFromPile)
 		{
 			await CardPileCmd.Add(card, PileType.Hand);
 		}
+		else
+		{
+			await RunSelectedAutoActionEffectRows(combatState, choiceContext, card, normalized);
+		}
 
 		return true;
+	}
+
+	private static async Task RunSelectedAutoActionEffectRows(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, CardExtraEffect autoEffect)
+	{
+		List<string> selectedIds = ParseAutoActionEffectIds(autoEffect);
+		if (combatState == null || choiceContext == null || card == null || selectedIds.Count == 0)
+		{
+			return;
+		}
+
+		Dictionary<string, CardExtraEffect> runtimeEffectsById = GetRuntimeEffectsIncludingBorrowedSources(combatState, card)
+			.Where(e => e != null && !string.IsNullOrWhiteSpace(e.EffectId))
+			.GroupBy(e => e.EffectId!, StringComparer.Ordinal)
+			.ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+		CardPlay syntheticPlay = new CardPlay
+		{
+			Card = card,
+			Target = null,
+			ResultPile = card.Pile?.Type ?? PileType.None,
+			Resources = new ResourceInfo
+			{
+				EnergySpent = 0,
+				EnergyValue = 0,
+				StarsSpent = 0,
+				StarValue = 0
+			},
+			IsAutoPlay = true,
+			PlayIndex = 0,
+			PlayCount = 1
+		};
+
+		foreach (string id in selectedIds)
+		{
+			if (string.Equals(id, autoEffect.EffectId ?? string.Empty, StringComparison.Ordinal)
+				|| !runtimeEffectsById.TryGetValue(id, out CardExtraEffect? payload)
+				|| payload.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile
+					or CardExtraEffectKind.ConditionalAutoDrawFromPile
+					or CardExtraEffectKind.ConditionalAutoRunEffects
+				|| !IsValidEffectAmount(payload.Kind, payload.Amount))
+			{
+				continue;
+			}
+
+			CardExtraEffect runnable = CloneEffect(payload);
+			runnable.Trigger = CardExtraEffectTrigger.OnPlay;
+			runnable.AsPower = false;
+
+			if (runnable.Timing == CardExtraEffectTiming.Immediate)
+			{
+				await ExecuteEffect(combatState, choiceContext, syntheticPlay, runnable);
+			}
+			else
+			{
+				Creature? lockedTarget = null;
+				Player? owner = card.Owner;
+				if (runnable.Target == CardExtraEffectTarget.Target && owner?.Creature != null)
+				{
+					lockedTarget = ResolveSingleTarget(combatState, owner.Creature, syntheticPlay);
+				}
+				CardEditorExtraEffectScheduler.Schedule(combatState, syntheticPlay, runnable, lockedTarget);
+			}
+		}
 	}
 
 	public static async Task RunConditionalAutoFromPile(CombatState combatState, PlayerChoiceContext choiceContext, Player player)
@@ -9236,7 +9441,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<CardExtraEffect> effects = new List<CardExtraEffect>();
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
-			if (e?.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+			if (e?.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects)
 			{
 				effects.Add(e);
 			}
@@ -9272,9 +9477,13 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			{
 				await CardCmd.AutoPlay(choiceContext, card, null);
 			}
-			else
+			else if (effect.Kind == CardExtraEffectKind.ConditionalAutoDrawFromPile)
 			{
 				await CardPileCmd.Add(card, PileType.Hand);
+			}
+			else
+			{
+				await RunSelectedAutoActionEffectRows(combatState, choiceContext, card, effect);
 			}
 			return;
 		}
@@ -9312,6 +9521,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			{
 				return;
 			}
+			HashSet<string> autoActionPayloadIds = BuildAutoActionPayloadIdSet(effects);
 
 			CardPlay syntheticPlay = new CardPlay
 			{
@@ -9333,6 +9543,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			foreach (CardExtraEffect effect in effects)
 			{
 				if (effect == null
+					|| IsAutoActionPayloadEffect(effect, autoActionPayloadIds)
 					|| IsPowerEffect(effect)
 					|| !IsValidEffectAmount(effect.Kind, effect.Amount)
 					|| !DoesTriggerMatch(effect, trigger, card))
@@ -9808,9 +10019,21 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				: TrimTrailingSentencePunctuation(ApplyHistoryConditionPrefix(card, action, effect));
 		}
 
-		return effect.Trigger == CardExtraEffectTrigger.OnPlay
-			? $"When played, {LowercaseFirst(action)}."
-			: $"{UppercaseFirst(action)}.";
+		string actionLine = $"{UppercaseFirst(action)}.";
+		if (IsPowerEffect(effect))
+		{
+			return ApplyPowerTriggerPrefix(actionLine, effect);
+		}
+		if (effect.Trigger == CardExtraEffectTrigger.TurnBoundary)
+		{
+			return FormatTurnBoundaryTrigger(effect, LowercaseFirst(actionLine));
+		}
+		if (effect.Trigger != CardExtraEffectTrigger.OnPlay)
+		{
+			return ApplyTriggerPrefix(actionLine, effect);
+		}
+
+		return $"When played, {LowercaseFirst(action)}.";
 	}
 
 	private static string? FormatScalingStageLine(CardModel card, Creature? target, CardExtraEffect effect, bool isUpgradePreview)
@@ -10572,6 +10795,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.AutoDrawSelfFromPile => FormatAutoDrawSelfFromPile(effect),
 				CardExtraEffectKind.ConditionalAutoPlayFromPile => FormatAutoPlaySelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
 				CardExtraEffectKind.ConditionalAutoDrawFromPile => FormatAutoDrawSelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
+				CardExtraEffectKind.ConditionalAutoRunEffects => FormatAutoRunEffectRows(card, NormalizeSelfPileAutoEffect(effect) ?? effect, target, isUpgradePreview),
 				CardExtraEffectKind.GrantKeywordToPile => FormatGrantKeywordToPile(effect, grammarAmount, amountText),
 				CardExtraEffectKind.GainGold => $"Gain {amountText} Gold.",
 				CardExtraEffectKind.LoseGold => $"Lose {amountText} Gold.",
@@ -10694,6 +10918,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				or CardExtraEffectKind.AutoPlaySelfFromPile
 				or CardExtraEffectKind.ConditionalAutoPlayFromPile
 				or CardExtraEffectKind.ConditionalAutoDrawFromPile
+				or CardExtraEffectKind.ConditionalAutoRunEffects
 			? scaledLine
 			: IsPowerEffect(effect)
 				? scaledLine
@@ -10711,7 +10936,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		else if (effect.Kind is CardExtraEffectKind.AutoPlaySelfFromPile
 			or CardExtraEffectKind.AutoDrawSelfFromPile
 			or CardExtraEffectKind.ConditionalAutoPlayFromPile
-			or CardExtraEffectKind.ConditionalAutoDrawFromPile)
+			or CardExtraEffectKind.ConditionalAutoDrawFromPile
+			or CardExtraEffectKind.ConditionalAutoRunEffects)
 		{
 			// These effect kinds already include their trigger wording (e.g. "At the start of your turn..."),
 			// so applying another trigger prefix would duplicate it. Still allow conditional branch text.
@@ -10844,24 +11070,16 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			result = CardEditorLoc.F("cardText.powerTrigger.thisTurnScope", $"This turn, {LowercaseFirst(result)}", ("Payload", result));
 		}
 
-		// Wrap with "For the next N turns/times" when a max-fire limit is set.
+		// Max fires are uses, not another duration. Keep them as a suffix so they do not
+		// collide with TriggerMaxTurns wording.
 		if (effect.TriggerMaxFires >= 1)
 		{
 			string nStr = effect.TriggerMaxFires.ToString(CultureInfo.InvariantCulture);
-			bool isTurnBased = effect.Trigger is CardExtraEffectTrigger.StartOfTurn
-				or CardExtraEffectTrigger.EndOfTurn
-				or CardExtraEffectTrigger.EndOfTurnInHand
-				or CardExtraEffectTrigger.StartOfEnemyTurn
-				or CardExtraEffectTrigger.EndOfEnemyTurn
-				or CardExtraEffectTrigger.TurnBoundary;
-			if (isTurnBased)
-			{
-				result = CardEditorLoc.F("cardText.powerTrigger.forNTurns", $"For the next {nStr} turns, {LowercaseFirst(result)}", ("N", effect.TriggerMaxFires), ("Payload", result));
-			}
-			else
-			{
-				result = CardEditorLoc.F("cardText.powerTrigger.forNTimes", $"The next {nStr} times, {LowercaseFirst(result)}", ("N", effect.TriggerMaxFires), ("Payload", result));
-			}
+			result = CardEditorLoc.F(
+				"cardText.powerTrigger.maxFires",
+				$"{TrimTrailingSentencePunctuation(result)}. Triggers up to {nStr} times.",
+				("N", effect.TriggerMaxFires),
+				("Payload", result));
 		}
 
 		// Wrap with "For the next N turns" when a turn duration limit is set (separate from fire limit).
@@ -10900,12 +11118,31 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			_ => string.Empty
 		};
 
-		string fallback = $"At the {phaseText} of {sideText}{locationText}, {payload}";
+		int everyN = Math.Max(1, effect?.TriggerEveryN ?? 1);
+		string fallback = everyN >= 2
+			? $"Every {FormatOrdinal(everyN)} {phaseText} of {sideText}{locationText}, {payload}"
+			: $"At the {phaseText} of {sideText}{locationText}, {payload}";
 		return CardEditorLoc.F("cardText.powerTrigger.turnBoundary", fallback,
 			("Edge", phaseText),
 			("Side", sideText),
 			("Location", locationText),
 			("Payload", payload));
+	}
+
+	private static string FormatOrdinal(int value)
+	{
+		int n = Math.Abs(value);
+		int lastTwo = n % 100;
+		string suffix = lastTwo is >= 11 and <= 13
+			? "th"
+			: (n % 10) switch
+			{
+				1 => "st",
+				2 => "nd",
+				3 => "rd",
+				_ => "th"
+			};
+		return value.ToString(CultureInfo.InvariantCulture) + suffix;
 	}
 
 	private static string BuildPowerTriggerWhenClause(CardExtraEffect effect)
@@ -14243,12 +14480,21 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		};
 	}
 
-	private static string FormatSelfPileAutoTurnBoundary(CardExtraEffect effect, string pile, string action, bool isPlay)
+	private static string FormatSelfPileAutoTurnBoundary(CardExtraEffect effect, string pile, string action, bool isPlay, bool usePayloadAsAction = false)
 	{
 		string when = BuildSelfPileAutoTurnBoundaryWhenClause(effect);
 		string key = isPlay
 			? "cardText.autoPlaySelf.turnBoundary"
 			: "cardText.autoDrawSelf.turnBoundary";
+		if (usePayloadAsAction)
+		{
+			return CardEditorLoc.F(
+				"cardText.autoRunEffectRows.turnBoundary",
+				$"{when}, if this is {pile}, {action}.",
+				("When", when),
+				("Pile", pile),
+				("Action", action));
+		}
 		return CardEditorLoc.F(
 			key,
 			$"{when}, if this is {pile}, {action} it.",
@@ -14415,6 +14661,74 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				"cardText.autoDrawSelf.startOfTurn",
 				$"At the start of your turn, if this is {pile}, draw it.",
 				("Pile", pile))
+		};
+	}
+
+	private static string? FormatAutoRunEffectRows(CardModel card, CardExtraEffect effect, Creature? target, bool isUpgradePreview)
+	{
+		if (card == null || effect == null)
+		{
+			return null;
+		}
+
+		List<string> selectedIds = ParseAutoActionEffectIds(effect);
+		if (selectedIds.Count == 0)
+		{
+			return CardEditorLoc.T("cardText.autoRunEffectRows.empty", "Run selected effect rows.");
+		}
+
+		Dictionary<string, CardExtraEffect> effectsById = GetEffectsForDescription(card, isUpgradePreview)
+			.Where(e => e != null && !string.IsNullOrWhiteSpace(e.EffectId))
+			.GroupBy(e => e.EffectId!, StringComparer.Ordinal)
+			.ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+		List<string> payloadLines = new List<string>();
+		foreach (string id in selectedIds)
+		{
+			if (string.Equals(id, effect.EffectId ?? string.Empty, StringComparison.Ordinal)
+				|| !effectsById.TryGetValue(id, out CardExtraEffect? payload)
+				|| payload.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile
+					or CardExtraEffectKind.ConditionalAutoDrawFromPile
+					or CardExtraEffectKind.ConditionalAutoRunEffects)
+			{
+				continue;
+			}
+
+			CardExtraEffect displayEffect = CloneEffect(payload);
+			displayEffect.Trigger = CardExtraEffectTrigger.OnPlay;
+			displayEffect.AsPower = false;
+			string? line = TryFormatLine(card, displayEffect, target, DescriptionUpgradeComparison.None, isUpgradePreview);
+			if (!string.IsNullOrWhiteSpace(line))
+			{
+				payloadLines.Add(LowercaseFirst(TrimTrailingSentencePunctuation(line!)));
+			}
+		}
+
+		string payloadText = payloadLines.Count switch
+		{
+			0 => CardEditorLoc.T("cardText.autoRunEffectRows.payloadFallback", "run selected effect rows"),
+			1 => payloadLines[0],
+			_ => string.Join("; ", payloadLines)
+		};
+
+		string pile = GetCardPileLocationWithSelectionMode(effect.CardSelectionPile, effect.CardSelectionMode);
+		return effect.Trigger == CardExtraEffectTrigger.TurnBoundary
+			? FormatSelfPileAutoTurnBoundary(effect, pile, payloadText, isPlay: false, usePayloadAsAction: true)
+			: FormatSelfPileAutoTrigger(effect, pile, payloadText);
+	}
+
+	private static string FormatSelfPileAutoTrigger(CardExtraEffect effect, string pile, string payload)
+	{
+		return effect.Trigger switch
+		{
+			CardExtraEffectTrigger.OnDraw => $"Whenever a card is drawn, if this is {pile}, {payload}.",
+			CardExtraEffectTrigger.OnDiscard => $"Whenever a card is discarded, if this is {pile}, {payload}.",
+			CardExtraEffectTrigger.OnExhaust => $"Whenever a card is exhausted, if this is {pile}, {payload}.",
+			CardExtraEffectTrigger.EndOfTurn => $"At the end of your turn, if this is {pile}, {payload}.",
+			CardExtraEffectTrigger.StartOfEnemyTurn => $"At the start of the enemy turn, if this is {pile}, {payload}.",
+			CardExtraEffectTrigger.OnPlay => $"Whenever a card is played, if this is {pile}, {payload}.",
+			CardExtraEffectTrigger.OnMovedToTopOfPile => $"Whenever this is moved to {GetCardPileBoundary(effect.CardSelectionPile, top: true)}, {payload}.",
+			CardExtraEffectTrigger.OnMovedToBottomOfPile => $"Whenever this is moved to {GetCardPileBoundary(effect.CardSelectionPile, top: false)}, {payload}.",
+			_ => $"At the start of your turn, if this is {pile}, {payload}."
 		};
 	}
 
@@ -15945,7 +16259,8 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 		if (effect.Kind is not CardExtraEffectKind.AutoPlaySelfFromPile
 			and not CardExtraEffectKind.AutoDrawSelfFromPile
 			and not CardExtraEffectKind.ConditionalAutoPlayFromPile
-			and not CardExtraEffectKind.ConditionalAutoDrawFromPile)
+			and not CardExtraEffectKind.ConditionalAutoDrawFromPile
+			and not CardExtraEffectKind.ConditionalAutoRunEffects)
 		{
 			return effect;
 		}
@@ -16377,6 +16692,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectKind.AutoDrawSelfFromPile => false,
 			CardExtraEffectKind.ConditionalAutoPlayFromPile => false,
 			CardExtraEffectKind.ConditionalAutoDrawFromPile => false,
+			CardExtraEffectKind.ConditionalAutoRunEffects => false,
 			CardExtraEffectKind.GrantKeywordToPile => false,
 			CardExtraEffectKind.DoesNotConsumeVigor => false,
 			CardExtraEffectKind.HitsAllEnemies => false,
@@ -21709,7 +22025,8 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			and not CardExtraEffectKind.DrawCardsThatCostLess
 			and not CardExtraEffectKind.AutoDrawSelfFromPile
 			and not CardExtraEffectKind.ConditionalAutoPlayFromPile
-			and not CardExtraEffectKind.ConditionalAutoDrawFromPile;
+			and not CardExtraEffectKind.ConditionalAutoDrawFromPile
+			and not CardExtraEffectKind.ConditionalAutoRunEffects;
 	}
 
 	private static bool DoesCountConditionPass(int count, CardExtraEffect effect)
@@ -25758,6 +26075,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			&& a.CostFilterEnabled == b.CostFilterEnabled
 			&& a.CostFilterMode == b.CostFilterMode
 			&& a.CostFilterMax == b.CostFilterMax
+			&& string.Equals(a.AutoActionEffectIds ?? string.Empty, b.AutoActionEffectIds ?? string.Empty, StringComparison.Ordinal)
 			&& a.ResourceConsumptionMode == b.ResourceConsumptionMode
 			&& a.ResourceConsumptionStat == b.ResourceConsumptionStat
 			&& a.StatusToStatusMode == b.StatusToStatusMode
@@ -25985,6 +26303,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			CostFilterMode = source.CostFilterMode,
 			CostFilterMax = source.CostFilterMax,
 			EffectId = source.EffectId,
+			AutoActionEffectIds = source.AutoActionEffectIds,
 			IncludeSourceCardInSelection = source.IncludeSourceCardInSelection,
 			FutureMatchingCards = source.FutureMatchingCards,
 			ResourceConsumptionMode = source.ResourceConsumptionMode,
