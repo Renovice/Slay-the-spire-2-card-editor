@@ -117,7 +117,10 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 
 		if (_sourceCard != null && _sourceEffect != null)
 		{
-			string? formatted = CardEditorExtraEffects.FormatSingleEffectLine(_sourceCard, _sourceEffect);
+			string? formatted = CardEditorExtraEffects.FormatSingleEffectLine(
+				_sourceCard,
+				_sourceEffect,
+				useLimitSourceInstance: CardEditorAutoPlayLoopGuard.BuildPowerUseLimitInstanceKey(_entryId));
 			if (!string.IsNullOrWhiteSpace(formatted))
 			{
 				return formatted.Trim();

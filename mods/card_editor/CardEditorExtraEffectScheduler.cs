@@ -27,6 +27,8 @@ internal static class CardEditorExtraEffectScheduler
 
 		public Creature? LockedTarget { get; init; }
 		public Creature? ExecutionHost { get; init; }
+		public CardModel? SourceCardInstance { get; init; }
+		public object? UseLimitSourceInstance { get; init; }
 		public int TriggerEventAmount { get; init; } = 1;
 		public int RemainingTriggers { get; set; }
 		public int SkipTriggers { get; set; }
@@ -40,13 +42,25 @@ internal static class CardEditorExtraEffectScheduler
 
 	private static readonly ConditionalWeakTable<CombatState, CombatSchedule> _schedules = new ConditionalWeakTable<CombatState, CombatSchedule>();
 
-	public static void Schedule(CombatState combatState, CardPlay sourcePlay, CardExtraEffect effect, Creature? lockedTarget, Creature? executionHost = null, int triggerEventAmount = 1)
+	public static void Schedule(
+		CombatState combatState,
+		CardPlay sourcePlay,
+		CardExtraEffect effect,
+		Creature? lockedTarget,
+		Creature? executionHost = null,
+		int triggerEventAmount = 1,
+		object? useLimitSourceInstance = null)
 	{
 		if (combatState == null || sourcePlay == null || effect == null)
 		{
 			return;
 		}
-		if (effect.Timing == CardExtraEffectTiming.Immediate || effect.Turns < 0 || effect.Amount <= 0)
+
+		CardExtraEffect scheduledEffect = CardEditorExtraEffects.CloneForDeferredExecution(sourcePlay, effect);
+		if (scheduledEffect.Timing == CardExtraEffectTiming.Immediate
+			|| scheduledEffect.Turns < 0
+			|| !CardEditorExtraEffects.IsValidEffectAmount(scheduledEffect.Kind, scheduledEffect.Amount)
+			|| scheduledEffect.RepeatCount < 0)
 		{
 			return;
 		}
@@ -57,17 +71,17 @@ internal static class CardEditorExtraEffectScheduler
 			return;
 		}
 
-		int remaining = effect.Turns == 0 ? -1 : Math.Max(1, effect.Turns);
+		int remaining = scheduledEffect.Turns == 0 ? -1 : Math.Max(1, scheduledEffect.Turns);
 		int skip = 0;
-		if (effect.Timing == CardExtraEffectTiming.EndOfAnyTurn)
+		if (scheduledEffect.Timing == CardExtraEffectTiming.EndOfAnyTurn)
 		{
 			skip = 1;
 		}
-		else if (effect.Timing == CardExtraEffectTiming.EndOfTurn && combatState.CurrentSide == CombatSide.Player)
+		else if (scheduledEffect.Timing == CardExtraEffectTiming.EndOfTurn && combatState.CurrentSide == CombatSide.Player)
 		{
 			skip = 1;
 		}
-		else if (effect.Timing == CardExtraEffectTiming.EndOfEnemyTurn && combatState.CurrentSide == CombatSide.Enemy)
+		else if (scheduledEffect.Timing == CardExtraEffectTiming.EndOfEnemyTurn && combatState.CurrentSide == CombatSide.Enemy)
 		{
 			skip = 1;
 		}
@@ -77,9 +91,11 @@ internal static class CardEditorExtraEffectScheduler
 		{
 			Card = CreateScheduledCardSnapshot(owner, sourcePlay.Card),
 			Owner = owner,
-			Effect = CardEditorExtraEffects.CloneEffect(effect),
-			LockedTarget = effect.Target == CardExtraEffectTarget.Target ? lockedTarget : null,
+			Effect = scheduledEffect,
+			LockedTarget = scheduledEffect.Target == CardExtraEffectTarget.Target ? lockedTarget : null,
 			ExecutionHost = executionHost,
+			SourceCardInstance = sourcePlay.Card,
+			UseLimitSourceInstance = useLimitSourceInstance ?? sourcePlay.Card,
 			TriggerEventAmount = Math.Max(0, triggerEventAmount),
 			RemainingTriggers = remaining,
 			SkipTriggers = skip,
@@ -306,9 +322,10 @@ internal static class CardEditorExtraEffectScheduler
 		try
 		{
 			using IDisposable _ = CardEditorCardPlayContext.PushScoped(play);
-			using IDisposable __ = CardEditorEffectSourceContext.PushScoped(scheduled.Card);
+			using IDisposable __ = CardEditorEffectSourceContext.PushScoped(scheduled.SourceCardInstance ?? scheduled.Card);
 			using IDisposable ___ = CardEditorPowerExecutionHostContext.PushScoped(scheduled.ExecutionHost);
-			using IDisposable ____ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
+			using IDisposable ____ = CardEditorAutoPlayLoopGuard.PushUseLimitSourceInstance(scheduled.UseLimitSourceInstance ?? scheduled.Card);
+			using IDisposable _____ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
 			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, scheduled.Effect, scheduled.TriggerEventAmount);
 		}
 		catch (Exception ex)

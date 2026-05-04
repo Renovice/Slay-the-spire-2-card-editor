@@ -12,7 +12,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorPresetStore
 {
-	private const int CurrentVersion = 13;
+	private const int CurrentVersion = 14;
 	private const string PresetExtension = ".json";
 	private const string SettingsPath = "user://card_editor/presets_settings.json";
 
@@ -1214,6 +1214,7 @@ internal static class CardEditorPresetStore
 		public int AmountXPlus { get; set; }
 		public string? AmountSourceMode { get; set; }
 		public string? AmountSourceEffectId { get; set; }
+		public decimal AmountSourceMultiplier { get; set; } = 1m;
 		public string? ValueSourceMode { get; set; }
 		public string? ValueSourceActor { get; set; }
 		public string? ValueSourceAggregation { get; set; }
@@ -1236,6 +1237,24 @@ internal static class CardEditorPresetStore
 		public int TriggerEveryN { get; set; }
 		public int TriggerMaxFires { get; set; }
 		public int TriggerMaxTurns { get; set; }
+		public bool AutoPlayAllowSelfTrigger { get; set; } = true;
+		public int AutoPlayLoopLimit { get; set; }
+		public string? AutoPlayLoopScope { get; set; }
+		public string? UseLimitWindow { get; set; }
+		public string? PowerStackMode { get; set; }
+		public string? DurationTickPolicy { get; set; }
+		public bool AutoPlayForceExhaust { get; set; }
+		public string? ConsumedCardAction { get; set; }
+		public string? ConsumedCardValueSource { get; set; }
+		public string? PotionMode { get; set; }
+		public string? PotionPoolFilter { get; set; }
+		public string? PotionRarityFilter { get; set; }
+		public bool? PotionInCombatOnly { get; set; }
+		public bool PotionAllowDuplicates { get; set; }
+		public string? SpecificPotionId { get; set; }
+		public string? CardRewardRarityFilter { get; set; }
+		public string? CardRewardSource { get; set; }
+		public string? CardRewardRarityOdds { get; set; }
 		public string? CreatedCardsCostDuration { get; set; }
 		public int CreatedCardsCostTurns { get; set; }
 		public string? CreatedCardsCostResource { get; set; }
@@ -1286,6 +1305,9 @@ internal static class CardEditorPresetStore
 		public string? MoveToPosition { get; set; }
 		public bool UseMoveDestinationForGeneratedCards { get; set; }
 		public string? AdditionalMoveToPiles { get; set; }
+		public string? DelayedPileAction { get; set; }
+		public string? DelayedPileCounterUnit { get; set; }
+		public string? DelayedPileCounterScope { get; set; }
 		public string? DrawnFromPile { get; set; }
 		public string? SpecificCardId { get; set; }
 		public bool ShowReferencedCardText { get; set; }
@@ -1295,6 +1317,9 @@ internal static class CardEditorPresetStore
 		public ChooseOneOptionDto? ChooseOneOption2 { get; set; }
 		public ChooseOneOptionDto? ChooseOneOption3 { get; set; }
 		public string? TransformMode { get; set; }
+		public string? StatefulTransformMode { get; set; }
+		public string? StatefulTransformDuration { get; set; }
+		public int StatefulTransformDurationAmount { get; set; } = 1;
 		public int ConditionalBonusAmount { get; set; }
 		public string? ConditionalBonusConditionType { get; set; }
 		public string? ConditionalBonusCondition { get; set; }
@@ -1489,6 +1514,7 @@ internal static class CardEditorPresetStore
 				AmountXPlus = effect.AmountXPlus,
 				AmountSourceMode = effect.AmountSourceMode.ToString(),
 				AmountSourceEffectId = effect.AmountSourceEffectId,
+				AmountSourceMultiplier = Math.Clamp(effect.AmountSourceMultiplier <= 0m ? 1m : effect.AmountSourceMultiplier, 0.01m, 999m),
 				ValueSourceMode = effect.ValueSourceMode.ToString(),
 				ValueSourceActor = effect.ValueSourceActor.ToString(),
 				ValueSourceAggregation = effect.ValueSourceAggregation.ToString(),
@@ -1511,6 +1537,24 @@ internal static class CardEditorPresetStore
 				TriggerEveryN = effect.TriggerEveryN,
 				TriggerMaxFires = effect.TriggerMaxFires,
 				TriggerMaxTurns = effect.TriggerMaxTurns,
+				AutoPlayAllowSelfTrigger = effect.AutoPlayAllowSelfTrigger,
+				AutoPlayLoopLimit = effect.AutoPlayLoopLimit,
+				AutoPlayLoopScope = effect.AutoPlayLoopScope.ToString(),
+				UseLimitWindow = effect.UseLimitWindow.ToString(),
+				PowerStackMode = effect.PowerStackMode.ToString(),
+				DurationTickPolicy = effect.DurationTickPolicy.ToString(),
+				AutoPlayForceExhaust = effect.AutoPlayForceExhaust,
+				ConsumedCardAction = effect.ConsumedCardAction.ToString(),
+				ConsumedCardValueSource = effect.ConsumedCardValueSource.ToString(),
+				PotionMode = effect.PotionMode.ToString(),
+				PotionPoolFilter = effect.PotionPoolFilter.ToString(),
+				PotionRarityFilter = effect.PotionRarityFilter.ToString(),
+				PotionInCombatOnly = effect.PotionInCombatOnly,
+				PotionAllowDuplicates = effect.PotionAllowDuplicates,
+				SpecificPotionId = effect.SpecificPotionId,
+				CardRewardRarityFilter = effect.CardRewardRarityFilter.ToString(),
+				CardRewardSource = effect.CardRewardSource.ToString(),
+				CardRewardRarityOdds = effect.CardRewardRarityOdds.ToString(),
 				CreatedCardsCostDuration = effect.CreatedCardsCostDuration.ToString(),
 				CreatedCardsCostTurns = effect.CreatedCardsCostTurns,
 				CreatedCardsCostResource = effect.CreatedCardsCostResource.ToString(),
@@ -1564,6 +1608,9 @@ internal static class CardEditorPresetStore
 				MoveToPosition = effect.MoveToPosition.ToString(),
 				UseMoveDestinationForGeneratedCards = effect.UseMoveDestinationForGeneratedCards,
 				AdditionalMoveToPiles = effect.AdditionalMoveToPiles.ToString(),
+				DelayedPileAction = effect.DelayedPileAction.ToString(),
+				DelayedPileCounterUnit = effect.DelayedPileCounterUnit.ToString(),
+				DelayedPileCounterScope = effect.DelayedPileCounterScope.ToString(),
 				DrawnFromPile = effect.DrawnFromPile.ToString(),
 				SpecificCardId = effect.SpecificCardId,
 				ShowReferencedCardText = effect.CardReferenceDisplayMode == CardExtraEffectCardReferenceDisplayMode.FullText,
@@ -1573,6 +1620,11 @@ internal static class CardEditorPresetStore
 				ChooseOneOption2 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption2),
 				ChooseOneOption3 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption3),
 				TransformMode = effect.TransformMode.ToString(),
+				StatefulTransformMode = effect.StatefulTransformMode.ToString(),
+				StatefulTransformDuration = effect.StatefulTransformDuration.ToString(),
+				StatefulTransformDurationAmount = numericFieldsAreDeltas
+					? effect.StatefulTransformDurationAmount
+					: Math.Clamp(effect.StatefulTransformDurationAmount <= 0 ? 1 : effect.StatefulTransformDurationAmount, 1, 99),
 				ConditionalBonusAmount = effect.ConditionalBonusAmount,
 				ConditionalBonusConditionType = effect.ConditionalBonusConditionType.ToString(),
 				ConditionalBonusCondition = effect.ConditionalBonusCondition.ToString(),
@@ -1708,6 +1760,7 @@ internal static class CardEditorPresetStore
 			effect.AmountSourceEffectId = string.IsNullOrWhiteSpace(AmountSourceEffectId)
 				? null
 				: AmountSourceEffectId.Trim();
+			effect.AmountSourceMultiplier = Math.Clamp(AmountSourceMultiplier <= 0m ? 1m : AmountSourceMultiplier, 0.01m, 999m);
 			effect.ValueSourceMode = CardExtraEffectValueSourceMode.Common;
 			if (!string.IsNullOrWhiteSpace(ValueSourceMode)
 				&& Enum.TryParse(ValueSourceMode, out CardExtraEffectValueSourceMode parsedValueSourceMode))
@@ -1829,6 +1882,89 @@ internal static class CardEditorPresetStore
 			effect.TriggerEveryN = numericFieldsAreDeltas ? TriggerEveryN : Math.Max(0, TriggerEveryN);
 			effect.TriggerMaxFires = numericFieldsAreDeltas ? TriggerMaxFires : Math.Max(0, TriggerMaxFires);
 			effect.TriggerMaxTurns = numericFieldsAreDeltas ? TriggerMaxTurns : Math.Max(0, TriggerMaxTurns);
+			effect.AutoPlayAllowSelfTrigger = AutoPlayAllowSelfTrigger;
+			effect.AutoPlayLoopLimit = numericFieldsAreDeltas
+				? Math.Clamp(AutoPlayLoopLimit, -999, 999)
+				: Math.Clamp(AutoPlayLoopLimit, 0, 999);
+			effect.AutoPlayLoopScope = CardExtraEffectAutoPlayLoopScope.ThisCard;
+			if (!string.IsNullOrWhiteSpace(AutoPlayLoopScope)
+				&& Enum.TryParse(AutoPlayLoopScope, out CardExtraEffectAutoPlayLoopScope parsedLoopScope))
+			{
+				effect.AutoPlayLoopScope = parsedLoopScope;
+			}
+			effect.UseLimitWindow = CardExtraEffectUseLimitWindow.Turn;
+			if (!string.IsNullOrWhiteSpace(UseLimitWindow)
+				&& Enum.TryParse(UseLimitWindow, out CardExtraEffectUseLimitWindow parsedUseLimitWindow))
+			{
+				effect.UseLimitWindow = parsedUseLimitWindow;
+			}
+			effect.PowerStackMode = CardExtraEffectPowerStackMode.Merge;
+			if (!string.IsNullOrWhiteSpace(PowerStackMode)
+				&& Enum.TryParse(PowerStackMode, out CardExtraEffectPowerStackMode parsedPowerStackMode))
+			{
+				effect.PowerStackMode = parsedPowerStackMode;
+			}
+			effect.DurationTickPolicy = CardExtraEffectDurationTickPolicy.Default;
+			if (!string.IsNullOrWhiteSpace(DurationTickPolicy)
+				&& Enum.TryParse(DurationTickPolicy, out CardExtraEffectDurationTickPolicy parsedDurationTickPolicy))
+			{
+				effect.DurationTickPolicy = parsedDurationTickPolicy;
+			}
+			effect.AutoPlayForceExhaust = AutoPlayForceExhaust;
+			effect.ConsumedCardAction = CardExtraEffectConsumedCardAction.Exhaust;
+			if (!string.IsNullOrWhiteSpace(ConsumedCardAction)
+				&& Enum.TryParse(ConsumedCardAction, out CardExtraEffectConsumedCardAction parsedConsumedCardAction))
+			{
+				effect.ConsumedCardAction = parsedConsumedCardAction;
+			}
+			effect.ConsumedCardValueSource = CardExtraEffectConsumedCardValueSource.Damage;
+			if (!string.IsNullOrWhiteSpace(ConsumedCardValueSource)
+				&& Enum.TryParse(ConsumedCardValueSource, out CardExtraEffectConsumedCardValueSource parsedConsumedCardValueSource))
+			{
+				effect.ConsumedCardValueSource = parsedConsumedCardValueSource;
+			}
+			effect.PotionMode = CardExtraEffectPotionMode.Random;
+			if (!string.IsNullOrWhiteSpace(PotionMode)
+				&& Enum.TryParse(PotionMode, out CardExtraEffectPotionMode parsedPotionMode))
+			{
+				effect.PotionMode = parsedPotionMode;
+			}
+			effect.PotionPoolFilter = CardExtraEffectPotionPoolFilter.Vanilla;
+			if (!string.IsNullOrWhiteSpace(PotionPoolFilter)
+				&& Enum.TryParse(PotionPoolFilter, out CardExtraEffectPotionPoolFilter parsedPotionPoolFilter))
+			{
+				effect.PotionPoolFilter = parsedPotionPoolFilter;
+			}
+			effect.PotionRarityFilter = CardExtraEffectPotionRarityFilter.Any;
+			if (!string.IsNullOrWhiteSpace(PotionRarityFilter)
+				&& Enum.TryParse(PotionRarityFilter, out CardExtraEffectPotionRarityFilter parsedPotionRarityFilter))
+			{
+				effect.PotionRarityFilter = parsedPotionRarityFilter;
+			}
+			effect.PotionInCombatOnly = PotionInCombatOnly ?? true;
+			effect.PotionAllowDuplicates = PotionAllowDuplicates;
+			if (!string.IsNullOrWhiteSpace(SpecificPotionId))
+			{
+				effect.SpecificPotionId = SpecificPotionId.Trim();
+			}
+			effect.CardRewardRarityFilter = CardExtraEffectCardRewardRarityFilter.Any;
+			if (!string.IsNullOrWhiteSpace(CardRewardRarityFilter)
+				&& Enum.TryParse(CardRewardRarityFilter, out CardExtraEffectCardRewardRarityFilter parsedCardRewardRarityFilter))
+			{
+				effect.CardRewardRarityFilter = parsedCardRewardRarityFilter;
+			}
+			effect.CardRewardSource = CardExtraEffectCardRewardSource.RoomDefault;
+			if (!string.IsNullOrWhiteSpace(CardRewardSource)
+				&& Enum.TryParse(CardRewardSource, out CardExtraEffectCardRewardSource parsedCardRewardSource))
+			{
+				effect.CardRewardSource = parsedCardRewardSource;
+			}
+			effect.CardRewardRarityOdds = CardExtraEffectCardRewardRarityOdds.RoomDefault;
+			if (!string.IsNullOrWhiteSpace(CardRewardRarityOdds)
+				&& Enum.TryParse(CardRewardRarityOdds, out CardExtraEffectCardRewardRarityOdds parsedCardRewardRarityOdds))
+			{
+				effect.CardRewardRarityOdds = parsedCardRewardRarityOdds;
+			}
 
 			CardCreatedCardsCostDuration createdCostDuration = CardCreatedCardsCostDuration.ThisTurn;
 			if (!string.IsNullOrWhiteSpace(CreatedCardsCostDuration) && Enum.TryParse(CreatedCardsCostDuration, out CardCreatedCardsCostDuration parsedCreatedCostDuration))
@@ -2079,6 +2215,24 @@ internal static class CardEditorPresetStore
 				effect.AdditionalMoveToPiles = parsedAdditionalMoveToPiles;
 			}
 
+			effect.DelayedPileAction = CardExtraEffectDelayedPileAction.RemoveFromDeck;
+			if (!string.IsNullOrWhiteSpace(DelayedPileAction) && Enum.TryParse(DelayedPileAction, out CardExtraEffectDelayedPileAction parsedDelayedPileAction))
+			{
+				effect.DelayedPileAction = parsedDelayedPileAction;
+			}
+
+			effect.DelayedPileCounterUnit = CardExtraEffectDelayedPileCounterUnit.Triggers;
+			if (!string.IsNullOrWhiteSpace(DelayedPileCounterUnit) && Enum.TryParse(DelayedPileCounterUnit, out CardExtraEffectDelayedPileCounterUnit parsedDelayedPileCounterUnit))
+			{
+				effect.DelayedPileCounterUnit = parsedDelayedPileCounterUnit;
+			}
+
+			effect.DelayedPileCounterScope = CardExtraEffectDelayedPileCounterScope.ThisCombat;
+			if (!string.IsNullOrWhiteSpace(DelayedPileCounterScope) && Enum.TryParse(DelayedPileCounterScope, out CardExtraEffectDelayedPileCounterScope parsedDelayedPileCounterScope))
+			{
+				effect.DelayedPileCounterScope = parsedDelayedPileCounterScope;
+			}
+
 			CardExtraEffectCardPile drawnFromPile = CardExtraEffectCardPile.AllPiles;
 			if (!string.IsNullOrWhiteSpace(DrawnFromPile) && Enum.TryParse(DrawnFromPile, out CardExtraEffectCardPile parsedDrawnFromPile))
 			{
@@ -2137,6 +2291,20 @@ internal static class CardEditorPresetStore
 			{
 				effect.TransformMode = parsedTransformMode;
 			}
+
+			effect.StatefulTransformMode = CardExtraEffectStatefulTransformMode.Transform;
+			if (!string.IsNullOrWhiteSpace(StatefulTransformMode) && Enum.TryParse(StatefulTransformMode, out CardExtraEffectStatefulTransformMode parsedStatefulTransformMode))
+			{
+				effect.StatefulTransformMode = parsedStatefulTransformMode;
+			}
+			effect.StatefulTransformDuration = CardExtraEffectStatefulTransformDuration.ThisCombat;
+			if (!string.IsNullOrWhiteSpace(StatefulTransformDuration) && Enum.TryParse(StatefulTransformDuration, out CardExtraEffectStatefulTransformDuration parsedStatefulTransformDuration))
+			{
+				effect.StatefulTransformDuration = parsedStatefulTransformDuration;
+			}
+			effect.StatefulTransformDurationAmount = numericFieldsAreDeltas
+				? StatefulTransformDurationAmount
+				: Math.Clamp(StatefulTransformDurationAmount <= 0 ? 1 : StatefulTransformDurationAmount, 1, 99);
 
 			effect.ConditionalBonusAmount = ConditionalBonusAmount;
 			effect.ConditionalBonusConditionType = CardExtraEffectBranchConditionType.None;

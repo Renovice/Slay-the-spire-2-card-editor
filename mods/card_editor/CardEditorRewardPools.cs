@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.CardPools;
@@ -11,6 +14,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -26,6 +30,13 @@ internal sealed class CardEditorRewardPoolDefinition
 
 internal static class CardEditorRewardPoolRegistry
 {
+	internal const string TinkerTimeTypeAttackPoolId = "TINKER_TIME.TYPE_ATTACK";
+	internal const string TinkerTimeTypeSkillPoolId = "TINKER_TIME.TYPE_SKILL";
+	internal const string TinkerTimeTypePowerPoolId = "TINKER_TIME.TYPE_POWER";
+	internal const string TinkerTimeRiderAttackPoolId = "TINKER_TIME.RIDER_ATTACK";
+	internal const string TinkerTimeRiderSkillPoolId = "TINKER_TIME.RIDER_SKILL";
+	internal const string TinkerTimeRiderPowerPoolId = "TINKER_TIME.RIDER_POWER";
+
 	private static readonly IReadOnlyList<CardEditorRewardPoolDefinition> _all = BuildDefinitions();
 	private static readonly Dictionary<string, CardEditorRewardPoolDefinition> _byId =
 		_all.ToDictionary(d => d.Id, StringComparer.OrdinalIgnoreCase);
@@ -82,6 +93,21 @@ internal static class CardEditorRewardPoolRegistry
 		replacement = ChooseCandidate(candidates, owner.PlayerRng.Rewards).Template;
 		Log.Info($"[CardEditor][RewardPools] Direct event reward replaced {canonicalCard.Id} with {replacement.Id}");
 		return true;
+	}
+
+	internal static IReadOnlyList<CardEditorRewardPoolTemplateCandidate> GetEnabledTemplateCandidates(
+		IEnumerable<string> poolIds,
+		Player owner,
+		CardRarity? selectedRarity = null)
+	{
+		if (owner == null)
+		{
+			return Array.Empty<CardEditorRewardPoolTemplateCandidate>();
+		}
+
+		return GetEnabledCandidates(poolIds, owner, selectedRarity)
+			.Select(c => new CardEditorRewardPoolTemplateCandidate(c.Template, c.Mode))
+			.ToList();
 	}
 
 	public static void ApplyToGeneratedCardReward(Player player, CardCreationOptions options, int optionCount, List<CardCreationResult> cards)
@@ -256,6 +282,48 @@ internal static class CardEditorRewardPoolRegistry
 
 		return new List<CardEditorRewardPoolDefinition>
 		{
+			new()
+			{
+				Id = TinkerTimeTypeAttackPoolId,
+				Title = "Tinker Time - Attack Base Option",
+				Group = "Tinker Time Builder",
+				RarityHint = CardRarity.Event
+			},
+			new()
+			{
+				Id = TinkerTimeTypeSkillPoolId,
+				Title = "Tinker Time - Skill Base Option",
+				Group = "Tinker Time Builder",
+				RarityHint = CardRarity.Event
+			},
+			new()
+			{
+				Id = TinkerTimeTypePowerPoolId,
+				Title = "Tinker Time - Power Base Option",
+				Group = "Tinker Time Builder",
+				RarityHint = CardRarity.Event
+			},
+			new()
+			{
+				Id = TinkerTimeRiderAttackPoolId,
+				Title = "Tinker Time - Attack Rider Option",
+				Group = "Tinker Time Builder",
+				RarityHint = CardRarity.Event
+			},
+			new()
+			{
+				Id = TinkerTimeRiderSkillPoolId,
+				Title = "Tinker Time - Skill Rider Option",
+				Group = "Tinker Time Builder",
+				RarityHint = CardRarity.Event
+			},
+			new()
+			{
+				Id = TinkerTimeRiderPowerPoolId,
+				Title = "Tinker Time - Power Rider Option",
+				Group = "Tinker Time Builder",
+				RarityHint = CardRarity.Event
+			},
 			new()
 			{
 				Id = "TRASH_HEAP.EVENT_CARDS",
@@ -502,6 +570,8 @@ internal static class CardEditorRewardPoolRegistry
 	private sealed record RewardPoolCandidate(CardModel Template, CardEditorRewardPoolBucket Bucket, CardEditorRewardPoolInjectionMode Mode);
 }
 
+internal readonly record struct CardEditorRewardPoolTemplateCandidate(CardModel Template, CardEditorRewardPoolInjectionMode Mode);
+
 [HarmonyPatch(typeof(MegaCrit.Sts2.Core.Runs.RunState), nameof(MegaCrit.Sts2.Core.Runs.RunState.CreateCard), typeof(CardModel), typeof(Player))]
 internal static class RunState_CreateCard_CardEditorRewardPools_Patch
 {
@@ -521,6 +591,347 @@ internal static class RunState_CreateCard_CardEditorRewardPools_Patch
 	}
 }
 
+internal sealed class CardEditorCardRewardSpec
+{
+	public CardGeneratedCardPool Pool { get; init; } = CardGeneratedCardPool.Default;
+	public CardGeneratedCardType Type { get; init; } = CardGeneratedCardType.Any;
+	public CardExtraEffectCardRewardRarityFilter Rarity { get; init; } = CardExtraEffectCardRewardRarityFilter.Any;
+	public string? CustomTag { get; init; }
+
+	public bool HasMetadata => Pool != CardGeneratedCardPool.Default
+		|| Type != CardGeneratedCardType.Any
+		|| Rarity != CardExtraEffectCardRewardRarityFilter.Any
+		|| !string.IsNullOrWhiteSpace(CustomTag);
+
+	public bool RequiresPostPopulateFilter => Pool == CardGeneratedCardPool.Ancient
+		|| Type != CardGeneratedCardType.Any
+		|| Rarity != CardExtraEffectCardRewardRarityFilter.Any
+		|| !string.IsNullOrWhiteSpace(CustomTag);
+}
+
+internal static class CardEditorCardRewardSpecs
+{
+	private const string SpecCategory = "CARD_EDITOR_REWARD";
+	private static readonly ConditionalWeakTable<CardReward, CardEditorCardRewardSpec> Specs = new();
+	private static readonly System.Reflection.FieldInfo? OptionsField = AccessTools.Field(typeof(CardReward), "<Options>k__BackingField");
+	private static readonly System.Reflection.FieldInfo? OptionCountField = AccessTools.Field(typeof(CardReward), "<OptionCount>k__BackingField");
+
+	public static CardEditorCardRewardSpec FromEffect(CardExtraEffect effect)
+	{
+		return new CardEditorCardRewardSpec
+		{
+			Pool = effect?.GeneratedCardPool ?? CardGeneratedCardPool.Default,
+			Type = effect?.GeneratedCardType ?? CardGeneratedCardType.Any,
+			Rarity = effect?.CardRewardRarityFilter ?? CardExtraEffectCardRewardRarityFilter.Any,
+			CustomTag = string.IsNullOrWhiteSpace(effect?.GeneratedCardCustomTag) ? null : effect.GeneratedCardCustomTag.Trim()
+		};
+	}
+
+	public static void Attach(CardReward reward, CardEditorCardRewardSpec spec)
+	{
+		if (reward == null || spec == null || !spec.HasMetadata)
+		{
+			return;
+		}
+
+		Specs.Remove(reward);
+		Specs.Add(reward, spec);
+	}
+
+	public static bool TryApplyToGeneratedCardReward(CardReward reward, Player player, CardCreationOptions options, int optionCount, List<CardCreationResult> cards)
+	{
+		if (reward == null
+			|| player == null
+			|| options == null
+			|| cards == null
+			|| !Specs.TryGetValue(reward, out CardEditorCardRewardSpec? spec)
+			|| !spec.RequiresPostPopulateFilter)
+		{
+			return false;
+		}
+
+		List<CardModel> candidates = options.GetPossibleCards(player)
+			.Where(card => MatchesSpec(player, card, spec))
+			.GroupBy(card => card.Id)
+			.Select(group => group.First())
+			.ToList();
+		if (candidates.Count == 0)
+		{
+			cards.Clear();
+			return true;
+		}
+
+		int count = Math.Min(Math.Max(optionCount, 1), candidates.Count);
+		try
+		{
+			List<CardCreationResult> generated = GenerateFilteredRewardCards(player, options, spec, candidates, count);
+			if (generated.Count == 0)
+			{
+				cards.Clear();
+				return true;
+			}
+
+			cards.Clear();
+			cards.AddRange(generated);
+			return true;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RewardPools] Card reward filter generation failed: {ex}");
+			return false;
+		}
+	}
+
+	public static bool TryBuildSerializable(CardReward reward, out SerializableReward result)
+	{
+		result = null!;
+		if (reward == null
+			|| !Specs.TryGetValue(reward, out CardEditorCardRewardSpec? spec)
+			|| !spec.HasMetadata
+			|| OptionsField?.GetValue(reward) is not CardCreationOptions options
+			|| OptionCountField?.GetValue(reward) is not int optionCount
+			|| options.CardPools.Count <= 0)
+		{
+			return false;
+		}
+
+		result = new SerializableReward
+		{
+			RewardType = RewardType.Card,
+			PredeterminedModelId = Encode(spec),
+			Source = options.Source,
+			RarityOdds = options.RarityOdds,
+			CardPoolIds = options.CardPools.Select(pool => pool.Id).ToList(),
+			OptionCount = optionCount
+		};
+		return true;
+	}
+
+	public static bool TryBuildFromSerializable(SerializableReward save, Player player, out Reward reward)
+	{
+		reward = null!;
+		if (save == null
+			|| save.RewardType != RewardType.Card
+			|| !TryDecode(save.PredeterminedModelId, out CardEditorCardRewardSpec spec))
+		{
+			return false;
+		}
+
+		CardCreationOptions options = new CardCreationOptions(save.CardPoolIds.Select(ModelDb.GetById<CardPoolModel>), save.Source, save.RarityOdds);
+		CardReward cardReward = new CardReward(options, save.OptionCount, player);
+		Attach(cardReward, spec);
+		reward = cardReward;
+		return true;
+	}
+
+	private static List<CardCreationResult> GenerateFilteredRewardCards(Player player, CardCreationOptions options, CardEditorCardRewardSpec spec, List<CardModel> candidates, int count)
+	{
+		if (CanUseVanillaRewardFactory(spec, candidates))
+		{
+			CardRarityOddsType odds = spec.Rarity != CardExtraEffectCardRewardRarityFilter.Any || candidates.Select(card => card.Rarity).Distinct().Count() <= 1
+				? CardRarityOddsType.Uniform
+				: options.RarityOdds;
+			CardCreationOptions filteredOptions = new CardCreationOptions(candidates, options.Source, odds)
+				.WithFlags(CardCreationFlags.NoCardPoolModifications);
+			if (options.RngOverride != null)
+			{
+				filteredOptions.WithRngOverride(options.RngOverride);
+			}
+
+			return CardFactory.CreateForReward(player, count, filteredOptions).ToList();
+		}
+
+		Rng rng = options.RngOverride ?? player.PlayerRng.Rewards;
+		List<CardModel> remaining = candidates.ToList();
+		List<CardCreationResult> result = new();
+		for (int i = 0; i < count && remaining.Count > 0; i++)
+		{
+			CardModel canonical = rng.NextItem(remaining);
+			if (canonical == null)
+			{
+				break;
+			}
+
+			remaining.Remove(canonical);
+			result.Add(new CardCreationResult(player.RunState.CreateCard(canonical, player)));
+		}
+
+		return result;
+	}
+
+	private static bool CanUseVanillaRewardFactory(CardEditorCardRewardSpec spec, List<CardModel> candidates)
+	{
+		if (spec.Rarity != CardExtraEffectCardRewardRarityFilter.Any)
+		{
+			return ToCardRarity(spec.Rarity) is CardRarity.Common or CardRarity.Uncommon or CardRarity.Rare;
+		}
+
+		return candidates.Any(card => card.Rarity is CardRarity.Common or CardRarity.Uncommon or CardRarity.Rare);
+	}
+
+	private static bool MatchesSpec(Player player, CardModel card, CardEditorCardRewardSpec spec)
+	{
+		if (player == null || card == null)
+		{
+			return false;
+		}
+
+		if (!CardEditorExtraEffects.MatchesCountPool(player, card, spec.Pool))
+		{
+			return false;
+		}
+
+		if (!MatchesType(card, spec.Type))
+		{
+			return false;
+		}
+
+		CardRarity? rarity = ToCardRarity(spec.Rarity);
+		if (rarity.HasValue && card.Rarity != rarity.Value)
+		{
+			return false;
+		}
+
+		string tag = spec.CustomTag?.Trim() ?? string.Empty;
+		if (!string.IsNullOrWhiteSpace(tag))
+		{
+			return CardEditorOverrides.TryGetEffectiveOverride(card.Id, out CardOverride overrideData)
+				&& overrideData.CustomTags != null
+				&& overrideData.CustomTags.Contains(tag);
+		}
+
+		return true;
+	}
+
+	private static bool MatchesType(CardModel card, CardGeneratedCardType type)
+	{
+		return type switch
+		{
+			CardGeneratedCardType.Attack => card.Type == CardType.Attack,
+			CardGeneratedCardType.Skill => card.Type == CardType.Skill,
+			CardGeneratedCardType.Power => card.Type == CardType.Power,
+			CardGeneratedCardType.Playable => card.Type is CardType.Attack or CardType.Skill or CardType.Power,
+			CardGeneratedCardType.Status => card.Type == CardType.Status,
+			CardGeneratedCardType.Curse => card.Type == CardType.Curse,
+			CardGeneratedCardType.Quest => card.Type == CardType.Quest,
+			_ => true
+		};
+	}
+
+	private static CardRarity? ToCardRarity(CardExtraEffectCardRewardRarityFilter rarity)
+	{
+		return rarity switch
+		{
+			CardExtraEffectCardRewardRarityFilter.Basic => CardRarity.Basic,
+			CardExtraEffectCardRewardRarityFilter.Common => CardRarity.Common,
+			CardExtraEffectCardRewardRarityFilter.Uncommon => CardRarity.Uncommon,
+			CardExtraEffectCardRewardRarityFilter.Rare => CardRarity.Rare,
+			CardExtraEffectCardRewardRarityFilter.Ancient => CardRarity.Ancient,
+			CardExtraEffectCardRewardRarityFilter.Event => CardRarity.Event,
+			CardExtraEffectCardRewardRarityFilter.Token => CardRarity.Token,
+			CardExtraEffectCardRewardRarityFilter.Status => CardRarity.Status,
+			CardExtraEffectCardRewardRarityFilter.Curse => CardRarity.Curse,
+			CardExtraEffectCardRewardRarityFilter.Quest => CardRarity.Quest,
+			_ => null
+		};
+	}
+
+	private static ModelId Encode(CardEditorCardRewardSpec spec)
+	{
+		string payload = string.Join("|", new[]
+		{
+			"1",
+			((int)spec.Pool).ToString(),
+			((int)spec.Type).ToString(),
+			((int)spec.Rarity).ToString(),
+			ToBase64Url(Encoding.UTF8.GetBytes(spec.CustomTag ?? string.Empty))
+		});
+		return new ModelId(SpecCategory, ToBase64Url(Encoding.UTF8.GetBytes(payload)));
+	}
+
+	private static bool TryDecode(ModelId id, out CardEditorCardRewardSpec spec)
+	{
+		spec = null!;
+		if (id == null || id == ModelId.none || !string.Equals(id.Category, SpecCategory, StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		try
+		{
+			string payload = Encoding.UTF8.GetString(FromBase64Url(id.Entry));
+			string[] parts = payload.Split('|');
+			if (parts.Length < 5 || parts[0] != "1")
+			{
+				return false;
+			}
+
+			spec = new CardEditorCardRewardSpec
+			{
+				Pool = Enum.TryParse(parts[1], out CardGeneratedCardPool pool) ? pool : CardGeneratedCardPool.Default,
+				Type = Enum.TryParse(parts[2], out CardGeneratedCardType type) ? type : CardGeneratedCardType.Any,
+				Rarity = Enum.TryParse(parts[3], out CardExtraEffectCardRewardRarityFilter rarity) ? rarity : CardExtraEffectCardRewardRarityFilter.Any,
+				CustomTag = string.IsNullOrWhiteSpace(parts[4]) ? null : Encoding.UTF8.GetString(FromBase64Url(parts[4]))
+			};
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static string ToBase64Url(byte[] bytes)
+	{
+		return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+	}
+
+	private static byte[] FromBase64Url(string value)
+	{
+		string text = value.Replace('-', '+').Replace('_', '/');
+		switch (text.Length % 4)
+		{
+			case 2:
+				text += "==";
+				break;
+			case 3:
+				text += "=";
+				break;
+		}
+		return Convert.FromBase64String(text);
+	}
+}
+
+[HarmonyPatch(typeof(CardReward), nameof(CardReward.ToSerializable))]
+internal static class CardReward_ToSerializable_CardEditorRewardSpecs_Patch
+{
+	public static bool Prefix(CardReward __instance, ref SerializableReward __result)
+	{
+		if (!CardEditorCardRewardSpecs.TryBuildSerializable(__instance, out SerializableReward result))
+		{
+			return true;
+		}
+
+		__result = result;
+		return false;
+	}
+}
+
+[HarmonyPatch(typeof(Reward), nameof(Reward.FromSerializable))]
+internal static class Reward_FromSerializable_CardEditorRewardSpecs_Patch
+{
+	public static bool Prefix(SerializableReward save, Player player, ref Reward __result)
+	{
+		if (!CardEditorCardRewardSpecs.TryBuildFromSerializable(save, player, out Reward reward))
+		{
+			return true;
+		}
+
+		__result = reward;
+		return false;
+	}
+}
+
 [HarmonyPatch(typeof(CardReward), nameof(CardReward.Populate))]
 internal static class CardReward_Populate_CardEditorRewardPools_Patch
 {
@@ -535,6 +946,11 @@ internal static class CardReward_Populate_CardEditorRewardPools_Patch
 			if (CardsField?.GetValue(__instance) is not List<CardCreationResult> cards
 				|| OptionsField?.GetValue(__instance) is not CardCreationOptions options
 				|| OptionCountField?.GetValue(__instance) is not int optionCount)
+			{
+				return;
+			}
+
+			if (CardEditorCardRewardSpecs.TryApplyToGeneratedCardReward(__instance, __instance.Player, options, optionCount, cards))
 			{
 				return;
 			}

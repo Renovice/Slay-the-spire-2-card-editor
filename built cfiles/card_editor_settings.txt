@@ -2,5 +2,8 @@
   "PreloadEditorPopupsOnLaunch": true,
   "IncrementalPopupHydrationOnOpen": true,
   "BackgroundPopupWarmupAfterDirtyClose": false,
-  "BackgroundPopupWarmupDelaySeconds": 0.08
+  "BackgroundPopupWarmupDelaySeconds": 0.08,
+  "EnableCardEditorAutoPlayLoopCap": true,
+  "CardEditorAutoPlayLoopCapPerTurn": 100,
+  "PreventCardEditorAutoPlaySelfLoops": false
 }

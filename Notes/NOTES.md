@@ -6,6 +6,11 @@ Before coding any new feature, always first understand how **both** the base gam
 
 - **Damage calculations**: STS2 applies Strength, Weak, Vulnerable, Block etc. through its own pipeline. Our `ExecuteEffect` calls into that pipeline via `DealDamageCmd` – don't re-implement damage math manually.
 - **Existing vanilla card behavior**: if a vanilla card already does the thing you need, reuse the same underlying command/helper/pipeline where possible instead of inventing a Card Editor-only version of the mechanic.
+- **Vanilla semantics first**: prefer vanilla-style semantics and wording whenever possible. If a safety knob is needed for mod-created edge cases, default it to vanilla behavior and make any safer deviation explicit in the editor UI/card text.
+- **Source semantics**: if a trigger can be raised by cards, powers, relics, or global commands, preserve the real source. Do not make a `null`/non-card source satisfy card-specific filters, and do not invent a fake card source just to make a filter pass.
+- **Loop limit semantics**: the per-effect autoplay loop limit counts whole effect activations, not individual cards produced by that activation. Power-mode immediate triggers consume the limit before running so repeated OnPlay events cannot queue recursive autoplay work. The separate global autoplay cap counts individual autoplayed cards and remains the hard softlock safety net.
+- **Loop limit scope**: autoplay loop limits can be tracked per card copy, across all copies of the same card/effect row, or across equivalent autoplay effects with the same trigger/filter/generated-card signature.
+- **Loop limit descriptions**: in combat, auto-generated extra-effect text shows the remaining loop-limit uses for the current turn and colors the number using the normal card-text increase/decrease highlighting.
 - **Card variations / upgrades**: STS2 cards track upgrade level on `CardModel`. The editor stores base + upgrade delta effects separately and resolves them via `GetEffectiveExtraEffects`. Always check how an effect differs between base and upgraded before assuming it "just works".
 - **Powers**: STS2 powers are persistent `PowerModel` instances attached to creatures. Our `CardEditorExtraEffectPower` is a single invisible power that stores a list of entries. New entries are added when a card is played; entries are removed on expiry. Never bypass this – scheduling deferred effects yourself will fight the power system.
 - **Scheduling**: One-shot deferred effects (e.g. "at the start of your next turn, deal damage") go through `CardEditorExtraEffectScheduler`. Repeating effects MUST use the power system (`AsPower = true` + a trigger).
@@ -35,6 +40,10 @@ When adding a new UI "box", dropdown, modifier row, or extra field to the card e
 - If a control changes between 1-box / 2-box / 3-box states, integrate that into the existing grid behavior rather than giving it unique positioning logic.
 - Avoid custom spacing hacks unless the shared grid cannot express the layout.
 - If a new modifier needs extra controls, add them as part of the current grid pattern so they sort/reorder the same way as rows like `Timing`, `Power Filter`, and `Condition Bonus`.
+
+## Rule: New extra effects must include universal modifiers by default
+
+Before adding a new `CardExtraEffectKind`, read `Notes/extra-effect-implementation-baseline.md`. A new effect is not complete just because its core action runs; it should support the shared timing, power, grant-to-card, scaling/count, conditional bonus, branch, use-limit/effect-limit, self-scaling, card-filter, text, upgrade, and UI systems wherever the effect's semantics allow it.
 
 ---
 
@@ -90,6 +99,7 @@ dotnet build card_editor.csproj -c Release
 
 ## Bug fix verification
 
+- Any bugs should be fixed at their root, not at the level of individual interactions, but all interactions and effects that are affected by said bug.
 - After fixing a bug, always test it in the live setup environment after build and deploy, not just by reading code or relying on logs.
 - For live verification, launch through Steam rather than the standalone `.exe`, because the Steam run is the real mod environment we ship against.
 - When checking runtime logs from a live verification run, inspect `user://logs/godot.log`.

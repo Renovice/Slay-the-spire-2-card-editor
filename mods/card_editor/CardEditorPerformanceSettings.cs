@@ -13,6 +13,9 @@ internal sealed class CardEditorPerformanceSettingsData
 	public bool IncrementalPopupHydrationOnOpen { get; set; } = false;
 	public bool BackgroundPopupWarmupAfterDirtyClose { get; set; } = false;
 	public double BackgroundPopupWarmupDelaySeconds { get; set; } = 0.08;
+	public bool EnableCardEditorAutoPlayLoopCap { get; set; } = true;
+	public int CardEditorAutoPlayLoopCapPerTurn { get; set; } = 100;
+	public bool PreventCardEditorAutoPlaySelfLoops { get; set; } = false;
 	public bool VerboseLogging { get; set; } = false;
 	public bool VerboseDamageDebugLogging { get; set; } = false;
 }
@@ -78,6 +81,33 @@ internal static class CardEditorPerformanceSettings
 		{
 			EnsureLoaded();
 			return _data.VerboseDamageDebugLogging;
+		}
+	}
+
+	public static bool EnableCardEditorAutoPlayLoopCap
+	{
+		get
+		{
+			EnsureLoaded();
+			return _data.EnableCardEditorAutoPlayLoopCap;
+		}
+	}
+
+	public static int CardEditorAutoPlayLoopCapPerTurn
+	{
+		get
+		{
+			EnsureLoaded();
+			return Math.Clamp(_data.CardEditorAutoPlayLoopCapPerTurn, 1, 999);
+		}
+	}
+
+	public static bool PreventCardEditorAutoPlaySelfLoops
+	{
+		get
+		{
+			EnsureLoaded();
+			return _data.PreventCardEditorAutoPlaySelfLoops;
 		}
 	}
 

@@ -411,7 +411,11 @@ internal static class CardEditorDrawnGeneratedCostController
 		}
 		if (modifier == CardExtraEffectCostModifier.HalfCost)
 		{
-			int currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.All);
+			int currentCost;
+			using (CardEditorEnergyCostVisibilityHelper.SuppressCardEditorCostHooksScoped())
+			{
+				currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.All);
+			}
 			if (currentCost < 0)
 			{
 				return;

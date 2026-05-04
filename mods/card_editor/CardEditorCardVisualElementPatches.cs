@@ -124,6 +124,7 @@ internal static class CardEditorCardVisualElementController
 		snapshot.UnplayableEnergyIconVisible = GetVisible(cardNode, _unplayableEnergyIconField);
 		snapshot.AncientTextBgVisible = GetVisible(cardNode, _ancientTextBgField);
 		NormalizeCostSnapshot(cardNode, snapshot);
+		NormalizeTypeSnapshot(cardNode, snapshot);
 		snapshot.IsCaptured = true;
 	}
 
@@ -140,6 +141,18 @@ internal static class CardEditorCardVisualElementController
 		snapshot.EnergyLabelVisible = shouldShowEnergy;
 	}
 
+	private static void NormalizeTypeSnapshot(NCard cardNode, VisibilitySnapshot snapshot)
+	{
+		CardModel? model = cardNode.Model;
+		if (model == null || model.Type == CardType.None)
+		{
+			return;
+		}
+
+		snapshot.TypePlaqueVisible = true;
+		snapshot.TypeLabelVisible = true;
+	}
+
 	private static void RestoreSnapshot(NCard cardNode, VisibilitySnapshot snapshot)
 	{
 		if (!snapshot.IsCaptured)
@@ -147,6 +160,7 @@ internal static class CardEditorCardVisualElementController
 			return;
 		}
 
+		NormalizeTypeSnapshot(cardNode, snapshot);
 		SetVisible(cardNode, _titleLabelField, snapshot.TitleVisible);
 		SetVisible(cardNode, _descriptionLabelField, snapshot.DescriptionVisible);
 		SetVisible(cardNode, _bannerField, snapshot.BannerVisible);

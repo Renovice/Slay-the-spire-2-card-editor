@@ -934,7 +934,9 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_isCreatorMode = creatorMode;
 		if (_titleLabel != null && GodotObject.IsInstanceValid(_titleLabel))
 		{
-			_titleLabel.Text = creatorMode ? "Preset Creator" : "Preset Editor";
+			_titleLabel.Text = creatorMode
+				? CardEditorLoc.T("button.presetCreator", "Preset Creator")
+				: CardEditorLoc.T("button.presetEditor", "Preset Editor");
 		}
 
 		if (IsNodeReady())

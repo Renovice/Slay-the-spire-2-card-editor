@@ -12,6 +12,11 @@ internal static class CardModel_get_Title_VanillaTitleOverride_Patch
 		{
 			return;
 		}
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.Title;
+			return;
+		}
 		if (__instance is CardEditorCreatedCardBase)
 		{
 			return;
@@ -20,7 +25,7 @@ internal static class CardModel_get_Title_VanillaTitleOverride_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData))
+		if (!CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData))
 		{
 			return;
 		}
@@ -43,4 +48,3 @@ internal static class CardModel_get_Title_VanillaTitleOverride_Patch
 		__result = title + "+";
 	}
 }
-

@@ -21,6 +21,13 @@ internal static class CardEditorEnergyCostVisibilityHelper
 
 	internal static bool SuppressCardEditorCostHooks => _suppressCardEditorCostHooks;
 
+	internal static IDisposable SuppressCardEditorCostHooksScoped()
+	{
+		bool previous = _suppressCardEditorCostHooks;
+		_suppressCardEditorCostHooks = true;
+		return new SuppressionScope(previous);
+	}
+
 	internal static decimal GetPreEditorModifiedEnergyCost(CombatState state, CardModel card, decimal originalCost)
 	{
 		bool previous = _suppressCardEditorCostHooks;
@@ -32,6 +39,28 @@ internal static class CardEditorEnergyCostVisibilityHelper
 		finally
 		{
 			_suppressCardEditorCostHooks = previous;
+		}
+	}
+
+	private sealed class SuppressionScope : IDisposable
+	{
+		private readonly bool _previous;
+		private bool _disposed;
+
+		public SuppressionScope(bool previous)
+		{
+			_previous = previous;
+		}
+
+		public void Dispose()
+		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			_suppressCardEditorCostHooks = _previous;
+			_disposed = true;
 		}
 	}
 

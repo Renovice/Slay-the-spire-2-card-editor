@@ -174,6 +174,7 @@ label.powerTurns
 label.resource
 label.uses
 multiplier.label
+cardText.customKeyword.amount
 cardText.doesNotConsumeVigor
 cardText.doesNotConsumeSelfHp
 cardText.doesNotConsumeStatStatus
@@ -280,6 +281,9 @@ tooltip.scalingStageEffect
 cardText.scalingStage
 effectKind.ScalingStage
 effectKind.PersistentSelfScaling
+effectKind.PersistentTargetCardMutation
+effectKind.SelfScaling
+effectKind.TargetCardMutation
 status.label
 statusIcon.mode.auto
 statusIcon.mode.baseGame
@@ -333,6 +337,7 @@ tooltip.countConditionAmount
 tooltip.countEnemyIntent
 tooltip.countEnemyStatus
 tooltip.countEvent
+tooltip.countEvent.inPile
 tooltip.countExcludeSource
 tooltip.countFilter
 tooltip.countMode

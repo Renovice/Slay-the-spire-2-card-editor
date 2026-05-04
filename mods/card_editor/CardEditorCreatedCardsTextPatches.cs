@@ -23,6 +23,12 @@ public static class CardModel_get_Title_CreatedCards_Patch
 			return true;
 		}
 
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.Title;
+			return false;
+		}
+
 		string title = CardEditorCreatedCardsStore.GetTitleForCard(__instance.Id);
 		if (!__instance.IsUpgraded)
 		{
@@ -54,6 +60,12 @@ public static class CardModel_GetDescriptionForUpgradePreview_CreatedCards_Patch
 		if (__instance is not CardEditorCreatedCardBase)
 		{
 			return true;
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.GetDescriptionForUpgradePreview();
+			return false;
 		}
 
 		__result = CreatedCardTextBuilder.Build(__instance, __instance.CurrentTarget, isUpgradePreview: true);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -19,20 +20,20 @@ internal static class CardModel_get_Pool_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData))
+		if (CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+			&& !string.IsNullOrWhiteSpace(overrideData.PoolTitle))
 		{
-			return;
-		}
-		if (string.IsNullOrWhiteSpace(overrideData.PoolTitle))
-		{
-			return;
+			string desired = overrideData.PoolTitle.Trim();
+			CardPoolModel? pool = ModelDb.AllCardPools.FirstOrDefault(p => string.Equals(p.Title, desired, StringComparison.OrdinalIgnoreCase));
+			if (pool != null)
+			{
+				__result = pool;
+			}
 		}
 
-		string desired = overrideData.PoolTitle.Trim();
-		CardPoolModel? pool = ModelDb.AllCardPools.FirstOrDefault(p => string.Equals(p.Title, desired, StringComparison.OrdinalIgnoreCase));
-		if (pool != null)
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
 		{
-			__result = pool;
+			__result = identitySource.Pool;
 		}
 	}
 }
@@ -50,20 +51,20 @@ internal static class CardModel_get_VisualCardPool_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData))
+		if (CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+			&& !string.IsNullOrWhiteSpace(overrideData.PoolTitle))
 		{
-			return;
-		}
-		if (string.IsNullOrWhiteSpace(overrideData.PoolTitle))
-		{
-			return;
+			string desired = overrideData.PoolTitle.Trim();
+			CardPoolModel? pool = ModelDb.AllCardPools.FirstOrDefault(p => string.Equals(p.Title, desired, StringComparison.OrdinalIgnoreCase));
+			if (pool != null)
+			{
+				__result = pool;
+			}
 		}
 
-		string desired = overrideData.PoolTitle.Trim();
-		CardPoolModel? pool = ModelDb.AllCardPools.FirstOrDefault(p => string.Equals(p.Title, desired, StringComparison.OrdinalIgnoreCase));
-		if (pool != null)
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
 		{
-			__result = pool;
+			__result = identitySource.VisualCardPool;
 		}
 	}
 }
@@ -81,18 +82,21 @@ internal static class CardModel_get_Rarity_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.TryGetEffectiveOverride(__instance.Id, out CardOverride overrideData))
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance.Id, out CardOverride overrideData))
 		{
-			return;
+			if (CardEditorFullArtRenderContext.IsActive && overrideData.FullArt == true)
+			{
+				__result = CardRarity.Ancient;
+				return;
+			}
+			if (overrideData.Rarity is CardRarity rarity && rarity != CardRarity.None)
+			{
+				__result = rarity;
+			}
 		}
-		if (CardEditorFullArtRenderContext.IsActive && overrideData.FullArt == true)
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
 		{
-			__result = CardRarity.Ancient;
-			return;
-		}
-		if (overrideData.Rarity is CardRarity rarity && rarity != CardRarity.None)
-		{
-			__result = rarity;
+			__result = identitySource.Rarity;
 		}
 	}
 }
@@ -110,13 +114,15 @@ internal static class CardModel_get_Type_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData))
-		{
-			return;
-		}
-		if (overrideData.CardType is CardType type && type != CardType.None)
+		if (CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+			&& overrideData.CardType is CardType type
+			&& type != CardType.None)
 		{
 			__result = type;
+		}
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.Type;
 		}
 	}
 }
@@ -142,9 +148,61 @@ internal static class CardModel_get_TargetType_VanillaOverride_Patch
 		{
 			__result = target;
 		}
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.TargetType;
+		}
 		if (CardEditorExtraEffects.TryGetRuleAdjustedTargetType(__instance, __result, out TargetType adjustedTargetType))
 		{
 			__result = adjustedTargetType;
+		}
+	}
+}
+
+[HarmonyPatch(typeof(CardModel), "get_CanonicalKeywords")]
+internal static class CardModel_get_CanonicalKeywords_DynamicIdentity_Patch
+{
+	public static void Postfix(CardModel __instance, ref IEnumerable<CardKeyword> __result)
+	{
+		if (__instance?.Id == null || CardEditorOverrides.SuppressAllOverrides)
+		{
+			return;
+		}
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.CanonicalKeywords;
+		}
+	}
+}
+
+[HarmonyPatch(typeof(CardModel), "get_Tags")]
+internal static class CardModel_get_Tags_DynamicIdentity_Patch
+{
+	public static void Postfix(CardModel __instance, ref IEnumerable<CardTag> __result)
+	{
+		if (__instance?.Id == null || CardEditorOverrides.SuppressAllOverrides)
+		{
+			return;
+		}
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.Tags;
+		}
+	}
+}
+
+[HarmonyPatch(typeof(CardModel), "get_GainsBlock")]
+internal static class CardModel_get_GainsBlock_DynamicIdentity_Patch
+{
+	public static void Postfix(CardModel __instance, ref bool __result)
+	{
+		if (__instance?.Id == null || CardEditorOverrides.SuppressAllOverrides)
+		{
+			return;
+		}
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.GainsBlock;
 		}
 	}
 }

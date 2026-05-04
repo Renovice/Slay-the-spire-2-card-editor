@@ -1,37 +1,58 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Monsters;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
-public abstract class CardEditorCreatedCardBase : CardModel
+public abstract class CardEditorCreatedCardBase : CardModel, KnowledgeDemon.IChoosable
 {
 	protected CardEditorCreatedCardBase()
 		: base(1, CardType.Attack, CardRarity.Common, TargetType.AnyEnemy, shouldShowInCardLibrary: false)
 	{
 	}
 
-	public override CardPoolModel Pool => CardEditorCreatedCardsStore.GetPoolForCard(base.Id);
+	public override CardPoolModel Pool => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+		? identitySource.Pool
+		: CardEditorCreatedCardsStore.GetPoolForCard(base.Id);
 
-	public override CardPoolModel VisualCardPool => Pool;
+	public override CardPoolModel VisualCardPool => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+		? identitySource.VisualCardPool
+		: Pool;
 
-	public override string PortraitPath => CardEditorCreatedCardsStore.GetPortraitPathForCard(base.Id) ?? CardModel.MissingPortraitPath;
+	public override string PortraitPath => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+		? identitySource.PortraitPath
+		: CardEditorCreatedCardsStore.GetPortraitPathForCard(base.Id) ?? CardModel.MissingPortraitPath;
 
-	public override string BetaPortraitPath => PortraitPath;
+	public override string BetaPortraitPath => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+		? identitySource.BetaPortraitPath
+		: PortraitPath;
 
-	public override CardType Type => CardEditorCreatedCardsStore.GetCardTypeForCard(base.Id);
+	public override CardType Type => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+		? identitySource.Type
+		: CardEditorCreatedCardsStore.GetCardTypeForCard(base.Id);
 
-	public override CardRarity Rarity => CardEditorCreatedCardsStore.GetRarityForCard(base.Id);
+	public override CardRarity Rarity => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+		? identitySource.Rarity
+		: CardEditorCreatedCardsStore.GetRarityForCard(base.Id);
 
-	public override TargetType TargetType => CardEditorCreatedCardsStore.GetTargetTypeForCard(base.Id);
+	public override TargetType TargetType => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+		? identitySource.TargetType
+		: CardEditorCreatedCardsStore.GetTargetTypeForCard(base.Id);
 
 	public override IEnumerable<CardKeyword> CanonicalKeywords
 	{
 		get
 		{
+			if (CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource))
+			{
+				return identitySource.CanonicalKeywords;
+			}
+
 			HashSet<CardKeyword> keywords = new HashSet<CardKeyword>(base.CanonicalKeywords);
 
 			foreach (CardKeyword keyword in CardEditorCreatedCardEffectSourceSupport.GetEffectSourceKeywords(this, isUpgradePreview: false))
@@ -47,6 +68,11 @@ public abstract class CardEditorCreatedCardBase : CardModel
 	{
 		get
 		{
+			if (CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource))
+			{
+				return identitySource.GainsBlock;
+			}
+
 			try
 			{
 				foreach (ModelId effectSourceId in CardEditorCreatedCardsStore.GetEffectSourceCardIds(base.Id))
@@ -94,6 +120,11 @@ public abstract class CardEditorCreatedCardBase : CardModel
 	{
 		get
 		{
+			if (CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource))
+			{
+				return identitySource.Tags;
+			}
+
 			return GetEffectiveTags();
 		}
 	}
@@ -171,6 +202,23 @@ public abstract class CardEditorCreatedCardBase : CardModel
 	{
 		// No default behavior: this card is driven by Card Editor overrides + extra effects.
 		return Task.CompletedTask;
+	}
+
+	public async Task OnChosen()
+	{
+		try
+		{
+			CombatState? combatState = base.CombatState.AsCombatState() ?? base.Owner?.Creature?.CombatState.AsCombatState();
+			if (combatState == null)
+			{
+				return;
+			}
+
+			await CardEditorExtraEffects.RunOnChosen(combatState, new BlockingPlayerChoiceContext(), this);
+		}
+		catch
+		{
+		}
 	}
 }
 

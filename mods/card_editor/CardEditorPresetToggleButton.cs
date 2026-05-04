@@ -94,7 +94,7 @@ public partial class NCardEditorPresetToggleButton : Control
 		CardEditorGodotResourceCache.Load(ref _hsvShader, _shaderPath);
 
 		_button = new CardEditorBaseDeckActionButton();
-		_button.Initialize("Preset Editor", Colors.White, _buttonTexture!, _buttonOutlineTexture!, _labelFont, _labelTheme, _outlineMaterial, _hsvShader);
+		_button.Initialize(CardEditorLoc.T("button.presetEditor", "Preset Editor"), Colors.White, _buttonTexture!, _buttonOutlineTexture!, _labelFont, _labelTheme, _outlineMaterial, _hsvShader);
 		_button.Triggered += OnTriggered;
 		AddChild(_button);
 	}
@@ -107,7 +107,9 @@ public partial class NCardEditorPresetToggleButton : Control
 			return;
 		}
 
-		string label = creatorMode ? "Preset Creator" : "Preset Editor";
+		string label = creatorMode
+			? CardEditorLoc.T("button.presetCreator", "Preset Creator")
+			: CardEditorLoc.T("button.presetEditor", "Preset Editor");
 		_button.SetText(label);
 		_button.TooltipText = isPanelOpen
 			? CardEditorLoc.T("tooltip.hidePresets", "Hide Presets")
@@ -184,7 +186,7 @@ internal static class CardEditorPresetButtonTunerHooks
 		Button button = new Button
 		{
 			Name = ToggleName,
-			Text = "Preset Button Tuner",
+			Text = CardEditorLoc.T("tuner.presetButton.title", "Preset Button Tuner"),
 			FocusMode = Control.FocusModeEnum.None,
 			MouseFilter = Control.MouseFilterEnum.Stop
 		};
@@ -249,7 +251,7 @@ internal static class CardEditorPresetButtonTunerHooks
 
 		Label title = new Label
 		{
-			Text = "Preset Button Tuner",
+			Text = CardEditorLoc.T("tuner.presetButton.title", "Preset Button Tuner"),
 			Name = "Title"
 		};
 		title.AddThemeFontSizeOverride("font_size", 24);
@@ -307,7 +309,7 @@ internal static class CardEditorPresetButtonTunerHooks
 		actions.AddThemeConstantOverride("separation", 8);
 		root.AddChild(actions);
 
-		Button reset = new Button { Text = "Reset", FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		Button reset = new Button { Text = CardEditorLoc.T("button.reset", "Reset"), FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		reset.Pressed += () =>
 		{
 			CardEditorPresetButtonTuning.Reset();
@@ -315,7 +317,7 @@ internal static class CardEditorPresetButtonTunerHooks
 		};
 		actions.AddChild(reset);
 
-		Button close = new Button { Text = "Close", FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		Button close = new Button { Text = CardEditorLoc.T("button.close", "Close"), FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		close.Pressed += () =>
 		{
 			library.SetMeta(OpenMetaKey, false);

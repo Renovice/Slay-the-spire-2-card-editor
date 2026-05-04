@@ -64,19 +64,19 @@ public partial class NCardEditorBaseDeckPanel : Control
 		CardEditorGodotResourceCache.Load(ref _outlineMaterial, _outlineMaterialPath);
 		CardEditorGodotResourceCache.Load(ref _hsvShader, _shaderPath);
 
-		_addButton = CreateActionButton("Add", AddButtonTint, OnAddPressed);
+		_addButton = CreateActionButton(CardEditorLoc.T("button.add", "Add"), AddButtonTint, OnAddPressed);
 		AddChild(_addButton);
 
-		_deleteButton = CreateActionButton("Delete", DeleteButtonTint, OnDeletePressed);
+		_deleteButton = CreateActionButton(CardEditorLoc.T("button.delete", "Delete"), DeleteButtonTint, OnDeletePressed);
 		AddChild(_deleteButton);
 
-		_cardListButton = CreateActionButton("Card List", CardListButtonTint, OnCardListPressed);
+		_cardListButton = CreateActionButton(CardEditorLoc.T("button.cardList", "Card List"), CardListButtonTint, OnCardListPressed);
 		AddChild(_cardListButton);
 
-		_resetButton = CreateActionButton("Reset", ResetButtonTint, OnResetPressed);
+		_resetButton = CreateActionButton(CardEditorLoc.T("button.reset", "Reset"), ResetButtonTint, OnResetPressed);
 		AddChild(_resetButton);
 
-		_presetButton = CreateActionButton("Preset Editor", PresetButtonTint, OnPresetPressed);
+		_presetButton = CreateActionButton(CardEditorLoc.T("button.presetEditor", "Preset Editor"), PresetButtonTint, OnPresetPressed);
 		AddChild(_presetButton);
 	}
 
@@ -136,7 +136,7 @@ public partial class NCardEditorBaseDeckPanel : Control
 			CardEditorBaseDeckActionBarTuning.BarTextOffsetY,
 			CardEditorBaseDeckActionBarTuning.ResetTextOffsetX,
 			CardEditorBaseDeckActionBarTuning.ResetTextOffsetY);
-		_presetButton.SetText("Preset Editor");
+		_presetButton.SetText(CardEditorLoc.T("button.presetEditor", "Preset Editor"));
 
 		bool hasSelection = CardEditorBaseDeckUiState.HasSelection;
 		_addButton.SetButtonEnabled(hasSelection);
@@ -214,8 +214,8 @@ public partial class NCardEditorBaseDeckPanel : Control
 
 		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Reset button pressed mode={CardEditorUiState.Mode} panelVisible={Visible} resetButtonVisible={_resetButton?.Visible}");
 		bool confirmed = await CardEditorConfirmPopup.ShowConfirmation(
-			"Reset Base Deck?",
-			"Revert this character's base deck to the vanilla starter deck?");
+			CardEditorLoc.T("confirm.resetBaseDeck.title", "Reset Base Deck?"),
+			CardEditorLoc.T("confirm.resetBaseDeck.body", "Revert this character's base deck to the vanilla starter deck?"));
 		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Reset button confirmation result={confirmed}");
 		if (!confirmed)
 		{
@@ -706,7 +706,7 @@ internal static class CardEditorBaseDeckActionBarTunerHooks
 
 		Label title = new Label
 		{
-			Text = "Button Bar Tuner",
+			Text = CardEditorLoc.T("tuner.buttonBar.title", "Button Bar Tuner"),
 			MouseFilter = Control.MouseFilterEnum.Ignore
 		};
 		title.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
@@ -716,7 +716,7 @@ internal static class CardEditorBaseDeckActionBarTunerHooks
 
 		Label help = new Label
 		{
-			Text = "Move and resize the buttons and their label text in-game.",
+			Text = CardEditorLoc.T("tuner.buttonBar.help", "Move and resize the buttons and their label text in-game."),
 			AutowrapMode = TextServer.AutowrapMode.WordSmart
 		};
 		help.AddThemeFontSizeOverride("font_size", 18);
@@ -778,8 +778,8 @@ internal static class CardEditorBaseDeckActionBarTunerHooks
 		footer.AddThemeConstantOverride("separation", 12);
 		controls.AddChild(footer);
 
-		footer.AddChild(CreateFooterButton("Reset", CardEditorBaseDeckActionBarTuning.Reset));
-		footer.AddChild(CreateFooterButton("Close", () => SetOpen(owner, false)));
+		footer.AddChild(CreateFooterButton(CardEditorLoc.T("button.reset", "Reset"), CardEditorBaseDeckActionBarTuning.Reset));
+		footer.AddChild(CreateFooterButton(CardEditorLoc.T("button.close", "Close"), () => SetOpen(owner, false)));
 
 		owner.AddChild(panel);
 		UpdateReadout(owner, panel);

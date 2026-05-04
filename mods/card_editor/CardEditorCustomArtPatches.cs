@@ -81,6 +81,21 @@ internal static class CardEditorCustomPortraitLoader
 			return false;
 		}
 
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(card, out CardModel identitySource))
+		{
+			if (TryGetPortrait(identitySource, out texture))
+			{
+				return true;
+			}
+
+			string portraitPath = identitySource.PortraitPath;
+			if (!string.IsNullOrWhiteSpace(portraitPath) && ResourceLoader.Exists(portraitPath))
+			{
+				texture = ResourceLoader.Load<Texture2D>(portraitPath, null, ResourceLoader.CacheMode.Reuse);
+				return texture != null;
+			}
+		}
+
 		if (TryGetCustomPortrait(card.Id, out texture))
 		{
 			return true;
@@ -94,8 +109,18 @@ internal static class CardEditorCustomPortraitLoader
 		portraitPath = string.Empty;
 
 		if (card?.Id == null
-			|| CardEditorCreatedCardsStore.IsCreatedCardId(card.Id)
-			|| CardEditorOverrides.SuppressAllOverrides
+			|| CardEditorOverrides.SuppressAllOverrides)
+		{
+			return false;
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(card, out CardModel identitySource))
+		{
+			portraitPath = beta ? identitySource.BetaPortraitPath : identitySource.PortraitPath;
+			return !string.IsNullOrWhiteSpace(portraitPath);
+		}
+
+		if (CardEditorCreatedCardsStore.IsCreatedCardId(card.Id)
 			|| !CardEditorOverrides.TryGetEffectiveOverride(card.Id, out CardOverride overrideData))
 		{
 			return false;

@@ -95,7 +95,7 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		{
 			overrideData = draftOverride;
 		}
-		else if (CardEditorOverrides.TryGet(card.Id, out CardOverride storedOverride)
+		else if (CardEditorOverrides.TryGetEffectiveOverride(card, out CardOverride storedOverride)
 			&& (storedOverride.ModifiedBaseTextEnabled == true || storedOverride.Upgrade?.ModifiedBaseTextEnabled == true))
 		{
 			overrideData = storedOverride;

@@ -552,6 +552,11 @@ internal static class CardModel_HoverTips_CardEditorKeywordSupport_Patch
 			{
 				combinedTips = combinedTips.Concat(customKeywordSummaries.Select(summary => CardEditorVanillaKeywordSupport.CreateDynamicHoverTip(summary.Name, summary.Description)));
 			}
+			IReadOnlyList<IHoverTip> hoverPreviewTips = CardEditorExtraEffects.GetAdditionalHoverPreviewTips(__instance);
+			if (hoverPreviewTips.Count > 0)
+			{
+				combinedTips = combinedTips.Concat(hoverPreviewTips);
+			}
 
 			List<IHoverTip> finalTips = IHoverTip.RemoveDupes(combinedTips).ToList();
 			if (finalTips.Count == 0)

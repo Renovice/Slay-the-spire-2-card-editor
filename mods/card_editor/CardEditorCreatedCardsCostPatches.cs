@@ -206,7 +206,11 @@ internal static class CardEditorCreatedCardsCostController
 			return false;
 		}
 
-		int currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.All);
+		int currentCost;
+		using (CardEditorEnergyCostVisibilityHelper.SuppressCardEditorCostHooksScoped())
+		{
+			currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.All);
+		}
 		if (currentCost < 0)
 		{
 			return false;

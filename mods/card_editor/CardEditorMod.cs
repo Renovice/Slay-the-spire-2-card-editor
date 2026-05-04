@@ -229,6 +229,8 @@ public static class CardEditorMod
 					ModHelper.AddModelToPool(poolType, cardType);
 				}
 			}
+
+			ModHelper.AddModelToPool(typeof(EventCardPool), typeof(CardEditorBuiltTinkerCard));
 		}
 		catch (Exception ex)
 		{
@@ -573,9 +575,21 @@ public static class GetDescriptionForPile_ManualPatch
 	public static bool Prefix(CardModel __instance, object? __1, MegaCrit.Sts2.Core.Entities.Creatures.Creature? __2, ref string __result)
 	{
 		CardEditorRunSelfScalingState.TryRestoreCard(__instance);
+		if (__instance is CardEditorBuiltTinkerCard builtTinkerCard)
+		{
+			__result = builtTinkerCard.ResolveDisplayDescription(__2, IsUpgradePreview(__1));
+			return false;
+		}
+
 		if (__instance is not CardEditorCreatedCardBase)
 		{
 			return true; // Continue to original for non-created cards
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.GetDescriptionForPile(PileType.None, __2);
+			return false;
 		}
 
 		__result = CreatedCardTextBuilder.Build(__instance, __2, isUpgradePreview: IsUpgradePreview(__1));
@@ -587,6 +601,12 @@ public static class GetDescriptionForPile_ManualPatch
 	{
 		if (__instance is CardEditorCreatedCardBase)
 		{
+			return;
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.GetDescriptionForPile(PileType.None, __2);
 			return;
 		}
 
@@ -614,9 +634,21 @@ public static class CardModel_GetDescriptionForPile_Patch
 	public static bool Prefix(CardModel __instance, MegaCrit.Sts2.Core.Entities.Creatures.Creature? target, ref string __result)
 	{
 		CardEditorRunSelfScalingState.TryRestoreCard(__instance);
+		if (__instance is CardEditorBuiltTinkerCard builtTinkerCard)
+		{
+			__result = builtTinkerCard.ResolveDisplayDescription(target, isUpgradePreview: false);
+			return false;
+		}
+
 		if (__instance is not CardEditorCreatedCardBase)
 		{
 			return true; // Continue to original for non-created cards
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.GetDescriptionForPile(PileType.None, target);
+			return false;
 		}
 
 		__result = CreatedCardTextBuilder.Build(__instance, target, isUpgradePreview: false);
@@ -628,6 +660,12 @@ public static class CardModel_GetDescriptionForPile_Patch
 	{
 		if (__instance is CardEditorCreatedCardBase)
 		{
+			return;
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.GetDescriptionForPile(pileType, target);
 			return;
 		}
 
@@ -648,6 +686,12 @@ public static class CardModel_GetDescriptionForUpgradePreview_Patch
 	{
 		if (__instance is CardEditorCreatedCardBase)
 		{
+			return;
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(__instance, out CardModel identitySource))
+		{
+			__result = identitySource.GetDescriptionForUpgradePreview();
 			return;
 		}
 
@@ -2933,6 +2977,7 @@ public static class Hook_AfterTurnEnd_Patch
 				CardEditorDrawnGeneratedCostController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorUpgradeAuraController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryUpgradeController.OnAfterPlayerTurnEnd(combatState);
+				await CardEditorExtraEffects.RunStatefulTransformsAfterPlayerTurnEnd(combatState);
 			}
 		}
 		catch (Exception ex)
@@ -2966,6 +3011,7 @@ public static class Hook_AfterCombatEnd_ClearScheduledEffects_Patch
 			{
 				CardEditorExtraEffectScheduler.Clear(combatState);
 				CardEditorCreatedCardsCostController.Clear(combatState);
+				await CardEditorExtraEffects.RunStatefulTransformsAfterCombatEnd(combatState);
 				CardEditorTemporaryKeywordController.Clear(combatState);
 				CardEditorTemporaryExtraEffectController.Clear(combatState);
 				CardEditorTemporaryEnchantmentController.Clear(combatState);

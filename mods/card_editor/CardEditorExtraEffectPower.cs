@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Rooms;
 using PowerCmd = SlayTheSpire2Mod.CardEditor.CardEditorPowerCmdCompat;
 
 namespace SlayTheSpire2Mod.CardEditor;
@@ -26,7 +27,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		public required long EntryId { get; init; }
 		public required CardModel SourceCard { get; init; }
 		public required CardExtraEffect Effect { get; init; }
+		public required CardExtraEffect MergeTemplate { get; init; }
 		public Creature? RememberedTarget { get; set; }
+		public int StackCount { get; set; } = 1;
 		public int TriggerCounter { get; set; }
 		public int TriggerFireCount { get; set; }
 		public int TurnCounter { get; set; }
@@ -61,10 +64,12 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 						EntryId = e.EntryId,
 						SourceCard = e.SourceCard,
 						RememberedTarget = e.RememberedTarget,
+						StackCount = Math.Max(1, e.StackCount),
 						TriggerCounter = e.TriggerCounter,
 						TriggerFireCount = e.TriggerFireCount,
 						TurnCounter = e.TurnCounter,
-						Effect = CardEditorExtraEffects.CloneEffect(e.Effect)
+						Effect = CardEditorExtraEffects.CloneEffect(e.Effect),
+						MergeTemplate = CardEditorExtraEffects.CloneEffect(e.MergeTemplate ?? e.Effect)
 					})
 					.ToList();
 			}
@@ -103,7 +108,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		}
 	}
 
-	public async Task AddPowerEffects(CardModel sourceCard, IReadOnlyList<CardExtraEffect> effects)
+	public async Task AddPowerEffects(CardModel sourceCard, IReadOnlyList<CardExtraEffect> effects, CardPlay? sourcePlay = null)
 	{
 		AssertMutable();
 		if (sourceCard == null || effects == null || effects.Count == 0)
@@ -116,24 +121,157 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
 			if (normalizedEffect == null
 				|| !normalizedEffect.AsPower
-				|| !CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount)
 				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind))
 			{
 				continue;
 			}
 
-			CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(normalizedEffect);
+			CardExtraEffect stored = sourcePlay != null
+				? CardEditorExtraEffects.CloneForDeferredExecution(sourcePlay, normalizedEffect)
+				: CardEditorExtraEffects.CloneEffect(normalizedEffect);
+			if (!CardEditorExtraEffects.IsValidEffectAmount(stored.Kind, stored.Amount))
+			{
+				continue;
+			}
+			if (stored.RepeatCount < 0)
+			{
+				continue;
+			}
 			stored.AsPower = true;
+
+			PowerEffectEntry? existingEntry = FindMergeTarget(sourceCard, stored);
+			if (existingEntry != null)
+			{
+				MergeIntoEntry(existingEntry, stored);
+				continue;
+			}
 
 			Entries.Add(new PowerEffectEntry
 			{
 				EntryId = Interlocked.Increment(ref _nextEntryId),
 				SourceCard = sourceCard,
-				Effect = stored
+				Effect = stored,
+				MergeTemplate = CardEditorExtraEffects.CloneEffect(stored),
+				StackCount = 1
 			});
 		}
 
 		await SyncVisibleMirrorPowers();
+	}
+
+	private PowerEffectEntry? FindMergeTarget(CardModel sourceCard, CardExtraEffect stored)
+	{
+		if (sourceCard == null
+			|| stored == null
+			|| stored.PowerStackMode != CardExtraEffectPowerStackMode.Merge)
+		{
+			return null;
+		}
+
+		return Entries.FirstOrDefault(entry => CanMergeIntoEntry(entry, sourceCard, stored));
+	}
+
+	private static bool CanMergeIntoEntry(PowerEffectEntry? entry, CardModel sourceCard, CardExtraEffect stored)
+	{
+		if (entry == null
+			|| entry.SourceCard == null
+			|| entry.Effect == null
+			|| entry.MergeTemplate == null
+			|| sourceCard == null
+			|| stored == null
+			|| entry.Effect.PowerStackMode != CardExtraEffectPowerStackMode.Merge
+			|| stored.PowerStackMode != CardExtraEffectPowerStackMode.Merge
+			|| !CardEditorExtraEffects.PowerEffectEntriesMatch(entry.MergeTemplate, stored))
+		{
+			return false;
+		}
+
+		return stored.AutoPlayLoopScope switch
+		{
+			CardExtraEffectAutoPlayLoopScope.ThisCard => ReferenceEquals(entry.SourceCard, sourceCard),
+			CardExtraEffectAutoPlayLoopScope.AllCopies => string.Equals(GetCardIdText(entry.SourceCard), GetCardIdText(sourceCard), StringComparison.Ordinal),
+			_ => true
+		};
+	}
+
+	private static void MergeIntoEntry(PowerEffectEntry entry, CardExtraEffect incoming)
+	{
+		entry.StackCount = Math.Clamp(entry.StackCount + 1, 1, 999);
+		MergeTriggerMaxTurns(entry, incoming.TriggerMaxTurns);
+		MergeTriggerMaxFires(entry, incoming.TriggerMaxFires);
+	}
+
+	private static void MergeTriggerMaxTurns(PowerEffectEntry entry, int incomingMaxTurns)
+	{
+		if (entry?.Effect == null)
+		{
+			return;
+		}
+		if (entry.Effect.TriggerMaxTurns <= 0 || incomingMaxTurns <= 0)
+		{
+			entry.Effect.TriggerMaxTurns = 0;
+			entry.TurnCounter = 0;
+			return;
+		}
+
+		int remaining = Math.Max(0, entry.Effect.TriggerMaxTurns - entry.TurnCounter);
+		entry.Effect.TriggerMaxTurns = Math.Clamp(remaining + incomingMaxTurns, 1, 999);
+		entry.TurnCounter = 0;
+	}
+
+	private static void MergeTriggerMaxFires(PowerEffectEntry entry, int incomingMaxFires)
+	{
+		if (entry?.Effect == null)
+		{
+			return;
+		}
+		if (entry.Effect.TriggerMaxFires <= 0 || incomingMaxFires <= 0)
+		{
+			entry.Effect.TriggerMaxFires = 0;
+			entry.TriggerFireCount = 0;
+			return;
+		}
+
+		int remaining = Math.Max(0, entry.Effect.TriggerMaxFires - entry.TriggerFireCount);
+		entry.Effect.TriggerMaxFires = Math.Clamp(remaining + incomingMaxFires, 1, 999);
+		entry.TriggerFireCount = 0;
+	}
+
+	private static string GetCardIdText(CardModel? card)
+	{
+		try
+		{
+			return card?.Id.ToString() ?? string.Empty;
+		}
+		catch
+		{
+			return string.Empty;
+		}
+	}
+
+	private static int GetStackCount(PowerEffectEntry? entry)
+	{
+		return Math.Clamp(entry?.StackCount ?? 1, 1, 999);
+	}
+
+	private static CardExtraEffect BuildStackedRuntimeEffect(PowerEffectEntry entry)
+	{
+		CardExtraEffect effect = CardEditorExtraEffects.CloneEffect(entry.Effect);
+		int stackCount = GetStackCount(entry);
+		if (effect.AutoPlayLoopLimit > 0 && stackCount > 1)
+		{
+			effect.AutoPlayLoopLimit = Math.Clamp(effect.AutoPlayLoopLimit * stackCount, 1, 999);
+		}
+		return effect;
+	}
+
+	private static int GetEffectiveTriggerMaxFires(PowerEffectEntry entry)
+	{
+		if (entry?.Effect == null || entry.Effect.TriggerMaxFires <= 0)
+		{
+			return 0;
+		}
+		return Math.Clamp(entry.Effect.TriggerMaxFires, 1, 999);
 	}
 
 	private static (int VisibleAmount, bool ShowAmountLabel) GetMirrorDisplayState(PowerEffectEntry entry)
@@ -143,14 +281,37 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			return (0, false);
 		}
 
+		if (entry.Effect.AutoPlayLoopLimit > 0)
+		{
+			CardExtraEffect runtimeEffect = BuildStackedRuntimeEffect(entry);
+			CombatState? combatState = entry.SourceCard?.CombatState.AsCombatState()
+				?? entry.SourceCard?.Owner?.Creature?.CombatState.AsCombatState();
+			int remaining = CardEditorAutoPlayLoopGuard.GetRemainingEffectUses(
+				combatState,
+				entry.SourceCard?.Owner,
+				entry.SourceCard,
+				runtimeEffect,
+				CardEditorAutoPlayLoopGuard.BuildPowerUseLimitInstanceKey(entry.EntryId));
+			if (remaining >= 0)
+			{
+				return (remaining, true);
+			}
+		}
+
 		if (entry.Effect.TriggerMaxTurns > 0)
 		{
 			return (Math.Max(0, entry.Effect.TriggerMaxTurns - entry.TurnCounter), true);
 		}
 
-		if (entry.Effect.TriggerMaxFires > 0)
+		int effectiveMaxFires = GetEffectiveTriggerMaxFires(entry);
+		if (effectiveMaxFires > 0)
 		{
-			return (Math.Max(0, entry.Effect.TriggerMaxFires - entry.TriggerFireCount), true);
+			return (Math.Max(0, effectiveMaxFires - entry.TriggerFireCount), true);
+		}
+
+		if (GetStackCount(entry) > 1)
+		{
+			return (GetStackCount(entry), true);
 		}
 
 		return (0, false);
@@ -180,13 +341,14 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				}
 
 				(int visibleAmount, bool showAmountLabel) = GetMirrorDisplayState(entry);
+				CardExtraEffect visibleEffect = BuildStackedRuntimeEffect(entry);
 				CardEditorVisibleExtraEffectPower? mirror = existingMirrors.FirstOrDefault(power => power.EntryId == entry.EntryId);
 				if (mirror == null)
 				{
 					using IDisposable _ = CardEditorVisibleExtraEffectPower.PushPendingPayload(
 						entry.EntryId,
 						entry.SourceCard,
-						entry.Effect,
+						visibleEffect,
 						visibleAmount,
 						showAmountLabel);
 					mirror = await PowerCmd.Apply<CardEditorVisibleExtraEffectPower>(owner, 1, owner, entry.SourceCard, silent: true);
@@ -194,7 +356,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 				if (mirror != null)
 				{
-					mirror.SyncFromEntry(entry.EntryId, entry.SourceCard, entry.Effect, visibleAmount, showAmountLabel);
+					mirror.SyncFromEntry(entry.EntryId, entry.SourceCard, visibleEffect, visibleAmount, showAmountLabel);
 					CardEditorPowerSourceMap.Register(mirror, entry.SourceCard);
 				}
 			}
@@ -299,7 +461,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 	private CardExtraEffect BuildResolvedPowerEffect(PowerEffectEntry entry)
 	{
-		CardExtraEffect resolved = CardEditorExtraEffects.CloneEffect(entry.Effect);
+		CardExtraEffect resolved = BuildStackedRuntimeEffect(entry);
 		if (resolved.Target == CardExtraEffectTarget.Target && resolved.PowerTargeting == CardExtraEffectPowerTargeting.AllEnemies)
 		{
 			resolved.Target = CardExtraEffectTarget.AllEnemies;
@@ -308,21 +470,38 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		return resolved;
 	}
 
-	private async Task ExecuteOrSchedulePowerEffect(
+	private async Task<int> ExecuteOrSchedulePowerEffect(
 		CombatState combatState,
 		PlayerChoiceContext choiceContext,
 		CardPlay triggerPlay,
 		PowerEffectEntry entry,
 		int triggerEventAmount = 1)
 	{
-		CardExtraEffect effect = entry?.Effect;
-		CardModel sourceCard = entry?.SourceCard;
-		if (effect == null || sourceCard == null || triggerPlay == null)
+		if (entry == null || entry.Effect == null || entry.SourceCard == null || triggerPlay == null)
 		{
-			return;
+			return 0;
 		}
 
+		CardExtraEffect effect = entry.Effect;
+		CardModel sourceCard = entry.SourceCard;
+		if (CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(sourceCard, effect))
+		{
+			return 0;
+		}
+
+		string useLimitSourceInstance = CardEditorAutoPlayLoopGuard.BuildPowerUseLimitInstanceKey(entry.EntryId);
 		CardExtraEffect resolvedEffect = BuildResolvedPowerEffect(entry);
+		int remainingUses = CardEditorAutoPlayLoopGuard.GetRemainingEffectUses(
+			combatState,
+			sourceCard.Owner ?? Owner?.Player,
+			sourceCard,
+			resolvedEffect,
+			useLimitSourceInstance);
+		if (remainingUses == 0)
+		{
+			return 0;
+		}
+
 		Creature? lockedTarget = null;
 		if (resolvedEffect.Target == CardExtraEffectTarget.Target)
 		{
@@ -331,37 +510,73 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				: ResolveRememberedEnemyTarget(entry, combatState, triggerPlay);
 			if (lockedTarget == null)
 			{
-				return;
+				return 0;
 			}
+		}
+
+		int stackCount = GetStackCount(entry);
+		int runCount = remainingUses >= 0 ? Math.Min(stackCount, remainingUses) : stackCount;
+		if (runCount <= 0)
+		{
+			return 0;
 		}
 
 		if (resolvedEffect.Timing == CardExtraEffectTiming.Immediate)
 		{
-			CardModel executionCard = CardEditorExtraEffects.ResolveImmediatePowerExecutionCard(sourceCard, triggerPlay, resolvedEffect);
-			Creature? executionTarget = resolvedEffect.Target == CardExtraEffectTarget.Target
-				? lockedTarget
-				: triggerPlay.Target;
-			CardPlay executionPlay = triggerPlay;
-			if (!ReferenceEquals(triggerPlay.Card, executionCard)
-				|| !ReferenceEquals(triggerPlay.Target, executionTarget))
+			int executed = 0;
+			for (int i = 0; i < runCount; i++)
 			{
-				executionPlay = new CardPlay
+				if (CardEditorAutoPlayLoopGuard.GetRemainingEffectUses(
+					combatState,
+					sourceCard.Owner ?? Owner?.Player,
+					sourceCard,
+					resolvedEffect,
+					useLimitSourceInstance) == 0)
 				{
-					Card = executionCard,
-					Target = executionTarget,
-					ResultPile = triggerPlay.ResultPile,
-					Resources = triggerPlay.Resources,
-					IsAutoPlay = triggerPlay.IsAutoPlay,
-					PlayIndex = triggerPlay.PlayIndex,
-					PlayCount = triggerPlay.PlayCount
-				};
+					break;
+				}
+
+				if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayEffect(
+					combatState,
+					sourceCard.Owner ?? Owner?.Player,
+					sourceCard,
+					resolvedEffect,
+					out IDisposable autoScope,
+					markPrecountedNestedBatch: true))
+				{
+					break;
+				}
+
+				CardModel executionCard = CardEditorExtraEffects.ResolveImmediatePowerExecutionCard(sourceCard, triggerPlay, resolvedEffect);
+				Creature? executionTarget = resolvedEffect.Target == CardExtraEffectTarget.Target
+					? lockedTarget
+					: triggerPlay.Target;
+				CardPlay executionPlay = triggerPlay;
+				if (!ReferenceEquals(triggerPlay.Card, executionCard)
+					|| !ReferenceEquals(triggerPlay.Target, executionTarget))
+				{
+					executionPlay = new CardPlay
+					{
+						Card = executionCard,
+						Target = executionTarget,
+						ResultPile = triggerPlay.ResultPile,
+						Resources = triggerPlay.Resources,
+						IsAutoPlay = triggerPlay.IsAutoPlay,
+						PlayIndex = triggerPlay.PlayIndex,
+						PlayCount = triggerPlay.PlayCount
+					};
+				}
+
+				CardEditorPowerSourceMap.Register(this, sourceCard);
+				using IDisposable ___ = autoScope;
+				using IDisposable _ = CardEditorEffectSourceContext.PushScoped(sourceCard);
+				using IDisposable __ = CardEditorPowerExecutionHostContext.PushScoped(Owner);
+				using IDisposable ____ = CardEditorAutoPlayLoopGuard.PushUseLimitSourceInstance(useLimitSourceInstance);
+				await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, executionPlay, resolvedEffect, triggerEventAmount);
+				executed++;
 			}
 
-			CardEditorPowerSourceMap.Register(this, sourceCard);
-			using IDisposable _ = CardEditorEffectSourceContext.PushScoped(sourceCard);
-			using IDisposable __ = CardEditorPowerExecutionHostContext.PushScoped(Owner);
-			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, executionPlay, resolvedEffect, triggerEventAmount);
-			return;
+			return executed;
 		}
 
 		CardPlay schedulingPlay = new CardPlay
@@ -375,7 +590,32 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			PlayCount = 1
 		};
 
-		CardEditorExtraEffectScheduler.Schedule(combatState, schedulingPlay, resolvedEffect, lockedTarget, Owner, triggerEventAmount);
+		for (int i = 0; i < runCount; i++)
+		{
+			CardEditorExtraEffectScheduler.Schedule(
+				combatState,
+				schedulingPlay,
+				resolvedEffect,
+				lockedTarget,
+				Owner,
+				triggerEventAmount,
+				useLimitSourceInstance);
+		}
+		return runCount;
+	}
+
+	private void TrackEntryFireCount(PowerEffectEntry entry, int runCount)
+	{
+		if (entry?.Effect == null || runCount <= 0 || entry.Effect.TriggerMaxFires < 1)
+		{
+			return;
+		}
+
+		entry.TriggerFireCount = Math.Clamp(entry.TriggerFireCount + runCount, 0, 999);
+		if (entry.TriggerFireCount >= GetEffectiveTriggerMaxFires(entry))
+		{
+			Entries.Remove(entry);
+		}
 	}
 
 	public override async Task AfterCardPlayed(PlayerChoiceContext context, CardPlay cardPlay)
@@ -499,8 +739,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				}
 
 				Player? filterOwner = entry.SourceCard?.Owner ?? owner.Player;
-				if (triggeringCard != null
-					&& CardEditorExtraEffects.PowerCountEventUsesCardFilters(countEvent)
+				if (CardEditorExtraEffects.PowerCountEventUsesCardFilters(countEvent)
 					&& !CardEditorExtraEffects.MatchesPowerTriggerCardFilters(filterOwner, triggeringCard, entry.Effect))
 				{
 					continue;
@@ -523,10 +762,14 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					}
 				}
 
-				CardPlay basePlay = triggeringPlay;
+				CardPlay? basePlay = triggeringPlay;
 				if (basePlay == null)
 				{
-					CardModel playCard = triggeringCard ?? entry.SourceCard;
+					CardModel? playCard = triggeringCard ?? entry.SourceCard;
+					if (playCard == null)
+					{
+						continue;
+					}
 					basePlay = new CardPlay
 					{
 						Card = playCard,
@@ -545,23 +788,17 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					};
 				}
 
+				int runCount = 0;
 				try
 				{
-					await ExecuteOrSchedulePowerEffect(combatState, choiceContext, basePlay, entry, amount);
+					runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, basePlay, entry, amount);
 				}
 				catch (Exception ex)
 				{
 					Log.Warn($"[CardEditor] Power extra effect failed (countEvent={countEvent}): {ex}");
 				}
 
-				if (entry.Effect.TriggerMaxFires >= 1)
-				{
-					entry.TriggerFireCount++;
-					if (entry.TriggerFireCount >= entry.Effect.TriggerMaxFires)
-					{
-						Entries.Remove(entry);
-					}
-				}
+				TrackEntryFireCount(entry, runCount);
 			}
 		}
 		catch (Exception ex)
@@ -615,8 +852,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					}
 				}
 
-				CardModel sourceCard = entry.SourceCard;
-				if (sourceCard.Owner?.Creature == null || !ReferenceEquals(sourceCard.Owner.Creature, owner))
+				CardModel sourceCard = entry.SourceCard!;
+				Creature? sourceOwner = sourceCard.Owner?.Creature;
+				if (sourceOwner == null || !ReferenceEquals(sourceOwner, owner))
 				{
 					continue;
 				}
@@ -637,23 +875,17 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					PlayIndex = 0,
 					PlayCount = 1
 				};
+				int runCount = 0;
 				try
 				{
-					await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
+					runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
 				}
 				catch (Exception ex)
 				{
 					Log.Warn($"[CardEditor] Power extra effect failed ({trigger}): {ex}");
 				}
 
-				if (entry.Effect.TriggerMaxFires >= 1)
-				{
-					entry.TriggerFireCount++;
-					if (entry.TriggerFireCount >= entry.Effect.TriggerMaxFires)
-					{
-						Entries.Remove(entry);
-					}
-				}
+				TrackEntryFireCount(entry, runCount);
 			}
 		}
 		catch (Exception ex)
@@ -666,12 +898,39 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		}
 	}
 
-	public override async Task AfterAttack(PlayerChoiceContext choiceContext, AttackCommand command)
+	private async Task RunLifecycleTriggerWithHookContext(
+		CardExtraEffectTrigger trigger,
+		CardModel? triggeringCard = null,
+		Creature? eventActor = null,
+		Creature? target = null)
+	{
+		ulong? netId = LocalContext.NetId;
+		Player? player = Owner?.Player;
+		if (!netId.HasValue || player == null)
+		{
+			return;
+		}
+
+		HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+		Task task = RunLifecycleTrigger(choiceContext, trigger, triggeringCard, eventActor, target);
+		bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+		if (!completed && choiceContext.GameAction != null)
+		{
+			await choiceContext.GameAction.CompletionTask;
+		}
+	}
+
+	private async Task RunLifecycleTrigger(
+		PlayerChoiceContext choiceContext,
+		CardExtraEffectTrigger trigger,
+		CardModel? triggeringCard = null,
+		Creature? eventActor = null,
+		Creature? target = null)
 	{
 		try
 		{
 			CombatState? combatState = CombatState.AsCombatState();
-			if (combatState == null)
+			if (combatState == null || choiceContext == null)
 			{
 				return;
 			}
@@ -682,7 +941,142 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				return;
 			}
 
-			Player ownerPlayer = owner.Player;
+			eventActor ??= owner;
+			using IDisposable _ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
+			foreach (PowerEffectEntry entry in Entries.ToList())
+			{
+				if (entry == null
+					|| entry.Effect == null
+					|| entry.SourceCard == null
+					|| entry.Effect.Trigger != trigger
+					|| !CardEditorExtraEffects.IsValidEffectAmount(entry.Effect.Kind, entry.Effect.Amount))
+				{
+					continue;
+				}
+
+				if (!WatchesEventActor(entry.Effect, eventActor))
+				{
+					continue;
+				}
+
+				if (triggeringCard != null)
+				{
+					Player? filterOwner = entry.SourceCard?.Owner ?? owner.Player;
+					if (!CardEditorExtraEffects.MatchesPowerTriggerCardFilters(filterOwner, triggeringCard, entry.Effect))
+					{
+						continue;
+					}
+				}
+
+				if (entry.Effect.TriggerEveryN >= 2)
+				{
+					entry.TriggerCounter++;
+					if (entry.TriggerCounter % entry.Effect.TriggerEveryN != 0)
+					{
+						continue;
+					}
+				}
+
+				CardModel sourceCard = entry.SourceCard;
+				if (sourceCard.Owner?.Creature == null || !ReferenceEquals(sourceCard.Owner.Creature, owner))
+				{
+					continue;
+				}
+
+				CardPlay syntheticPlay = new CardPlay
+				{
+					Card = sourceCard,
+					Target = target,
+					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
+					Resources = new ResourceInfo
+					{
+						EnergySpent = 0,
+						EnergyValue = 0,
+						StarsSpent = 0,
+						StarValue = 0
+					},
+					IsAutoPlay = true,
+					PlayIndex = 0,
+					PlayCount = 1
+				};
+
+				int runCount = 0;
+				try
+				{
+					runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
+				}
+				catch (Exception ex)
+				{
+					Log.Warn($"[CardEditor] Power extra effect failed (lifecycle trigger={trigger}): {ex}");
+				}
+
+				TrackEntryFireCount(entry, runCount);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Lifecycle power trigger failed ({trigger}): {ex}");
+		}
+		finally
+		{
+			await SyncVisibleMirrorPowers();
+		}
+	}
+
+	public override async Task AfterCardEnteredCombat(CardModel card)
+	{
+		Creature? actor = card?.Owner?.Creature;
+		await RunLifecycleTriggerWithHookContext(CardExtraEffectTrigger.AfterCardEnteredCombat, card, actor, actor);
+	}
+
+	public override async Task BeforeHandDraw(Player player, PlayerChoiceContext choiceContext, ICombatState combatState)
+	{
+		await RunLifecycleTrigger(choiceContext, CardExtraEffectTrigger.BeforeHandDraw, eventActor: player?.Creature, target: player?.Creature);
+	}
+
+	public override async Task AfterDeath(PlayerChoiceContext choiceContext, Creature creature, bool wasRemovalPrevented, float deathAnimLength)
+	{
+		await RunLifecycleTrigger(choiceContext, CardExtraEffectTrigger.AfterDeath, eventActor: creature, target: creature);
+	}
+
+	public override async Task AfterCombatEnd(CombatRoom room)
+	{
+		await RunLifecycleTriggerWithHookContext(CardExtraEffectTrigger.AfterCombatEnd, eventActor: Owner, target: Owner);
+	}
+
+	public override async Task AfterAttack(PlayerChoiceContext choiceContext, AttackCommand command)
+	{
+		try
+		{
+			CombatState? combatState = CombatState.AsCombatState();
+			if (combatState == null || command == null)
+			{
+				return;
+			}
+
+			Creature? owner = Owner;
+			if (owner == null || !owner.IsPlayer)
+			{
+				return;
+			}
+
+			Player? ownerPlayer = owner.Player;
+			if (ownerPlayer == null)
+			{
+				return;
+			}
+
+			if (choiceContext != null)
+			{
+				Creature? attackTarget = command.Results?.FirstOrDefault()?.Receiver;
+				await RunLifecycleTrigger(
+					choiceContext,
+					CardExtraEffectTrigger.AfterAttack,
+					command.ModelSource as CardModel,
+					command.Attacker,
+					attackTarget);
+			}
+
 			Creature? osty = ownerPlayer.Osty;
 			if (osty == null || !ReferenceEquals(command.Attacker, osty))
 			{
@@ -737,23 +1131,17 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					PlayCount = 1
 				};
 
+				int runCount = 0;
 				try
 				{
-					await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
+					runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
 				}
 				catch (Exception ex)
 				{
 					Log.Warn($"[CardEditor] Power extra effect failed (OstyDealDamage): {ex}");
 				}
 
-				if (entry.Effect.TriggerMaxFires >= 1)
-				{
-					entry.TriggerFireCount++;
-					if (entry.TriggerFireCount >= entry.Effect.TriggerMaxFires)
-					{
-						Entries.Remove(entry);
-					}
-				}
+				TrackEntryFireCount(entry, runCount);
 			}
 		}
 		catch (Exception ex)
@@ -875,16 +1263,8 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 				PlayCount = 1
 			};
 
-			await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
-
-			if (entry.Effect.TriggerMaxFires >= 1)
-			{
-				entry.TriggerFireCount++;
-				if (entry.TriggerFireCount >= entry.Effect.TriggerMaxFires)
-				{
-					Entries.Remove(entry);
-				}
-			}
+			int runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
+			TrackEntryFireCount(entry, runCount);
 		}
 	}
 	finally
@@ -945,24 +1325,17 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 				PlayCount = 1
 			};
 
+			int runCount = 0;
 			try
 			{
-				await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
+				runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
 			}
 			catch (Exception ex)
 			{
 				Log.Warn($"[CardEditor] Power extra effect failed (timed trigger={trigger}): {ex}");
 			}
 
-			// Track fire count and expire entry if max reached.
-			if (entry.Effect.TriggerMaxFires >= 1)
-			{
-				entry.TriggerFireCount++;
-				if (entry.TriggerFireCount >= entry.Effect.TriggerMaxFires)
-				{
-					Entries.Remove(entry);
-				}
-			}
+			TrackEntryFireCount(entry, runCount);
 		}
 	}
 	finally
@@ -1043,17 +1416,9 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 					}
 				}
 
-				await ExecuteOrSchedulePowerEffect(combatState, choiceContext, basePlay, entry);
+				int runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, basePlay, entry);
 
-				// Track fire count and expire entry if max reached.
-				if (entry.Effect.TriggerMaxFires >= 1)
-				{
-					entry.TriggerFireCount++;
-					if (entry.TriggerFireCount >= entry.Effect.TriggerMaxFires)
-					{
-						Entries.Remove(entry);
-					}
-				}
+				TrackEntryFireCount(entry, runCount);
 			}
 		}
 		catch (Exception ex)

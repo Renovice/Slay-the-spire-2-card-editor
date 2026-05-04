@@ -159,7 +159,9 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 		}
 
 		toggleButton.Visible = true;
-		toggleButton.Text = IsOpen(library) ? "Hide Bookmark Tuner" : "Tune Bookmark";
+		toggleButton.Text = IsOpen(library)
+			? CardEditorLoc.T("button.hideBookmarkTuner", "Hide Bookmark Tuner")
+			: CardEditorLoc.T("button.tuneBookmark", "Tune Bookmark");
 		panel.Visible = IsOpen(library);
 		RefreshPanel(panel);
 	}
@@ -192,7 +194,7 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 			OffsetRight = -20f,
 			OffsetBottom = 56f,
 			CustomMinimumSize = new Vector2(200f, 38f),
-			Text = "Tune Bookmark"
+			Text = CardEditorLoc.T("button.tuneBookmark", "Tune Bookmark")
 		};
 		if (_bodyFont != null)
 		{
@@ -259,7 +261,7 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 		root.AddThemeConstantOverride("separation", 8);
 		margin.AddChild(root);
 
-		Label title = CreateLabel("Bookmark Tuner", header: true);
+		Label title = CreateLabel(CardEditorLoc.T("tuner.bookmark.title", "Bookmark Tuner"), header: true);
 		root.AddChild(title);
 
 		Label values = CreateLabel(string.Empty, header: false);
@@ -283,8 +285,8 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
 		};
 		footer.AddThemeConstantOverride("separation", 8);
-		footer.AddChild(CreateActionButton("Reset", CardEditorBaseDeckBookmarkTuning.Reset));
-		footer.AddChild(CreateActionButton("Close", () => SetOpen(library, false)));
+		footer.AddChild(CreateActionButton(CardEditorLoc.T("button.reset", "Reset"), CardEditorBaseDeckBookmarkTuning.Reset));
+		footer.AddChild(CreateActionButton(CardEditorLoc.T("button.close", "Close"), () => SetOpen(library, false)));
 		root.AddChild(footer);
 
 		return panel;

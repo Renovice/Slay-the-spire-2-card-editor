@@ -251,7 +251,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		Button button = new Button
 		{
 			Name = ToggleName,
-			Text = "Preset Popup Tuner",
+			Text = CardEditorLoc.T("tuner.presetPopup.title", "Preset Popup Tuner"),
 			FocusMode = Control.FocusModeEnum.None,
 			MouseFilter = Control.MouseFilterEnum.Stop,
 			ZIndex = 66
@@ -324,7 +324,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		dragHandle.GuiInput += @event => HandlePanelDragInput(library, panel, @event);
 		root.AddChild(dragHandle);
 
-		Label title = CreateInfoLabel("Preset Popup Tuner", 24);
+		Label title = CreateInfoLabel(CardEditorLoc.T("tuner.presetPopup.title", "Preset Popup Tuner"), 24);
 		title.Name = "Title";
 		title.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
 		title.MouseFilter = Control.MouseFilterEnum.Ignore;
@@ -333,7 +333,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		CheckBox linkRowsCheck = new CheckBox
 		{
 			Name = "LinkRowsCheck",
-			Text = "Link button rows",
+			Text = CardEditorLoc.T("tuner.presetPopup.linkRows", "Link button rows"),
 			FocusMode = Control.FocusModeEnum.None,
 			MouseFilter = Control.MouseFilterEnum.Stop
 		};
@@ -352,7 +352,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		};
 		root.AddChild(linkRowsCheck);
 
-		Label copyHint = CreateInfoLabel("Copy the coordinate lines below and send them back.", 15);
+		Label copyHint = CreateInfoLabel(CardEditorLoc.T("tuner.copyCoordinateLines", "Copy the coordinate lines below and send them back."), 15);
 		copyHint.Name = "CopyHint";
 		copyHint.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		root.AddChild(copyHint);
@@ -365,7 +365,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		Button coordsToggle = new Button
 		{
 			Name = "CoordsToggle",
-			Text = "Show Coordinates",
+			Text = CardEditorLoc.T("button.showCoordinates", "Show Coordinates"),
 			FocusMode = Control.FocusModeEnum.None,
 			MouseFilter = Control.MouseFilterEnum.Stop,
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
@@ -504,7 +504,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		actions.AddThemeConstantOverride("separation", 8);
 		root.AddChild(actions);
 
-		Button centerText = new Button { Text = "Center Text", FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		Button centerText = new Button { Text = CardEditorLoc.T("button.centerText", "Center Text"), FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		centerText.Pressed += () =>
 		{
 			CenterButtonTextOffsets();
@@ -512,7 +512,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		};
 		actions.AddChild(centerText);
 
-		Button reset = new Button { Text = "Reset", FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		Button reset = new Button { Text = CardEditorLoc.T("button.reset", "Reset"), FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		reset.Pressed += () =>
 		{
 			CardEditorPresetPanelTuning.Reset();
@@ -520,7 +520,7 @@ internal static class CardEditorPresetPanelTunerHooks
 		};
 		actions.AddChild(reset);
 
-		Button close = new Button { Text = "Close", FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		Button close = new Button { Text = CardEditorLoc.T("button.close", "Close"), FocusMode = Control.FocusModeEnum.None, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		close.Pressed += () =>
 		{
 			library.SetMeta(OpenMetaKey, false);
@@ -777,7 +777,9 @@ internal static class CardEditorPresetPanelTunerHooks
 			bool coordsOpen = library != null && IsCoordsOpen(library);
 			if (coordsToggle != null)
 			{
-				coordsToggle.Text = coordsOpen ? "Hide Coordinates" : "Show Coordinates";
+				coordsToggle.Text = coordsOpen
+					? CardEditorLoc.T("button.hideCoordinates", "Hide Coordinates")
+					: CardEditorLoc.T("button.showCoordinates", "Show Coordinates");
 			}
 			if (coordsBox != null)
 			{

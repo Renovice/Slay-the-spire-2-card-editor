@@ -263,6 +263,66 @@ internal static class CardEditorTemporaryEnchantmentController
 		_schedules.Remove(combatState);
 	}
 
+	public static void OnCardTransformed(CombatState combatState, CardModel original, CardModel replacement)
+	{
+		if (combatState == null || original == null || replacement == null || !replacement.IsMutable)
+		{
+			return;
+		}
+
+		if (TryMoveScheduledState(combatState, original, replacement))
+		{
+			return;
+		}
+
+		CopyVisibleEnchantment(original, replacement);
+	}
+
+	private static bool TryMoveScheduledState(CombatState combatState, CardModel original, CardModel replacement)
+	{
+		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule))
+		{
+			return false;
+		}
+
+		CardModel fromKey = ResolveScheduleKey(original);
+		CardModel toKey = ResolveScheduleKey(replacement);
+		if (fromKey == null || toKey == null || !schedule.States.TryGetValue(fromKey, out CardState? state))
+		{
+			return false;
+		}
+
+		schedule.States.Remove(fromKey);
+		if (schedule.States.TryGetValue(toKey, out CardState? existing))
+		{
+			if (existing.Baseline == null)
+			{
+				existing.Baseline = state.Baseline;
+			}
+			existing.Grants.AddRange(state.Grants);
+			state = existing;
+		}
+		else
+		{
+			schedule.States[toKey] = state;
+		}
+
+		ReapplyCardState(toKey, state);
+		return true;
+	}
+
+	private static void CopyVisibleEnchantment(CardModel source, CardModel destination)
+	{
+		EnchantmentSnapshot? snapshot = CaptureSnapshot(source);
+		if (snapshot == null)
+		{
+			return;
+		}
+
+		ClearCardEnchantment(destination);
+		ApplySnapshot(destination, snapshot);
+	}
+
 	private static void FinalizeStateChange(CombatSchedule schedule, CardModel card, CardState state, bool changed)
 	{
 		if (!changed)

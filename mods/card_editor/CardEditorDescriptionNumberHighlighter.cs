@@ -39,6 +39,14 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return lineMatched;
 		}
 
+		// Multi-line custom text is authored line-by-line. If no line can be matched
+		// safely, keep the user's text literal instead of applying unrelated numbers
+		// from earlier/later generated lines.
+		if (SplitDescriptionLines(template).Length > 1 || SplitDescriptionLines(referenceDescription).Length > 1)
+		{
+			return template;
+		}
+
 		List<RenderedNumberToken> referenceTokens = ExtractRenderedNumberTokens(referenceDescription);
 		if (referenceTokens.Count == 0)
 		{
@@ -123,9 +131,11 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 			if (highlightDepth == 0 && imageDepth == 0 && TryReadNumericToken(template, i, out int tokenEndExclusive))
 			{
+				string templateToken = template.Substring(i, tokenEndExclusive - i);
 				builder.Append(tokenIndex < referenceTokens.Count
-					? referenceTokens[tokenIndex].RenderedText
-					: template.AsSpan(i, tokenEndExclusive - i));
+					&& string.Equals(templateToken, referenceTokens[tokenIndex].PlainText, StringComparison.Ordinal)
+						? referenceTokens[tokenIndex].RenderedText
+						: templateToken);
 				tokenIndex++;
 				i = tokenEndExclusive;
 				continue;
@@ -543,6 +553,11 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return false;
 		}
 
+		if (start > 0 && char.IsLetter(text[start - 1]))
+		{
+			return false;
+		}
+
 		int cursor = start;
 		if ((text[cursor] == '+' || text[cursor] == '-') && cursor + 1 < text.Length && char.IsDigit(text[cursor + 1]))
 		{
@@ -572,6 +587,11 @@ internal static class CardEditorDescriptionNumberHighlighter
 		}
 
 		endExclusive = cursor;
+		if (cursor < text.Length && char.IsLetter(text[cursor]))
+		{
+			return false;
+		}
+
 		return true;
 	}
 

@@ -14,6 +14,10 @@ internal static class Hook_ModifyStarCost_CardEditorCardStarCostsLess_Patch
 	{
 		try
 		{
+			if (CardEditorEnergyCostVisibilityHelper.SuppressCardEditorCostHooks)
+			{
+				return;
+			}
 			// Keep vanilla "no star cost / X-cost" visuals intact (negative sentinel values),
 			// but never allow cost reductions to push a normally-costed card below 0 in combat.
 			if (__result < 0m)

@@ -7,6 +7,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -18,6 +19,154 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace SlayTheSpire2Mod.CardEditor;
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.ModifyCardPlayResultPileTypeAndPosition))]
+internal static class Hook_ModifyCardPlayResultPile_CardEditorExtraEffects_Patch
+{
+	public static void Postfix(
+		ICombatState combatState,
+		CardModel card,
+		bool isAutoPlay,
+		ResourceInfo resources,
+		PileType pileType,
+		CardPilePosition position,
+		ref (PileType, CardPilePosition) __result)
+	{
+		if (combatState == null || card == null)
+		{
+			return;
+		}
+
+		if (CardEditorExtraEffects.TryGetCardPlayResultPileOverride(card, out PileType overridePile, out CardPilePosition overridePosition))
+		{
+			__result = (overridePile, overridePosition);
+		}
+	}
+}
+
+internal static class CardEditorExtraEffectTriggerPatchHelpers
+{
+	public static List<CardModel> GetCombatPileSnapshot(Player? player)
+	{
+		List<CardModel> cards = new List<CardModel>();
+		if (player?.PlayerCombatState?.AllPiles == null)
+		{
+			return cards;
+		}
+
+		HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
+		foreach (CardPile pile in player.PlayerCombatState.AllPiles)
+		{
+			if (pile?.Cards == null || pile.Cards.Count == 0)
+			{
+				continue;
+			}
+
+			foreach (CardModel card in pile.Cards)
+			{
+				if (card != null && seen.Add(card))
+				{
+					cards.Add(card);
+				}
+			}
+		}
+
+		return cards;
+	}
+
+	public static List<CardModel> GetDeckAndCombatPileSnapshot(Player? player)
+	{
+		List<CardModel> cards = new List<CardModel>();
+		if (player == null)
+		{
+			return cards;
+		}
+
+		HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
+		if (player.Deck?.Cards != null)
+		{
+			foreach (CardModel card in player.Deck.Cards)
+			{
+				if (card != null && seen.Add(card))
+				{
+					cards.Add(card);
+				}
+			}
+		}
+
+		foreach (CardModel card in GetCombatPileSnapshot(player))
+		{
+			if (card != null && seen.Add(card))
+			{
+				cards.Add(card);
+			}
+		}
+
+		return cards;
+	}
+
+	public static async Task RunForEachCombatPileCard(
+		CombatState combatState,
+		Player player,
+		ulong netId,
+		Func<PlayerChoiceContext, CardModel, Task> runEffect)
+	{
+		if (combatState == null || player == null || runEffect == null)
+		{
+			return;
+		}
+
+		foreach (CardModel card in GetCombatPileSnapshot(player))
+		{
+			await RunForCard(player, netId, card, runEffect);
+		}
+	}
+
+	public static async Task RunForEachDeckAndCombatPileCard(
+		Player player,
+		ulong netId,
+		Func<PlayerChoiceContext, CardModel, Task> runEffect)
+	{
+		if (player == null || runEffect == null)
+		{
+			return;
+		}
+
+		foreach (CardModel card in GetDeckAndCombatPileSnapshot(player))
+		{
+			await RunForCard(player, netId, card, runEffect);
+		}
+	}
+
+	public static async Task RunForCard(
+		Player player,
+		ulong netId,
+		CardModel card,
+		Func<PlayerChoiceContext, CardModel, Task> runEffect)
+	{
+		if (player == null || card == null || runEffect == null)
+		{
+			return;
+		}
+
+		HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId, GameActionType.Combat);
+		Task task = runEffect(choiceContext, card);
+		bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+		if (!completed && choiceContext.GameAction != null)
+		{
+			await choiceContext.GameAction.CompletionTask;
+		}
+	}
+
+	private sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class
+	{
+		public static readonly ReferenceEqualityComparer<T> Instance = new ReferenceEqualityComparer<T>();
+
+		public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+
+		public int GetHashCode(T obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+	}
+}
 
 [HarmonyPatch(typeof(Hook), nameof(Hook.BeforeCombatStart))]
 internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
@@ -79,17 +228,18 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterAttack))]
 internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Patch
 {
-	public static void Postfix(CombatState combatState, AttackCommand command, ref Task __result)
+	public static void Postfix(ICombatState combatState, PlayerChoiceContext choiceContext, AttackCommand command, ref Task __result)
 	{
-		if (__result == null || combatState == null || command == null)
+		CombatState? concreteCombatState = combatState.AsCombatState();
+		if (__result == null || concreteCombatState == null || command == null)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, combatState, command);
+		__result = RunAfter(__result, concreteCombatState, command);
 	}
 
 	private static async Task RunAfter(Task original, CombatState combatState, AttackCommand command)
@@ -104,6 +254,21 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 
 		try
 		{
+			Creature? attackTarget = command.Results?.FirstOrDefault()?.Receiver;
+			foreach (Player player in combatState.Players)
+			{
+				if (player == null)
+				{
+					continue;
+				}
+
+				await CardEditorExtraEffectTriggerPatchHelpers.RunForEachCombatPileCard(
+					combatState,
+					player,
+					netId.Value,
+					(choiceContext, card) => CardEditorExtraEffects.RunAfterAttack(combatState, choiceContext, card, attackTarget));
+			}
+
 			Player? ostyOwner = null;
 			foreach (Player player in combatState.Players)
 			{
@@ -119,49 +284,63 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 				return;
 			}
 
-			CardPile? hand = ostyOwner.PlayerCombatState?.Hand;
-			CardPile? drawPile = ostyOwner.PlayerCombatState?.DrawPile;
-			CardPile? discardPile = ostyOwner.PlayerCombatState?.DiscardPile;
-			CardPile? exhaustPile = ostyOwner.PlayerCombatState?.ExhaustPile;
+			await CardEditorExtraEffectTriggerPatchHelpers.RunForEachCombatPileCard(
+				combatState,
+				ostyOwner,
+				netId.Value,
+				(choiceContext, card) => CardEditorExtraEffects.RunAfterOstyDealDamage(combatState, choiceContext, card));
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] AfterAttack extra effects failed: {ex}");
+		}
+	}
+}
 
-			List<CardModel> cards = new List<CardModel>();
-			if (hand?.Cards != null && hand.Cards.Count > 0)
-			{
-				cards.AddRange(hand.Cards);
-			}
-			if (drawPile?.Cards != null && drawPile.Cards.Count > 0)
-			{
-				cards.AddRange(drawPile.Cards);
-			}
-			if (discardPile?.Cards != null && discardPile.Cards.Count > 0)
-			{
-				cards.AddRange(discardPile.Cards);
-			}
-			if (exhaustPile?.Cards != null && exhaustPile.Cards.Count > 0)
-			{
-				cards.AddRange(exhaustPile.Cards);
-			}
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardEnteredCombat))]
+internal static class Hook_AfterCardEnteredCombat_CardEditorExtraEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, CardModel card, ref Task __result)
+	{
+		CombatState? concreteCombatState = combatState.AsCombatState();
+		if (__result == null || concreteCombatState == null || card == null)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		{
+			return;
+		}
+		__result = RunAfter(__result, concreteCombatState, card);
+	}
 
-			if (cards.Count == 0)
+	private static async Task RunAfter(Task original, CombatState combatState, CardModel card)
+	{
+		await original;
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		try
+		{
+			Player? owner = card.Owner;
+			if (owner == null)
 			{
 				return;
 			}
 
-			List<CardModel> snapshot = cards.Where(c => c != null).ToList();
-			foreach (CardModel card in snapshot)
-			{
-				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(ostyOwner, netId.Value, GameActionType.Combat);
-				Task task = CardEditorExtraEffects.RunAfterOstyDealDamage(combatState, choiceContext, card);
-				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
-				if (!completed && choiceContext.GameAction != null)
-				{
-					await choiceContext.GameAction.CompletionTask;
-				}
-			}
+			await CardEditorExtraEffectTriggerPatchHelpers.RunForCard(
+				owner,
+				netId.Value,
+				card,
+				(choiceContext, currentCard) => CardEditorExtraEffects.RunAfterCardEnteredCombat(combatState, choiceContext, currentCard));
 		}
 		catch (Exception ex)
 		{
-			Log.Warn($"[CardEditor] AfterAttack (OstyDealDamage) extra effects failed: {ex}");
+			Log.Warn($"[CardEditor] AfterCardEnteredCombat extra effects failed: {ex}");
 		}
 	}
 }
@@ -700,22 +879,28 @@ internal static class Hook_AfterCardRetained_CardEditorExtraEffects_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.BeforeHandDraw))]
 internal static class Hook_BeforeHandDraw_AutoPlaySelfFromPile_Patch
 {
-	public static void Postfix(CombatState combatState, Player player, PlayerChoiceContext playerChoiceContext, ref Task __result)
+	public static void Postfix(ICombatState combatState, Player player, PlayerChoiceContext playerChoiceContext, ref Task __result)
 	{
-		if (__result == null || combatState == null || player == null)
+		CombatState? concreteCombatState = combatState.AsCombatState();
+		if (__result == null || concreteCombatState == null || player == null)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, combatState, player, playerChoiceContext);
+		__result = RunAfter(__result, concreteCombatState, player, playerChoiceContext);
 	}
 
 	private static async Task RunAfter(Task original, CombatState combatState, Player player, PlayerChoiceContext choiceContext)
 	{
 		await original;
+		if (player == null || choiceContext == null)
+		{
+			return;
+		}
+
 		try
 		{
 			CardEditorConditionalFromPileFiredTracker.Clear(combatState);
@@ -749,15 +934,116 @@ internal static class Hook_BeforeHandDraw_AutoPlaySelfFromPile_Patch
 				foreach (CardModel card in snapshot)
 				{
 					await CardEditorExtraEffects.RunStartOfTurn(combatState, choiceContext, card);
+					await CardEditorExtraEffects.RunBeforeHandDraw(combatState, choiceContext, card);
 				}
 			}
 
-			await CardEditorExtraEffects.RunAutoPlaySelfFromPile(combatState, choiceContext, player, CardExtraEffectTrigger.StartOfTurn);
-			await CardEditorExtraEffects.RunAutoDrawSelfFromPile(combatState, choiceContext, player, CardExtraEffectTrigger.StartOfTurn);
+			await CardEditorExtraEffects.RunAutoPlaySelfFromPile(combatState, choiceContext, player!, CardExtraEffectTrigger.StartOfTurn);
+			await CardEditorExtraEffects.RunAutoDrawSelfFromPile(combatState, choiceContext, player!, CardExtraEffectTrigger.StartOfTurn);
 		}
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] BeforeHandDraw auto-play/draw-self failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterDeath))]
+internal static class Hook_AfterDeath_CardEditorExtraEffects_Patch
+{
+	public static void Postfix(IRunState runState, ICombatState? combatState, Creature creature, bool wasRemovalPrevented, float deathAnimLength, ref Task __result)
+	{
+		CombatState? concreteCombatState = combatState.AsCombatState();
+		if (__result == null || concreteCombatState == null || creature == null)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		{
+			return;
+		}
+		__result = RunAfter(__result, concreteCombatState, creature);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState, Creature creature)
+	{
+		await original;
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (Player player in combatState.Players)
+			{
+				if (player == null)
+				{
+					continue;
+				}
+
+				await CardEditorExtraEffectTriggerPatchHelpers.RunForEachCombatPileCard(
+					combatState,
+					player,
+					netId.Value,
+					(choiceContext, card) => CardEditorExtraEffects.RunAfterDeath(combatState, choiceContext, card, creature));
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] AfterDeath extra effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCombatEnd))]
+internal static class Hook_AfterCombatEnd_CardEditorExtraEffects_Patch
+{
+	[HarmonyPriority(Priority.First)]
+	public static void Postfix(IRunState runState, ICombatState? combatState, CombatRoom room, ref Task __result)
+	{
+		CombatState? concreteCombatState = combatState.AsCombatState();
+		if (__result == null || concreteCombatState == null)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		{
+			return;
+		}
+		__result = RunAfter(__result, concreteCombatState);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState)
+	{
+		await original;
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (Player player in combatState.Players)
+			{
+				if (player == null)
+				{
+					continue;
+				}
+
+				await CardEditorExtraEffectTriggerPatchHelpers.RunForEachDeckAndCombatPileCard(
+					player,
+					netId.Value,
+					(choiceContext, card) => CardEditorExtraEffects.RunAfterCombatEnd(combatState, choiceContext, card));
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] AfterCombatEnd extra effects failed: {ex}");
 		}
 	}
 }

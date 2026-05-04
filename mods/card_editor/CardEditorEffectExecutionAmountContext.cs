@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Models;
 
@@ -11,6 +12,12 @@ internal static class CardEditorEffectExecutionAmountContext
 	private sealed class Session
 	{
 		public Dictionary<string, int> AppliedAmountsByEffectId { get; } = new(StringComparer.Ordinal);
+		public Dictionary<string, int> TotalDamageAmountsByEffectId { get; } = new(StringComparer.Ordinal);
+		public Dictionary<string, int> BlockedDamageAmountsByEffectId { get; } = new(StringComparer.Ordinal);
+		public Dictionary<string, int> OverkillDamageAmountsByEffectId { get; } = new(StringComparer.Ordinal);
+		public Dictionary<string, int> KillCountsByEffectId { get; } = new(StringComparer.Ordinal);
+		public Dictionary<string, int> AppliedCountsByEffectId { get; } = new(StringComparer.Ordinal);
+		public HashSet<DamageResult> CurrentPlayDamageResults { get; } = new();
 		public Stack<EffectFrame> Frames { get; } = new();
 	}
 
@@ -18,8 +25,19 @@ internal static class CardEditorEffectExecutionAmountContext
 	{
 		public required CardExtraEffect Effect { get; init; }
 		public required int FallbackAppliedAmount { get; init; }
+		public required int FallbackAppliedCount { get; init; }
 		public int ReportedAppliedAmount { get; set; }
 		public bool HasReportedAppliedAmount { get; set; }
+		public int ReportedTotalDamageAmount { get; set; }
+		public bool HasReportedTotalDamageAmount { get; set; }
+		public int ReportedBlockedDamageAmount { get; set; }
+		public bool HasReportedBlockedDamageAmount { get; set; }
+		public int ReportedOverkillDamageAmount { get; set; }
+		public bool HasReportedOverkillDamageAmount { get; set; }
+		public int ReportedKillCount { get; set; }
+		public bool HasReportedKillCount { get; set; }
+		public int ReportedAppliedCount { get; set; }
+		public bool HasReportedAppliedCount { get; set; }
 	}
 
 	private sealed class RootSessionScope : IDisposable
@@ -72,11 +90,31 @@ internal static class CardEditorEffectExecutionAmountContext
 				return;
 			}
 
-				int appliedAmount = _frame.HasReportedAppliedAmount
-					? _frame.ReportedAppliedAmount
-					: _frame.FallbackAppliedAmount;
-				AccumulateIntoParentRunEffectSource(_session, appliedAmount);
-				_session.AppliedAmountsByEffectId[effectId] = ClampNonNegative(appliedAmount);
+			int appliedAmount = _frame.HasReportedAppliedAmount
+				? _frame.ReportedAppliedAmount
+				: _frame.FallbackAppliedAmount;
+			int totalDamageAmount = _frame.HasReportedTotalDamageAmount
+				? _frame.ReportedTotalDamageAmount
+				: appliedAmount;
+			int blockedDamageAmount = _frame.HasReportedBlockedDamageAmount
+				? _frame.ReportedBlockedDamageAmount
+				: 0;
+			int overkillDamageAmount = _frame.HasReportedOverkillDamageAmount
+				? _frame.ReportedOverkillDamageAmount
+				: 0;
+			int killCount = _frame.HasReportedKillCount
+				? _frame.ReportedKillCount
+				: 0;
+			int appliedCount = _frame.HasReportedAppliedCount
+				? _frame.ReportedAppliedCount
+				: _frame.FallbackAppliedCount;
+			AccumulateIntoParentRunEffectSource(_session, appliedAmount, totalDamageAmount, blockedDamageAmount, overkillDamageAmount, killCount, appliedCount);
+			_session.AppliedAmountsByEffectId[effectId] = ClampNonNegative(appliedAmount);
+			_session.TotalDamageAmountsByEffectId[effectId] = ClampNonNegative(totalDamageAmount);
+			_session.BlockedDamageAmountsByEffectId[effectId] = ClampNonNegative(blockedDamageAmount);
+			_session.OverkillDamageAmountsByEffectId[effectId] = ClampNonNegative(overkillDamageAmount);
+			_session.KillCountsByEffectId[effectId] = ClampNonNegative(killCount);
+			_session.AppliedCountsByEffectId[effectId] = ClampNonNegative(appliedCount);
 			}
 		}
 
@@ -102,7 +140,7 @@ internal static class CardEditorEffectExecutionAmountContext
 		return new RootSessionScope();
 	}
 
-	public static IDisposable PushEffectScoped(CardExtraEffect effect, int fallbackAppliedAmount)
+	public static IDisposable PushEffectScoped(CardExtraEffect effect, int fallbackAppliedAmount, int fallbackAppliedCount = 0)
 	{
 		Session? session = _currentSession.Value;
 		if (session == null || effect == null)
@@ -113,7 +151,8 @@ internal static class CardEditorEffectExecutionAmountContext
 		EffectFrame frame = new EffectFrame
 		{
 			Effect = effect,
-			FallbackAppliedAmount = ClampNonNegative(fallbackAppliedAmount)
+			FallbackAppliedAmount = ClampNonNegative(fallbackAppliedAmount),
+			FallbackAppliedCount = ClampNonNegative(fallbackAppliedCount)
 		};
 		session.Frames.Push(frame);
 		return new EffectScope(session, frame);
@@ -136,9 +175,201 @@ internal static class CardEditorEffectExecutionAmountContext
 		return session.AppliedAmountsByEffectId.TryGetValue(effectId.Trim(), out amount);
 	}
 
+	public static bool TryGetTotalDamageAmount(string? effectId, out int amount)
+	{
+		amount = 0;
+		if (string.IsNullOrWhiteSpace(effectId))
+		{
+			return false;
+		}
+
+		Session? session = _currentSession.Value;
+		if (session == null)
+		{
+			return false;
+		}
+
+		return session.TotalDamageAmountsByEffectId.TryGetValue(effectId.Trim(), out amount);
+	}
+
+	public static bool TryGetBlockedDamageAmount(string? effectId, out int amount)
+	{
+		amount = 0;
+		if (string.IsNullOrWhiteSpace(effectId))
+		{
+			return false;
+		}
+
+		Session? session = _currentSession.Value;
+		if (session == null)
+		{
+			return false;
+		}
+
+		return session.BlockedDamageAmountsByEffectId.TryGetValue(effectId.Trim(), out amount);
+	}
+
+	public static bool TryGetOverkillDamageAmount(string? effectId, out int amount)
+	{
+		amount = 0;
+		if (string.IsNullOrWhiteSpace(effectId))
+		{
+			return false;
+		}
+
+		Session? session = _currentSession.Value;
+		if (session == null)
+		{
+			return false;
+		}
+
+		return session.OverkillDamageAmountsByEffectId.TryGetValue(effectId.Trim(), out amount);
+	}
+
+	public static bool TryGetKillCount(string? effectId, out int count)
+	{
+		count = 0;
+		if (string.IsNullOrWhiteSpace(effectId))
+		{
+			return false;
+		}
+
+		Session? session = _currentSession.Value;
+		if (session == null)
+		{
+			return false;
+		}
+
+		return session.KillCountsByEffectId.TryGetValue(effectId.Trim(), out count);
+	}
+
+	public static bool TryGetAppliedCount(string? effectId, out int count)
+	{
+		count = 0;
+		if (string.IsNullOrWhiteSpace(effectId))
+		{
+			return false;
+		}
+
+		Session? session = _currentSession.Value;
+		if (session == null)
+		{
+			return false;
+		}
+
+		return session.AppliedCountsByEffectId.TryGetValue(effectId.Trim(), out count);
+	}
+
 	public static void ReportCurrentDamageApplied(int amount)
 	{
 		ReportIfCurrentKindMatches(amount, CardExtraEffectKind.DealDamage, CardExtraEffectKind.LoseHp);
+	}
+
+	public static void ReportCurrentDamageTotals(int totalDamageAmount, int damageInstanceCount, int blockedDamageAmount = 0, int overkillDamageAmount = 0)
+	{
+		if (totalDamageAmount <= 0 && damageInstanceCount <= 0 && blockedDamageAmount <= 0 && overkillDamageAmount <= 0)
+		{
+			return;
+		}
+
+		EffectFrame? frame = GetCurrentFrame();
+		if (frame?.Effect == null)
+		{
+			return;
+		}
+
+		if (frame.Effect.Kind != CardExtraEffectKind.DealDamage
+			&& frame.Effect.Kind != CardExtraEffectKind.RunEffectSourceCard)
+		{
+			return;
+		}
+
+		if (totalDamageAmount > 0)
+		{
+			frame.ReportedTotalDamageAmount = ClampNonNegative(frame.ReportedTotalDamageAmount + totalDamageAmount);
+			frame.HasReportedTotalDamageAmount = true;
+		}
+
+		if (blockedDamageAmount > 0)
+		{
+			frame.ReportedBlockedDamageAmount = ClampNonNegative(frame.ReportedBlockedDamageAmount + blockedDamageAmount);
+			frame.HasReportedBlockedDamageAmount = true;
+		}
+
+		if (overkillDamageAmount > 0)
+		{
+			frame.ReportedOverkillDamageAmount = ClampNonNegative(frame.ReportedOverkillDamageAmount + overkillDamageAmount);
+			frame.HasReportedOverkillDamageAmount = true;
+		}
+
+		if (damageInstanceCount > 0)
+		{
+			frame.ReportedAppliedCount = frame.Effect.Kind == CardExtraEffectKind.DealDamage
+				? Math.Max(ClampNonNegative(frame.ReportedAppliedCount), ClampNonNegative(damageInstanceCount))
+				: ClampNonNegative(frame.ReportedAppliedCount + damageInstanceCount);
+			frame.HasReportedAppliedCount = true;
+		}
+	}
+
+	public static void ReportCurrentDamageResults(IEnumerable<DamageResult>? results)
+	{
+		if (results == null)
+		{
+			return;
+		}
+
+		Session? session = _currentSession.Value;
+		if (session == null)
+		{
+			return;
+		}
+
+		foreach (DamageResult? result in results)
+		{
+			if (result == null || !session.CurrentPlayDamageResults.Add(result))
+			{
+				continue;
+			}
+
+			if (result.WasTargetKilled)
+			{
+				ReportCurrentKillCount(1);
+			}
+		}
+	}
+
+	public static void ReportCurrentKillCount(int count)
+	{
+		if (count <= 0)
+		{
+			return;
+		}
+
+		EffectFrame? frame = GetCurrentFrame();
+		if (frame?.Effect == null)
+		{
+			return;
+		}
+
+		if (frame.Effect.Kind != CardExtraEffectKind.DealDamage
+			&& frame.Effect.Kind != CardExtraEffectKind.RunEffectSourceCard)
+		{
+			return;
+		}
+
+		frame.ReportedKillCount = ClampNonNegative(frame.ReportedKillCount + count);
+		frame.HasReportedKillCount = true;
+	}
+
+	public static bool ContainsCurrentPlayDamageResult(DamageResult? result)
+	{
+		if (result == null)
+		{
+			return false;
+		}
+
+		Session? session = _currentSession.Value;
+		return session != null && session.CurrentPlayDamageResults.Contains(result);
 	}
 
 	public static void ReportCurrentBlockApplied(int amount)
@@ -188,6 +419,8 @@ internal static class CardEditorEffectExecutionAmountContext
 		{
 			frame.ReportedAppliedAmount = ClampNonNegative(frame.ReportedAppliedAmount + amount);
 			frame.HasReportedAppliedAmount = true;
+			frame.ReportedAppliedCount = ClampNonNegative(frame.ReportedAppliedCount + 1);
+			frame.HasReportedAppliedCount = true;
 			return;
 		}
 
@@ -198,6 +431,8 @@ internal static class CardEditorEffectExecutionAmountContext
 
 		frame.ReportedAppliedAmount = ClampNonNegative(frame.ReportedAppliedAmount + amount);
 		frame.HasReportedAppliedAmount = true;
+		frame.ReportedAppliedCount = ClampNonNegative(frame.ReportedAppliedCount + 1);
+		frame.HasReportedAppliedCount = true;
 	}
 
 	private static void ReportIfCurrentKindMatches(int amount, params CardExtraEffectKind[] expectedKinds)
@@ -217,6 +452,8 @@ internal static class CardEditorEffectExecutionAmountContext
 		{
 			frame.ReportedAppliedAmount = ClampNonNegative(frame.ReportedAppliedAmount + amount);
 			frame.HasReportedAppliedAmount = true;
+			frame.ReportedAppliedCount = ClampNonNegative(frame.ReportedAppliedCount + 1);
+			frame.HasReportedAppliedCount = true;
 			return;
 		}
 
@@ -229,6 +466,8 @@ internal static class CardEditorEffectExecutionAmountContext
 
 			frame.ReportedAppliedAmount = ClampNonNegative(frame.ReportedAppliedAmount + amount);
 			frame.HasReportedAppliedAmount = true;
+			frame.ReportedAppliedCount = ClampNonNegative(frame.ReportedAppliedCount + 1);
+			frame.HasReportedAppliedCount = true;
 			return;
 		}
 	}
@@ -272,9 +511,9 @@ internal static class CardEditorEffectExecutionAmountContext
 			&& CardEditorExtraEffects.PowerMatchesStatus(power, status);
 	}
 
-	private static void AccumulateIntoParentRunEffectSource(Session session, int appliedAmount)
+	private static void AccumulateIntoParentRunEffectSource(Session session, int appliedAmount, int totalDamageAmount, int blockedDamageAmount, int overkillDamageAmount, int killCount, int appliedCount)
 	{
-		if (session == null || session.Frames.Count == 0 || appliedAmount <= 0)
+		if (session == null || session.Frames.Count == 0)
 		{
 			return;
 		}
@@ -285,8 +524,41 @@ internal static class CardEditorEffectExecutionAmountContext
 			return;
 		}
 
-		parent.ReportedAppliedAmount = ClampNonNegative(parent.ReportedAppliedAmount + appliedAmount);
-		parent.HasReportedAppliedAmount = true;
+		if (appliedAmount > 0)
+		{
+			parent.ReportedAppliedAmount = ClampNonNegative(parent.ReportedAppliedAmount + appliedAmount);
+			parent.HasReportedAppliedAmount = true;
+		}
+
+		if (totalDamageAmount > 0)
+		{
+			parent.ReportedTotalDamageAmount = ClampNonNegative(parent.ReportedTotalDamageAmount + totalDamageAmount);
+			parent.HasReportedTotalDamageAmount = true;
+		}
+
+		if (blockedDamageAmount > 0)
+		{
+			parent.ReportedBlockedDamageAmount = ClampNonNegative(parent.ReportedBlockedDamageAmount + blockedDamageAmount);
+			parent.HasReportedBlockedDamageAmount = true;
+		}
+
+		if (overkillDamageAmount > 0)
+		{
+			parent.ReportedOverkillDamageAmount = ClampNonNegative(parent.ReportedOverkillDamageAmount + overkillDamageAmount);
+			parent.HasReportedOverkillDamageAmount = true;
+		}
+
+		if (killCount > 0)
+		{
+			parent.ReportedKillCount = ClampNonNegative(parent.ReportedKillCount + killCount);
+			parent.HasReportedKillCount = true;
+		}
+
+		if (appliedCount > 0)
+		{
+			parent.ReportedAppliedCount = ClampNonNegative(parent.ReportedAppliedCount + appliedCount);
+			parent.HasReportedAppliedCount = true;
+		}
 	}
 
 	private static void RemoveFrame(Session session, EffectFrame frame)
