@@ -2685,6 +2685,7 @@ public static class Hook_AfterPlayerTurnStart_Patch
 		await original;
 		try
 		{
+			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.YourTurn);
 			await CardEditorExtraEffectScheduler.RunAfterPlayerTurnStart(combatState, choiceContext, player);
 			CardEditorCreatedCardsCostController.OnAfterPlayerTurnStart(combatState, player);
 			Creature? creature = player?.Creature;
@@ -2715,14 +2716,15 @@ public static class Hook_BeforeHandDraw_CardEditorTurnBoundaryPower_Patch
 			return;
 		}
 
-		__result = RunAfter(__result, player, playerChoiceContext);
+		__result = RunAfter(__result, combatState, player, playerChoiceContext);
 	}
 
-	private static async Task RunAfter(Task original, Player player, PlayerChoiceContext choiceContext)
+	private static async Task RunAfter(Task original, CombatState combatState, Player player, PlayerChoiceContext choiceContext)
 	{
 		await original;
 		try
 		{
+			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.YourTurn);
 			Creature? creature = player?.Creature;
 			if (creature == null)
 			{
@@ -2764,6 +2766,7 @@ public static class Hook_AfterSideTurnStart_Patch
 
 		try
 		{
+			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.EnemyTurn);
 			ulong? netId = LocalContext.NetId;
 			if (!netId.HasValue)
 			{
@@ -2823,6 +2826,7 @@ public static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryPower_Patch
 		await original;
 		try
 		{
+			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.EnemyTurn);
 			ulong? netId = LocalContext.NetId;
 			if (!netId.HasValue)
 			{
@@ -2877,15 +2881,16 @@ public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 		await original;
 		try
 		{
+			CardExtraEffectTurnBoundarySide boundarySide = side == CombatSide.Enemy
+				? CardExtraEffectTurnBoundarySide.EnemyTurn
+				: CardExtraEffectTurnBoundarySide.YourTurn;
+			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.End, boundarySide);
+
 			ulong? netId = LocalContext.NetId;
 			if (!netId.HasValue)
 			{
 				return;
 			}
-
-			CardExtraEffectTurnBoundarySide boundarySide = side == CombatSide.Enemy
-				? CardExtraEffectTurnBoundarySide.EnemyTurn
-				: CardExtraEffectTurnBoundarySide.YourTurn;
 
 			foreach (Player player in combatState.Players)
 			{
@@ -2935,13 +2940,14 @@ public static class Hook_AfterTurnEnd_Patch
 		try
 		{
 			await CardEditorExtraEffectScheduler.RunAfterTurnEnd(combatState, side);
+			CardExtraEffectTurnBoundarySide boundarySide = side == CombatSide.Enemy
+				? CardExtraEffectTurnBoundarySide.EnemyTurn
+				: CardExtraEffectTurnBoundarySide.YourTurn;
+			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.EndAfterDiscard, boundarySide);
+
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue)
 			{
-				CardExtraEffectTurnBoundarySide boundarySide = side == CombatSide.Enemy
-					? CardExtraEffectTurnBoundarySide.EnemyTurn
-					: CardExtraEffectTurnBoundarySide.YourTurn;
-
 				foreach (Player player in combatState.Players)
 				{
 					Creature? creature = player?.Creature;

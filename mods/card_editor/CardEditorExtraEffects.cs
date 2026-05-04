@@ -776,7 +776,11 @@ public enum CardExtraEffectPowerStackMode
 public enum CardExtraEffectDuration
 {
 	Permanent = 0,
-	ThisTurn = 1
+	ThisTurn = 1,
+	NextTurnStartBeforeDraw = 2,
+	NextTurnStartAfterDraw = 3,
+	NextTurnEndBeforeDiscard = 4,
+	NextTurnEndAfterDiscard = 5
 }
 
 public enum CardCreatedCardsCostDuration
@@ -3942,9 +3946,26 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			CardExtraEffectDuration.Permanent => "Permanent",
 			CardExtraEffectDuration.ThisTurn => "This Turn",
+			CardExtraEffectDuration.NextTurnStartBeforeDraw => "Next Start (Before Draw)",
+			CardExtraEffectDuration.NextTurnStartAfterDraw => "Next Start (After Draw)",
+			CardExtraEffectDuration.NextTurnEndBeforeDiscard => "Next End (Before Discard)",
+			CardExtraEffectDuration.NextTurnEndAfterDiscard => "Next End (After Discard)",
 			_ => duration.ToString()
 		};
 		return CardEditorLoc.Enum("extraEffectDuration", duration, fallback);
+	}
+
+	private static string? DurationSuffixLabel(CardExtraEffectDuration duration)
+	{
+		return duration switch
+		{
+			CardExtraEffectDuration.ThisTurn => CardEditorLoc.T("cardText.duration.thisTurn", "this turn"),
+			CardExtraEffectDuration.NextTurnStartBeforeDraw => CardEditorLoc.T("cardText.duration.nextStartBeforeDraw", "until next turn start (before draw)"),
+			CardExtraEffectDuration.NextTurnStartAfterDraw => CardEditorLoc.T("cardText.duration.nextStartAfterDraw", "until next turn start (after draw)"),
+			CardExtraEffectDuration.NextTurnEndBeforeDiscard => CardEditorLoc.T("cardText.duration.nextEndBeforeDiscard", "until next turn end (before discard)"),
+			CardExtraEffectDuration.NextTurnEndAfterDiscard => CardEditorLoc.T("cardText.duration.nextEndAfterDiscard", "until next turn end (after discard)"),
+			_ => null
+		};
 	}
 
 	public static string CreatedCardsCostDurationLabel(CardCreatedCardsCostDuration duration)
@@ -4547,7 +4568,8 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 	public static bool SupportsDuration(CardExtraEffectKind kind)
 	{
-		return kind is CardExtraEffectKind.GainStrength
+		return kind is CardExtraEffectKind.ApplyPower
+			or CardExtraEffectKind.GainStrength
 			or CardExtraEffectKind.LoseStrength
 			or CardExtraEffectKind.GainDexterity
 			or CardExtraEffectKind.LoseDexterity
@@ -4568,6 +4590,19 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			or CardExtraEffectKind.GainBlur
 			or CardExtraEffectKind.GainRitual
 			or CardExtraEffectKind.ApplyConstrict;
+	}
+
+	internal static bool IsTemporaryDuration(CardExtraEffectDuration duration)
+	{
+		return duration != CardExtraEffectDuration.Permanent;
+	}
+
+	internal static bool IsBoundaryDuration(CardExtraEffectDuration duration)
+	{
+		return duration is CardExtraEffectDuration.NextTurnStartBeforeDraw
+			or CardExtraEffectDuration.NextTurnStartAfterDraw
+			or CardExtraEffectDuration.NextTurnEndBeforeDiscard
+			or CardExtraEffectDuration.NextTurnEndAfterDiscard;
 	}
 
 	public static bool SupportsAsPower(CardExtraEffectKind kind)
@@ -13236,8 +13271,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			amountText = StsTextUtilities.HighlightChangeText(amountText, upgradeHighlightComparison);
 		}
 
-		string? powerDurationSuffix = (effect.Duration == CardExtraEffectDuration.ThisTurn && SupportsDuration(effect.Kind))
-			? CardEditorLoc.T("cardText.duration.thisTurn", "this turn")
+		string? powerDurationSuffix = SupportsDuration(effect.Kind)
+			? DurationSuffixLabel(effect.Duration)
 			: null;
 
 		string? cardCostsLessDurationSuffix = null;
@@ -13296,6 +13331,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			if (allowDamageBlockPreview && !amountIsX && effect.Kind is CardExtraEffectKind.DealDamage or CardExtraEffectKind.GainBlock)
 			{
 				TryGetScaledAmountText(card, effect, baseAmount, target, upgradeHighlightComparison, out amountText);
+			}
+			else if (!amountIsX && TryGetScaledPowerAmountText(card, effect, baseAmount, target, upgradeHighlightComparison, out string powerAmountText))
+			{
+				amountText = powerAmountText;
 			}
 
 			string FormatEnergyText()
@@ -13361,7 +13400,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.RemovePoison => FormatRemovePowerText(effect.Target, amountText, "Poison"),
 				CardExtraEffectKind.RemoveDoom => FormatRemovePowerText(effect.Target, amountText, "Doom"),
 				CardExtraEffectKind.RemoveConstrict => FormatRemovePowerText(effect.Target, amountText, "Constrict"),
-				CardExtraEffectKind.ApplyPower => FormatApplyPower(effect, amountText),
+				CardExtraEffectKind.ApplyPower => FormatApplyPower(effect, amountText, powerDurationSuffix),
 				CardExtraEffectKind.CopyDebuffs => FormatCopyDebuffs(effect.Target),
 				CardExtraEffectKind.ModifyActivePower => FormatModifyActivePower(effect, amountText),
 				CardExtraEffectKind.CountdownEffect => FormatCountdownEffect(card, effect, isUpgradePreview),
@@ -13664,51 +13703,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 		try
 		{
-			CardModel modifierCard = CardEditorBorrowedEffectSourceDamageHelper.ResolveRuntimePlayedCard(card) ?? card;
-			Player? owner = modifierCard.Owner;
-			Creature? dealer = owner?.Creature;
-			CombatState? combatState = modifierCard.CombatState.AsCombatState();
-
-			bool isOstyAttack = effect.Kind == CardExtraEffectKind.OstyAction
-				&& effect.OstyAction is CardExtraEffectOstyAction.Attack or CardExtraEffectOstyAction.AttackAll;
-
-			ValueProp props = ValueProp.Move;
-
 			decimal preview = baseAmount;
-			if (ShouldRunGlobalHooks(modifierCard) && dealer != null && combatState != null && owner?.RunState != null)
+			if (TryGetHookedMoveAmountPreview(card, effect, baseAmount, target, out decimal hookedPreview))
 			{
-				if (effect.Kind == CardExtraEffectKind.DealDamage || isOstyAttack)
-				{
-					Creature? effectiveDealer = isOstyAttack ? owner.Osty : dealer;
-					Creature? damageTarget = effect.Target switch
-					{
-						CardExtraEffectTarget.Self => isOstyAttack ? owner.Osty : dealer,
-						CardExtraEffectTarget.Target => target,
-						_ => null
-					};
-					CardPreviewMode previewMode = (effect.Target == CardExtraEffectTarget.AllEnemies || effect.OstyAction == CardExtraEffectOstyAction.AttackAll)
-						? CardPreviewMode.MultiCreatureTargeting
-						: CardPreviewMode.Normal;
-
-					if (effectiveDealer != null)
-					{
-						preview = Hook.ModifyDamage(owner.RunState, combatState, damageTarget, effectiveDealer, baseAmount, props, modifierCard, ModifyDamageHookType.All, previewMode, out IEnumerable<AbstractModel> _);
-					}
-				}
-				else if (effect.Kind == CardExtraEffectKind.GainBlock)
-				{
-					Creature? blockTarget = effect.Target switch
-					{
-						CardExtraEffectTarget.Self => dealer,
-						CardExtraEffectTarget.Target => target,
-						_ => null
-					};
-
-					if (blockTarget != null)
-					{
-						preview = Hook.ModifyBlock(combatState, blockTarget, baseAmount, props, modifierCard, cardPlay: null, out IEnumerable<AbstractModel> _);
-					}
-				}
+				preview = hookedPreview;
 			}
 
 			int previewInt = (int)preview;
@@ -13774,10 +13772,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			_ => payload
 		};
 
-		// For non-stat-buff kinds with Duration=ThisTurn in power mode, the power entry expires at end of turn.
-		if (!SupportsDuration(effect.Kind) && effect.Duration == CardExtraEffectDuration.ThisTurn)
+		// For non-status kinds in power mode, Duration controls how long the listener remains.
+		string? listenerDuration = !SupportsDuration(effect.Kind) ? DurationSuffixLabel(effect.Duration) : null;
+		if (!string.IsNullOrWhiteSpace(listenerDuration))
 		{
-			result = CardEditorLoc.F("cardText.powerTrigger.thisTurnScope", $"This turn, {LowercaseFirst(result)}", ("Payload", result));
+			result = CardEditorLoc.F("cardText.powerTrigger.durationScope", $"{CapitalizeFirst(listenerDuration)}, {LowercaseFirst(result)}", ("Duration", CapitalizeFirst(listenerDuration)), ("Payload", result));
 		}
 
 		// Max fires are uses, not another duration. Keep them as a suffix so they do not
@@ -18473,8 +18472,7 @@ private static string? BuildEffectSourceReferenceLine(
 		return null;
 	}
 
-	ModelId sourceId = ModelId.Deserialize(idStr.Trim());
-	if (sourceId == ModelId.none)
+	if (!TryParseSpecificCardId(idStr, out ModelId sourceId) || sourceId == ModelId.none)
 	{
 		return null;
 	}
@@ -19462,13 +19460,6 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 		try
 		{
 			CardModel modifierCard = CardEditorBorrowedEffectSourceDamageHelper.ResolveRuntimePlayedCard(card) ?? card;
-			Player? owner = modifierCard.Owner;
-			Creature? dealer = owner?.Creature;
-			CombatState? combatState = modifierCard.CombatState.AsCombatState();
-
-			bool isOstyAttack = effect.Kind == CardExtraEffectKind.OstyAction
-				&& effect.OstyAction is CardExtraEffectOstyAction.Attack or CardExtraEffectOstyAction.AttackAll;
-
 			ValueProp props = ValueProp.Move;
 
 			decimal enchanted = baseAmount;
@@ -19487,40 +19478,9 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			}
 
 			decimal preview = enchanted;
-			if (ShouldRunGlobalHooks(modifierCard) && dealer != null && combatState != null && owner?.RunState != null)
+			if (TryGetHookedMoveAmountPreview(card, effect, baseAmount, target, out decimal hookedPreview))
 			{
-				if (effect.Kind == CardExtraEffectKind.DealDamage || isOstyAttack)
-				{
-					Creature? effectiveDealer = isOstyAttack ? owner.Osty : dealer;
-					Creature? damageTarget = effect.Target switch
-					{
-						CardExtraEffectTarget.Self => isOstyAttack ? owner.Osty : dealer,
-						CardExtraEffectTarget.Target => target,
-						_ => null
-					};
-					CardPreviewMode previewMode = (effect.Target == CardExtraEffectTarget.AllEnemies || effect.OstyAction == CardExtraEffectOstyAction.AttackAll)
-						? CardPreviewMode.MultiCreatureTargeting
-						: CardPreviewMode.Normal;
-
-					if (effectiveDealer != null)
-					{
-						preview = Hook.ModifyDamage(owner.RunState, combatState, damageTarget, effectiveDealer, baseAmount, props, modifierCard, ModifyDamageHookType.All, previewMode, out IEnumerable<AbstractModel> _);
-					}
-				}
-				else if (effect.Kind == CardExtraEffectKind.GainBlock)
-				{
-					Creature? blockTarget = effect.Target switch
-					{
-						CardExtraEffectTarget.Self => dealer,
-						CardExtraEffectTarget.Target => target,
-						_ => null
-					};
-
-					if (blockTarget != null)
-					{
-						preview = Hook.ModifyBlock(combatState, blockTarget, baseAmount, props, modifierCard, cardPlay: null, out IEnumerable<AbstractModel> _);
-					}
-				}
+				preview = hookedPreview;
 			}
 
 			int previewInt = (int)preview;
@@ -19531,6 +19491,282 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 		{
 			amountText = baseAmount.ToString(CultureInfo.InvariantCulture);
 		}
+	}
+
+	private static bool TryGetScaledPowerAmountText(CardModel card, CardExtraEffect effect, int baseAmount, Creature? target, int upgradeHighlightComparison, out string amountText)
+	{
+		amountText = baseAmount.ToString(CultureInfo.InvariantCulture);
+
+		try
+		{
+			if (!TryResolveAppliedPowerPreviewModel(effect, out PowerModel? canonicalPower, out bool displayAbsoluteAmount)
+				|| canonicalPower == null)
+			{
+				return false;
+			}
+
+			CardModel modifierCard = CardEditorBorrowedEffectSourceDamageHelper.ResolveRuntimePlayedCard(card) ?? card;
+			Player? owner = modifierCard.Owner;
+			Creature? ownerCreature = owner?.Creature;
+			CombatState? combatState = modifierCard.CombatState.AsCombatState();
+			if (!ShouldRunGlobalHooks(modifierCard)
+				|| ownerCreature == null
+				|| combatState == null
+				|| !combatState.ContainsCreature(ownerCreature))
+			{
+				return false;
+			}
+
+			decimal baseForHook = displayAbsoluteAmount ? -baseAmount : baseAmount;
+			IReadOnlyList<Creature?> previewTargets = ResolvePreviewTargetsForEffect(combatState, ownerCreature, modifierCard, target, effect.Target, ownerCreature);
+			decimal preview = baseForHook;
+			if (!TryGetUniformHookedPreview(previewTargets, previewTarget =>
+				Hook.ModifyPowerAmountGiven(combatState, canonicalPower, ownerCreature, baseForHook, previewTarget, modifierCard, out IEnumerable<AbstractModel> _), out preview))
+			{
+				Creature? fallbackTarget = effect.Target == CardExtraEffectTarget.Self
+					? ownerCreature
+					: effect.Target == CardExtraEffectTarget.Target
+						? target
+						: null;
+				preview = Hook.ModifyPowerAmountGiven(combatState, canonicalPower, ownerCreature, baseForHook, fallbackTarget, modifierCard, out IEnumerable<AbstractModel> _);
+			}
+
+			int previewInt = (int)preview;
+			int displayPreview = displayAbsoluteAmount ? Math.Abs(previewInt) : previewInt;
+			int comparison = upgradeHighlightComparison != 0 ? upgradeHighlightComparison : displayPreview.CompareTo(baseAmount);
+			amountText = StsTextUtilities.HighlightChangeText(displayPreview.ToString(CultureInfo.InvariantCulture), comparison);
+			return true;
+		}
+		catch
+		{
+			amountText = baseAmount.ToString(CultureInfo.InvariantCulture);
+			return false;
+		}
+	}
+
+	private static bool TryGetHookedMoveAmountPreview(CardModel card, CardExtraEffect effect, int baseAmount, Creature? target, out decimal preview)
+	{
+		preview = baseAmount;
+
+		CardModel modifierCard = CardEditorBorrowedEffectSourceDamageHelper.ResolveRuntimePlayedCard(card) ?? card;
+		Player? owner = modifierCard.Owner;
+		Creature? ownerCreature = owner?.Creature;
+		CombatState? combatState = modifierCard.CombatState.AsCombatState();
+		if (!ShouldRunGlobalHooks(modifierCard) || ownerCreature == null || combatState == null)
+		{
+			return false;
+		}
+
+		bool isOstyAttack = effect.Kind == CardExtraEffectKind.OstyAction
+			&& effect.OstyAction is CardExtraEffectOstyAction.Attack or CardExtraEffectOstyAction.AttackAll;
+
+		if (effect.Kind == CardExtraEffectKind.DealDamage || isOstyAttack)
+		{
+			if (owner?.RunState == null)
+			{
+				return false;
+			}
+
+			Creature? effectiveDealer = isOstyAttack ? owner.Osty : ownerCreature;
+			if (effectiveDealer == null)
+			{
+				return false;
+			}
+
+			CardExtraEffectTarget requestedTarget = isOstyAttack && effect.OstyAction == CardExtraEffectOstyAction.AttackAll
+				? CardExtraEffectTarget.AllEnemies
+				: effect.Target;
+			Creature? selfTarget = isOstyAttack ? owner.Osty : ownerCreature;
+			IReadOnlyList<Creature?> previewTargets = ResolvePreviewTargetsForEffect(combatState, ownerCreature, modifierCard, target, requestedTarget, selfTarget);
+			if (TryGetUniformHookedPreview(previewTargets, previewTarget =>
+				Hook.ModifyDamage(owner.RunState, combatState, previewTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, ModifyDamageHookType.All, CardPreviewMode.Normal, out IEnumerable<AbstractModel> _), out preview))
+			{
+				return true;
+			}
+
+			Creature? fallbackTarget = requestedTarget switch
+			{
+				CardExtraEffectTarget.Self => selfTarget,
+				CardExtraEffectTarget.Target => target,
+				_ => null
+			};
+			CardPreviewMode previewMode = requestedTarget == CardExtraEffectTarget.AllEnemies || requestedTarget == CardExtraEffectTarget.RandomEnemy
+				? CardPreviewMode.MultiCreatureTargeting
+				: CardPreviewMode.Normal;
+			preview = Hook.ModifyDamage(owner.RunState, combatState, fallbackTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, ModifyDamageHookType.All, previewMode, out IEnumerable<AbstractModel> _);
+			return true;
+		}
+
+		if (effect.Kind == CardExtraEffectKind.GainBlock)
+		{
+			IReadOnlyList<Creature?> previewTargets = ResolvePreviewTargetsForEffect(combatState, ownerCreature, modifierCard, target, effect.Target, ownerCreature);
+			if (TryGetUniformHookedPreview(previewTargets, previewTarget =>
+				previewTarget != null
+					? Hook.ModifyBlock(combatState, previewTarget, baseAmount, ValueProp.Move, modifierCard, cardPlay: null, out IEnumerable<AbstractModel> _)
+					: baseAmount, out preview))
+			{
+				return true;
+			}
+
+			Creature? fallbackTarget = effect.Target == CardExtraEffectTarget.Self
+				? ownerCreature
+				: effect.Target == CardExtraEffectTarget.Target
+					? target
+					: null;
+			if (fallbackTarget == null)
+			{
+				return false;
+			}
+
+			preview = Hook.ModifyBlock(combatState, fallbackTarget, baseAmount, ValueProp.Move, modifierCard, cardPlay: null, out IEnumerable<AbstractModel> _);
+			return true;
+		}
+
+		return false;
+	}
+
+	private static bool TryGetUniformHookedPreview(IReadOnlyList<Creature?> targets, Func<Creature?, decimal> previewForTarget, out decimal preview)
+	{
+		preview = 0m;
+		if (targets.Count == 0)
+		{
+			return false;
+		}
+
+		bool found = false;
+		int firstInt = 0;
+		foreach (Creature? target in targets)
+		{
+			if (target == null)
+			{
+				continue;
+			}
+
+			decimal candidate = previewForTarget(target);
+			int candidateInt = (int)candidate;
+			if (!found)
+			{
+				found = true;
+				firstInt = candidateInt;
+				preview = candidate;
+				continue;
+			}
+
+			if (candidateInt != firstInt)
+			{
+				return false;
+			}
+		}
+
+		return found;
+	}
+
+	private static IReadOnlyList<Creature?> ResolvePreviewTargetsForEffect(
+		CombatState combatState,
+		Creature ownerCreature,
+		CardModel card,
+		Creature? hoveredTarget,
+		CardExtraEffectTarget requestedTarget,
+		Creature? selfTarget)
+	{
+		CardExtraEffectTarget effectiveTarget = GetEffectivePreviewTarget(card, requestedTarget);
+		switch (effectiveTarget)
+		{
+			case CardExtraEffectTarget.Self:
+				return selfTarget != null && selfTarget.IsAlive ? new Creature?[] { selfTarget } : Array.Empty<Creature?>();
+			case CardExtraEffectTarget.AllEnemies:
+			case CardExtraEffectTarget.RandomEnemy:
+				return combatState.GetOpponentsOf(ownerCreature).Where(c => c != null && c.IsAlive).Cast<Creature?>().ToList();
+			case CardExtraEffectTarget.OtherEnemies:
+			{
+				IEnumerable<Creature> source = hoveredTarget != null
+					? combatState.GetTeammatesOf(hoveredTarget)
+					: combatState.GetOpponentsOf(ownerCreature);
+				return source.Where(c => c != null && c.IsAlive && !ReferenceEquals(c, hoveredTarget)).Cast<Creature?>().ToList();
+			}
+			case CardExtraEffectTarget.AllAllies:
+				return ResolveFriendlyGroupTargets(combatState, ownerCreature, includeSelf: true).Cast<Creature?>().ToList();
+			case CardExtraEffectTarget.AnyPlayer:
+				if (hoveredTarget != null && IsFriendlyTarget(ownerCreature, hoveredTarget, includeSelf: true))
+				{
+					return new Creature?[] { hoveredTarget };
+				}
+				return ownerCreature.IsAlive ? new Creature?[] { ownerCreature } : Array.Empty<Creature?>();
+			case CardExtraEffectTarget.AnyAlly:
+				if (hoveredTarget != null && IsFriendlyTarget(ownerCreature, hoveredTarget, includeSelf: false))
+				{
+					return new Creature?[] { hoveredTarget };
+				}
+				return ResolveFriendlyGroupTargets(combatState, ownerCreature, includeSelf: false).Take(1).Cast<Creature?>().ToList();
+			default:
+				return hoveredTarget != null && hoveredTarget.IsAlive ? new Creature?[] { hoveredTarget } : Array.Empty<Creature?>();
+		}
+	}
+
+	private static CardExtraEffectTarget GetEffectivePreviewTarget(CardModel card, CardExtraEffectTarget requestedTarget)
+	{
+		if (requestedTarget != CardExtraEffectTarget.Target || card == null)
+		{
+			return requestedTarget;
+		}
+
+		return card.TargetType switch
+		{
+			TargetType.Self => CardExtraEffectTarget.Self,
+			TargetType.RandomEnemy => CardExtraEffectTarget.RandomEnemy,
+			TargetType.AllEnemies => CardExtraEffectTarget.AllEnemies,
+			TargetType.AnyAlly => CardExtraEffectTarget.AnyAlly,
+			TargetType.AllAllies => CardExtraEffectTarget.AllAllies,
+			TargetType.AnyPlayer => CardExtraEffectTarget.AnyPlayer,
+			_ => requestedTarget
+		};
+	}
+
+	private static bool TryResolveAppliedPowerPreviewModel(CardExtraEffect effect, out PowerModel? canonicalPower, out bool displayAbsoluteAmount)
+	{
+		displayAbsoluteAmount = false;
+		canonicalPower = effect.Kind switch
+		{
+			CardExtraEffectKind.GainStrength => ModelDb.Power<StrengthPower>(),
+			CardExtraEffectKind.LoseStrength => ModelDb.Power<StrengthPower>(),
+			CardExtraEffectKind.GainDexterity => ModelDb.Power<DexterityPower>(),
+			CardExtraEffectKind.LoseDexterity => ModelDb.Power<DexterityPower>(),
+			CardExtraEffectKind.GainFocus => ModelDb.Power<FocusPower>(),
+			CardExtraEffectKind.LoseFocus => ModelDb.Power<FocusPower>(),
+			CardExtraEffectKind.ApplyWeak => ModelDb.Power<WeakPower>(),
+			CardExtraEffectKind.ApplyFrail => ModelDb.Power<FrailPower>(),
+			CardExtraEffectKind.ApplyVulnerable => ModelDb.Power<VulnerablePower>(),
+			CardExtraEffectKind.ApplyPoison => ModelDb.Power<PoisonPower>(),
+			CardExtraEffectKind.ApplyDoom => ModelDb.Power<DoomPower>(),
+			CardExtraEffectKind.ApplyConstrict => ModelDb.Power<ConstrictPower>(),
+			CardExtraEffectKind.GainArtifact => ModelDb.Power<ArtifactPower>(),
+			CardExtraEffectKind.GainThorns => ModelDb.Power<ThornsPower>(),
+			CardExtraEffectKind.GainRegen => ModelDb.Power<RegenPower>(),
+			CardExtraEffectKind.GainPlating => ModelDb.Power<PlatingPower>(),
+			CardExtraEffectKind.GainIntangible => ModelDb.Power<IntangiblePower>(),
+			CardExtraEffectKind.GainBuffer => ModelDb.Power<BufferPower>(),
+			CardExtraEffectKind.GainVigor => ModelDb.Power<VigorPower>(),
+			CardExtraEffectKind.GainBlur => ModelDb.Power<BlurPower>(),
+			CardExtraEffectKind.GainRitual => ModelDb.Power<RitualPower>(),
+			_ => null
+		};
+
+		if (effect.Kind is CardExtraEffectKind.LoseStrength or CardExtraEffectKind.LoseDexterity or CardExtraEffectKind.LoseFocus)
+		{
+			displayAbsoluteAmount = true;
+		}
+
+		if (canonicalPower != null)
+		{
+			return true;
+		}
+
+		if (effect.Kind == CardExtraEffectKind.ApplyPower)
+		{
+			return TryResolveConfiguredPowerModel(effect.PowerId, out canonicalPower) && canonicalPower != null;
+		}
+
+		return false;
 	}
 
 	private static bool ShouldRunGlobalHooks(CardModel card)
@@ -20097,10 +20333,22 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		};
 	}
 
-	private static string FormatApplyPower(CardExtraEffect effect, string amountText)
+	private static string FormatApplyPower(CardExtraEffect effect, string amountText, string? suffix = null)
 	{
 		string powerName = ResolvePowerTitle(effect?.PowerId) ?? CardEditorLoc.T("cardText.power.unknown", "Unknown Power");
 		string payload = $"{amountText} [gold]{powerName}[/gold]";
+		string suffixPart = BuildSuffixPart(suffix);
+		if (!string.IsNullOrWhiteSpace(suffixPart))
+		{
+			return effect.Target switch
+			{
+				CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.applyPower.duration.allEnemies", $"Apply {payload} to ALL enemies{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
+				CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.applyPower.duration.otherEnemies", $"Apply {payload} to other enemies{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
+				CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.applyPower.duration.randomEnemy", $"Apply {payload} to a random enemy{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
+				CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.applyPower.duration.self", $"Gain {payload}{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
+				_ => CardEditorLoc.F("cardText.applyPower.duration.target", $"Apply {payload}{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart))
+			};
+		}
 
 		return effect.Target switch
 		{
@@ -22836,8 +23084,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				return;
 			}
 
-			ModelId sourceId = ModelId.Deserialize(idStr.Trim());
-			if (sourceId == ModelId.none)
+			if (!TryParseSpecificCardId(idStr, out ModelId sourceId) || sourceId == ModelId.none)
 			{
 				return;
 			}
@@ -23104,7 +23351,9 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				{
 					foreach (Creature target in ResolveTargets(combatState, ownerCreature, cardPlay, effect.Target))
 					{
+						bool targetAlreadyHadPower = TargetAlreadyHasCustomStatus(target, effect.PowerId);
 						await ApplyCustomStatusPower(target, effect.PowerId, amount, ownerCreature, cardPlay.Card, effect);
+						await TrackConfiguredPowerDuration(combatState, target, effect.PowerId, amount, effect.Duration, targetAlreadyHadPower);
 					}
 					break;
 				}
@@ -23129,6 +23378,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					{
 						ApplyDurationTickPolicy(activePower, effect, targetAlreadyHadPower);
 					}
+					await TrackConfiguredPowerDuration(combatState, target, effect.PowerId, amount, effect.Duration, targetAlreadyHadPower);
 				}
 				break;
 			}
@@ -23214,15 +23464,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainStrength:
 			{
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-				{
-					await ApplyPower<StrengthPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-					await ApplyPower<CardEditorTempStrengthTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
-				}
-				else
-				{
-					await ApplyPower<StrengthPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				}
+				await ApplyPowerWithDuration<StrengthPower, CardEditorTempStrengthTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.LoseStrength:
@@ -23233,28 +23475,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					break;
 				}
 				int delta = -amount;
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-				{
-					await ApplyPower<StrengthPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
-					await ApplyPower<CardEditorTempStrengthTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, delta);
-				}
-				else
-				{
-					await ApplyPower<StrengthPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
-				}
+				await ApplyPowerWithDuration<StrengthPower, CardEditorTempStrengthTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
 				break;
 			}
 			case CardExtraEffectKind.GainDexterity:
 			{
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-				{
-					await ApplyPower<DexterityPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-					await ApplyPower<CardEditorTempDexterityTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
-				}
-				else
-				{
-					await ApplyPower<DexterityPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				}
+				await ApplyPowerWithDuration<DexterityPower, CardEditorTempDexterityTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.LoseDexterity:
@@ -23265,28 +23491,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					break;
 				}
 				int delta = -amount;
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-				{
-					await ApplyPower<DexterityPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
-					await ApplyPower<CardEditorTempDexterityTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, delta);
-				}
-				else
-				{
-					await ApplyPower<DexterityPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
-				}
+				await ApplyPowerWithDuration<DexterityPower, CardEditorTempDexterityTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
 				break;
 			}
 			case CardExtraEffectKind.GainFocus:
 			{
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-				{
-					await ApplyPower<FocusPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-					await ApplyPower<CardEditorTempFocusTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
-				}
-				else
-				{
-					await ApplyPower<FocusPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				}
+				await ApplyPowerWithDuration<FocusPower, CardEditorTempFocusTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.LoseFocus:
@@ -23297,22 +23507,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					break;
 				}
 				int delta = -amount;
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-				{
-					await ApplyPower<FocusPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
-					await ApplyPower<CardEditorTempFocusTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, delta);
-				}
-				else
-				{
-					await ApplyPower<FocusPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
-				}
+				await ApplyPowerWithDuration<FocusPower, CardEditorTempFocusTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, delta, effect);
 				break;
 			}
 			case CardExtraEffectKind.ApplyWeak:
 			{
-				await ApplyPower<WeakPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempWeakTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<WeakPower, CardEditorTempWeakTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveWeak:
@@ -23322,9 +23522,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.ApplyFrail:
 			{
-				await ApplyPower<FrailPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempFrailTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<FrailPower, CardEditorTempFrailTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveFrail:
@@ -23360,8 +23558,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 						// ignored
 					}
 				}
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempVulnerableTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await TrackBuiltInPowerDuration<VulnerablePower, CardEditorTempVulnerableTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveVulnerable:
@@ -23371,9 +23568,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.ApplyPoison:
 			{
-				await ApplyPower<PoisonPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempPoisonTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<PoisonPower, CardEditorTempPoisonTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemovePoison:
@@ -23383,9 +23578,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.ApplyDoom:
 			{
-				await ApplyPower<DoomPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempDoomTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<DoomPower, CardEditorTempDoomTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveDoom:
@@ -23395,9 +23588,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainArtifact:
 			{
-				await ApplyPower<ArtifactPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempArtifactTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<ArtifactPower, CardEditorTempArtifactTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveArtifact:
@@ -23407,9 +23598,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainThorns:
 			{
-				await ApplyPower<ThornsPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempThornsTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<ThornsPower, CardEditorTempThornsTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveThorns:
@@ -23419,9 +23608,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainRegen:
 			{
-				await ApplyPower<RegenPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempRegenTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<RegenPower, CardEditorTempRegenTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveRegen:
@@ -23431,9 +23618,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainPlating:
 			{
-				await ApplyPower<PlatingPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempPlatingTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<PlatingPower, CardEditorTempPlatingTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemovePlating:
@@ -23443,9 +23628,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainIntangible:
 			{
-				await ApplyPower<IntangiblePower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempIntangibleTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<IntangiblePower, CardEditorTempIntangibleTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveIntangible:
@@ -23455,9 +23638,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainBuffer:
 			{
-				await ApplyPower<BufferPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempBufferTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<BufferPower, CardEditorTempBufferTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveBuffer:
@@ -23467,9 +23648,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainVigor:
 			{
-				await ApplyPower<VigorPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempVigorTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<VigorPower, CardEditorTempVigorTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveVigor:
@@ -23479,9 +23658,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainBlur:
 			{
-				await ApplyPower<BlurPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempBlurTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<BlurPower, CardEditorTempBlurTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveBlur:
@@ -23491,9 +23668,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GainRitual:
 			{
-				await ApplyPower<RitualPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempRitualTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<RitualPower, CardEditorTempRitualTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveRitual:
@@ -23503,9 +23678,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.ApplyConstrict:
 			{
-				await ApplyPower<ConstrictPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				if (effect.Duration == CardExtraEffectDuration.ThisTurn)
-					await ApplyPower<CardEditorTempConstrictTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount);
+				await ApplyPowerWithDuration<ConstrictPower, CardEditorTempConstrictTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveConstrict:
@@ -31011,6 +31184,63 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 		}
 
 		return GetAllClassCards(owner).Where(c => c != null && !ReferenceEquals(c.Pool, myPool));
+	}
+
+	private static async Task ApplyPowerWithDuration<TPower, TTracker>(CombatState combatState, Creature ownerCreature, CardPlay cardPlay, CardExtraEffectTarget target, int amount, CardExtraEffect effect)
+		where TPower : PowerModel
+		where TTracker : PowerModel
+	{
+		await ApplyPower<TPower>(combatState, ownerCreature, cardPlay, target, amount, effect);
+		await TrackBuiltInPowerDuration<TPower, TTracker>(combatState, ownerCreature, cardPlay, target, amount, effect);
+	}
+
+	private static async Task TrackBuiltInPowerDuration<TPower, TTracker>(CombatState combatState, Creature ownerCreature, CardPlay cardPlay, CardExtraEffectTarget target, int amount, CardExtraEffect? effect)
+		where TPower : PowerModel
+		where TTracker : PowerModel
+	{
+		if (effect == null || amount == 0 || effect.Duration == CardExtraEffectDuration.Permanent)
+		{
+			return;
+		}
+
+		if (effect.Duration == CardExtraEffectDuration.ThisTurn)
+		{
+			await ApplyPower<TTracker>(combatState, ownerCreature, cardPlay, target, amount);
+			return;
+		}
+
+		ModelId powerId = ModelDb.GetId<TPower>();
+		await TrackConfiguredPowerDuration(combatState, ownerCreature, cardPlay, target, powerId.ToString(), amount, effect, targetHadPowerBefore: false);
+	}
+
+	private static async Task TrackConfiguredPowerDuration(CombatState combatState, Creature ownerCreature, CardPlay cardPlay, CardExtraEffectTarget target, string? powerId, int amount, CardExtraEffect? effect, bool targetHadPowerBefore)
+	{
+		if (effect == null
+			|| amount == 0
+			|| effect.Duration == CardExtraEffectDuration.Permanent
+			|| string.IsNullOrWhiteSpace(powerId))
+		{
+			return;
+		}
+
+		foreach (Creature applyTarget in ResolveTargets(combatState, ownerCreature, cardPlay, target))
+		{
+			await TrackConfiguredPowerDuration(combatState, applyTarget, powerId, amount, effect.Duration, targetHadPowerBefore);
+		}
+	}
+
+	private static async Task TrackConfiguredPowerDuration(CombatState combatState, Creature? target, string? powerId, int amount, CardExtraEffectDuration duration, bool targetHadPowerBefore)
+	{
+		if (target == null
+			|| amount == 0
+			|| duration == CardExtraEffectDuration.Permanent
+			|| string.IsNullOrWhiteSpace(powerId))
+		{
+			return;
+		}
+
+		CardEditorPowerDurationTrackerPower? tracker = await PowerCmd.Apply<CardEditorPowerDurationTrackerPower>(target, 1, target, null, silent: true);
+		tracker?.Track(powerId, amount, targetHadPowerBefore, duration, combatState);
 	}
 
 	private static async Task ApplyPower<TPower>(CombatState combatState, Creature ownerCreature, CardPlay cardPlay, CardExtraEffectTarget target, int amount, CardExtraEffect? effect = null) where TPower : PowerModel

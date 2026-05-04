@@ -420,7 +420,7 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 
 		if (HasCustomBase && TinkerTimeRider == TinkerTime.RiderEffect.Violence)
 		{
-			lines.Add($"Repeat this base effect {DynamicVars["ViolenceHits"].IntValue} times.");
+			lines.Add($"Repeat this base effect {FormatDynamicVar("ViolenceHits")} times.");
 		}
 
 		string riderDescription = HasCustomRider
@@ -462,8 +462,8 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 	{
 		return TinkerTimeType switch
 		{
-			CardType.Attack => $"Deal {DynamicVars.Damage.IntValue} damage.",
-			CardType.Skill => $"Gain {DynamicVars.Block.IntValue} Block.",
+			CardType.Attack => $"Deal {DynamicVars.Damage.ToHighlightedString(inverse: false)} damage.",
+			CardType.Skill => $"Gain {DynamicVars.Block.ToHighlightedString(inverse: false)} Block.",
 			CardType.Power => string.Empty,
 			_ => string.Empty
 		};
@@ -474,18 +474,23 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 		return TinkerTimeRider switch
 		{
 			TinkerTime.RiderEffect.None => string.Empty,
-			TinkerTime.RiderEffect.Sapping => $"Apply {DynamicVars["SappingWeak"].IntValue} Weak and {DynamicVars["SappingVulnerable"].IntValue} Vulnerable.",
-			TinkerTime.RiderEffect.Violence when !HasCustomBase => $"Deal damage {DynamicVars["ViolenceHits"].IntValue} times.",
+			TinkerTime.RiderEffect.Sapping => $"Apply {FormatDynamicVar("SappingWeak")} Weak and {FormatDynamicVar("SappingVulnerable")} Vulnerable.",
+			TinkerTime.RiderEffect.Violence when !HasCustomBase => $"Deal damage {FormatDynamicVar("ViolenceHits")} times.",
 			TinkerTime.RiderEffect.Violence => string.Empty,
-			TinkerTime.RiderEffect.Choking => $"Apply {DynamicVars["ChokingDamage"].IntValue} Strangle.",
-			TinkerTime.RiderEffect.Energized => $"Gain {DynamicVars["EnergizedEnergy"].IntValue} Energy.",
-			TinkerTime.RiderEffect.Wisdom => $"Draw {DynamicVars["WisdomCards"].IntValue} cards.",
+			TinkerTime.RiderEffect.Choking => $"Apply {FormatDynamicVar("ChokingDamage")} Strangle.",
+			TinkerTime.RiderEffect.Energized => $"Gain {FormatDynamicVar("EnergizedEnergy")} Energy.",
+			TinkerTime.RiderEffect.Wisdom => $"Draw {FormatDynamicVar("WisdomCards")} cards.",
 			TinkerTime.RiderEffect.Chaos => "Add a random card to your hand. It costs 0 this turn.",
-			TinkerTime.RiderEffect.Expertise => $"Gain {DynamicVars["ExpertiseStrength"].IntValue} Strength and {DynamicVars["ExpertiseDexterity"].IntValue} Dexterity.",
-			TinkerTime.RiderEffect.Curious => $"Apply {DynamicVars["CuriousReduction"].IntValue} Curious.",
+			TinkerTime.RiderEffect.Expertise => $"Gain {FormatDynamicVar("ExpertiseStrength")} Strength and {FormatDynamicVar("ExpertiseDexterity")} Dexterity.",
+			TinkerTime.RiderEffect.Curious => $"Apply {FormatDynamicVar("CuriousReduction")} Curious.",
 			TinkerTime.RiderEffect.Improvement => "Apply 1 Improvement.",
 			_ => string.Empty
 		};
+	}
+
+	private string FormatDynamicVar(string name)
+	{
+		return DynamicVars[name].ToHighlightedString(inverse: false);
 	}
 
 	private static bool VanillaRiderNeedsEnemyTarget(TinkerTime.RiderEffect rider)

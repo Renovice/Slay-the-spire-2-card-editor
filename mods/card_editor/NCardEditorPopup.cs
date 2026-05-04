@@ -6591,6 +6591,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				CustomMinimumSize = new Vector2(0, 100),
 				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 				PlaceholderText = CardEditorLoc.T("field.modifiedBaseTextPlaceholder", "Enable this to start from the current base card text."),
+				TooltipText = GetLiveNumberTokenTooltip(),
 				WrapMode = TextEdit.LineWrappingMode.Boundary,
 				Visible = hasModifiedBaseText
 			};
@@ -6638,6 +6639,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		QueuePreviewUpdate();
 	}
 
+	private static string GetLiveNumberTokenTooltip()
+	{
+		return CardEditorLoc.T(
+			"tooltip.liveNumberTokens",
+			"Live numbers: use {{n1}}, {{n2}} for generated numbers, or {{l2n1}} for line 2 number 1.");
+	}
+
 	private string BuildVanillaModifiedBaseTextSeedFromUi()
 	{
 		if (_isCreatedCard || _isUpgradeEditor)
@@ -6665,7 +6673,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 			CardModel preview = ModelDb.GetById<CardModel>(_cardId).ToMutable();
 			CardEditorOverrides.ApplyOverrideToCard(preview, draft);
-			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
+			string seed = CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
+			return CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(seed);
 		}
 		catch
 		{
@@ -6967,6 +6976,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = new Vector2(0, 100),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 			PlaceholderText = CardEditorLoc.T("field.modifiedBaseTextPlaceholder", "Enable this to start from the current base card text."),
+			TooltipText = GetLiveNumberTokenTooltip(),
 			WrapMode = TextEdit.LineWrappingMode.Boundary,
 			Visible = hasCustomText
 		};
@@ -7312,6 +7322,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = new Vector2(0, 100),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 			PlaceholderText = CardEditorLoc.T("field.modifiedBaseTextPlaceholder", "Enable this to start from the current base card text."),
+			TooltipText = GetLiveNumberTokenTooltip(),
 			WrapMode = TextEdit.LineWrappingMode.Boundary,
 			Visible = hasCustomText
 		};
@@ -7357,7 +7368,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				CardEditorCreatedCardEffectSourceSupport.EnsureEffectSourceDynamicVars(preview, isUpgradePreview);
 			}
 
-			return CreatedCardTextBuilder.Build(preview, preview.CurrentTarget, isUpgradePreview);
+			string seed = CreatedCardTextBuilder.Build(preview, preview.CurrentTarget, isUpgradePreview);
+			return CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(seed);
 		}
 		catch
 		{
@@ -7397,6 +7409,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = new Vector2(0, 100),
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 			PlaceholderText = CardEditorLoc.T("field.modifiedBaseTextPlaceholder", "Enable this to start from the current base card text."),
+			TooltipText = GetLiveNumberTokenTooltip(),
 			WrapMode = TextEdit.LineWrappingMode.Boundary,
 			Visible = hasModifiedBaseText
 		};
@@ -7446,7 +7459,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				TryUpgradeForPreview(preview);
 			}
 
-			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
+			string seed = CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
+			return CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(seed);
 		}
 		catch
 		{
@@ -9309,20 +9323,17 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		OptionButton durationSelect = new OptionButton
 		{
-			CustomMinimumSize = new Vector2(160, _fieldMinSize.Y),
+			CustomMinimumSize = new Vector2(230, _fieldMinSize.Y),
 			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
 		};
-		durationSelect.TooltipText = CardEditorLoc.T("tooltip.duration", "Duration (Permanent / This Turn)");
+		durationSelect.TooltipText = CardEditorLoc.T("tooltip.durationExpiry", "Duration / expiry timing for temporary powers and statuses.");
 		StyleInput(durationSelect);
 		ConstrainOptionButtonPopup(durationSelect);
-		durationSelect.AddItem(CardEditorExtraEffects.DurationLabel(CardExtraEffectDuration.Permanent));
-		durationSelect.AddItem(CardEditorExtraEffects.DurationLabel(CardExtraEffectDuration.ThisTurn));
-		int durationIndex = effect != null ? (int)effect.Duration : 0;
-		if (durationIndex < 0 || durationIndex > 1)
+		foreach (CardExtraEffectDuration duration in Enum.GetValues<CardExtraEffectDuration>())
 		{
-			durationIndex = 0;
+			durationSelect.AddItem(CardEditorExtraEffects.DurationLabel(duration), (int)duration);
 		}
-		durationSelect.Select(durationIndex);
+		SelectOptionButtonById(durationSelect, (int)(effect?.Duration ?? CardExtraEffectDuration.Permanent));
 
 		OptionButton timingSelect = new OptionButton
 		{
@@ -10366,12 +10377,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		else if (desiredDuration.HasValue)
 		{
-			int index = (int)desiredDuration.Value;
-			if (index < 0 || index > 1)
-			{
-				index = 0;
-			}
-			row.DurationSelect.Select(index);
+			SelectOptionButtonById(row.DurationSelect, (int)desiredDuration.Value);
 		}
 
 		row.DurationSelect.Disabled = !supported;
@@ -10763,17 +10769,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = new Vector2(_coreTriggerColumnWidths[2], _fieldMinSize.Y),
 			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
 		};
-		durationSelect.TooltipText = CardEditorLoc.T("tooltip.duration", "Duration (Permanent / This Turn)");
+		durationSelect.TooltipText = CardEditorLoc.T("tooltip.durationExpiry", "Duration / expiry timing for temporary powers and statuses.");
 		StyleInput(durationSelect);
 		ConstrainOptionButtonPopup(durationSelect);
-		durationSelect.AddItem(CardEditorExtraEffects.DurationLabel(CardExtraEffectDuration.Permanent));
-		durationSelect.AddItem(CardEditorExtraEffects.DurationLabel(CardExtraEffectDuration.ThisTurn));
-		int durationIndex = effect != null ? (int)effect.Duration : 0;
-		if (durationIndex < 0 || durationIndex > 1)
+		foreach (CardExtraEffectDuration duration in Enum.GetValues<CardExtraEffectDuration>())
 		{
-			durationIndex = 0;
+			durationSelect.AddItem(CardEditorExtraEffects.DurationLabel(duration), (int)duration);
 		}
-		durationSelect.Select(durationIndex);
+		SelectOptionButtonById(durationSelect, (int)(effect?.Duration ?? CardExtraEffectDuration.Permanent));
 
 		OptionButton timingSelect = new OptionButton
 		{
@@ -22279,11 +22282,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	private static CardExtraEffectDuration GetSelectedDuration(ExtraEffectRow row)
 	{
 		int selected = row.DurationSelect.Selected;
-		if (selected < 0 || selected > 1)
+		if (selected < 0 || row.DurationSelect == null || !GodotObject.IsInstanceValid(row.DurationSelect) || selected >= row.DurationSelect.ItemCount)
 		{
 			return CardExtraEffectDuration.Permanent;
 		}
-		return (CardExtraEffectDuration)selected;
+		int id = row.DurationSelect.GetItemId(selected);
+		return Enum.IsDefined(typeof(CardExtraEffectDuration), id) ? (CardExtraEffectDuration)id : CardExtraEffectDuration.Permanent;
 	}
 
 	private static CardExtraEffectTrigger GetSelectedTrigger(ExtraEffectRow row)
@@ -23321,11 +23325,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	private static CardExtraEffectDuration GetSelectedDuration(CardSmithRow row)
 	{
 		int selected = row.DurationSelect.Selected;
-		if (selected < 0 || selected > 1)
+		if (selected < 0 || row.DurationSelect == null || !GodotObject.IsInstanceValid(row.DurationSelect) || selected >= row.DurationSelect.ItemCount)
 		{
 			return CardExtraEffectDuration.Permanent;
 		}
-		return (CardExtraEffectDuration)selected;
+		int id = row.DurationSelect.GetItemId(selected);
+		return Enum.IsDefined(typeof(CardExtraEffectDuration), id) ? (CardExtraEffectDuration)id : CardExtraEffectDuration.Permanent;
 	}
 
 	private static CardExtraEffectTrigger GetSelectedTrigger(CardSmithRow row)
@@ -24682,12 +24687,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		else if (desiredDuration.HasValue)
 		{
-			int index = (int)desiredDuration.Value;
-			if (index < 0 || index > 1)
-			{
-				index = 0;
-			}
-			row.DurationSelect.Select(index);
+			SelectOptionButtonById(row.DurationSelect, (int)desiredDuration.Value);
 		}
 
 		row.DurationSelect.Disabled = !supported;

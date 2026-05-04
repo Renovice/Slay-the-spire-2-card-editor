@@ -358,6 +358,7 @@ tooltip.drawTargetPool
 tooltip.drawTargetType
 tooltip.drawnFromPile
 tooltip.duration
+tooltip.liveNumberTokens
 tooltip.effect.moveDown
 tooltip.effect.moveUp
 tooltip.effect.remove

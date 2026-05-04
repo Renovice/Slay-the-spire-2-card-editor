@@ -454,6 +454,8 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			};
 			using IDisposable playScope = CardEditorCardPlayContext.PushScoped(previewPlay);
 			using IDisposable sourceScope = CardEditorEffectSourceContext.PushScoped(effectSourceCard);
+			BindVanillaEffectSourceCardToRuntimePlay(effectSourceCard, previewPlay);
+			RefreshEffectSourceCardPreview(effectSourceCard, target, isUpgradePreview);
 
 			string keywordFilter = customKeywordFilter?.Trim() ?? string.Empty;
 			if (!string.IsNullOrWhiteSpace(keywordFilter))
@@ -476,6 +478,30 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		{
 			Log.Warn($"[CardEditor] Failed building effect source description for {createdCard.Id} (source {effectSourceCard.Id}): {ex}");
 			return null;
+		}
+	}
+
+	private static void RefreshEffectSourceCardPreview(CardModel effectSourceCard, Creature? target, bool isUpgradePreview)
+	{
+		if (effectSourceCard == null)
+		{
+			return;
+		}
+
+		try
+		{
+			CardPreviewMode previewMode = isUpgradePreview ? CardPreviewMode.Upgrade : CardPreviewMode.Normal;
+			effectSourceCard.DynamicVars.ClearPreview();
+			effectSourceCard.UpdateDynamicVarPreview(previewMode, target, effectSourceCard.DynamicVars);
+			if (effectSourceCard.Enchantment != null)
+			{
+				effectSourceCard.Enchantment.DynamicVars.ClearPreview();
+				effectSourceCard.UpdateDynamicVarPreview(previewMode, target, effectSourceCard.Enchantment.DynamicVars);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed refreshing borrowed effect source preview for {effectSourceCard.Id}: {ex}");
 		}
 	}
 

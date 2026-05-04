@@ -1170,11 +1170,8 @@ public override async Task AfterTurnEnd(PlayerChoiceContext choiceContext, Comba
 			await RunStartOrEndTimed(choiceContext, CardExtraEffectTrigger.EndOfTurnInHand);
 			await RunStartOrEndTimed(choiceContext, CardExtraEffectTrigger.EndOfTurn);
 
-			// Expire "this turn" power entries for non-stat-buff kinds.
-			Entries.RemoveAll(e => e != null
-				&& e.Effect != null
-				&& !CardEditorExtraEffects.SupportsDuration(e.Effect.Kind)
-				&& e.Effect.Duration == CardExtraEffectDuration.ThisTurn);
+			// Expire temporary power-mode entries for non-status kinds.
+			ExpireNonStatusDurationEntries(CardExtraEffectTurnBoundary.EndAfterDiscard, CardExtraEffectTurnBoundarySide.YourTurn);
 
 			// Increment turn counter and expire entries that exceeded their turn duration.
 			foreach (PowerEffectEntry entry in Entries.ToList())
@@ -1197,6 +1194,7 @@ public override async Task AfterTurnEnd(PlayerChoiceContext choiceContext, Comba
 		{
 			await RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.EndAfterDiscard, CardExtraEffectTurnBoundarySide.EnemyTurn);
 			await RunStartOrEndTimed(choiceContext, CardExtraEffectTrigger.EndOfEnemyTurn);
+			ExpireNonStatusDurationEntries(CardExtraEffectTurnBoundary.EndAfterDiscard, CardExtraEffectTurnBoundarySide.EnemyTurn);
 		}
 	}
 	finally
@@ -1266,11 +1264,47 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 			int runCount = await ExecuteOrSchedulePowerEffect(combatState, choiceContext, syntheticPlay, entry);
 			TrackEntryFireCount(entry, runCount);
 		}
+		if (boundary != CardExtraEffectTurnBoundary.EndAfterDiscard)
+		{
+			ExpireNonStatusDurationEntries(boundary, side);
+		}
 	}
 	finally
 	{
 		await SyncVisibleMirrorPowers();
 	}
+}
+
+private void ExpireNonStatusDurationEntries(CardExtraEffectTurnBoundary boundary, CardExtraEffectTurnBoundarySide side)
+{
+	Creature? owner = Owner;
+	if (owner == null)
+	{
+		return;
+	}
+
+	CardExtraEffectTurnBoundarySide ownerSide = owner.Side == CombatSide.Enemy
+		? CardExtraEffectTurnBoundarySide.EnemyTurn
+		: CardExtraEffectTurnBoundarySide.YourTurn;
+
+	Entries.RemoveAll(e => e != null
+		&& e.Effect != null
+		&& !CardEditorExtraEffects.SupportsDuration(e.Effect.Kind)
+		&& side == ownerSide
+		&& DoesDurationExpireAt(e.Effect.Duration, boundary));
+}
+
+private static bool DoesDurationExpireAt(CardExtraEffectDuration duration, CardExtraEffectTurnBoundary boundary)
+{
+	return duration switch
+	{
+		CardExtraEffectDuration.ThisTurn => boundary == CardExtraEffectTurnBoundary.EndAfterDiscard,
+		CardExtraEffectDuration.NextTurnStartBeforeDraw => boundary == CardExtraEffectTurnBoundary.Start,
+		CardExtraEffectDuration.NextTurnStartAfterDraw => boundary == CardExtraEffectTurnBoundary.StartAfterDraw,
+		CardExtraEffectDuration.NextTurnEndBeforeDiscard => boundary == CardExtraEffectTurnBoundary.End,
+		CardExtraEffectDuration.NextTurnEndAfterDiscard => boundary == CardExtraEffectTurnBoundary.EndAfterDiscard,
+		_ => false
+	};
 }
 
 private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExtraEffectTrigger trigger)

@@ -28,7 +28,17 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 	public static string ApplyLiveNumbersFromReference(string template, string? referenceDescription)
 	{
-		if (string.IsNullOrWhiteSpace(template) || string.IsNullOrWhiteSpace(referenceDescription))
+		if (string.IsNullOrWhiteSpace(template))
+		{
+			return template;
+		}
+
+		if (TryApplySemanticLiveNumberTokens(template, referenceDescription, out string semanticText))
+		{
+			return semanticText;
+		}
+
+		if (string.IsNullOrWhiteSpace(referenceDescription))
 		{
 			return template;
 		}
@@ -41,10 +51,19 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 		// Multi-line custom text is authored line-by-line. If no line can be matched
 		// safely, keep the user's text literal instead of applying unrelated numbers
-		// from earlier/later generated lines.
+		// from earlier/later generated lines. When the numeric slot count is exactly
+		// the same, keep the 6.8 behavior: custom text number N mirrors generated
+		// text number N, including Strength/Vulnerable target previews.
 		if (SplitDescriptionLines(template).Length > 1 || SplitDescriptionLines(referenceDescription).Length > 1)
 		{
-			return template;
+			List<string> templateTokens = ExtractVisibleNumberTokens(template, includeHighlightedNumbers: false);
+			List<RenderedNumberToken> fallbackReferenceTokens = ExtractRenderedNumberTokens(referenceDescription);
+			if (templateTokens.Count == 0 || templateTokens.Count != fallbackReferenceTokens.Count)
+			{
+				return template;
+			}
+
+			return ApplyRenderedNumberTokens(template, fallbackReferenceTokens);
 		}
 
 		List<RenderedNumberToken> referenceTokens = ExtractRenderedNumberTokens(referenceDescription);
@@ -54,6 +73,175 @@ internal static class CardEditorDescriptionNumberHighlighter
 		}
 
 		return ApplyRenderedNumberTokens(template, referenceTokens);
+	}
+
+	public static string BuildLiveNumberTokenTemplate(string referenceDescription)
+	{
+		if (string.IsNullOrWhiteSpace(referenceDescription))
+		{
+			return referenceDescription;
+		}
+
+		StringBuilder builder = new StringBuilder(referenceDescription.Length + 16);
+		int tokenIndex = 0;
+		int imageDepth = 0;
+
+		for (int i = 0; i < referenceDescription.Length;)
+		{
+			if (TryReadTag(referenceDescription, i, out string tag, out int tagEndExclusive))
+			{
+				if (!IsLiveNumberHighlightTag(tag))
+				{
+					builder.Append(tag);
+				}
+				UpdateTemplateTokenTagState(tag, ref imageDepth);
+				i = tagEndExclusive;
+				continue;
+			}
+
+			if (imageDepth == 0 && TryReadNumericToken(referenceDescription, i, out int tokenEndExclusive))
+			{
+				tokenIndex++;
+				builder.Append("{{n");
+				builder.Append(tokenIndex.ToString(CultureInfo.InvariantCulture));
+				builder.Append("}}");
+				i = tokenEndExclusive;
+				continue;
+			}
+
+			builder.Append(referenceDescription[i]);
+			i++;
+		}
+
+		return tokenIndex > 0 ? builder.ToString() : referenceDescription;
+	}
+
+	private static bool TryApplySemanticLiveNumberTokens(string template, string? referenceDescription, out string rendered)
+	{
+		rendered = template;
+		if (!template.Contains("{{", StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		List<RenderedNumberToken> globalTokens = string.IsNullOrWhiteSpace(referenceDescription)
+			? new List<RenderedNumberToken>()
+			: ExtractRenderedNumberTokens(referenceDescription);
+		List<List<RenderedNumberToken>> lineTokens = new List<List<RenderedNumberToken>>();
+		if (!string.IsNullOrWhiteSpace(referenceDescription))
+		{
+			foreach (string line in SplitDescriptionLines(referenceDescription))
+			{
+				lineTokens.Add(ExtractRenderedNumberTokens(line));
+			}
+		}
+
+		StringBuilder builder = new StringBuilder(template.Length + 16);
+		bool replacedAny = false;
+		for (int i = 0; i < template.Length;)
+		{
+			if (i + 3 < template.Length && template[i] == '{' && template[i + 1] == '{')
+			{
+				int tokenEnd = template.IndexOf("}}", i + 2, StringComparison.Ordinal);
+				if (tokenEnd >= 0)
+				{
+					string token = template.Substring(i + 2, tokenEnd - i - 2);
+					if (TryResolveSemanticLiveNumberToken(token, globalTokens, lineTokens, out string replacement))
+					{
+						builder.Append(replacement);
+						replacedAny = true;
+						i = tokenEnd + 2;
+						continue;
+					}
+				}
+			}
+
+			builder.Append(template[i]);
+			i++;
+		}
+
+		if (!replacedAny)
+		{
+			return false;
+		}
+
+		rendered = builder.ToString();
+		return true;
+	}
+
+	private static bool TryResolveSemanticLiveNumberToken(
+		string rawToken,
+		IReadOnlyList<RenderedNumberToken> globalTokens,
+		IReadOnlyList<List<RenderedNumberToken>> lineTokens,
+		out string replacement)
+	{
+		replacement = string.Empty;
+		string token = rawToken.Trim();
+		if (token.Length < 2)
+		{
+			return false;
+		}
+
+		if ((token[0] == 'n' || token[0] == 'N')
+			&& TryParsePositiveInt(token, 1, token.Length - 1, out int globalNumberIndex))
+		{
+			replacement = GetRenderedTokenOrFallback(globalTokens, globalNumberIndex - 1);
+			return true;
+		}
+
+		if (token[0] == 'l' || token[0] == 'L')
+		{
+			int numberMarker = token.IndexOf('n', 1);
+			if (numberMarker < 0)
+			{
+				numberMarker = token.IndexOf('N', 1);
+			}
+
+			if (numberMarker > 1
+				&& numberMarker + 1 < token.Length
+				&& TryParsePositiveInt(token, 1, numberMarker - 1, out int lineIndex)
+				&& TryParsePositiveInt(token, numberMarker + 1, token.Length - numberMarker - 1, out int lineNumberIndex))
+			{
+				IReadOnlyList<RenderedNumberToken> tokens = Array.Empty<RenderedNumberToken>();
+				int zeroBasedLineIndex = lineIndex - 1;
+				if (zeroBasedLineIndex >= 0 && zeroBasedLineIndex < lineTokens.Count)
+				{
+					tokens = lineTokens[zeroBasedLineIndex];
+				}
+				replacement = GetRenderedTokenOrFallback(tokens, lineNumberIndex - 1);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool TryParsePositiveInt(string text, int start, int length, out int value)
+	{
+		value = 0;
+		if (start < 0 || length <= 0 || start + length > text.Length)
+		{
+			return false;
+		}
+
+		for (int i = start; i < start + length; i++)
+		{
+			if (!char.IsDigit(text[i]))
+			{
+				return false;
+			}
+
+			value = (value * 10) + (text[i] - '0');
+		}
+
+		return value > 0;
+	}
+
+	private static string GetRenderedTokenOrFallback(IReadOnlyList<RenderedNumberToken> tokens, int zeroBasedIndex)
+	{
+		return zeroBasedIndex >= 0 && zeroBasedIndex < tokens.Count
+			? tokens[zeroBasedIndex].RenderedText
+			: "0";
 	}
 
 	private static string? TryApplyLiveNumbersByMatchingLines(string template, string referenceDescription)
@@ -131,11 +319,9 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 			if (highlightDepth == 0 && imageDepth == 0 && TryReadNumericToken(template, i, out int tokenEndExclusive))
 			{
-				string templateToken = template.Substring(i, tokenEndExclusive - i);
 				builder.Append(tokenIndex < referenceTokens.Count
-					&& string.Equals(templateToken, referenceTokens[tokenIndex].PlainText, StringComparison.Ordinal)
-						? referenceTokens[tokenIndex].RenderedText
-						: templateToken);
+					? referenceTokens[tokenIndex].RenderedText
+					: template.AsSpan(i, tokenEndExclusive - i));
 				tokenIndex++;
 				i = tokenEndExclusive;
 				continue;
@@ -619,6 +805,26 @@ internal static class CardEditorDescriptionNumberHighlighter
 		}
 
 		return 1;
+	}
+
+	private static bool IsLiveNumberHighlightTag(string tag)
+	{
+		return tag.Equals("[green]", StringComparison.OrdinalIgnoreCase)
+			|| tag.Equals("[red]", StringComparison.OrdinalIgnoreCase)
+			|| tag.Equals("[/green]", StringComparison.OrdinalIgnoreCase)
+			|| tag.Equals("[/red]", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static void UpdateTemplateTokenTagState(string tag, ref int imageDepth)
+	{
+		if (tag.StartsWith("[img", StringComparison.OrdinalIgnoreCase))
+		{
+			imageDepth++;
+		}
+		else if (tag.Equals("[/img]", StringComparison.OrdinalIgnoreCase))
+		{
+			imageDepth = imageDepth > 0 ? imageDepth - 1 : 0;
+		}
 	}
 
 	private static void UpdateInlineTagState(string tag, ref int highlightDepth, ref int imageDepth)

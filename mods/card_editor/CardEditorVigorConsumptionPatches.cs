@@ -1,21 +1,25 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Commands.Builders;
+using MegaCrit.Sts2.Core.Entities.Powers;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Powers;
+using Creature = MegaCrit.Sts2.Core.Entities.Creatures.Creature;
 using PowerCmd = SlayTheSpire2Mod.CardEditor.CardEditorPowerCmdCompat;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
 internal sealed class CardEditorVigorConsumptionSnapshot
 {
-	private static readonly ModelId VigorPowerId = ModelId.Deserialize("VigorPower");
-	private readonly MegaCrit.Sts2.Core.Entities.Creatures.Creature _owner;
+	private readonly Creature _owner;
 	private readonly CardModel _card;
 	private readonly int _startingAmount;
 
-	private CardEditorVigorConsumptionSnapshot(MegaCrit.Sts2.Core.Entities.Creatures.Creature owner, CardModel card, int startingAmount)
+	private CardEditorVigorConsumptionSnapshot(Creature owner, CardModel card, int startingAmount)
 	{
 		_owner = owner;
 		_card = card;
@@ -36,8 +40,8 @@ internal sealed class CardEditorVigorConsumptionSnapshot
 			return null;
 		}
 
-		MegaCrit.Sts2.Core.Entities.Creatures.Creature? owner = playedCard.Owner?.Creature;
-		int amount = owner?.Powers?.FirstOrDefault(power => power != null && Equals(power.Id, VigorPowerId))?.Amount ?? 0;
+		Creature? owner = playedCard.Owner?.Creature;
+		int amount = TryGetVigorPower(owner)?.Amount ?? 0;
 		if (owner == null || amount <= 0)
 		{
 			return null;
@@ -48,7 +52,7 @@ internal sealed class CardEditorVigorConsumptionSnapshot
 
 	public async Task RestoreIfConsumed()
 	{
-		PowerModel? current = _owner.Powers?.FirstOrDefault(power => power != null && Equals(power.Id, VigorPowerId));
+		PowerModel? current = TryGetVigorPower(_owner);
 		int currentAmount = current?.Amount ?? 0;
 		if (currentAmount >= _startingAmount)
 		{
@@ -63,7 +67,7 @@ internal sealed class CardEditorVigorConsumptionSnapshot
 
 		try
 		{
-			PowerModel? canonical = ModelDb.GetByIdOrNull<PowerModel>(VigorPowerId);
+			PowerModel? canonical = TryGetCanonicalVigorPower();
 			if (canonical == null)
 			{
 				return;
@@ -76,14 +80,53 @@ internal sealed class CardEditorVigorConsumptionSnapshot
 			// ignored
 		}
 	}
+
+	private static PowerModel? TryGetVigorPower(Creature? owner)
+	{
+		if (owner == null)
+		{
+			return null;
+		}
+
+		try
+		{
+			return owner.GetPower<VigorPower>();
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static PowerModel? TryGetCanonicalVigorPower()
+	{
+		try
+		{
+			return ModelDb.Power<VigorPower>();
+		}
+		catch
+		{
+			return null;
+		}
+	}
 }
 
 [HarmonyPatch(typeof(AttackCommand), nameof(AttackCommand.Execute))]
 internal static class AttackCommand_Execute_PreserveCardVigorPatch
 {
+	private static bool _warnedPatchFailure;
+
 	public static void Prefix(AttackCommand __instance, out CardEditorVigorConsumptionSnapshot? __state)
 	{
-		__state = CardEditorVigorConsumptionSnapshot.TryCreate(__instance);
+		try
+		{
+			__state = CardEditorVigorConsumptionSnapshot.TryCreate(__instance);
+		}
+		catch (Exception ex)
+		{
+			WarnPatchFailure("snapshot", ex);
+			__state = null;
+		}
 	}
 
 	public static void Postfix(ref Task __result, CardEditorVigorConsumptionSnapshot? __state)
@@ -99,6 +142,24 @@ internal static class AttackCommand_Execute_PreserveCardVigorPatch
 	private static async Task RestoreAfter(Task original, CardEditorVigorConsumptionSnapshot snapshot)
 	{
 		await original;
-		await snapshot.RestoreIfConsumed();
+		try
+		{
+			await snapshot.RestoreIfConsumed();
+		}
+		catch (Exception ex)
+		{
+			WarnPatchFailure("restore", ex);
+		}
+	}
+
+	private static void WarnPatchFailure(string phase, Exception ex)
+	{
+		if (_warnedPatchFailure)
+		{
+			return;
+		}
+
+		_warnedPatchFailure = true;
+		Log.Warn($"[CardEditor] Preserve-card-vigor attack patch failed during {phase}; attack will continue without vigor restoration. {ex}");
 	}
 }
