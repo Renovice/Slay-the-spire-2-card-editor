@@ -68,6 +68,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private const double _holdAccelerationSeconds = 2.0;
 	private const string _createdCardIdPrefix = "CARD_EDITOR_CREATED_CARD";
 	private const string _prebuiltPopupCacheHostName = "CardEditorPrebuiltPopupCacheHost";
+	private const string _localizedSharedCreatedPopupCachePrefix = "__localized_shared_created_editor";
+	private const string _localizedSharedVanillaPopupCachePrefix = "__localized_shared_vanilla_editor";
 	private static readonly bool _verbosePerfLogging = false;
 
 	private static Font? _headerFont;
@@ -91,6 +93,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private static List<CardPickerEntry>? _cachedCardPickerEntries;
 	private static bool _uiWarmupRunning;
 	private static bool _uiWarmupComplete;
+	private static bool _localizedSharedWarmupQueued;
 	private static Control? _prebuiltPopupCacheHost;
 	private static readonly Dictionary<string, NCardEditorPopup> _prebuiltPopupCache = new(StringComparer.Ordinal);
 	private static readonly HashSet<string> _queuedPrebuiltPopupKeys = new(StringComparer.Ordinal);
@@ -196,6 +199,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private OptionButton? _tempFocusDurationSelect;
 	private LineEdit? _tempFocusTurnsField;
 	private HBoxContainer? _tempFocusTurnsRow;
+	private VBoxContainer? _vanillaEffectsContainer;
 	private OptionButton _enchantmentSelect = null!;
 	private LineEdit _enchantmentAmountField = null!;
 	private OptionButton _afflictionSelect = null!;
@@ -310,16 +314,20 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private HashSet<CardTag>? _baselineTags;
 	private VBoxContainer? _customTagsList;
 	private LineEdit? _customTagField;
+	private VBoxContainer? _cardSpecificNumbersContainer;
+	private VBoxContainer? _dynamicRowsContainer;
 	private readonly Dictionary<string, LineEdit> _dynamicFields = new();
 	private readonly Dictionary<ModelId, LineEdit> _hardcodedPowerAmountFields = new();
 	private readonly Dictionary<ModelId, int> _hardcodedPowerAmountDefaults = new();
 	private readonly Dictionary<LineEdit, SpinButtons> _spinButtons = new();
 	private readonly List<ExtraEffectRow> _extraEffectRows = new();
+	private readonly Dictionary<string, LocalizedSharedCreatedRowsCacheEntry> _localizedSharedCreatedRowsCache = new(StringComparer.Ordinal);
 	private readonly List<CardSmithRow> _cardSmithRows = new();
 	private readonly Queue<PendingExtraEffectRow> _pendingExistingExtraEffectRows = new();
 	private readonly List<Button> _extraEffectHydrationButtons = new();
 	private int _pendingExistingExtraEffectRowTotal;
 	private int _pendingExistingExtraEffectRowBuilt;
+	private string _localizedSharedCreatedRowsCacheRevisionKey = string.Empty;
 	private HoldSpinState? _holdSpinState;
 	private UpgradeBaseline? _upgradeBaseline;
 	private const string EffectFormRowMetaKey = "card_editor_effect_form_row";
@@ -476,19 +484,32 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	{
 		ulong startMs = Time.GetTicksMsec();
 		string cacheKey = GetPrebuiltPopupCacheKey(previewCard.Id, isUpgradeEditor);
+		bool useLocalizedSharedPopup = ShouldUseLocalizedSharedPopup(previewCard.Id);
 		if (_prebuiltPopupCache.TryGetValue(cacheKey, out NCardEditorPopup? existing)
 			&& existing != null
 			&& GodotObject.IsInstanceValid(existing)
 			&& !existing.IsQueuedForDeletion())
 		{
-			PopupLagLog($"GetOrCreatePersistentPopup HIT card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} visible={existing.Visible} inTree={existing.IsInsideTree()} pendingRows={existing._pendingExistingExtraEffectRows.Count} createdPending={existing._createdEffectValueRowsPending} dirty={existing._uiDirtySinceOpen}");
+			if (useLocalizedSharedPopup)
+			{
+				PopupLagLog($"LocalizedSharedPopup HIT requestedCard={previewCard.Id} currentCard={existing._cardId} mode={(isUpgradeEditor ? "upgrade" : "base")} visible={existing.Visible} inTree={existing.IsInsideTree()} pendingRows={existing._pendingExistingExtraEffectRows.Count} createdPending={existing._createdEffectValueRowsPending} dirty={existing._uiDirtySinceOpen}");
+				existing.RetargetLocalizedSharedPopup(previewCard, onApplied, isUpgradeEditor, preferredPanelSize);
+			}
+			else
+			{
+				PopupLagLog($"GetOrCreatePersistentPopup HIT card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} visible={existing.Visible} inTree={existing.IsInsideTree()} pendingRows={existing._pendingExistingExtraEffectRows.Count} createdPending={existing._createdEffectValueRowsPending} dirty={existing._uiDirtySinceOpen}");
+			}
 			existing.PreparePersistentPopupForOpen(onApplied, preferredPanelSize);
 			HidePersistentPopupsExcept(existing);
-			PopupLagLog($"GetOrCreatePersistentPopup HIT done card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs}");
+			PopupLagLog(useLocalizedSharedPopup
+				? $"LocalizedSharedPopup HIT done requestedCard={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRows={existing._pendingExistingExtraEffectRows.Count}"
+				: $"GetOrCreatePersistentPopup HIT done card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs}");
 			return existing;
 		}
 
-		PopupLagLog($"GetOrCreatePersistentPopup MISS card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} cacheSize={_prebuiltPopupCache.Count} queuedBuilds={_prebuiltPopupBuildQueue.Count} queuedHydration={_prebuiltPopupHydrationQueue.Count}");
+		PopupLagLog(useLocalizedSharedPopup
+			? $"LocalizedSharedPopup MISS card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} cacheSize={_prebuiltPopupCache.Count}"
+			: $"GetOrCreatePersistentPopup MISS card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} cacheSize={_prebuiltPopupCache.Count} queuedBuilds={_prebuiltPopupBuildQueue.Count} queuedHydration={_prebuiltPopupHydrationQueue.Count}");
 		Control? cacheHost = EnsurePrebuiltPopupCacheHost();
 		NCardEditorPopup popup = new NCardEditorPopup();
 		popup.Initialize(previewCard, onApplied, useModalContainer: false, isUpgradeEditor, preferredPanelSize);
@@ -496,15 +517,33 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		popup._persistentPopupCacheKey = cacheKey;
 		popup._allowPersistentPopupReuseOnClose = true;
 		popup._uiDirtySinceOpen = false;
+		ulong uiStartMs = Time.GetTicksMsec();
 		popup.EnsureUiBuilt();
+		ulong uiElapsedMs = Time.GetTicksMsec() - uiStartMs;
+		if (uiElapsedMs >= 25)
+		{
+			PopupLagLog(useLocalizedSharedPopup
+				? $"LocalizedSharedPopup MISS uiBuilt card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={uiElapsedMs}"
+				: $"GetOrCreatePersistentPopup MISS uiBuilt card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={uiElapsedMs}");
+		}
 		if (cacheHost != null && GodotObject.IsInstanceValid(cacheHost))
 		{
+			ulong addStartMs = Time.GetTicksMsec();
 			cacheHost.AddChild(popup);
+			ulong addElapsedMs = Time.GetTicksMsec() - addStartMs;
+			if (addElapsedMs >= 25)
+			{
+				PopupLagLog(useLocalizedSharedPopup
+					? $"LocalizedSharedPopup MISS addTree card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={addElapsedMs}"
+					: $"GetOrCreatePersistentPopup MISS addTree card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={addElapsedMs}");
+			}
 		}
 		_prebuiltPopupCache[cacheKey] = popup;
 		popup.PreparePersistentPopupForOpen(onApplied, preferredPanelSize);
 		HidePersistentPopupsExcept(popup);
-		PopupLagLog($"GetOrCreatePersistentPopup MISS built card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRows={popup._pendingExistingExtraEffectRows.Count} createdPending={popup._createdEffectValueRowsPending}");
+		PopupLagLog(useLocalizedSharedPopup
+			? $"LocalizedSharedPopup MISS built card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRows={popup._pendingExistingExtraEffectRows.Count} createdPending={popup._createdEffectValueRowsPending}"
+			: $"GetOrCreatePersistentPopup MISS built card={previewCard.Id} mode={(isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRows={popup._pendingExistingExtraEffectRows.Count} createdPending={popup._createdEffectValueRowsPending}");
 		return popup;
 	}
 
@@ -530,6 +569,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			_uiWarmupComplete = true;
 			CardEditorMod.VerboseLog("[CardEditor] Startup popup preload skipped: PreloadEditorPopupsOnLaunch is false in card_editor_settings.txt.");
+			return;
+		}
+
+		if (IsLocalizedSharedCreatedPopupLocaleActive())
+		{
+			QueueLocalizedSharedPopupWarmup(owner);
 			return;
 		}
 
@@ -566,7 +611,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			_prebuiltPopupHydrationQueue.Clear();
 			_prebuiltPopupBuildScheduled = false;
 			_prebuiltPopupHydrationScheduled = false;
-			_uiWarmupComplete = false;
+			_localizedSharedWarmupQueued = false;
 
 			_cachedCardPickerOverrideRevision = -1;
 			_cachedCardPickerCreatedRevision = -1;
@@ -592,6 +637,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			return;
 		}
 
+		if (IsLocalizedSharedCreatedPopupLocaleActive())
+		{
+			QueueLocalizedSharedPopupWarmup();
+			return;
+		}
+
 		_uiWarmupRunning = true;
 		ulong warmupStartMs = Time.GetTicksMsec();
 		try
@@ -604,9 +655,16 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			}
 
 			int queued = 0;
-			foreach (ModelId createdId in CardEditorCreatedCardsStore.GetAllCreatedCardIds()
+			List<ModelId> warmupCreatedIds = CardEditorCreatedCardsStore.GetAllCreatedCardIds()
 				.Where(id => id != null && id != ModelId.none)
-				.OrderByDescending(CountUiWarmupExtraEffectRows))
+				.OrderByDescending(CountUiWarmupExtraEffectRows)
+				.ToList();
+			if (IsLocalizedSharedCreatedPopupLocaleActive() && warmupCreatedIds.Count > 1)
+			{
+				warmupCreatedIds = warmupCreatedIds.Take(1).ToList();
+			}
+
+			foreach (ModelId createdId in warmupCreatedIds)
 			{
 				QueuePrebuiltPopupBuild(createdId, isUpgradeEditor: false);
 				queued++;
@@ -649,9 +707,157 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 	}
 
+	private static void QueueLocalizedSharedPopupWarmup(Node? owner = null)
+	{
+		if (_uiWarmupComplete || _localizedSharedWarmupQueued)
+		{
+			return;
+		}
+
+		_localizedSharedWarmupQueued = true;
+		_uiWarmupComplete = true;
+
+		int queued = 0;
+		ModelId vanillaSeed = GetLocalizedSharedVanillaWarmupCardId();
+		if (vanillaSeed != null && vanillaSeed != ModelId.none)
+		{
+			QueuePrebuiltPopupBuild(vanillaSeed, isUpgradeEditor: false);
+			QueuePrebuiltPopupBuild(vanillaSeed, isUpgradeEditor: true);
+			queued += 2;
+		}
+
+		ModelId createdSeed = GetLocalizedSharedCreatedWarmupCardId();
+		if (createdSeed != null && createdSeed != ModelId.none)
+		{
+			QueuePrebuiltPopupBuild(createdSeed, isUpgradeEditor: false);
+			QueuePrebuiltPopupBuild(createdSeed, isUpgradeEditor: true);
+			queued += 2;
+		}
+
+		if (queued == 0)
+		{
+			PopupLagLog("LocalizedSharedStartupWarmup skipped noSeeds");
+			return;
+		}
+
+		PopupLagLog($"LocalizedSharedStartupWarmup queued vanillaSeed={vanillaSeed} createdSeed={createdSeed} queued={queued}");
+		SceneTree? tree = owner?.GetTree() ?? NGame.Instance?.GetTree();
+		if (tree != null)
+		{
+			SceneTreeTimer timer = tree.CreateTimer(0.75);
+			timer.Timeout += () =>
+			{
+				PopupLagLog($"LocalizedSharedStartupWarmup start queuedBuilds={_prebuiltPopupBuildQueue.Count} cacheSize={_prebuiltPopupCache.Count}");
+				ScheduleQueuedPrebuiltPopupBuilds();
+			};
+			return;
+		}
+
+		Callable.From(() =>
+		{
+			PopupLagLog($"LocalizedSharedStartupWarmup start queuedBuilds={_prebuiltPopupBuildQueue.Count} cacheSize={_prebuiltPopupCache.Count}");
+			ScheduleQueuedPrebuiltPopupBuilds();
+		}).CallDeferred();
+	}
+
+	private static ModelId GetLocalizedSharedVanillaWarmupCardId()
+	{
+		try
+		{
+			foreach (CardModel card in ModelDb.AllCards)
+			{
+				if (card?.Id == null || card.Id == ModelId.none)
+				{
+					continue;
+				}
+				if (CardEditorCreatedCardsStore.IsCreatedCardId(card.Id))
+				{
+					continue;
+				}
+				return card.Id;
+			}
+		}
+		catch
+		{
+		}
+
+		return ModelId.none;
+	}
+
+	private static ModelId GetLocalizedSharedCreatedWarmupCardId()
+	{
+		try
+		{
+			foreach (ModelId id in CardEditorCreatedCardsStore.GetAllCreatedCardIds()
+				.Where(id => id != null && id != ModelId.none)
+				.OrderBy(CountUiWarmupExtraEffectRows))
+			{
+				return id;
+			}
+		}
+		catch
+		{
+		}
+
+		return ModelId.none;
+	}
+
 	private static string GetPrebuiltPopupCacheKey(ModelId cardId, bool isUpgradeEditor)
 	{
+		if (ShouldUseLocalizedSharedCreatedPopup(cardId))
+		{
+			return $"{_localizedSharedCreatedPopupCachePrefix}|{(isUpgradeEditor ? "upgrade" : "base")}";
+		}
+		if (ShouldUseLocalizedSharedVanillaPopup(cardId))
+		{
+			return $"{_localizedSharedVanillaPopupCachePrefix}|{(isUpgradeEditor ? "upgrade" : "base")}";
+		}
+
 		return $"{cardId}|{(isUpgradeEditor ? "upgrade" : "base")}";
+	}
+
+	private static bool ShouldUseLocalizedSharedPopup(ModelId cardId)
+	{
+		return ShouldUseLocalizedSharedCreatedPopup(cardId)
+			|| ShouldUseLocalizedSharedVanillaPopup(cardId);
+	}
+
+	private static bool ShouldUseLocalizedSharedCreatedPopup(ModelId cardId)
+	{
+		return IsLocalizedSharedCreatedPopupLocaleActive()
+			&& CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
+	}
+
+	private static bool ShouldUseLocalizedSharedVanillaPopup(ModelId cardId)
+	{
+		return IsLocalizedSharedCreatedPopupLocaleActive()
+			&& cardId != null
+			&& cardId != ModelId.none
+			&& !CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
+	}
+
+	private bool ShouldKeepPreviewNodeWarmForPersistentCache()
+	{
+		return _isPersistentPopupCacheEntry && ShouldUseLocalizedSharedPopup(_cardId);
+	}
+
+	private static bool IsLocalizedSharedCreatedPopupLocaleActive()
+	{
+		string language = string.Empty;
+		try
+		{
+			language = LocManager.Instance?.Language ?? string.Empty;
+		}
+		catch
+		{
+			language = string.Empty;
+		}
+
+		return language.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+			|| language.StartsWith("zhs", StringComparison.OrdinalIgnoreCase)
+			|| language.StartsWith("zht", StringComparison.OrdinalIgnoreCase)
+			|| language.StartsWith("kor", StringComparison.OrdinalIgnoreCase)
+			|| language.StartsWith("ko", StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static Control? EnsurePrebuiltPopupCacheHost()
@@ -863,9 +1069,19 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		popup.Visible = false;
 		popup.EnsureUiBuilt();
 		cacheHost.AddChild(popup);
-		popup.EnsurePendingPopupHydrationCompleted();
-		popup.ForceLayoutRefreshNow();
-		popup.ReleasePreviewNodeResources();
+		if (ShouldUseLocalizedSharedCreatedPopup(cardId))
+		{
+			PopupLagLog($"RebuildPrebuiltHydration deferred card={cardId} mode={(isUpgradeEditor ? "upgrade" : "base")} pendingRows={popup._pendingExistingExtraEffectRows.Count}");
+		}
+		else
+		{
+			popup.EnsurePendingPopupHydrationCompleted();
+			popup.ForceLayoutRefreshNow();
+		}
+		if (!popup.ShouldKeepPreviewNodeWarmForPersistentCache())
+		{
+			popup.ReleasePreviewNodeResources();
+		}
 		popup._manualPrebuiltPopupWarmupHydration = false;
 		popup._rebuildPrebuiltPopupOnClose = false;
 		popup._uiDirtySinceOpen = false;
@@ -1022,8 +1238,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		popup._uiDirtySinceOpen = false;
 		popup._manualPrebuiltPopupWarmupHydration = true;
 		popup.Visible = false;
+		ulong uiStartMs = Time.GetTicksMsec();
 		popup.EnsureUiBuilt();
+		ulong uiElapsedMs = Time.GetTicksMsec() - uiStartMs;
+		ulong addStartMs = Time.GetTicksMsec();
 		cacheHost.AddChild(popup);
+		ulong addElapsedMs = Time.GetTicksMsec() - addStartMs;
 		popup._rebuildPrebuiltPopupOnClose = false;
 		_prebuiltPopupCache[cacheKey] = popup;
 
@@ -1031,17 +1251,28 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		int pendingRows = popup._pendingExistingExtraEffectRows.Count;
 		if (pendingRows > 0)
 		{
-			QueuePrebuiltPopupHydration(cacheKey);
-			if (!_uiWarmupRunning)
+			if (ShouldUseLocalizedSharedCreatedPopup(request.CardId))
 			{
-				ScheduleQueuedPrebuiltPopupHydration(delaySeconds: 0.05);
+				popup._manualPrebuiltPopupWarmupHydration = false;
+				PopupLagLog($"PrebuiltPopupHydration deferred card={request.CardId} mode={(request.IsUpgradeEditor ? "upgrade" : "base")} pendingRows={pendingRows} cacheKey={cacheKey}");
+			}
+			else
+			{
+				QueuePrebuiltPopupHydration(cacheKey);
+				if (!_uiWarmupRunning)
+				{
+					ScheduleQueuedPrebuiltPopupHydration(delaySeconds: 0.05);
+				}
 			}
 		}
 		else
 		{
-			popup.ReleasePreviewNodeResources();
+			if (!popup.ShouldKeepPreviewNodeWarmForPersistentCache())
+			{
+				popup.ReleasePreviewNodeResources();
+			}
 		}
-		PerfLog($"[CardEditor][Perf] PrebuiltPopupReady card={request.CardId} mode={(request.IsUpgradeEditor ? "upgrade" : "base")} elapsedMs={buildElapsedMs} pendingRows={pendingRows}");
+		PopupLagLog($"PrebuiltPopupReady card={request.CardId} mode={(request.IsUpgradeEditor ? "upgrade" : "base")} elapsedMs={buildElapsedMs} uiMs={uiElapsedMs} addTreeMs={addElapsedMs} pendingRows={pendingRows} keepPreview={popup.ShouldKeepPreviewNodeWarmForPersistentCache()} cacheKey={cacheKey}");
 		return true;
 	}
 
@@ -1105,6 +1336,17 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			return false;
 		}
 
+		if (ShouldUseLocalizedSharedCreatedPopup(popup._cardId))
+		{
+			popup._manualPrebuiltPopupWarmupHydration = false;
+			PopupLagLog($"PrebuiltPopupHydration skipped-shared-created card={popup._cardId} mode={(popup._isUpgradeEditor ? "upgrade" : "base")} pendingRows={popup._pendingExistingExtraEffectRows.Count}");
+			if (_prebuiltPopupHydrationQueue.Count > 0 && scheduleRemaining)
+			{
+				ScheduleQueuedPrebuiltPopupHydration(delaySeconds: 0.03);
+			}
+			return false;
+		}
+
 		bool hasMoreRows = popup.HydrateSinglePendingExistingExtraEffectRowNow();
 		if (hasMoreRows)
 		{
@@ -1115,7 +1357,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			popup._manualPrebuiltPopupWarmupHydration = false;
 			popup.CompleteDeferredCreatedEffectValueRowsNow();
 			popup.ForceLayoutRefreshNow();
-			popup.ReleasePreviewNodeResources();
+			if (!popup.ShouldKeepPreviewNodeWarmForPersistentCache())
+			{
+				popup.ReleasePreviewNodeResources();
+			}
 			PerfLog($"[CardEditor][Perf] PrebuiltPopupHydrated card={popup._cardId} rows={popup._extraEffectRows.Count}");
 		}
 
@@ -1224,6 +1469,1369 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 
 		_isBatchEdit = _batchCardIds.Count > 1;
+	}
+
+	private void RetargetLocalizedSharedPopup(CardModel previewCard, Action onApplied, bool isUpgradeEditor, Vector2? preferredPanelSize)
+	{
+		if (previewCard == null || previewCard.Id == null || previewCard.Id == ModelId.none)
+		{
+			return;
+		}
+
+		ulong startMs = Time.GetTicksMsec();
+		if (_cardId == previewCard.Id && _isUpgradeEditor == isUpgradeEditor)
+		{
+			_previewCard = previewCard;
+			_onApplied = onApplied;
+			_requestedPanelSize = preferredPanelSize.HasValue && preferredPanelSize.Value.X > 0f && preferredPanelSize.Value.Y > 0f
+				? preferredPanelSize.Value
+				: _panelSize;
+			_preferredPanelSize = _requestedPanelSize;
+			RefreshCachedPopupSnapshotAfterExternalApply();
+			PopupLagLog($"LocalizedSharedRetarget card={_cardId} mode={(isUpgradeEditor ? "upgrade" : "base")} totalMs={Time.GetTicksMsec() - startMs} sameCard=True pendingRows={_pendingExistingExtraEffectRows.Count}");
+			return;
+		}
+
+		ulong bindStartMs = Time.GetTicksMsec();
+		long bindMs = 0;
+		long rowsMs = 0;
+		bool previousSuppress = _suppressPreviewUpdate;
+		_suppressPreviewUpdate = true;
+		try
+		{
+			StashCurrentLocalizedSharedCreatedRowsForRetarget();
+			CardEditorUiState.ClearDraftOverride(_cardId);
+			if (_isCreatedCard)
+			{
+				CardEditorCreatedCardsStore.ClearDraftMeta(_cardId);
+			}
+
+			BindLocalizedSharedPopupState(previewCard, onApplied, isUpgradeEditor, preferredPanelSize);
+			RefreshLocalizedSharedPopupControls();
+			bindMs = (long)(Time.GetTicksMsec() - bindStartMs);
+
+			ulong rowsStartMs = Time.GetTicksMsec();
+			RequeueExistingExtraEffectRowsForCurrentCard();
+			rowsMs = (long)(Time.GetTicksMsec() - rowsStartMs);
+		}
+		finally
+		{
+			_suppressPreviewUpdate = previousSuppress;
+		}
+
+		PopupLagLog($"LocalizedSharedRetarget card={_cardId} mode={(isUpgradeEditor ? "upgrade" : "base")} totalMs={Time.GetTicksMsec() - startMs} bindMs={bindMs} rowsMs={rowsMs} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending}");
+	}
+
+	private void BindLocalizedSharedPopupState(CardModel previewCard, Action onApplied, bool isUpgradeEditor, Vector2? preferredPanelSize)
+	{
+		StopSpinHold();
+		CloseTransientPickerOverlaysForSharedRetarget();
+
+		_previewCard = previewCard;
+		_cardId = previewCard.Id;
+		_isCreatedCard = CardEditorCreatedCardsStore.IsCreatedCardId(_cardId);
+		_onApplied = onApplied;
+		_useModalContainer = false;
+		_isUpgradeEditor = isUpgradeEditor;
+		_requestedPanelSize = preferredPanelSize.HasValue && preferredPanelSize.Value.X > 0f && preferredPanelSize.Value.Y > 0f
+			? preferredPanelSize.Value
+			: _panelSize;
+		_preferredPanelSize = _requestedPanelSize;
+		_openingEffectiveOverride = CardEditorOverrides.TryGetEffectiveOverride(_cardId, out CardOverride effectiveOverride)
+			? CardEditorOverrides.Clone(effectiveOverride)
+			: null;
+		_upgradeBaseline = null;
+		_baselineTags = !_isUpgradeEditor ? ComputeBaselineTags() : null;
+		_preserveDraftOnClose = false;
+		_rebuildPrebuiltPopupOnClose = false;
+		_warmOppositePrebuiltPopupOnClose = false;
+		_isPersistentPopupCacheEntry = true;
+		_persistentPopupCacheKey = GetPrebuiltPopupCacheKey(_cardId, _isUpgradeEditor);
+		_allowPersistentPopupReuseOnClose = true;
+		_manualPrebuiltPopupWarmupHydration = false;
+		_uiDirtySinceOpen = false;
+		_previewUpdateQueued = false;
+	}
+
+	private void CloseTransientPickerOverlaysForSharedRetarget()
+	{
+		QueueFreeOverlay(ref _specificCardPickerOverlay);
+		QueueFreeOverlay(ref _specificPotionPickerOverlay);
+		QueueFreeOverlay(ref _keywordPickerOverlay);
+		QueueFreeOverlay(ref _rewardPoolPickerOverlay);
+		_createdRewardPoolChecks.Clear();
+	}
+
+	private static void QueueFreeOverlay(ref Control? overlay)
+	{
+		if (overlay != null && GodotObject.IsInstanceValid(overlay))
+		{
+			overlay.QueueFreeSafely();
+		}
+		overlay = null;
+	}
+
+	private void RefreshLocalizedSharedPopupControls()
+	{
+		if (_cardNameLabel != null && GodotObject.IsInstanceValid(_cardNameLabel))
+		{
+			_cardNameLabel.Text = _previewCard.Title;
+		}
+
+		EnsurePreviewNodeReady();
+		ForcePreviewReload();
+
+		BindKeywordAndTagControlsForCurrentCard();
+		if (_isUpgradeEditor)
+		{
+			if (_isCreatedCard)
+			{
+				BindCreatedUpgradeControlsForCurrentCard();
+			}
+			else
+			{
+				BindVanillaUpgradeControlsForCurrentCard();
+			}
+			RebuildSharedDynamicRowsForCurrentCard();
+		}
+		else if (_isCreatedCard)
+		{
+			BindCreatedBaseControlsForCurrentCard();
+			ResetCreatedEffectValueRowsForSharedRetarget();
+		}
+		else
+		{
+			BindVanillaBaseControlsForCurrentCard();
+			RebuildSharedVanillaDynamicSectionsForCurrentCard();
+		}
+
+		QueuePreviewLayout();
+		QueuePopupLayout();
+	}
+
+	private void BindCreatedBaseControlsForCurrentCard()
+	{
+		if (!CardEditorCreatedCardsStore.TryGetDefinition(_cardId, out CardEditorCreatedCardDefinition def))
+		{
+			def = new CardEditorCreatedCardDefinition();
+		}
+
+		CardOverride? existingOverride = CardEditorOverrides.TryGetEffectiveOverride(_cardId, out CardOverride effectiveOverride)
+			? effectiveOverride
+			: null;
+
+		SetTickboxSilent(_createdEnabledTickbox, def.Enabled);
+		BindBaseCostFieldsForCurrentCard();
+		SetLineEditText(_createdTitleField, CardEditorCreatedCardsStore.GetTitleForCard(_cardId));
+		SetTickboxSilent(_endlessUpgradesTickbox, existingOverride?.EndlessUpgrades == true);
+		SelectCardType(_previewCard.Type);
+		SelectOptionByValue(_createdPoolSelect, _createdPoolOptions, CardEditorCreatedCardsStore.GetResolvedPoolTitle(def), StringComparer.OrdinalIgnoreCase);
+		SelectOptionByValue(_createdRaritySelect, _createdRarityOptions, def.Rarity);
+		SelectOptionByValue(_createdTargetSelect, _createdTargetOptions, def.TargetType);
+		SetLineEditText(_replayField, _previewCard.BaseReplayCount.ToString(CultureInfo.InvariantCulture));
+		BindEnchantmentUiForCurrentCard();
+		BindAfflictionUiForCurrentCard();
+		BindCreatedRewardPoolControls(def);
+		BindCosmeticControls(existingOverride);
+		BindCreatedArtControls(def);
+		BindCreatedFinishControls(def);
+
+		bool hasCustomText = def.CustomTextEnabled;
+		SetTickboxSilent(_createdCustomTextTickbox, hasCustomText);
+		if (_createdCustomTextField != null && GodotObject.IsInstanceValid(_createdCustomTextField))
+		{
+			_createdCustomTextField.Text = def.CustomText ?? string.Empty;
+			_createdCustomTextField.Visible = hasCustomText;
+		}
+	}
+
+	private void BindCreatedUpgradeControlsForCurrentCard()
+	{
+		SelectCardType(_previewCard.Type);
+		if (_cardTypeSelect != null && GodotObject.IsInstanceValid(_cardTypeSelect))
+		{
+			_cardTypeSelect.Disabled = true;
+			_cardTypeSelect.SelfModulate = StsColors.gray;
+		}
+
+		UpgradeBaseline? upgradeBaseline = GetUpgradeBaseline();
+		CardUpgradeOverride? storedUpgrade = GetEffectivePopupUpgradeOverride();
+		if (upgradeBaseline != null)
+		{
+			int desiredEnergyDelta = storedUpgrade?.EnergyCostDelta ?? upgradeBaseline.VanillaEnergyDelta;
+			SetLineEditText(_energyCostField, desiredEnergyDelta.ToString(CultureInfo.InvariantCulture));
+			SetLineEditEnabled(_energyCostField, !upgradeBaseline.BaseEnergyCostsX);
+
+			int desiredStarDelta = storedUpgrade?.StarCostDelta ?? upgradeBaseline.VanillaStarDelta;
+			SetLineEditText(_starCostField, desiredStarDelta.ToString(CultureInfo.InvariantCulture));
+			SetLineEditEnabled(_starCostField, !upgradeBaseline.BaseHasStarCostX);
+
+			int desiredReplayDelta = storedUpgrade?.ReplayCountDelta ?? upgradeBaseline.VanillaReplayDelta;
+			SetLineEditText(_replayField, desiredReplayDelta.ToString(CultureInfo.InvariantCulture));
+		}
+
+		bool hasCustomText = CardEditorCreatedCardsStore.IsCustomTextUpgradedEnabled(_cardId);
+		SetTickboxSilent(_createdCustomTextUpgradedTickbox, hasCustomText);
+		if (_createdCustomTextUpgradedField != null && GodotObject.IsInstanceValid(_createdCustomTextUpgradedField))
+		{
+			_createdCustomTextUpgradedField.Text = CardEditorCreatedCardsStore.GetStoredCustomTextUpgraded(_cardId) ?? string.Empty;
+			_createdCustomTextUpgradedField.Visible = hasCustomText;
+		}
+
+		BindEnchantmentUiForCurrentCard();
+		BindAfflictionUiForCurrentCard();
+	}
+
+	private void BindVanillaBaseControlsForCurrentCard()
+	{
+		CardOverride? existing = CardEditorOverrides.Get(_cardId);
+
+		SetTickboxSilent(_vanillaEnabledTickbox, existing?.Enabled != false);
+		SetLineEditText(_vanillaTitleField, existing?.TitleOverride ?? GetCanonicalVanillaTitle(_cardId));
+		SetTickboxSilent(_endlessUpgradesTickbox, existing?.EndlessUpgrades == true);
+		SelectCardType(_previewCard.Type);
+		if (_cardTypeSelect != null && GodotObject.IsInstanceValid(_cardTypeSelect))
+		{
+			_cardTypeSelect.Disabled = false;
+			_cardTypeSelect.SelfModulate = Colors.White;
+		}
+
+		SelectVanillaPool(existing?.PoolTitle);
+		SelectVanillaRarity(existing?.Rarity);
+		SelectVanillaTargetType(existing?.TargetType);
+		BindCosmeticControls(existing);
+		BindVanillaArtControls(existing);
+		BindVanillaFinishControls(existing);
+		BindVanillaModifiedBaseTextControls(existing);
+		BindBaseCostFieldsForCurrentCard();
+		BindEnchantmentUiForCurrentCard();
+		BindAfflictionUiForCurrentCard();
+	}
+
+	private void BindVanillaUpgradeControlsForCurrentCard()
+	{
+		SelectCardType(_previewCard.Type);
+		if (_cardTypeSelect != null && GodotObject.IsInstanceValid(_cardTypeSelect))
+		{
+			_cardTypeSelect.Disabled = true;
+			_cardTypeSelect.SelfModulate = StsColors.gray;
+		}
+
+		UpgradeBaseline? upgradeBaseline = GetUpgradeBaseline();
+		CardUpgradeOverride? storedUpgrade = GetEffectivePopupUpgradeOverride();
+		if (upgradeBaseline != null)
+		{
+			int desiredEnergyDelta = storedUpgrade?.EnergyCostDelta ?? upgradeBaseline.VanillaEnergyDelta;
+			SetLineEditText(_energyCostField, desiredEnergyDelta.ToString(CultureInfo.InvariantCulture));
+			SetLineEditEnabled(_energyCostField, !upgradeBaseline.BaseEnergyCostsX);
+
+			int desiredStarDelta = storedUpgrade?.StarCostDelta ?? upgradeBaseline.VanillaStarDelta;
+			SetLineEditText(_starCostField, desiredStarDelta.ToString(CultureInfo.InvariantCulture));
+			SetLineEditEnabled(_starCostField, !upgradeBaseline.BaseHasStarCostX);
+
+			int desiredReplayDelta = storedUpgrade?.ReplayCountDelta ?? upgradeBaseline.VanillaReplayDelta;
+			SetLineEditText(_replayField, desiredReplayDelta.ToString(CultureInfo.InvariantCulture));
+		}
+
+		bool hasModifiedBaseText = storedUpgrade?.ModifiedBaseTextEnabled == true;
+		SetTickboxSilent(_vanillaModifiedBaseTextUpgradedTickbox, hasModifiedBaseText);
+		if (_vanillaModifiedBaseTextUpgradedField != null && GodotObject.IsInstanceValid(_vanillaModifiedBaseTextUpgradedField))
+		{
+			_vanillaModifiedBaseTextUpgradedField.Text = hasModifiedBaseText ? (storedUpgrade?.ModifiedBaseText ?? string.Empty) : string.Empty;
+			_vanillaModifiedBaseTextUpgradedField.Visible = hasModifiedBaseText;
+		}
+
+		BindEnchantmentUiForCurrentCard();
+		BindAfflictionUiForCurrentCard();
+	}
+
+	private static string GetCanonicalVanillaTitle(ModelId cardId)
+	{
+		bool prevSuppress = CardEditorOverrides.SuppressAllOverrides;
+		CardEditorOverrides.SuppressAllOverrides = true;
+		try
+		{
+			return ModelDb.GetById<CardModel>(cardId)?.Title ?? string.Empty;
+		}
+		catch
+		{
+			return string.Empty;
+		}
+		finally
+		{
+			CardEditorOverrides.SuppressAllOverrides = prevSuppress;
+		}
+	}
+
+	private void SelectVanillaPool(string? poolTitle)
+	{
+		int index = 0;
+		if (!string.IsNullOrWhiteSpace(poolTitle))
+		{
+			string desired = poolTitle.Trim();
+			int found = _vanillaPoolOptions.FindIndex(s => !string.IsNullOrWhiteSpace(s) && string.Equals(s, desired, StringComparison.OrdinalIgnoreCase));
+			if (found >= 0)
+			{
+				index = found;
+			}
+		}
+		SelectOptionIndex(_vanillaPoolSelect, index);
+	}
+
+	private void SelectVanillaRarity(CardRarity? rarity)
+	{
+		int index = 0;
+		if (rarity.HasValue && rarity.Value != CardRarity.None)
+		{
+			int found = _vanillaRarityOptions.IndexOf(rarity.Value);
+			if (found >= 0)
+			{
+				index = found;
+			}
+		}
+		SelectOptionIndex(_vanillaRaritySelect, index);
+	}
+
+	private void SelectVanillaTargetType(TargetType? target)
+	{
+		int index = target.HasValue ? _targetTypeOptions.IndexOf(target.Value) : 0;
+		SelectOptionIndex(_targetTypeSelect, index >= 0 ? index : 0);
+	}
+
+	private void BindVanillaArtControls(CardOverride? existing)
+	{
+		if (_vanillaArtSearchField != null && GodotObject.IsInstanceValid(_vanillaArtSearchField))
+		{
+			_vanillaArtSearchField.Text = string.Empty;
+		}
+		SetTickboxSilent(_vanillaFullArtTickbox, existing?.FullArt == true);
+		_vanillaPortraitSourceCatalog.Clear();
+		(ModelId? CardId, string? CustomFile) selectedPortrait = !string.IsNullOrWhiteSpace(existing?.CustomPortraitFile)
+			? (null, existing!.CustomPortraitFile)
+			: (existing?.PortraitSourceCardId ?? ModelId.none, null);
+		RebuildVanillaArtDropdown(_vanillaArtSearchField?.Text ?? string.Empty, selectedPortrait);
+	}
+
+	private void EnsureVanillaPortraitCatalogForCurrentCard()
+	{
+		if (_vanillaPortraitSourceCatalog.Count > 0)
+		{
+			return;
+		}
+
+		ulong startMs = Time.GetTicksMsec();
+		_vanillaPortraitSourceCatalog.Clear();
+		foreach (CardModel card in ModelDb.AllCards)
+		{
+			if (card == null || card.Id == null || card.Id == _cardId)
+			{
+				continue;
+			}
+			string label = $"{card.Title} ({ToDisplayTitle(card.Pool.Title)})";
+			_vanillaPortraitSourceCatalog.Add((card.Id, null, label));
+		}
+		foreach (string file in CardEditorCreatedCardsStore.ListCustomPortraitFiles())
+		{
+			string prefix = CardEditorLoc.T("value.customPrefix", "Custom");
+			string shortFile = file.Length > 30 ? file[..30] + "\u2026" : file;
+			_vanillaPortraitSourceCatalog.Add((null, file, $"{prefix}: {shortFile}"));
+		}
+		_vanillaPortraitSourceCatalog.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
+		ulong elapsedMs = Time.GetTicksMsec() - startMs;
+		if (elapsedMs >= 25)
+		{
+			PopupLagLog($"VanillaArtCatalog built card={_cardId} elapsedMs={elapsedMs} entries={_vanillaPortraitSourceCatalog.Count}");
+		}
+	}
+
+	private void BindVanillaFinishControls(CardOverride? existing)
+	{
+		CardEditorVisualFinish finish = existing?.Finish ?? CardEditorVisualFinish.None;
+		SelectOptionByValue(_vanillaFinishSelect, _vanillaFinishOptions, finish);
+		bool hasSliders = GetFinishSliderDefs(finish).Length > 0;
+		if (_vanillaFinishEditorButton != null && GodotObject.IsInstanceValid(_vanillaFinishEditorButton))
+		{
+			_vanillaFinishEditorButton.Visible = hasSliders;
+		}
+		if (_vanillaFinishEditorContainer != null && GodotObject.IsInstanceValid(_vanillaFinishEditorContainer))
+		{
+			_vanillaFinishEditorContainer.Visible = false;
+			_vanillaFinishParams = existing?.FinishParams != null
+				? new Dictionary<string, float>(existing.FinishParams)
+				: new Dictionary<string, float>();
+			BuildFinishEditorSliders(_vanillaFinishEditorContainer, _vanillaFinishSliders, _vanillaFinishValueLabels, _vanillaFinishParams, finish, QueuePreviewUpdate);
+		}
+	}
+
+	private void BindVanillaModifiedBaseTextControls(CardOverride? existing)
+	{
+		bool hasModifiedBaseText = existing?.ModifiedBaseTextEnabled == true;
+		SetTickboxSilent(_vanillaModifiedBaseTextTickbox, hasModifiedBaseText);
+		if (_vanillaModifiedBaseTextField != null && GodotObject.IsInstanceValid(_vanillaModifiedBaseTextField))
+		{
+			_vanillaModifiedBaseTextField.Text = hasModifiedBaseText ? (existing?.ModifiedBaseText ?? string.Empty) : string.Empty;
+			_vanillaModifiedBaseTextField.Visible = hasModifiedBaseText;
+		}
+	}
+
+	private void BindBaseCostFieldsForCurrentCard()
+	{
+		bool energyX = _previewCard.EnergyCost.CostsX;
+		SetTickboxSilent(_energyCostXTickbox, energyX);
+		SetLineEditText(
+			_energyCostField,
+			energyX
+				? "X"
+				: _previewCard.EnergyCost.GetWithModifiers(CostModifiers.None) < 0
+					? string.Empty
+					: _previewCard.EnergyCost.GetWithModifiers(CostModifiers.None).ToString(CultureInfo.InvariantCulture));
+		ApplyCostXUiState(_energyCostField, _energyCostXTickbox, metaKeyPreviousText: "card_editor_prev_energy_cost", placeholderWhenNonX: CardEditorLoc.T("value.none", "None"));
+
+		bool starX = _previewCard.HasStarCostX;
+		SetTickboxSilent(_starCostXTickbox, starX);
+		SetLineEditText(
+			_starCostField,
+			starX
+				? "X"
+				: _previewCard.BaseStarCost < 0
+					? string.Empty
+					: _previewCard.BaseStarCost.ToString(CultureInfo.InvariantCulture));
+		ApplyCostXUiState(_starCostField, _starCostXTickbox, metaKeyPreviousText: "card_editor_prev_star_cost", placeholderWhenNonX: CardEditorLoc.T("value.none", "None"));
+	}
+
+	private void BindEnchantmentUiForCurrentCard()
+	{
+		if (_enchantmentSelect == null || !GodotObject.IsInstanceValid(_enchantmentSelect) || _enchantmentAmountField == null)
+		{
+			return;
+		}
+
+		ModelId? selectedId = null;
+		int amount = Math.Max(1, _previewCard.Enchantment?.Amount ?? 1);
+		if (_isUpgradeEditor)
+		{
+			CardUpgradeOverride? storedUpgrade = GetEffectivePopupUpgradeOverride();
+			if (storedUpgrade?.EnchantmentId != null)
+			{
+				selectedId = storedUpgrade.EnchantmentId;
+				amount = Math.Max(1, storedUpgrade.EnchantmentAmount ?? amount);
+			}
+		}
+		else if (CardEditorOverrides.TryGetEffectiveOverride(_cardId, out CardOverride existingOverride)
+			&& existingOverride.EnchantmentId != null)
+		{
+			selectedId = existingOverride.EnchantmentId;
+		}
+
+		SelectModelIdOption(_enchantmentSelect, _enchantmentIds, selectedId);
+		SetLineEditText(_enchantmentAmountField, amount.ToString(CultureInfo.InvariantCulture));
+		UpdateAmountEnabled(_enchantmentSelect, _enchantmentAmountField, _enchantmentIds);
+	}
+
+	private void BindAfflictionUiForCurrentCard()
+	{
+		if (_afflictionSelect == null || !GodotObject.IsInstanceValid(_afflictionSelect) || _afflictionAmountField == null)
+		{
+			return;
+		}
+
+		ModelId? selectedId = null;
+		int amount = Math.Max(1, _previewCard.Affliction?.Amount ?? 1);
+		if (_isUpgradeEditor)
+		{
+			CardUpgradeOverride? storedUpgrade = GetEffectivePopupUpgradeOverride();
+			if (storedUpgrade?.AfflictionId != null)
+			{
+				selectedId = storedUpgrade.AfflictionId;
+				amount = Math.Max(1, storedUpgrade.AfflictionAmount ?? amount);
+			}
+		}
+		else if (CardEditorOverrides.TryGetEffectiveOverride(_cardId, out CardOverride existingOverride)
+			&& existingOverride.AfflictionId != null)
+		{
+			selectedId = existingOverride.AfflictionId;
+		}
+
+		SelectModelIdOption(_afflictionSelect, _afflictionIds, selectedId);
+		SetLineEditText(_afflictionAmountField, amount.ToString(CultureInfo.InvariantCulture));
+		UpdateAmountEnabled(_afflictionSelect, _afflictionAmountField, _afflictionIds);
+	}
+
+	private void BindCreatedRewardPoolControls(CardEditorCreatedCardDefinition def)
+	{
+		_createdRewardPoolSelectedIds.Clear();
+		foreach (string id in def.CustomRewardPoolIds ?? new List<string>())
+		{
+			if (CardEditorRewardPoolRegistry.IsKnownPoolId(id))
+			{
+				_createdRewardPoolSelectedIds.Add(id.Trim());
+			}
+		}
+
+		SetTickboxSilent(_createdCustomRewardPoolsTickbox, def.CustomRewardPoolsEnabled);
+		SelectOptionByValue(_createdRewardBucketSelect, _createdRewardBucketOptions, def.RewardPoolBucket);
+		if (_createdRewardBucketSelect != null
+			&& GodotObject.IsInstanceValid(_createdRewardBucketSelect)
+			&& _createdRewardBucketSelect.Selected >= 0
+			&& _createdRewardBucketSelect.Selected < _createdRewardBucketOptions.Count)
+		{
+			_createdRewardBucketSelect.TooltipText = GetRewardBucketTooltip(_createdRewardBucketOptions[_createdRewardBucketSelect.Selected]);
+		}
+
+		SelectOptionByValue(_createdRewardInjectionModeSelect, _createdRewardInjectionModeOptions, def.RewardPoolInjectionMode);
+		if (_createdRewardInjectionModeSelect != null
+			&& GodotObject.IsInstanceValid(_createdRewardInjectionModeSelect)
+			&& _createdRewardInjectionModeSelect.Selected >= 0
+			&& _createdRewardInjectionModeSelect.Selected < _createdRewardInjectionModeOptions.Count)
+		{
+			_createdRewardInjectionModeSelect.TooltipText = GetRewardInjectionTooltip(_createdRewardInjectionModeOptions[_createdRewardInjectionModeSelect.Selected]);
+		}
+		UpdateCreatedRewardPoolPickerButtonText();
+	}
+
+	private void BindCosmeticControls(CardOverride? existing)
+	{
+		CardEditorCosmeticStylePreset stylePreset = existing?.CosmeticStylePreset ?? CardEditorCosmeticStylePreset.None;
+		CardEditorCosmeticAnimationPreset animationPreset =
+			existing?.CosmeticAnimationPreset
+			?? ((existing?.CosmeticPlayAttackerAnim ?? false)
+				? CardEditorCosmeticAnimationPreset.MatchCardType
+				: CardEditorCosmeticAnimationPreset.None);
+		CardEditorCosmeticVfxPreset vfxPreset = existing?.CosmeticVfxPreset ?? CardEditorCosmeticVfxPreset.None;
+		CardEditorCosmeticAttach attach = existing?.CosmeticVfxAttach ?? CardEditorCosmeticAttach.Target;
+		if (stylePreset != CardEditorCosmeticStylePreset.None
+			&& CardEditorCosmetics.TryGetStyleDefaults(stylePreset, out CardEditorCosmeticAnimationPreset styleAnimation, out CardEditorCosmeticVfxPreset styleVfx, out CardEditorCosmeticAttach styleAttach))
+		{
+			if (animationPreset == CardEditorCosmeticAnimationPreset.None)
+			{
+				animationPreset = styleAnimation;
+			}
+			if (vfxPreset == CardEditorCosmeticVfxPreset.None)
+			{
+				vfxPreset = styleVfx;
+			}
+			if (existing?.CosmeticVfxAttach == null)
+			{
+				attach = styleAttach;
+			}
+		}
+
+		SelectOptionByValue(_cosmeticStylePresetSelect, _cosmeticStylePresetOptions, stylePreset);
+		SelectOptionByValue(_cosmeticAnimationPresetSelect, _cosmeticAnimationPresetOptions, animationPreset);
+		SelectOptionByValue(_cosmeticVfxPresetSelect, _cosmeticVfxPresetOptions, vfxPreset);
+		SelectOptionByValue(_cosmeticVfxAttachSelect, _cosmeticVfxAttachOptions, attach);
+		if (_cosmeticVfxAttachSelect != null && GodotObject.IsInstanceValid(_cosmeticVfxAttachSelect))
+		{
+			_cosmeticVfxAttachSelect.Disabled = vfxPreset == CardEditorCosmeticVfxPreset.None;
+		}
+
+		SetTickboxSilent(_cosmeticHideCostOrbTickbox, existing?.HideCosmeticCostOrb == true);
+		SetTickboxSilent(_cosmeticHideCostNumberTickbox, existing?.HideCosmeticCostNumber == true);
+		SetTickboxSilent(_cosmeticHideNameBannerTickbox, existing?.HideCosmeticNameBanner == true);
+		SetTickboxSilent(_cosmeticHideNameTextTickbox, existing?.HideCosmeticNameText == true);
+		SetTickboxSilent(_cosmeticHideTypeBadgeTickbox, existing?.HideCosmeticTypeBadge == true);
+		SetTickboxSilent(_cosmeticHideTextBackgroundTickbox, existing?.HideCosmeticTextBackground == true);
+		SetTickboxSilent(_cosmeticHideBodyTextTickbox, existing?.HideCosmeticBodyText == true);
+	}
+
+	private void BindCreatedArtControls(CardEditorCreatedCardDefinition def)
+	{
+		if (_createdArtSearchField != null && GodotObject.IsInstanceValid(_createdArtSearchField))
+		{
+			_createdArtSearchField.Text = string.Empty;
+		}
+		SetTickboxSilent(_createdFullArtTickbox, def.FullArt);
+		(ModelId? CardId, string? CustomFile) selectedPortrait = !string.IsNullOrWhiteSpace(def.CustomPortraitFile)
+			? (null, def.CustomPortraitFile)
+			: (def.PortraitSourceCardId ?? ModelId.none, null);
+		RebuildCreatedArtDropdown(string.Empty, selectedPortrait);
+	}
+
+	private void BindCreatedFinishControls(CardEditorCreatedCardDefinition def)
+	{
+		SelectOptionByValue(_createdFinishSelect, _createdFinishOptions, def.Finish);
+		bool hasSliders = GetFinishSliderDefs(def.Finish).Length > 0;
+		if (_createdFinishEditorButton != null && GodotObject.IsInstanceValid(_createdFinishEditorButton))
+		{
+			_createdFinishEditorButton.Visible = hasSliders;
+		}
+		if (_createdFinishEditorContainer != null && GodotObject.IsInstanceValid(_createdFinishEditorContainer))
+		{
+			_createdFinishEditorContainer.Visible = false;
+			_createdFinishParams = def.FinishParams != null
+				? new Dictionary<string, float>(def.FinishParams)
+				: new Dictionary<string, float>();
+			BuildFinishEditorSliders(_createdFinishEditorContainer, _createdFinishSliders, _createdFinishValueLabels, _createdFinishParams, def.Finish, OnCreatedCardMetaChanged);
+		}
+	}
+
+	private void BindKeywordAndTagControlsForCurrentCard()
+	{
+		foreach ((CardKeyword keyword, KeywordTickbox tickbox) in _keywordChecks)
+		{
+			SetTickboxSilent(tickbox, _previewCard.Keywords.Contains(keyword));
+		}
+
+		if (!_isUpgradeEditor)
+		{
+			_baselineTags = ComputeBaselineTags();
+			HashSet<CardTag> effectiveTags = new HashSet<CardTag>(_previewCard.Tags.Where(t => t != CardTag.None));
+			foreach ((CardTag tag, KeywordTickbox tickbox) in _tagChecks)
+			{
+				SetTickboxSilent(tickbox, effectiveTags.Contains(tag));
+			}
+
+			_customTags.Clear();
+			if (CardEditorOverrides.TryGetEffectiveOverride(_cardId, out CardOverride effectiveOverride)
+				&& effectiveOverride.CustomTags != null
+				&& effectiveOverride.CustomTags.Count > 0)
+			{
+				_customTags.UnionWith(effectiveOverride.CustomTags);
+			}
+			RebuildCustomTagsList();
+		}
+	}
+
+	private void ResetCreatedEffectValueRowsForSharedRetarget()
+	{
+		RemoveChildrenSafely(_createdEffectValueContainer, _createdEffectValueLoadingLabel);
+		_dynamicFields.Clear();
+		_createdEffectValueRowsScheduled = false;
+		_createdEffectValueRowsPending = true;
+		_createdEffectSourceNumbersKey = string.Empty;
+	}
+
+	private void RebuildSharedDynamicRowsForCurrentCard()
+	{
+		if (_dynamicRowsContainer == null || !GodotObject.IsInstanceValid(_dynamicRowsContainer))
+		{
+			return;
+		}
+
+		RemoveChildrenSafely(_dynamicRowsContainer);
+		_dynamicFields.Clear();
+		_effectSourceDynamicVarKey = string.Empty;
+
+		UpgradeBaseline? upgradeBaseline = _isUpgradeEditor ? GetUpgradeBaseline() : null;
+		CardUpgradeOverride? storedUpgrade = _isUpgradeEditor ? GetEffectivePopupUpgradeOverride() : null;
+		IEnumerable<KeyValuePair<string, decimal>> dynamicKeys = _previewCard.DynamicVars
+			.OrderBy(p => p.Key)
+			.Select(p => new KeyValuePair<string, decimal>(p.Key, p.Value.BaseValue));
+		if (_isUpgradeEditor && upgradeBaseline != null)
+		{
+			dynamicKeys = upgradeBaseline.BaseVars.OrderBy(p => p.Key);
+		}
+
+		foreach ((string key, decimal baseValue) in dynamicKeys)
+		{
+			HBoxContainer row = new HBoxContainer();
+			row.AddThemeConstantOverride("separation", 10);
+			Label name = new Label { Text = key, CustomMinimumSize = new Vector2(_labelWidth, 0) };
+			StyleBodyLabel(name);
+
+			string fieldText = baseValue.ToString(CultureInfo.InvariantCulture);
+			if (_isUpgradeEditor && upgradeBaseline != null)
+			{
+				decimal vanillaDelta = upgradeBaseline.VanillaVarDeltas.TryGetValue(key, out decimal delta) ? delta : 0m;
+				decimal desiredDelta = vanillaDelta;
+				if (storedUpgrade?.DynamicVarDeltas != null && storedUpgrade.DynamicVarDeltas.TryGetValue(key, out decimal overriddenDelta))
+				{
+					desiredDelta = overriddenDelta;
+				}
+				fieldText = desiredDelta.ToString(CultureInfo.InvariantCulture);
+			}
+
+			NMegaLineEdit field = new NMegaLineEdit
+			{
+				Text = fieldText,
+				SizeFlagsHorizontal = Control.SizeFlags.Fill,
+				CustomMinimumSize = _numericFieldMinSize
+			};
+			StyleInput(field);
+			field.TextChanged += _ => QueuePreviewUpdate();
+			_dynamicFields[key] = field;
+			Control spinButtons = CreateSpinButtons(field, step: 1m, minValue: null, maxValue: null);
+			row.AddChild(name);
+			row.AddChild(spinButtons);
+			row.AddChild(field);
+			row.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+			_dynamicRowsContainer.AddChild(row);
+		}
+	}
+
+	private void RebuildSharedVanillaDynamicSectionsForCurrentCard()
+	{
+		if (_isCreatedCard || _isUpgradeEditor)
+		{
+			return;
+		}
+
+		ResetVanillaDynamicSectionFields();
+
+		if (_vanillaEffectsContainer != null && GodotObject.IsInstanceValid(_vanillaEffectsContainer))
+		{
+			RemoveChildrenSafely(_vanillaEffectsContainer);
+			BuildVanillaEffectsUi(_vanillaEffectsContainer);
+		}
+
+		if (_cardSpecificNumbersContainer != null && GodotObject.IsInstanceValid(_cardSpecificNumbersContainer))
+		{
+			RemoveChildrenSafely(_cardSpecificNumbersContainer);
+			_hardcodedPowerAmountFields.Clear();
+			_hardcodedPowerAmountDefaults.Clear();
+			BuildCardSpecificNumberRows(_cardSpecificNumbersContainer);
+		}
+
+		RebuildSharedDynamicRowsForCurrentCard();
+	}
+
+	private void ResetVanillaDynamicSectionFields()
+	{
+		_sealedThroneStarsGainedField = null;
+		_drawCostReductionField = null;
+		_resonanceEnemyStrengthLossField = null;
+		_handDiscardCountField = null;
+		_retainHandTurnsField = null;
+		_noDrawDurationSelect = null;
+		_noDrawTurnsField = null;
+		_noDrawTurnsRow = null;
+		_conquerorDurationSelect = null;
+		_conquerorTurnsField = null;
+		_conquerorTurnsRow = null;
+		_reflectDurationSelect = null;
+		_reflectTurnsField = null;
+		_reflectTurnsRow = null;
+		_slyGrantDurationSelect = null;
+		_slyGrantTurnsField = null;
+		_slyGrantTurnsRow = null;
+		_tempStrengthDurationSelect = null;
+		_tempStrengthTurnsField = null;
+		_tempStrengthTurnsRow = null;
+		_tempDexterityDurationSelect = null;
+		_tempDexterityTurnsField = null;
+		_tempDexterityTurnsRow = null;
+		_tempFocusDurationSelect = null;
+		_tempFocusTurnsField = null;
+		_tempFocusTurnsRow = null;
+	}
+
+	private void BuildCardSpecificNumberRows(VBoxContainer rightColumn)
+	{
+		if (_isUpgradeEditor || _isCreatedCard || rightColumn == null)
+		{
+			return;
+		}
+
+		if (_cardId == ModelDb.GetId<TheSealedThrone>())
+		{
+			ModelId powerId = ModelDb.GetId<TheSealedThronePower>();
+			decimal starsGained = 1m;
+			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride)
+				&& existingOverride.PowerAmounts != null
+				&& existingOverride.PowerAmounts.TryGetValue(powerId, out decimal overriddenAmount))
+			{
+				starsGained = overriddenAmount;
+			}
+			rightColumn.AddChild(CreateNumericRow(
+				CardEditorLoc.T("field.starsGained", "Stars Gained"),
+				((int)starsGained).ToString(CultureInfo.InvariantCulture),
+				out LineEdit starsField,
+				minValue: 0,
+				maxValue: 99,
+				onChanged: QueuePreviewUpdate));
+			_sealedThroneStarsGainedField = starsField;
+		}
+
+		if (_cardId == ModelDb.GetId<KinglyKick>())
+		{
+			int reduction = 1;
+			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride) && existingOverride.DrawCostReduction.HasValue)
+			{
+				reduction = Math.Max(0, existingOverride.DrawCostReduction.Value);
+			}
+			rightColumn.AddChild(CreateNumericRow(
+				CardEditorLoc.T("field.costReductionOnDraw", "Cost Reduction on Draw"),
+				reduction.ToString(CultureInfo.InvariantCulture),
+				out LineEdit reductionField,
+				minValue: 0,
+				maxValue: 99,
+				onChanged: QueuePreviewUpdate));
+			_drawCostReductionField = reductionField;
+		}
+
+		if (_cardId == ModelDb.GetId<Resonance>())
+		{
+			int loss = 1;
+			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride)
+				&& existingOverride.DynamicVarBaseValues != null
+				&& existingOverride.DynamicVarBaseValues.TryGetValue(CardEditorOverrideKeys.ResonanceEnemyStrengthLoss, out decimal overriddenLoss))
+			{
+				loss = Math.Clamp((int)overriddenLoss, 0, 99);
+			}
+			rightColumn.AddChild(CreateNumericRow(
+				CardEditorLoc.T("field.enemyStrengthLoss", "Enemy Strength Loss"),
+				loss.ToString(CultureInfo.InvariantCulture),
+				out LineEdit lossField,
+				minValue: 0,
+				maxValue: 99,
+				onChanged: QueuePreviewUpdate));
+			_resonanceEnemyStrengthLossField = lossField;
+		}
+
+		if (CardEditorTargetedDiscardSupport.IsSupportedCard(_cardId))
+		{
+			int discardCount = 1;
+			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride) && existingOverride.HandDiscardCount.HasValue)
+			{
+				discardCount = existingOverride.HandDiscardCount.Value;
+			}
+			discardCount = Math.Clamp(discardCount, 0, 99);
+
+			HBoxContainer discardRow = CreateNumericRow(
+				CardEditorLoc.T("field.discardCount", "Discard"),
+				discardCount.ToString(CultureInfo.InvariantCulture),
+				out LineEdit discardField,
+				minValue: 0,
+				maxValue: 99,
+				onChanged: QueuePreviewUpdate);
+			discardField.TooltipText = CardEditorLoc.T("tooltip.discardCountOverride", "Overrides how many cards this card makes you discard from hand.");
+			rightColumn.AddChild(discardRow);
+			_handDiscardCountField = discardField;
+		}
+
+		BuildHardcodedPowerAmountsUi(rightColumn);
+	}
+
+	private void RequeueExistingExtraEffectRowsForCurrentCard()
+	{
+		ClearExtraEffectRowsForSharedRetarget();
+		if (TryAttachLocalizedSharedCreatedRowsFromCache(allowAttachDuringOpen: false))
+		{
+			return;
+		}
+
+		QueueExistingExtraEffectRowsForCurrentCard();
+
+		if (_pendingExistingExtraEffectRows.Count == 0)
+		{
+			FinalizeExtraEffectRowStructureRefresh();
+			return;
+		}
+
+		RefreshEffectSummaryList();
+		EnsureExistingExtraEffectLoadingLabels();
+		UpdateExtraEffectHydrationUiState();
+		if (ShouldDeferLocalizedSharedCreatedRowsUntilInteraction())
+		{
+			PopupLagLog($"LocalizedSharedRows DEFER card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} pendingRows={_pendingExistingExtraEffectRows.Count}");
+			return;
+		}
+
+		EnsurePendingExistingExtraEffectRowsHydrationScheduled();
+	}
+
+	private bool ShouldDeferLocalizedSharedCreatedRowsUntilInteraction()
+	{
+		return CardEditorPerformanceSettings.IncrementalPopupHydrationOnOpen
+			&& !_manualPrebuiltPopupWarmupHydration
+			&& _isPersistentPopupCacheEntry
+			&& ShouldUseLocalizedSharedCreatedPopup(_cardId)
+			&& _pendingExistingExtraEffectRows.Count > 0;
+	}
+
+	private bool ShouldCacheLocalizedSharedCreatedRows()
+	{
+		return _isPersistentPopupCacheEntry
+			&& ShouldUseLocalizedSharedCreatedPopup(_cardId)
+			&& _extraEffectsContainer != null
+			&& GodotObject.IsInstanceValid(_extraEffectsContainer);
+	}
+
+	private static string GetLocalizedSharedCreatedRowsRevisionKey()
+	{
+		return $"{CardEditorOverrides.Revision}|{CardEditorCreatedCardsStore.Revision}";
+	}
+
+	private void EnsureLocalizedSharedCreatedRowsCacheRevisionFresh()
+	{
+		string revisionKey = GetLocalizedSharedCreatedRowsRevisionKey();
+		if (string.Equals(_localizedSharedCreatedRowsCacheRevisionKey, revisionKey, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		ClearLocalizedSharedCreatedRowsCache();
+		_localizedSharedCreatedRowsCacheRevisionKey = revisionKey;
+	}
+
+	private string GetLocalizedSharedCreatedRowsCacheKey(ModelId cardId, bool isUpgradeEditor)
+	{
+		return $"{cardId}|{(isUpgradeEditor ? "upgrade" : "base")}|rev:{GetLocalizedSharedCreatedRowsRevisionKey()}";
+	}
+
+	private void StashCurrentLocalizedSharedCreatedRowsForRetarget()
+	{
+		if (!ShouldCacheLocalizedSharedCreatedRows())
+		{
+			return;
+		}
+
+		EnsureLocalizedSharedCreatedRowsCacheRevisionFresh();
+
+		if (_uiDirtySinceOpen
+			|| _pendingExistingExtraEffectRows.Count > 0
+			|| _existingExtraEffectHydrating
+			|| _extraEffectRows.Count == 0)
+		{
+			return;
+		}
+
+		string cacheKey = GetLocalizedSharedCreatedRowsCacheKey(_cardId, _isUpgradeEditor);
+		LocalizedSharedCreatedRowsCacheEntry entry = new LocalizedSharedCreatedRowsCacheEntry
+		{
+			Rows = _extraEffectRows.ToList(),
+			CardIdText = _cardId.ToString(),
+			IsUpgradeEditor = _isUpgradeEditor
+		};
+
+		foreach (ExtraEffectRow row in entry.Rows)
+		{
+			DetachExtraEffectRowForCache(row);
+		}
+		_extraEffectRows.Clear();
+		RemoveChildrenSafely(_effectSummaryContainer);
+
+		if (_localizedSharedCreatedRowsCache.TryGetValue(cacheKey, out LocalizedSharedCreatedRowsCacheEntry? oldEntry)
+			&& oldEntry != null
+			&& !ReferenceEquals(oldEntry, entry))
+		{
+			FreeLocalizedSharedCreatedRowsCacheEntry(oldEntry);
+		}
+		_localizedSharedCreatedRowsCache[cacheKey] = entry;
+		PopupLagLog($"LocalizedSharedRows STASH card={entry.CardIdText} mode={(entry.IsUpgradeEditor ? "upgrade" : "base")} rows={entry.Rows.Count} cacheSize={_localizedSharedCreatedRowsCache.Count}");
+	}
+
+	private bool TryAttachLocalizedSharedCreatedRowsFromCache(bool allowAttachDuringOpen)
+	{
+		if (!ShouldCacheLocalizedSharedCreatedRows())
+		{
+			return false;
+		}
+
+		EnsureLocalizedSharedCreatedRowsCacheRevisionFresh();
+		string cacheKey = GetLocalizedSharedCreatedRowsCacheKey(_cardId, _isUpgradeEditor);
+		if (!_localizedSharedCreatedRowsCache.TryGetValue(cacheKey, out LocalizedSharedCreatedRowsCacheEntry? entry)
+			|| entry == null)
+		{
+			PopupLagLog($"LocalizedSharedRows MISS card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} rowCache={_localizedSharedCreatedRowsCache.Count}");
+			return false;
+		}
+
+		if (!allowAttachDuringOpen)
+		{
+			PopupLagLog($"LocalizedSharedRows CACHE_DEFER card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} rows={entry.Rows.Count} rowCache={_localizedSharedCreatedRowsCache.Count}");
+			return false;
+		}
+
+		_localizedSharedCreatedRowsCache.Remove(cacheKey);
+		_pendingExistingExtraEffectRows.Clear();
+		_pendingExtraEffectPanelAttachments.Clear();
+		_pendingExistingExtraEffectRowTotal = entry.Rows.Count;
+		_pendingExistingExtraEffectRowBuilt = entry.Rows.Count;
+		_existingExtraEffectHydrationScheduled = false;
+		_existingExtraEffectHydrating = false;
+		_bulkInitializingExtraEffectRows = false;
+		ClearExistingExtraEffectLoadingLabels();
+		RemoveChildrenSafely(_extraEffectsContainer);
+		RemoveChildrenSafely(_effectSummaryContainer);
+		_extraEffectRows.Clear();
+
+		foreach (ExtraEffectRow row in entry.Rows)
+		{
+			if (row.Container == null || !GodotObject.IsInstanceValid(row.Container))
+			{
+				continue;
+			}
+
+			if (row.Container.GetParent() is Node parent)
+			{
+				parent.RemoveChild(row.Container);
+			}
+			_extraEffectsContainer.AddChild(row.Container);
+			_extraEffectRows.Add(row);
+		}
+
+		UpdateExtraEffectReorderButtons();
+		RefreshEffectSummaryList();
+		UpdateExtraEffectHydrationUiState();
+		PopupLagLog($"LocalizedSharedRows HIT card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} rows={_extraEffectRows.Count} rowCache={_localizedSharedCreatedRowsCache.Count}");
+		return true;
+	}
+
+	private static void DetachExtraEffectRowForCache(ExtraEffectRow row)
+	{
+		if (row.Container != null
+			&& GodotObject.IsInstanceValid(row.Container)
+			&& row.Container.GetParent() is Node containerParent)
+		{
+			containerParent.RemoveChild(row.Container);
+		}
+
+		if (row.SummaryPanel != null
+			&& GodotObject.IsInstanceValid(row.SummaryPanel)
+			&& row.SummaryPanel.GetParent() is Node summaryParent)
+		{
+			summaryParent.RemoveChild(row.SummaryPanel);
+		}
+	}
+
+	private static void FreeLocalizedSharedCreatedRowsCacheEntry(LocalizedSharedCreatedRowsCacheEntry entry)
+	{
+		foreach (ExtraEffectRow row in entry.Rows)
+		{
+			if (row.SummaryPanel != null && GodotObject.IsInstanceValid(row.SummaryPanel))
+			{
+				if (row.SummaryPanel.GetParent() is Node summaryParent)
+				{
+					summaryParent.RemoveChild(row.SummaryPanel);
+				}
+				row.SummaryPanel.QueueFreeSafely();
+			}
+			if (row.Container != null && GodotObject.IsInstanceValid(row.Container))
+			{
+				if (row.Container.GetParent() is Node containerParent)
+				{
+					containerParent.RemoveChild(row.Container);
+				}
+				row.Container.QueueFreeSafely();
+			}
+		}
+		entry.Rows.Clear();
+	}
+
+	private void ClearLocalizedSharedCreatedRowsCache()
+	{
+		foreach (LocalizedSharedCreatedRowsCacheEntry entry in _localizedSharedCreatedRowsCache.Values.ToList())
+		{
+			FreeLocalizedSharedCreatedRowsCacheEntry(entry);
+		}
+		_localizedSharedCreatedRowsCache.Clear();
+	}
+
+	private void ClearExtraEffectRowsForSharedRetarget()
+	{
+		_existingExtraEffectHydrationScheduled = false;
+		_existingExtraEffectHydrating = false;
+		_pendingExistingExtraEffectRows.Clear();
+		_pendingExtraEffectPanelAttachments.Clear();
+		_pendingExistingExtraEffectRowTotal = 0;
+		_pendingExistingExtraEffectRowBuilt = 0;
+		_bulkInitializingExtraEffectRows = false;
+		ClearExistingExtraEffectLoadingLabels();
+
+		RemoveChildrenSafely(_extraEffectsContainer);
+		RemoveChildrenSafely(_effectSummaryContainer);
+		_extraEffectRows.Clear();
+	}
+
+	private void QueueExistingExtraEffectRowsForCurrentCard()
+	{
+		CardOverride? effectiveBase = GetEffectivePopupOverride();
+		List<CardExtraEffect>? baseEffects = effectiveBase?.ExtraEffects;
+		List<CardExtraEffect>? upgradeEffects = effectiveBase?.Upgrade?.ExtraEffects;
+
+		if (_isUpgradeEditor)
+		{
+			if (baseEffects != null && baseEffects.Count > 0)
+			{
+				bool numericFieldsAreDeltas = effectiveBase?.Upgrade?.ExtraEffectNumericFieldsAreDeltas ?? false;
+				(CardExtraEffect?[] alignedUpgradeEffects, List<CardExtraEffect> absoluteUpgradeEffects) = upgradeEffects != null
+					? CardEditorExtraEffects.AlignUpgradeEffectsForEditor(baseEffects, upgradeEffects)
+					: (new CardExtraEffect?[baseEffects.Count], new List<CardExtraEffect>());
+				int baseCount = baseEffects.Count;
+				for (int i = 0; i < baseCount; i++)
+				{
+					CardExtraEffect baseEffect = baseEffects[i];
+					CardExtraEffect? upgradeEffect = i < alignedUpgradeEffects.Length ? alignedUpgradeEffects[i] : null;
+					CardExtraEffect displayEffect = BuildUpgradeDeltaRowEffect(baseEffect, upgradeEffect, numericFieldsAreDeltas);
+					CardEditorUpgradeDeltaDebugLog.LogUpgradeEditorRow(
+						"UpgradeEditor.HydrateDeltaRow",
+						_cardId.ToString(),
+						i,
+						baseEffect,
+						upgradeEffect,
+						displayEffect,
+						numericFieldsAreDeltas);
+
+					QueueExistingExtraEffectRowForHydration(displayEffect, isUpgradeDeltaRow: true);
+				}
+
+				foreach (CardExtraEffect upgradeEffect in absoluteUpgradeEffects)
+				{
+					QueueExistingExtraEffectRowForHydration(upgradeEffect);
+				}
+			}
+			else if (upgradeEffects != null && upgradeEffects.Count > 0)
+			{
+				foreach (CardExtraEffect? effect in upgradeEffects)
+				{
+					CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+					if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
+					{
+						QueueExistingExtraEffectRowForHydration(normalizedEffect);
+					}
+				}
+			}
+			return;
+		}
+
+		(List<CardExtraEffect> legacyBefore, List<CardExtraEffect> legacyAfter) = BuildLegacyCreatedCardEffectSourceExtraEffects(baseEffects);
+		foreach (CardExtraEffect effect in legacyBefore)
+		{
+			QueueExistingExtraEffectRowForHydration(effect);
+		}
+
+		if (baseEffects != null && baseEffects.Count > 0)
+		{
+			foreach (CardExtraEffect effect in baseEffects)
+			{
+				CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+				if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
+				{
+					QueueExistingExtraEffectRowForHydration(normalizedEffect);
+				}
+			}
+		}
+
+		foreach (CardExtraEffect effect in legacyAfter)
+		{
+			QueueExistingExtraEffectRowForHydration(effect);
+		}
+	}
+
+	private void SelectCardType(CardType type)
+	{
+		int index = _cardTypes.IndexOf(type);
+		if (index < 0)
+		{
+			index = _cardTypes.IndexOf(CardType.Attack);
+			if (index < 0)
+			{
+				index = 0;
+			}
+		}
+		SelectOptionIndex(_cardTypeSelect, index);
+	}
+
+	private static void SelectModelIdOption(OptionButton? select, List<ModelId?> ids, ModelId? selectedId)
+	{
+		int index = ids.FindIndex(id => id == selectedId);
+		if (index < 0)
+		{
+			index = 0;
+		}
+		SelectOptionIndex(select, index);
+	}
+
+	private static void SelectOptionByValue<T>(OptionButton? select, List<T> options, T value)
+	{
+		int index = options.IndexOf(value);
+		SelectOptionIndex(select, index >= 0 ? index : 0);
+	}
+
+	private static void SelectOptionByValue(OptionButton? select, List<string> options, string value, StringComparer comparer)
+	{
+		int index = options.FindIndex(option => comparer.Equals(option, value));
+		SelectOptionIndex(select, index >= 0 ? index : 0);
+	}
+
+	private static void SelectOptionIndex(OptionButton? select, int index)
+	{
+		if (select == null || !GodotObject.IsInstanceValid(select) || select.ItemCount <= 0)
+		{
+			return;
+		}
+		select.Select(Math.Clamp(index, 0, select.ItemCount - 1));
+	}
+
+	private static void SetTickboxSilent(KeywordTickbox? tickbox, bool value)
+	{
+		if (tickbox == null || !GodotObject.IsInstanceValid(tickbox))
+		{
+			return;
+		}
+		tickbox.SetTickedSilent(value);
+	}
+
+	private static void SetLineEditText(LineEdit? field, string value)
+	{
+		if (field == null || !GodotObject.IsInstanceValid(field))
+		{
+			return;
+		}
+		field.Text = value ?? string.Empty;
+	}
+
+	private void SetLineEditEnabled(LineEdit? field, bool enabled)
+	{
+		if (field == null || !GodotObject.IsInstanceValid(field))
+		{
+			return;
+		}
+		field.Editable = enabled;
+		SetSpinEnabled(field, enabled);
+		field.SelfModulate = enabled ? Colors.White : StsColors.gray;
+	}
+
+	private static void RemoveChildrenSafely(Node? container, Node? except = null)
+	{
+		if (container == null || !GodotObject.IsInstanceValid(container))
+		{
+			return;
+		}
+
+		foreach (Node child in container.GetChildren().ToList())
+		{
+			if (except != null && child == except)
+			{
+				continue;
+			}
+
+			container.RemoveChild(child);
+			child.QueueFreeSafely();
+		}
+	}
+
+	private void ResetLocalizedSharedCreatedPopupUiForRebuild()
+	{
+		ReleasePreviewNodeResources();
+		ClearLocalizedSharedCreatedRowsCache();
+
+		foreach (Node child in GetChildren().ToList())
+		{
+			RemoveChild(child);
+			child.QueueFreeSafely();
+		}
+
+		_uiBuilt = false;
+		_layoutQueued = false;
+		_previewReadyConnected = false;
+		_previewLayoutQueued = false;
+		_previewUpdateQueued = false;
+		_existingExtraEffectHydrationScheduled = false;
+		_existingExtraEffectHydrating = false;
+		_createdEffectValueRowsPending = false;
+		_createdEffectValueRowsScheduled = false;
+		_createdEffectSourceNumbersKey = string.Empty;
+		_effectSourceDynamicVarKey = string.Empty;
+		_createdEffectSourceIds.Clear();
+		_createdPoolOptions.Clear();
+		_createdRarityOptions.Clear();
+		_createdTargetOptions.Clear();
+		_createdPortraitSourceOptions.Clear();
+		_createdPortraitSourceCatalog.Clear();
+		_createdEffectSourceOrderOptions.Clear();
+		_createdFinishOptions.Clear();
+		_createdFinishParams.Clear();
+		_createdFinishSliders.Clear();
+		_createdFinishValueLabels.Clear();
+		_createdRewardBucketOptions.Clear();
+		_createdRewardInjectionModeOptions.Clear();
+		_createdRewardPoolChecks.Clear();
+		_createdRewardPoolSelectedIds.Clear();
+		_effectSourceDynamicVarRowControls.Clear();
+		_effectSourceSpecialNumberRowControls.Clear();
+		_effectSourceSpecialNumberFields.Clear();
+		_effectSourceSpecialNumberDefaults.Clear();
+		_cardTypes.Clear();
+		_targetTypeOptions.Clear();
+		_vanillaFinishOptions.Clear();
+		_vanillaPoolOptions.Clear();
+		_vanillaRarityOptions.Clear();
+		_vanillaPortraitSourceOptions.Clear();
+		_vanillaPortraitSourceCatalog.Clear();
+		_vanillaFinishParams.Clear();
+		_vanillaFinishSliders.Clear();
+		_vanillaFinishValueLabels.Clear();
+		_enchantmentIds.Clear();
+		_afflictionIds.Clear();
+		_powerIds.Clear();
+		_powerIdTexts.Clear();
+		_powerLabels.Clear();
+		_keywordChecks.Clear();
+		_tagChecks.Clear();
+		_customTags.Clear();
+		_dynamicFields.Clear();
+		_hardcodedPowerAmountFields.Clear();
+		_hardcodedPowerAmountDefaults.Clear();
+		_spinButtons.Clear();
+		_extraEffectRows.Clear();
+		_localizedSharedCreatedRowsCacheRevisionKey = string.Empty;
+		_cardSmithRows.Clear();
+		_pendingExistingExtraEffectRows.Clear();
+		_pendingExtraEffectPanelAttachments.Clear();
+		_extraEffectHydrationButtons.Clear();
+		_pendingExistingExtraEffectRowTotal = 0;
+		_pendingExistingExtraEffectRowBuilt = 0;
+		_bulkInitializingExtraEffectRows = false;
+
+		_panel = null!;
+		_cardPreviewViewport = null;
+		_cardPreviewNode = null;
+		_specificCardPickerOverlay = null;
+		_specificPotionPickerOverlay = null;
+		_keywordPickerOverlay = null;
+		_rewardPoolPickerOverlay = null;
+		_cardNameLabel = null;
+		_targetTypeSelect = null;
+		_starCostField = null;
+		_energyCostXTickbox = null;
+		_starCostXTickbox = null;
+		_vanillaEffectsContainer = null;
+		_cardSpecificNumbersContainer = null;
+		_dynamicRowsContainer = null;
+		_defaultFocus = null;
+		_createdEnabledTickbox = null;
+		_createdTitleField = null;
+		_createdPoolSelect = null;
+		_createdRaritySelect = null;
+		_createdTargetSelect = null;
+		_createdArtSearchField = null;
+		_createdPortraitSourceSelect = null;
+		_createdEffectSourceListContainer = null;
+		_createdEffectSourceOrderSelect = null;
+		_createdEffectValueContainer = null;
+		_createdEffectValueLoadingLabel = null;
+		_effectSourceDynamicVarLabel = null;
+		_effectSourceDynamicVarContainer = null;
+		_createdFullArtTickbox = null;
+		_createdFinishSelect = null;
+		_createdFinishEditorButton = null;
+		_createdFinishEditorContainer = null;
+		_createdCustomTextTickbox = null;
+		_createdCustomTextField = null;
+		_createdCustomTextUpgradedTickbox = null;
+		_createdCustomTextUpgradedField = null;
+		_createdCustomRewardPoolsTickbox = null;
+		_createdRewardBucketSelect = null;
+		_createdRewardInjectionModeSelect = null;
+		_createdRewardPoolPickerButton = null;
+		_vanillaEnabledTickbox = null;
+		_vanillaTitleField = null;
+		_vanillaFullArtTickbox = null;
+		_vanillaFinishSelect = null;
+		_vanillaFinishEditorButton = null;
+		_vanillaFinishEditorContainer = null;
+		_vanillaPoolSelect = null;
+		_vanillaRaritySelect = null;
+		_vanillaArtSearchField = null;
+		_vanillaPortraitSourceSelect = null;
+		_vanillaModifiedBaseTextTickbox = null;
+		_vanillaModifiedBaseTextField = null;
+		_vanillaModifiedBaseTextUpgradedTickbox = null;
+		_vanillaModifiedBaseTextUpgradedField = null;
+		_endlessUpgradesTickbox = null;
+		ResetVanillaDynamicSectionFields();
 	}
 
 	private void PreparePrebuiltPopupForOpen(Action onApplied, bool useModalContainer, Vector2? preferredPanelSize)
@@ -1659,6 +3267,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	{
 		_existingExtraEffectHydrationScheduled = false;
 		_existingExtraEffectHydrating = false;
+		ClearLocalizedSharedCreatedRowsCache();
 		DisconnectWindowSizeSignal();
 		StopSpinHold();
 	}
@@ -2072,7 +3681,18 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 
 		ulong vanillaEffectsStartMs = Time.GetTicksMsec();
-		BuildVanillaEffectsUi(rightColumn);
+		if (ShouldUseLocalizedSharedVanillaPopup(_cardId) && !_isUpgradeEditor)
+		{
+			_vanillaEffectsContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+			_vanillaEffectsContainer.AddThemeConstantOverride("separation", 10);
+			rightColumn.AddChild(_vanillaEffectsContainer);
+			BuildVanillaEffectsUi(_vanillaEffectsContainer);
+		}
+		else
+		{
+			_vanillaEffectsContainer = null;
+			BuildVanillaEffectsUi(rightColumn);
+		}
 		vanillaEffectsMs = (long)(Time.GetTicksMsec() - vanillaEffectsStartMs);
 		ulong extraEffectsStartMs = Time.GetTicksMsec();
 		BuildExtraEffectsUi(rightColumn);
@@ -2086,83 +3706,6 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		};
 		StyleSectionLabel(varLabel);
 		rightColumn.AddChild(varLabel);
-
-		if (!_isUpgradeEditor && _cardId == ModelDb.GetId<TheSealedThrone>())
-		{
-			ModelId powerId = ModelDb.GetId<TheSealedThronePower>();
-			decimal starsGained = 1m;
-			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride)
-				&& existingOverride.PowerAmounts != null
-				&& existingOverride.PowerAmounts.TryGetValue(powerId, out decimal overriddenAmount))
-			{
-				starsGained = overriddenAmount;
-			}
-			rightColumn.AddChild(CreateNumericRow(
-				CardEditorLoc.T("field.starsGained", "Stars Gained"),
-				((int)starsGained).ToString(CultureInfo.InvariantCulture),
-				out LineEdit starsField,
-				minValue: 0,
-				maxValue: 99,
-				onChanged: QueuePreviewUpdate));
-			_sealedThroneStarsGainedField = starsField;
-		}
-
-		if (!_isUpgradeEditor && _cardId == ModelDb.GetId<KinglyKick>())
-		{
-			int reduction = 1;
-			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride) && existingOverride.DrawCostReduction.HasValue)
-			{
-				reduction = Math.Max(0, existingOverride.DrawCostReduction.Value);
-			}
-			rightColumn.AddChild(CreateNumericRow(
-				CardEditorLoc.T("field.costReductionOnDraw", "Cost Reduction on Draw"),
-				reduction.ToString(CultureInfo.InvariantCulture),
-				out LineEdit reductionField,
-				minValue: 0,
-				maxValue: 99,
-				onChanged: QueuePreviewUpdate));
-			_drawCostReductionField = reductionField;
-		}
-
-		if (!_isUpgradeEditor && _cardId == ModelDb.GetId<Resonance>())
-		{
-			int loss = 1;
-			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride)
-				&& existingOverride.DynamicVarBaseValues != null
-				&& existingOverride.DynamicVarBaseValues.TryGetValue(CardEditorOverrideKeys.ResonanceEnemyStrengthLoss, out decimal overriddenLoss))
-			{
-				loss = Math.Clamp((int)overriddenLoss, 0, 99);
-			}
-			rightColumn.AddChild(CreateNumericRow(
-				CardEditorLoc.T("field.enemyStrengthLoss", "Enemy Strength Loss"),
-				loss.ToString(CultureInfo.InvariantCulture),
-				out LineEdit lossField,
-				minValue: 0,
-				maxValue: 99,
-				onChanged: QueuePreviewUpdate));
-			_resonanceEnemyStrengthLossField = lossField;
-		}
-
-		if (!_isUpgradeEditor && !_isCreatedCard && CardEditorTargetedDiscardSupport.IsSupportedCard(_cardId))
-		{
-			int discardCount = 1;
-			if (CardEditorOverrides.TryGet(_cardId, out CardOverride existingOverride) && existingOverride.HandDiscardCount.HasValue)
-			{
-				discardCount = existingOverride.HandDiscardCount.Value;
-			}
-			discardCount = Math.Clamp(discardCount, 0, 99);
-
-			HBoxContainer discardRow = CreateNumericRow(
-				CardEditorLoc.T("field.discardCount", "Discard"),
-				discardCount.ToString(CultureInfo.InvariantCulture),
-				out LineEdit discardField,
-				minValue: 0,
-				maxValue: 99,
-				onChanged: QueuePreviewUpdate);
-			discardField.TooltipText = CardEditorLoc.T("tooltip.discardCountOverride", "Overrides how many cards this card makes you discard from hand.");
-			rightColumn.AddChild(discardRow);
-			_handDiscardCountField = discardField;
-		}
 
 		if (_isCreatedCard && !_isUpgradeEditor)
 		{
@@ -2179,7 +3722,27 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			if (!_isUpgradeEditor)
 			{
-				BuildHardcodedPowerAmountsUi(rightColumn);
+				if (ShouldUseLocalizedSharedVanillaPopup(_cardId))
+				{
+					_cardSpecificNumbersContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+					_cardSpecificNumbersContainer.AddThemeConstantOverride("separation", 10);
+					rightColumn.AddChild(_cardSpecificNumbersContainer);
+					BuildCardSpecificNumberRows(_cardSpecificNumbersContainer);
+				}
+				else
+				{
+					_cardSpecificNumbersContainer = null;
+					BuildCardSpecificNumberRows(rightColumn);
+				}
+			}
+
+			bool useSharedDynamicRowsContainer = ShouldUseLocalizedSharedPopup(_cardId);
+			_dynamicRowsContainer = null;
+			if (useSharedDynamicRowsContainer)
+			{
+				_dynamicRowsContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+				_dynamicRowsContainer.AddThemeConstantOverride("separation", 10);
+				rightColumn.AddChild(_dynamicRowsContainer);
 			}
 
 			Label effectSourceLabel = new Label { Text = CardEditorLoc.T("effectSourceNumbers.label", "Effect Source Numbers") };
@@ -2235,7 +3798,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 				row.AddChild(spinButtons);
 				row.AddChild(field);
 				row.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
-				rightColumn.AddChild(row);
+				if (_dynamicRowsContainer != null)
+				{
+					_dynamicRowsContainer.AddChild(row);
+				}
+				else
+				{
+					rightColumn.AddChild(row);
+				}
 			}
 		}
 
@@ -2330,6 +3900,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			_suppressPreviewUpdate = false;
 			ulong buildElapsedMs = Time.GetTicksMsec() - buildStartMs;
 			PerfLog($"[CardEditor][Perf] PopupBuildUi card={_cardId} totalMs={buildElapsedMs} createdMetaMs={createdMetaMs} vanillaEffectsMs={vanillaEffectsMs} extraEffectsMs={extraEffectsMs} extraEffectRows={_extraEffectRows.Count} createdValueRowsPending={_createdEffectValueRowsPending}");
+			if (buildElapsedMs >= 25)
+			{
+				PopupLagLog($"BuildUi card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} totalMs={buildElapsedMs} createdMetaMs={createdMetaMs} vanillaEffectsMs={vanillaEffectsMs} extraEffectsMs={extraEffectsMs} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending}");
+			}
 		}
 	}
 
@@ -3147,6 +4721,13 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public CardExtraEffect Effect { get; init; } = null!;
 		public bool IsUpgradeDeltaRow { get; init; }
 		public Control? PlaceholderPanel { get; init; }
+	}
+
+	private sealed class LocalizedSharedCreatedRowsCacheEntry
+	{
+		public List<ExtraEffectRow> Rows { get; init; } = new();
+		public string CardIdText { get; init; } = string.Empty;
+		public bool IsUpgradeEditor { get; init; }
 	}
 
 	private sealed class CardSmithRow
@@ -6501,26 +8082,6 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		BuildCosmeticSelectorRows(rightColumn, existing);
 
 		_vanillaPortraitSourceCatalog.Clear();
-		foreach (CardModel card in ModelDb.AllCards)
-		{
-			if (card == null || card.Id == null)
-			{
-				continue;
-			}
-			if (card.Id == _cardId)
-			{
-				continue;
-			}
-			string label = $"{card.Title} ({ToDisplayTitle(card.Pool.Title)})";
-			_vanillaPortraitSourceCatalog.Add((card.Id, null, label));
-		}
-		foreach (string file in CardEditorCreatedCardsStore.ListCustomPortraitFiles())
-		{
-			string prefix = CardEditorLoc.T("value.customPrefix", "Custom");
-			string shortFile = file.Length > 30 ? file[..30] + "\u2026" : file;
-			_vanillaPortraitSourceCatalog.Add((null, file, $"{prefix}: {shortFile}"));
-		}
-		_vanillaPortraitSourceCatalog.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
 
 		rightColumn.AddChild(CreateBoundedTextRow(CardEditorLoc.T("field.artSearch", "Art Search"), _cosmeticTextWidth, string.Empty, out LineEdit artSearchField, OnVanillaArtSearchChanged));
 		_vanillaArtSearchField = artSearchField;
@@ -6711,14 +8272,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
+		ulong startMs = Time.GetTicksMsec();
 		string trimmed = query?.Trim() ?? string.Empty;
 		List<(ModelId? CardId, string? CustomFile, string Label)> filtered;
 		if (string.IsNullOrWhiteSpace(trimmed))
 		{
+			filtered = new List<(ModelId? CardId, string? CustomFile, string Label)>();
+		}
+		else if (trimmed == "*")
+		{
+			EnsureVanillaPortraitCatalogForCurrentCard();
 			filtered = _vanillaPortraitSourceCatalog.ToList();
 		}
 		else
 		{
+			EnsureVanillaPortraitCatalogForCurrentCard();
 			filtered = _vanillaPortraitSourceCatalog
 				.Where(item => item.Label.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
 				.ToList();
@@ -6736,6 +8304,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (index >= 0)
 			{
 				filtered.Insert(0, _vanillaPortraitSourceCatalog[index]);
+			}
+			else
+			{
+				filtered.Insert(0, (selectionToKeep.CardId, selectionToKeep.CustomFile, BuildPortraitSourceLabel(selectionToKeep.CardId, selectionToKeep.CustomFile)));
 			}
 		}
 
@@ -6769,6 +8341,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			_suppressPreviewUpdate = prevSuppress;
 		}
+
+		ulong elapsedMs = Time.GetTicksMsec() - startMs;
+		if (elapsedMs >= 25)
+		{
+			PopupLagLog($"VanillaArtDropdown rebuilt card={_cardId} queryLength={trimmed.Length} elapsedMs={elapsedMs} items={_vanillaPortraitSourceOptions.Count}");
+		}
 	}
 
 	private void BuildCreatedCardMetaUi(VBoxContainer rightColumn)
@@ -6788,6 +8366,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			existingOverride = effectiveOverride;
 		}
+
+		ulong metaStartMs = Time.GetTicksMsec();
+		long basicMs = 0;
+		long rulesMs = 0;
+		long cosmeticsMs = 0;
+		long customTextMs = 0;
 
 		Label header = new Label { Text = CardEditorLoc.T("section.creator", "Creator") };
 		StyleSectionLabel(header);
@@ -6871,11 +8455,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		targetSelect.Select(targetIndex);
 		targetSelect.ItemSelected += _ => OnCreatedCardMetaChanged();
+		basicMs = (long)(Time.GetTicksMsec() - metaStartMs);
 
+		ulong rulesStartMs = Time.GetTicksMsec();
 		BuildReplayCountUi(rightColumn);
 		BuildEnchantmentAndAfflictionUi(rightColumn);
 		BuildCreatedRewardPoolsUi(rightColumn, def);
+		rulesMs = (long)(Time.GetTicksMsec() - rulesStartMs);
 
+		ulong cosmeticsStartMs = Time.GetTicksMsec();
 		Label cosmeticsLabel = new Label { Text = CardEditorLoc.T("section.cosmetics", "Cosmetics") };
 		StyleSectionLabel(cosmeticsLabel);
 		rightColumn.AddChild(cosmeticsLabel);
@@ -6883,22 +8471,6 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		BuildCosmeticSelectorRows(rightColumn, existingOverride);
 
 		_createdPortraitSourceCatalog.Clear();
-		foreach (CardModel card in ModelDb.AllCards)
-		{
-			if (card is CardEditorCreatedCardBase)
-			{
-				continue;
-			}
-			string label = $"{card.Title} ({ToDisplayTitle(card.Pool.Title)})";
-			_createdPortraitSourceCatalog.Add((card.Id, null, label));
-		}
-		foreach (string file in CardEditorCreatedCardsStore.ListCustomPortraitFiles())
-		{
-			string prefix = CardEditorLoc.T("value.customPrefix", "Custom");
-			string shortFile = file.Length > 30 ? file[..30] + "\u2026" : file;
-			_createdPortraitSourceCatalog.Add((null, file, $"{prefix}: {shortFile}"));
-		}
-		_createdPortraitSourceCatalog.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
 
 		rightColumn.AddChild(CreateBoundedTextRow(
 			CardEditorLoc.T("field.artSearch", "Art Search"),
@@ -6960,6 +8532,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			_createdFinishParams.Clear();
 		BuildFinishEditorSliders(_createdFinishEditorContainer, _createdFinishSliders, _createdFinishValueLabels, _createdFinishParams, def.Finish, OnCreatedCardMetaChanged);
 
+		cosmeticsMs = (long)(Time.GetTicksMsec() - cosmeticsStartMs);
+		ulong customTextStartMs = Time.GetTicksMsec();
 
 		// Custom text override — checkbox + text area
 		bool hasCustomText = def.CustomTextEnabled;
@@ -6983,6 +8557,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(_createdCustomTextField);
 		_createdCustomTextField.TextChanged += OnCustomTextChanged;
 		rightColumn.AddChild(_createdCustomTextField);
+		customTextMs = (long)(Time.GetTicksMsec() - customTextStartMs);
+
+		ulong metaElapsedMs = Time.GetTicksMsec() - metaStartMs;
+		if (metaElapsedMs >= 25)
+		{
+			PopupLagLog($"BuildCreatedMeta card={_cardId} elapsedMs={metaElapsedMs} basicMs={basicMs} rulesMs={rulesMs} cosmeticsMs={cosmeticsMs} customTextMs={customTextMs}");
+		}
 	}
 
 	private void BuildCreatedRewardPoolsUi(VBoxContainer rightColumn, CardEditorCreatedCardDefinition def)
@@ -7479,6 +9060,63 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return (ModelId.none, null);
 	}
 
+	private void EnsureCreatedPortraitSourceCatalogBuilt()
+	{
+		if (_createdPortraitSourceCatalog.Count > 0)
+		{
+			return;
+		}
+
+		ulong startMs = Time.GetTicksMsec();
+		_createdPortraitSourceCatalog.Clear();
+		foreach (CardModel card in ModelDb.AllCards)
+		{
+			if (card == null || card.Id == null || card is CardEditorCreatedCardBase)
+			{
+				continue;
+			}
+			_createdPortraitSourceCatalog.Add((card.Id, null, BuildPortraitSourceLabel(card.Id, null)));
+		}
+		foreach (string file in CardEditorCreatedCardsStore.ListCustomPortraitFiles())
+		{
+			_createdPortraitSourceCatalog.Add((null, file, BuildPortraitSourceLabel(null, file)));
+		}
+		_createdPortraitSourceCatalog.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
+		ulong elapsedMs = Time.GetTicksMsec() - startMs;
+		if (elapsedMs >= 25)
+		{
+			PopupLagLog($"CreatedArtCatalog built card={_cardId} elapsedMs={elapsedMs} entries={_createdPortraitSourceCatalog.Count}");
+		}
+	}
+
+	private static string BuildPortraitSourceLabel(ModelId? cardId, string? customFile)
+	{
+		if (!string.IsNullOrWhiteSpace(customFile))
+		{
+			string prefix = CardEditorLoc.T("value.customPrefix", "Custom");
+			string shortFile = customFile.Length > 30 ? customFile[..30] + "\u2026" : customFile;
+			return $"{prefix}: {shortFile}";
+		}
+
+		if (cardId != null && cardId != ModelId.none)
+		{
+			try
+			{
+				CardModel? card = ModelDb.GetByIdOrNull<CardModel>(cardId);
+				if (card != null)
+				{
+					return $"{card.Title} ({ToDisplayTitle(card.Pool.Title)})";
+				}
+			}
+			catch
+			{
+			}
+			return cardId.ToString();
+		}
+
+		return CardEditorLoc.T("value.none", "None");
+	}
+
 	private void RebuildCreatedArtDropdown(string query, (ModelId? CardId, string? CustomFile) selectionToKeep)
 	{
 		if (_createdPortraitSourceSelect == null)
@@ -7486,14 +9124,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
+		ulong startMs = Time.GetTicksMsec();
 		string trimmed = query?.Trim() ?? string.Empty;
 		List<(ModelId? CardId, string? CustomFile, string Label)> filtered;
 		if (string.IsNullOrWhiteSpace(trimmed))
 		{
+			filtered = new List<(ModelId? CardId, string? CustomFile, string Label)>();
+		}
+		else if (trimmed == "*")
+		{
+			EnsureCreatedPortraitSourceCatalogBuilt();
 			filtered = _createdPortraitSourceCatalog.ToList();
 		}
 		else
 		{
+			EnsureCreatedPortraitSourceCatalogBuilt();
 			filtered = _createdPortraitSourceCatalog
 				.Where(item => item.Label.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
 				.ToList();
@@ -7511,6 +9156,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (index >= 0)
 			{
 				filtered.Insert(0, _createdPortraitSourceCatalog[index]);
+			}
+			else
+			{
+				filtered.Insert(0, (selectionToKeep.CardId, selectionToKeep.CustomFile, BuildPortraitSourceLabel(selectionToKeep.CardId, selectionToKeep.CustomFile)));
 			}
 		}
 
@@ -7543,6 +9192,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		finally
 		{
 			_suppressPreviewUpdate = prevSuppress;
+		}
+
+		ulong elapsedMs = Time.GetTicksMsec() - startMs;
+		if (elapsedMs >= 25)
+		{
+			PopupLagLog($"CreatedArtDropdown rebuilt card={_cardId} queryLength={trimmed.Length} elapsedMs={elapsedMs} items={_createdPortraitSourceOptions.Count}");
 		}
 	}
 
@@ -8607,6 +10262,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		RefreshEffectSummaryList();
 		EnsureExistingExtraEffectLoadingLabels();
 		UpdateExtraEffectHydrationUiState();
+		if (ShouldDeferLocalizedSharedCreatedRowsUntilInteraction())
+		{
+			PopupLagLog($"LocalizedSharedRows DEFER card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} pendingRows={_pendingExistingExtraEffectRows.Count}");
+			return;
+		}
+
 		EnsurePendingExistingExtraEffectRowsHydrationScheduled();
 	}
 
@@ -8753,7 +10414,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool createdPendingBefore = _createdEffectValueRowsPending;
 		ulong startMs = Time.GetTicksMsec();
 		PopupLagLog($"ForceHydration start card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} pendingRows={pendingRowsBefore} createdPending={createdPendingBefore} existingHydrating={_existingExtraEffectHydrating} previewQueued={_previewUpdateQueued}");
-		CompletePendingExistingExtraEffectRowsNow();
+		if (pendingRowsBefore == 0 || !TryAttachLocalizedSharedCreatedRowsFromCache(allowAttachDuringOpen: true))
+		{
+			CompletePendingExistingExtraEffectRowsNow();
+		}
 		CompleteDeferredCreatedEffectValueRowsNow();
 		PopupLagLog($"ForceHydration end card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} elapsedMs={Time.GetTicksMsec() - startMs} pendingRowsBefore={pendingRowsBefore} pendingRowsAfter={_pendingExistingExtraEffectRows.Count} createdPendingBefore={createdPendingBefore} createdPendingAfter={_createdEffectValueRowsPending} rowsBuilt={_pendingExistingExtraEffectRowBuilt}/{_pendingExistingExtraEffectRowTotal}");
 	}
@@ -8762,8 +10426,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	{
 		_manualPrebuiltPopupWarmupHydration = false;
 		UpdateExtraEffectHydrationUiState();
-		EnsurePendingExistingExtraEffectRowsHydrationScheduled();
-		ScheduleCreatedEffectValueRowsRefresh();
+		bool deferLocalizedSharedCreatedRows = ShouldDeferLocalizedSharedCreatedRowsUntilInteraction();
+		if (deferLocalizedSharedCreatedRows)
+		{
+			PopupLagLog($"AutoHydration deferred card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} pendingRows={_pendingExistingExtraEffectRows.Count}");
+		}
+		else
+		{
+			EnsurePendingExistingExtraEffectRowsHydrationScheduled();
+			ScheduleCreatedEffectValueRowsRefresh();
+		}
 	}
 
 	private void TrackExtraEffectHydrationButton(Button? button)
@@ -8791,6 +10463,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	private void ScheduleCreatedEffectValueRowsRefresh()
 	{
 		if (!_createdEffectValueRowsPending)
+		{
+			return;
+		}
+
+		if (ShouldDeferLocalizedSharedCreatedRowsUntilInteraction())
 		{
 			return;
 		}
@@ -18867,11 +20544,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void FinalizeExtraEffectRowStructureRefresh()
 	{
+		ulong startMs = Time.GetTicksMsec();
 		AttachPendingExtraEffectPanels();
+		ulong attachMs = Time.GetTicksMsec() - startMs;
 		RefreshAllSelfScalingTargetOptions();
+		ulong selfScalingMs = Time.GetTicksMsec() - startMs - attachMs;
 		RefreshAllAmountSourceOptions();
+		ulong amountSourceMs = Time.GetTicksMsec() - startMs - attachMs - selfScalingMs;
 		UpdateExtraEffectReorderButtons();
+		ulong reorderMs = Time.GetTicksMsec() - startMs - attachMs - selfScalingMs - amountSourceMs;
 		RefreshEffectSummaryList();
+		ulong totalMs = Time.GetTicksMsec() - startMs;
+		if (totalMs >= 25)
+		{
+			PopupLagLog($"FinalizeRows card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} totalMs={totalMs} attachMs={attachMs} selfScalingMs={selfScalingMs} amountSourceMs={amountSourceMs} reorderMs={reorderMs} summaryMs={totalMs - attachMs - selfScalingMs - amountSourceMs - reorderMs} rows={_extraEffectRows.Count}");
+		}
 	}
 
 	private ExtraEffectRow? FindExtraEffectRowByStableId(string? stableEffectId)
