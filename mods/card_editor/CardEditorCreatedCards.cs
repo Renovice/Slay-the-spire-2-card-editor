@@ -208,7 +208,7 @@ public abstract class CardEditorCreatedCardBase : CardModel, KnowledgeDemon.ICho
 	{
 		try
 		{
-			CombatState? combatState = base.CombatState.AsCombatState() ?? base.Owner?.Creature?.CombatState.AsCombatState();
+			CombatState? combatState = this.GetConcreteCombatState() ?? base.Owner?.Creature.GetConcreteCombatState();
 			if (combatState == null)
 			{
 				return;

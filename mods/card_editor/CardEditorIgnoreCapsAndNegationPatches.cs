@@ -123,7 +123,7 @@ internal static class CardEditorIgnoreEffectHelpers
 
 	public static bool HasIgnoreEffect(CardModel? card, CardExtraEffectKind kind)
 	{
-		return HasActiveIgnoreEffect(kind, card, dealer: null, combatState: card?.CombatState.AsCombatState(), target: null);
+		return HasActiveIgnoreEffect(kind, card, dealer: null, combatState: card.GetConcreteCombatState(), target: null);
 	}
 
 	public static bool HasActiveIgnoreEffect(
@@ -161,9 +161,9 @@ internal static class CardEditorIgnoreEffectHelpers
 			CardPlay? playForConditions = CardEditorCardPlayContext.Current ?? BuildPreviewPlay(effectiveSource, target);
 			Creature? ownerCreature = effectiveSource.Owner?.Creature ?? dealer;
 			CombatState? resolvedCombatState = combatState
-				?? CardEditorCardPlayContext.Current?.Card?.CombatState.AsCombatState()
-				?? effectiveSource.CombatState.AsCombatState()
-				?? dealer?.CombatState.AsCombatState();
+				?? CardEditorCardPlayContext.Current?.Card.GetConcreteCombatState()
+				?? effectiveSource.GetConcreteCombatState()
+				?? dealer.GetConcreteCombatState();
 
 			if (debug)
 			{
@@ -244,7 +244,7 @@ internal static class CardEditorIgnoreEffectHelpers
 		}
 
 		Creature? dealer = attack.Attacker;
-		CombatState? combatState = dealer?.CombatState.AsCombatState() ?? cardSource.CombatState.AsCombatState();
+		CombatState? combatState = dealer.GetConcreteCombatState() ?? cardSource.GetConcreteCombatState();
 		ValueProp props = attack.DamageProps;
 
 		if (HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target: null))
@@ -524,8 +524,8 @@ internal static class IntangiblePower_ModifyHpLostAfterOsty_IgnoreCaps_Patch
 		CardModel? cardSource)
 	{
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
-		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
-		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target.GetConcreteCombatState(), target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target.GetConcreteCombatState(), target);
 		if (CardEditorIgnoreEffectHelpers.VerboseDebugEnabled)
 		{
 			Log.Info(
@@ -552,8 +552,8 @@ internal static class SlipperyPower_ModifyDamageCap_IgnoreCaps_Patch
 		CardModel? cardSource)
 	{
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
-		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
-		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target.GetConcreteCombatState(), target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target.GetConcreteCombatState(), target);
 		if (CardEditorIgnoreEffectHelpers.VerboseDebugEnabled)
 		{
 			Log.Info(
@@ -580,8 +580,8 @@ internal static class HardToKillPower_ModifyDamageCap_IgnoreCaps_Patch
 		CardModel? cardSource)
 	{
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
-		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
-		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target.GetConcreteCombatState(), target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target.GetConcreteCombatState(), target);
 		if (CardEditorIgnoreEffectHelpers.VerboseDebugEnabled)
 		{
 			Log.Info(
@@ -621,8 +621,8 @@ internal static class HardenedShellPower_ModifyHpLostBeforeOstyLate_IgnoreCaps_P
 			return false;
 		}
 
-		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
-		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target?.CombatState.AsCombatState(), target);
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, target.GetConcreteCombatState(), target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, target.GetConcreteCombatState(), target);
 
 		// Ignore-caps and ignore-enemy-damage-reductions both bypass Hardened Shell's target-owned cap.
 		if (ignoreCaps || ignoreEnemyReductions)

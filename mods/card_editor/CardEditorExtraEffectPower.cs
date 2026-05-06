@@ -322,8 +322,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		if (entry.Effect.AutoPlayLoopLimit > 0)
 		{
 			CardExtraEffect runtimeEffect = BuildStackedRuntimeEffect(entry);
-			CombatState? combatState = entry.SourceCard?.CombatState.AsCombatState()
-				?? entry.SourceCard?.Owner?.Creature?.CombatState.AsCombatState();
+			CombatState? combatState = entry.SourceCard.GetConcreteCombatState()
+				?? entry.SourceCard?.Owner?.Creature.GetConcreteCombatState();
 			int remaining = CardEditorAutoPlayLoopGuard.GetRemainingEffectUses(
 				combatState,
 				entry.SourceCard?.Owner,
@@ -419,7 +419,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			&& creature.IsAlive
 			&& owner != null
 			&& !ReferenceEquals(creature, owner)
-			&& owner.CombatState.AsCombatState()?.GetOpponentsOf(owner).Contains(creature) == true;
+			&& owner.GetConcreteCombatState()?.GetOpponentsOf(owner).Contains(creature) == true;
 	}
 
 	private Creature? ResolveRememberedEnemyTarget(PowerEffectEntry entry, CombatState combatState, CardPlay triggerPlay)
@@ -490,7 +490,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		return CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect) switch
 		{
 			CardExtraEffectPowerTriggerFrom.Self => ReferenceEquals(effectiveEventActor, owner),
-			CardExtraEffectPowerTriggerFrom.AnyEnemy => owner.CombatState.AsCombatState()?.GetOpponentsOf(owner).Contains(effectiveEventActor) == true,
+			CardExtraEffectPowerTriggerFrom.AnyEnemy => owner.GetConcreteCombatState()?.GetOpponentsOf(owner).Contains(effectiveEventActor) == true,
 			CardExtraEffectPowerTriggerFrom.AnyAlly => effectiveEventActor.Side == owner.Side && !ReferenceEquals(effectiveEventActor, owner),
 			CardExtraEffectPowerTriggerFrom.Anyone => true,
 			_ => ReferenceEquals(effectiveEventActor, owner)
@@ -698,7 +698,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.OrbEvoked, eventActor: eventActor, amount: 1);
 	}
 
-	public override Task AfterCardGeneratedForCombat(CardModel card, bool addedByPlayer)
+	public override Task AfterCardGeneratedForCombat(CardModel card, Player? creator)
 	{
 		try
 		{
@@ -1067,7 +1067,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await RunLifecycleTriggerWithHookContext(CardExtraEffectTrigger.AfterCardEnteredCombat, card, actor, actor);
 	}
 
-	public override async Task BeforeHandDraw(Player player, PlayerChoiceContext choiceContext, CombatState combatState)
+	public override async Task BeforeHandDraw(Player player, PlayerChoiceContext choiceContext, ICombatState combatState)
 	{
 		await RunLifecycleTrigger(choiceContext, CardExtraEffectTrigger.BeforeHandDraw, eventActor: player?.Creature, target: player?.Creature);
 	}
@@ -1082,22 +1082,14 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await RunLifecycleTriggerWithHookContext(CardExtraEffectTrigger.AfterCombatEnd, eventActor: Owner, target: Owner);
 	}
 
-	public override async Task AfterAttack(AttackCommand command)
+	public override async Task AfterAttack(PlayerChoiceContext choiceContext, AttackCommand command)
 	{
-		ulong? netId = LocalContext.NetId;
-		Player? player = Owner?.Player;
-		if (!netId.HasValue || player == null)
+		if (choiceContext == null)
 		{
 			return;
 		}
 
-		HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
-		Task task = RunAfterAttackWithChoiceContext(choiceContext, command);
-		bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
-		if (!completed && choiceContext.GameAction != null)
-		{
-			await choiceContext.GameAction.CompletionTask;
-		}
+		await RunAfterAttackWithChoiceContext(choiceContext, command);
 	}
 
 	private async Task RunAfterAttackWithChoiceContext(PlayerChoiceContext choiceContext, AttackCommand command)

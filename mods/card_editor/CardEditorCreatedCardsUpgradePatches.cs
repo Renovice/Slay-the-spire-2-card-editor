@@ -43,7 +43,7 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsUpgraded
 			return;
 		}
 
-		CombatState? combatState = sourceCard.CombatState.AsCombatState() ?? list[0].Owner?.Creature?.CombatState.AsCombatState();
+		CombatState? combatState = sourceCard.GetConcreteCombatState() ?? list[0].Owner?.Creature.GetConcreteCombatState();
 		IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetRuntimeEffectsForExecution(combatState, sourceCard);
 		if (effects == null || effects.Count == 0)
 		{

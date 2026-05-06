@@ -199,7 +199,7 @@ internal static class PlayerCmd_GainEnergy_CardEditorResourceCount_Patch
 		{
 			PlayerCombatState? combatState = player.PlayerCombatState;
 			Creature actor = player.Creature;
-			CombatState? state = actor.CombatState.AsCombatState();
+			CombatState? state = actor.GetConcreteCombatState();
 			int currentEnergy = combatState?.Energy ?? oldEnergy;
 			int delta = gain
 				? Math.Max(0, currentEnergy - oldEnergy)
@@ -243,7 +243,7 @@ internal static class PlayerCmd_LoseEnergy_CardEditorResourceCount_Patch
 		{
 			PlayerCombatState? combatState = player.PlayerCombatState;
 			Creature actor = player.Creature;
-			CombatState? state = actor.CombatState.AsCombatState();
+			CombatState? state = actor.GetConcreteCombatState();
 			int currentEnergy = combatState?.Energy ?? oldEnergy;
 			int delta = gain
 				? Math.Max(0, currentEnergy - oldEnergy)
@@ -272,7 +272,7 @@ internal static class Creature_LoseBlockInternal_CardEditorResourceCount_Patch
 
 	public static void Postfix(Creature __instance, int __state)
 	{
-		if (__instance?.CombatState.AsCombatState() == null)
+		if (__instance.GetConcreteCombatState() == null)
 		{
 			return;
 		}
@@ -280,11 +280,11 @@ internal static class Creature_LoseBlockInternal_CardEditorResourceCount_Patch
 		try
 		{
 			int delta = Math.Max(0, __state - __instance.Block);
-			if (delta > 0 && __instance.CombatState.AsCombatState() != null)
+			if (delta > 0 && __instance.GetConcreteCombatState() != null)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentBlockRemoved(delta);
-				CardEditorExtraEffects.RecordResourceCount(__instance.CombatState.AsCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, delta);
-				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.CombatState.AsCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
+				CardEditorExtraEffects.RecordResourceCount(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
 			}
 		}
 		catch (Exception ex)
@@ -304,7 +304,7 @@ internal static class Creature_DamageBlockInternal_CardEditorResourceCount_Patch
 
 	public static void Postfix(Creature __instance, int __state)
 	{
-		if (__instance?.CombatState.AsCombatState() == null)
+		if (__instance.GetConcreteCombatState() == null)
 		{
 			return;
 		}
@@ -315,8 +315,8 @@ internal static class Creature_DamageBlockInternal_CardEditorResourceCount_Patch
 			if (delta > 0)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentBlockRemoved(delta);
-				CardEditorExtraEffects.RecordResourceCount(__instance.CombatState.AsCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, delta);
-				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.CombatState.AsCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
+				CardEditorExtraEffects.RecordResourceCount(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
 			}
 		}
 		catch (Exception ex)
@@ -336,7 +336,7 @@ internal static class Creature_AfterTurnStart_CardEditorResourceCount_Patch
 
 	public static void Postfix(Creature __instance, ref Task __result, int __state)
 	{
-		if (__result == null || __instance?.CombatState.AsCombatState() == null)
+		if (__result == null || __instance.GetConcreteCombatState() == null)
 		{
 			return;
 		}
@@ -349,7 +349,7 @@ internal static class Creature_AfterTurnStart_CardEditorResourceCount_Patch
 		await original;
 		try
 		{
-			CombatState? combatState = creature.CombatState.AsCombatState();
+			CombatState? combatState = creature.GetConcreteCombatState();
 			if (combatState == null)
 			{
 				return;
@@ -392,7 +392,7 @@ internal static class CreatureCmd_Heal_CardEditorResourceCount_Patch
 		await original;
 		try
 		{
-			CombatState? combatState = creature.CombatState.AsCombatState();
+			CombatState? combatState = creature.GetConcreteCombatState();
 			if (combatState == null)
 			{
 				return;
@@ -480,7 +480,7 @@ internal static class PlayerCmd_GainStars_CardEditorPowerCountEvent_Patch
 		try
 		{
 			Creature actor = player.Creature;
-			CombatState? combatState = actor?.CombatState.AsCombatState();
+			CombatState? combatState = actor.GetConcreteCombatState();
 			int delta = amount <= 0m
 				? 0
 				: (int)Math.Min(decimal.Truncate(amount), int.MaxValue);
@@ -516,7 +516,7 @@ internal static class PlayerCmd_LoseStars_CardEditorPowerCountEvent_Patch
 		try
 		{
 			Creature actor = player.Creature;
-			CombatState? combatState = actor?.CombatState.AsCombatState();
+			CombatState? combatState = actor.GetConcreteCombatState();
 			int delta = amount <= 0m
 				? 0
 				: (int)Math.Min(decimal.Truncate(amount), int.MaxValue);

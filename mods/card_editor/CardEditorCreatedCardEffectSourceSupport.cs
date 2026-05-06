@@ -362,7 +362,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 		try
 		{
-			CombatState? combatState = createdCard.CombatState.AsCombatState() ?? cardPlay?.Card?.CombatState.AsCombatState();
+			CombatState? combatState = createdCard.GetConcreteCombatState() ?? cardPlay?.Card.GetConcreteCombatState();
 			if (combatState != null)
 			{
 				IReadOnlyList<CardExtraEffect> borrowedEffects = CardEditorExtraEffects.GetRuntimeEffectsForBorrowedSource(combatState, createdCard, effectSourceId, customKeywordFilter);
@@ -687,12 +687,12 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			return null;
 		}
 
-		CombatState? hostCombatState = createdCard.CombatState.AsCombatState() ?? createdCard.Owner?.Creature?.CombatState.AsCombatState();
+		CombatState? hostCombatState = createdCard.GetConcreteCombatState() ?? createdCard.Owner?.Creature.GetConcreteCombatState();
 		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
 		Dictionary<string, RuntimeVanillaEffectSourceState> states = _runtimeVanillaEffectSourceStates.GetOrCreateValue(createdCard);
 		if (states.TryGetValue(stateKey, out RuntimeVanillaEffectSourceState? state)
 			&& state?.SourceCard != null
-			&& state.CombatState.AsCombatState() == hostCombatState)
+			&& state.GetConcreteCombatState() == hostCombatState)
 		{
 			return state.SourceCard;
 		}
@@ -720,7 +720,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 
 		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
-		CombatState? hostCombatState = createdCard.CombatState.AsCombatState() ?? createdCard.Owner?.Creature?.CombatState.AsCombatState();
+		CombatState? hostCombatState = createdCard.GetConcreteCombatState() ?? createdCard.Owner?.Creature.GetConcreteCombatState();
 		if (!_runtimeVanillaEffectSourceStates.TryGetValue(createdCard, out Dictionary<string, RuntimeVanillaEffectSourceState>? states))
 		{
 			return false;
@@ -731,7 +731,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			return false;
 		}
 
-		if (state.CombatState.AsCombatState() != hostCombatState)
+		if (state.GetConcreteCombatState() != hostCombatState)
 		{
 			states.Remove(stateKey);
 			return false;
@@ -763,7 +763,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 		try
 		{
-			if ((hostCard.CombatState.AsCombatState() != null || hostCard.Owner?.Creature?.CombatState.AsCombatState() != null)
+			if ((hostCard.GetConcreteCombatState() != null || hostCard.Owner?.Creature.GetConcreteCombatState() != null)
 				&& effectSourceCard.UpgradePreviewType != CardUpgradePreviewType.Combat)
 			{
 				effectSourceCard.UpgradePreviewType = CardUpgradePreviewType.Combat;

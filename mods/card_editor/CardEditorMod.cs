@@ -2639,7 +2639,7 @@ internal static class CardEditorCreatedCards_OnPlay_RunExtraEffects_Patch
 		{
 			return;
 		}
-		CombatState? combatState = cardPlay?.Card?.CombatState.AsCombatState();
+		CombatState? combatState = cardPlay?.Card.GetConcreteCombatState();
 		if (combatState == null)
 		{
 			return;

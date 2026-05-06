@@ -1081,9 +1081,9 @@ public static class CardEditorOverrides
 
 		try
 		{
-			if (card.CombatState.AsCombatState() != null && (card.Pile?.Type ?? PileType.None) == PileType.Hand)
+			if (card.GetConcreteCombatState() != null && (card.Pile?.Type ?? PileType.None) == PileType.Hand)
 			{
-				CardEditorExtraEffects.ApplyIntrinsicTimedCardCostsLessOnEnterHand(card.CombatState.AsCombatState(), card);
+				CardEditorExtraEffects.ApplyIntrinsicTimedCardCostsLessOnEnterHand(card.GetConcreteCombatState(), card);
 			}
 		}
 		catch
