@@ -265,8 +265,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private readonly Dictionary<string, Label> _createdFinishValueLabels = new();
 	private KeywordTickbox? _createdCustomTextTickbox;
 	private TextEdit? _createdCustomTextField;
+	private Button? _createdCustomTextLinkNumbersButton;
 	private KeywordTickbox? _createdCustomTextUpgradedTickbox;
 	private TextEdit? _createdCustomTextUpgradedField;
+	private Button? _createdCustomTextUpgradedLinkNumbersButton;
 	private KeywordTickbox? _createdCustomRewardPoolsTickbox;
 	private OptionButton? _createdRewardBucketSelect;
 	private readonly List<CardEditorRewardPoolBucket> _createdRewardBucketOptions = new();
@@ -297,8 +299,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private KeywordTickbox? _endlessUpgradesTickbox;
 	private KeywordTickbox? _vanillaModifiedBaseTextTickbox;
 	private TextEdit? _vanillaModifiedBaseTextField;
+	private Button? _vanillaModifiedBaseTextLinkNumbersButton;
 	private KeywordTickbox? _vanillaModifiedBaseTextUpgradedTickbox;
 	private TextEdit? _vanillaModifiedBaseTextUpgradedField;
+	private Button? _vanillaModifiedBaseTextUpgradedLinkNumbersButton;
 
 	private readonly List<CardType> _cardTypes = new();
 	private readonly List<TargetType?> _targetTypeOptions = new();
@@ -1643,6 +1647,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			_createdCustomTextField.Text = def.CustomText ?? string.Empty;
 			_createdCustomTextField.Visible = hasCustomText;
 		}
+		if (_createdCustomTextLinkNumbersButton != null && GodotObject.IsInstanceValid(_createdCustomTextLinkNumbersButton))
+		{
+			_createdCustomTextLinkNumbersButton.Visible = hasCustomText;
+		}
 	}
 
 	private void BindCreatedUpgradeControlsForCurrentCard()
@@ -1676,6 +1684,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			_createdCustomTextUpgradedField.Text = CardEditorCreatedCardsStore.GetStoredCustomTextUpgraded(_cardId) ?? string.Empty;
 			_createdCustomTextUpgradedField.Visible = hasCustomText;
+		}
+		if (_createdCustomTextUpgradedLinkNumbersButton != null && GodotObject.IsInstanceValid(_createdCustomTextUpgradedLinkNumbersButton))
+		{
+			_createdCustomTextUpgradedLinkNumbersButton.Visible = hasCustomText;
 		}
 
 		BindEnchantmentUiForCurrentCard();
@@ -1739,6 +1751,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			_vanillaModifiedBaseTextUpgradedField.Text = hasModifiedBaseText ? (storedUpgrade?.ModifiedBaseText ?? string.Empty) : string.Empty;
 			_vanillaModifiedBaseTextUpgradedField.Visible = hasModifiedBaseText;
+		}
+		if (_vanillaModifiedBaseTextUpgradedLinkNumbersButton != null && GodotObject.IsInstanceValid(_vanillaModifiedBaseTextUpgradedLinkNumbersButton))
+		{
+			_vanillaModifiedBaseTextUpgradedLinkNumbersButton.Visible = hasModifiedBaseText;
 		}
 
 		BindEnchantmentUiForCurrentCard();
@@ -1871,6 +1887,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			_vanillaModifiedBaseTextField.Text = hasModifiedBaseText ? (existing?.ModifiedBaseText ?? string.Empty) : string.Empty;
 			_vanillaModifiedBaseTextField.Visible = hasModifiedBaseText;
+		}
+		if (_vanillaModifiedBaseTextLinkNumbersButton != null && GodotObject.IsInstanceValid(_vanillaModifiedBaseTextLinkNumbersButton))
+		{
+			_vanillaModifiedBaseTextLinkNumbersButton.Visible = hasModifiedBaseText;
 		}
 	}
 
@@ -2810,8 +2830,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_createdFinishEditorContainer = null;
 		_createdCustomTextTickbox = null;
 		_createdCustomTextField = null;
+		_createdCustomTextLinkNumbersButton = null;
 		_createdCustomTextUpgradedTickbox = null;
 		_createdCustomTextUpgradedField = null;
+		_createdCustomTextUpgradedLinkNumbersButton = null;
 		_createdCustomRewardPoolsTickbox = null;
 		_createdRewardBucketSelect = null;
 		_createdRewardInjectionModeSelect = null;
@@ -2828,8 +2850,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_vanillaPortraitSourceSelect = null;
 		_vanillaModifiedBaseTextTickbox = null;
 		_vanillaModifiedBaseTextField = null;
+		_vanillaModifiedBaseTextLinkNumbersButton = null;
 		_vanillaModifiedBaseTextUpgradedTickbox = null;
 		_vanillaModifiedBaseTextUpgradedField = null;
+		_vanillaModifiedBaseTextUpgradedLinkNumbersButton = null;
 		_endlessUpgradesTickbox = null;
 		ResetVanillaDynamicSectionFields();
 	}
@@ -8159,6 +8183,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			StyleInput(_vanillaModifiedBaseTextField);
 			_vanillaModifiedBaseTextField.TextChanged += OnVanillaModifiedBaseTextChanged;
 			rightColumn.AddChild(_vanillaModifiedBaseTextField);
+
+			_vanillaModifiedBaseTextLinkNumbersButton = CreateLiveNumberLinkButton(OnVanillaModifiedBaseTextLinkNumbersPressed, hasModifiedBaseText);
+			rightColumn.AddChild(CreateFieldAlignedRow(_vanillaModifiedBaseTextLinkNumbersButton, _cosmeticDropdownWidth));
 		}
 
 	}
@@ -8186,6 +8213,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 			_vanillaModifiedBaseTextField.Visible = enabled;
 		}
+		if (_vanillaModifiedBaseTextLinkNumbersButton != null)
+		{
+			_vanillaModifiedBaseTextLinkNumbersButton.Visible = enabled;
+		}
 
 		QueuePreviewUpdate();
 	}
@@ -8207,7 +8238,30 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			"Live numbers: use {{n1}}, {{n2}} for generated numbers, or {{l2n1}} for line 2 number 1.");
 	}
 
+	private Button CreateLiveNumberLinkButton(Action onPressed, bool visible)
+	{
+		Button button = new Button
+		{
+			Text = CardEditorLoc.T("button.linkLiveNumbers", "Link Numbers"),
+			TooltipText = CardEditorLoc.T(
+				"tooltip.linkLiveNumbers",
+				"Convert literal numbers in this text to live number tokens from the generated card text."),
+			Visible = visible
+		};
+		StyleActionButton(button, minWidth: 150f);
+		button.Pressed += onPressed;
+		return button;
+	}
+
+	private void OnVanillaModifiedBaseTextLinkNumbersPressed()
+	{
+		LinkTextFieldToLiveNumbers(_vanillaModifiedBaseTextField, BuildVanillaModifiedBaseTextReferenceFromUi(), QueuePreviewUpdate);
+	}
+
 	private string BuildVanillaModifiedBaseTextSeedFromUi()
+		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(BuildVanillaModifiedBaseTextReferenceFromUi());
+
+	private string BuildVanillaModifiedBaseTextReferenceFromUi()
 	{
 		if (_isCreatedCard || _isUpgradeEditor)
 		{
@@ -8234,8 +8288,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 			CardModel preview = ModelDb.GetById<CardModel>(_cardId).ToMutable();
 			CardEditorOverrides.ApplyOverrideToCard(preview, draft);
-			string seed = CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
-			return CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(seed);
+			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
 		}
 		catch
 		{
@@ -8557,6 +8610,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(_createdCustomTextField);
 		_createdCustomTextField.TextChanged += OnCustomTextChanged;
 		rightColumn.AddChild(_createdCustomTextField);
+
+		_createdCustomTextLinkNumbersButton = CreateLiveNumberLinkButton(OnCreatedCustomTextLinkNumbersPressed, hasCustomText);
+		rightColumn.AddChild(CreateFieldAlignedRow(_createdCustomTextLinkNumbersButton, _cosmeticDropdownWidth));
 		customTextMs = (long)(Time.GetTicksMsec() - customTextStartMs);
 
 		ulong metaElapsedMs = Time.GetTicksMsec() - metaStartMs;
@@ -8872,6 +8928,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 			_createdCustomTextField.Visible = enabled;
 		}
+		if (_createdCustomTextLinkNumbersButton != null)
+		{
+			_createdCustomTextLinkNumbersButton.Visible = enabled;
+		}
 		OnCreatedCardMetaChanged();
 	}
 
@@ -8910,6 +8970,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(_createdCustomTextUpgradedField);
 		_createdCustomTextUpgradedField.TextChanged += OnUpgradeCustomTextChanged;
 		rightColumn.AddChild(_createdCustomTextUpgradedField);
+
+		_createdCustomTextUpgradedLinkNumbersButton = CreateLiveNumberLinkButton(OnCreatedCustomTextUpgradedLinkNumbersPressed, hasCustomText);
+		rightColumn.AddChild(CreateFieldAlignedRow(_createdCustomTextUpgradedLinkNumbersButton, _cosmeticDropdownWidth));
 	}
 
 	private void OnUpgradeCustomTextTickboxChanged()
@@ -8928,12 +8991,19 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 			_createdCustomTextUpgradedField.Visible = enabled;
 		}
+		if (_createdCustomTextUpgradedLinkNumbersButton != null)
+		{
+			_createdCustomTextUpgradedLinkNumbersButton.Visible = enabled;
+		}
 
 		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, enabled);
 		QueuePreviewUpdate();
 	}
 
 	private string BuildCreatedCustomTextSeedFromPreview(bool isUpgradePreview)
+		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(BuildCreatedCustomTextReferenceFromPreview(isUpgradePreview));
+
+	private string BuildCreatedCustomTextReferenceFromPreview(bool isUpgradePreview)
 	{
 		if (!_isCreatedCard)
 		{
@@ -8946,11 +9016,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (preview == null || preview.Id != _cardId)
 			{
 				preview = CardEditorOverrides.BuildPreview(ModelDb.GetById<CardModel>(_cardId));
-				CardEditorCreatedCardEffectSourceSupport.EnsureEffectSourceDynamicVars(preview, isUpgradePreview);
 			}
+			if (isUpgradePreview && !preview.IsUpgraded)
+			{
+				TryUpgradeForPreview(preview);
+			}
+			CardEditorCreatedCardEffectSourceSupport.EnsureEffectSourceDynamicVars(preview, isUpgradePreview);
 
-			string seed = CreatedCardTextBuilder.Build(preview, preview.CurrentTarget, isUpgradePreview);
-			return CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(seed);
+			return CreatedCardTextBuilder.BuildAutoGeneratedDescription(preview, preview.CurrentTarget, isUpgradePreview);
 		}
 		catch
 		{
@@ -8967,6 +9040,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, _createdCustomTextUpgradedTickbox?.IsTicked ?? false);
 		QueuePreviewUpdate();
+	}
+
+	private void OnCreatedCustomTextLinkNumbersPressed()
+	{
+		LinkTextFieldToLiveNumbers(_createdCustomTextField, BuildCreatedCustomTextReferenceFromPreview(isUpgradePreview: false), OnCreatedCardMetaChanged);
+	}
+
+	private void OnCreatedCustomTextUpgradedLinkNumbersPressed()
+	{
+		LinkTextFieldToLiveNumbers(_createdCustomTextUpgradedField, BuildCreatedCustomTextReferenceFromPreview(isUpgradePreview: true), () =>
+		{
+			CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, _createdCustomTextUpgradedTickbox?.IsTicked ?? false);
+			QueuePreviewUpdate();
+		});
 	}
 
 	private void BuildVanillaUpgradeTextUi(VBoxContainer rightColumn, CardUpgradeOverride? storedUpgrade)
@@ -8997,6 +9084,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(_vanillaModifiedBaseTextUpgradedField);
 		_vanillaModifiedBaseTextUpgradedField.TextChanged += OnVanillaUpgradeModifiedBaseTextChanged;
 		rightColumn.AddChild(_vanillaModifiedBaseTextUpgradedField);
+
+		_vanillaModifiedBaseTextUpgradedLinkNumbersButton = CreateLiveNumberLinkButton(OnVanillaModifiedBaseTextUpgradedLinkNumbersPressed, hasModifiedBaseText);
+		rightColumn.AddChild(CreateFieldAlignedRow(_vanillaModifiedBaseTextUpgradedLinkNumbersButton, _cosmeticDropdownWidth));
 	}
 
 	private void OnVanillaUpgradeModifiedBaseTextTickboxChanged()
@@ -9009,6 +9099,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				_vanillaModifiedBaseTextUpgradedField.Text = BuildVanillaModifiedBaseTextUpgradedSeedFromUi();
 			}
 			_vanillaModifiedBaseTextUpgradedField.Visible = enabled;
+		}
+		if (_vanillaModifiedBaseTextUpgradedLinkNumbersButton != null)
+		{
+			_vanillaModifiedBaseTextUpgradedLinkNumbersButton.Visible = enabled;
 		}
 
 		QueuePreviewUpdate();
@@ -9025,6 +9119,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	}
 
 	private string BuildVanillaModifiedBaseTextUpgradedSeedFromUi()
+		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(BuildVanillaModifiedBaseTextUpgradedReferenceFromUi());
+
+	private string BuildVanillaModifiedBaseTextUpgradedReferenceFromUi()
 	{
 		if (_isCreatedCard || !_isUpgradeEditor)
 		{
@@ -9040,13 +9137,37 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				TryUpgradeForPreview(preview);
 			}
 
-			string seed = CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
-			return CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(seed);
+			return CardEditorVanillaDescriptionOverrideSupport.BuildEditableFullDescription(preview, preview.CurrentTarget);
 		}
 		catch
 		{
 			return string.Empty;
 		}
+	}
+
+	private void OnVanillaModifiedBaseTextUpgradedLinkNumbersPressed()
+	{
+		LinkTextFieldToLiveNumbers(_vanillaModifiedBaseTextUpgradedField, BuildVanillaModifiedBaseTextUpgradedReferenceFromUi(), QueuePreviewUpdate);
+	}
+
+	private static void LinkTextFieldToLiveNumbers(TextEdit? field, string referenceDescription, Action onChanged)
+	{
+		if (field == null || !GodotObject.IsInstanceValid(field))
+		{
+			return;
+		}
+
+		string current = field.Text ?? string.Empty;
+		string converted = string.IsNullOrWhiteSpace(current)
+			? CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(referenceDescription)
+			: CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplateFromCustomText(current, referenceDescription);
+		if (string.Equals(current, converted, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		field.Text = converted;
+		onChanged();
 	}
 
 	private (ModelId? CardId, string? CustomFile) GetSelectedPortraitSourceId()

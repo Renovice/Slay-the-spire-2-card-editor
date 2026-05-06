@@ -37,11 +37,7 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsUpgraded
 			return;
 		}
 
-		CardModel? sourceCard = CardEditorCardPlayContext.Current?.Card;
-		if (sourceCard == null && CardEditorHookModelContext.Current is PowerModel power)
-		{
-			sourceCard = CardEditorPowerSourceMap.TryGetSourceCard(power);
-		}
+		CardModel? sourceCard = CardEditorGeneratedCardSourceResolver.ResolveSourceCard();
 		if (sourceCard == null)
 		{
 			return;

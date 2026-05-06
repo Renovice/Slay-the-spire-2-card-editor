@@ -24,7 +24,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 internal static class Hook_ModifyCardPlayResultPile_CardEditorExtraEffects_Patch
 {
 	public static void Postfix(
-		ICombatState combatState,
+		CombatState combatState,
 		CardModel card,
 		bool isAutoPlay,
 		ResourceInfo resources,
@@ -228,18 +228,17 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterAttack))]
 internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Patch
 {
-	public static void Postfix(ICombatState combatState, PlayerChoiceContext choiceContext, AttackCommand command, ref Task __result)
+	public static void Postfix(CombatState combatState, AttackCommand command, ref Task __result)
 	{
-		CombatState? concreteCombatState = combatState.AsCombatState();
-		if (__result == null || concreteCombatState == null || command == null)
+		if (__result == null || combatState == null || command == null)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, concreteCombatState, command);
+		__result = RunAfter(__result, combatState, command);
 	}
 
 	private static async Task RunAfter(Task original, CombatState combatState, AttackCommand command)
@@ -300,18 +299,17 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardEnteredCombat))]
 internal static class Hook_AfterCardEnteredCombat_CardEditorExtraEffects_Patch
 {
-	public static void Postfix(ICombatState combatState, CardModel card, ref Task __result)
+	public static void Postfix(CombatState combatState, CardModel card, ref Task __result)
 	{
-		CombatState? concreteCombatState = combatState.AsCombatState();
-		if (__result == null || concreteCombatState == null || card == null)
+		if (__result == null || combatState == null || card == null)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, concreteCombatState, card);
+		__result = RunAfter(__result, combatState, card);
 	}
 
 	private static async Task RunAfter(Task original, CombatState combatState, CardModel card)
@@ -879,18 +877,17 @@ internal static class Hook_AfterCardRetained_CardEditorExtraEffects_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.BeforeHandDraw))]
 internal static class Hook_BeforeHandDraw_AutoPlaySelfFromPile_Patch
 {
-	public static void Postfix(ICombatState combatState, Player player, PlayerChoiceContext playerChoiceContext, ref Task __result)
+	public static void Postfix(CombatState combatState, Player player, PlayerChoiceContext playerChoiceContext, ref Task __result)
 	{
-		CombatState? concreteCombatState = combatState.AsCombatState();
-		if (__result == null || concreteCombatState == null || player == null)
+		if (__result == null || combatState == null || player == null)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, concreteCombatState, player, playerChoiceContext);
+		__result = RunAfter(__result, combatState, player, playerChoiceContext);
 	}
 
 	private static async Task RunAfter(Task original, CombatState combatState, Player player, PlayerChoiceContext choiceContext)
@@ -951,18 +948,17 @@ internal static class Hook_BeforeHandDraw_AutoPlaySelfFromPile_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterDeath))]
 internal static class Hook_AfterDeath_CardEditorExtraEffects_Patch
 {
-	public static void Postfix(IRunState runState, ICombatState? combatState, Creature creature, bool wasRemovalPrevented, float deathAnimLength, ref Task __result)
+	public static void Postfix(IRunState runState, CombatState combatState, Creature creature, bool wasRemovalPrevented, float deathAnimLength, ref Task __result)
 	{
-		CombatState? concreteCombatState = combatState.AsCombatState();
-		if (__result == null || concreteCombatState == null || creature == null)
+		if (__result == null || combatState == null || creature == null)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, concreteCombatState, creature);
+		__result = RunAfter(__result, combatState, creature);
 	}
 
 	private static async Task RunAfter(Task original, CombatState combatState, Creature creature)
@@ -1002,18 +998,17 @@ internal static class Hook_AfterDeath_CardEditorExtraEffects_Patch
 internal static class Hook_AfterCombatEnd_CardEditorExtraEffects_Patch
 {
 	[HarmonyPriority(Priority.First)]
-	public static void Postfix(IRunState runState, ICombatState? combatState, CombatRoom room, ref Task __result)
+	public static void Postfix(IRunState runState, CombatState combatState, CombatRoom room, ref Task __result)
 	{
-		CombatState? concreteCombatState = combatState.AsCombatState();
-		if (__result == null || concreteCombatState == null)
+		if (__result == null || combatState == null)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, concreteCombatState);
+		__result = RunAfter(__result, combatState);
 	}
 
 	private static async Task RunAfter(Task original, CombatState combatState)

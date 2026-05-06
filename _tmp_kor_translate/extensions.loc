@@ -1229,7 +1229,7 @@
   "CARD_EDITOR.row.powerFilter": "파워 필터",
   "CARD_EDITOR.row.grantFilter": "부여 필터",
   "CARD_EDITOR.row.grantDuration": "부여 지속 시간",
-  "CARD_EDITOR.ui.enchantment": "인챈트"
+  "CARD_EDITOR.ui.enchantment": "인챈트",
   "CARD_EDITOR.tooltip.countFilter": "이 효과와 일치하는 카드만 셉니다 (스케일링용).",
   "CARD_EDITOR.tooltip.countExcludeSource": "더미 계산 시 이 카드 자체는 제외합니다. '손에 있는 다른 카드' 방식의 스케일링에 유용합니다.",
   "CARD_EDITOR.row.triggering": "트리거링",

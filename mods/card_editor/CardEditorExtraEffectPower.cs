@@ -33,6 +33,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		public int TriggerCounter { get; set; }
 		public int TriggerFireCount { get; set; }
 		public int TurnCounter { get; set; }
+		public bool AutoPlayLoopLimitMerged { get; set; }
 	}
 
 	private static long _nextEntryId;
@@ -68,6 +69,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 						TriggerCounter = e.TriggerCounter,
 						TriggerFireCount = e.TriggerFireCount,
 						TurnCounter = e.TurnCounter,
+						AutoPlayLoopLimitMerged = e.AutoPlayLoopLimitMerged,
 						Effect = CardEditorExtraEffects.CloneEffect(e.Effect),
 						MergeTemplate = CardEditorExtraEffects.CloneEffect(e.MergeTemplate ?? e.Effect)
 					})
@@ -196,9 +198,45 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 	private static void MergeIntoEntry(PowerEffectEntry entry, CardExtraEffect incoming)
 	{
+		MergeAutoPlayLoopLimit(entry, incoming.AutoPlayLoopLimit);
 		entry.StackCount = Math.Clamp(entry.StackCount + 1, 1, 999);
 		MergeTriggerMaxTurns(entry, incoming.TriggerMaxTurns);
 		MergeTriggerMaxFires(entry, incoming.TriggerMaxFires);
+	}
+
+	private static void MergeAutoPlayLoopLimit(PowerEffectEntry entry, int incomingLimit)
+	{
+		if (entry?.Effect == null)
+		{
+			return;
+		}
+		if (entry.Effect.AutoPlayLoopLimit <= 0 || incomingLimit <= 0)
+		{
+			entry.Effect.AutoPlayLoopLimit = 0;
+			entry.AutoPlayLoopLimitMerged = true;
+			return;
+		}
+
+		EnsureAutoPlayLoopLimitMerged(entry);
+		entry.Effect.AutoPlayLoopLimit = Math.Clamp(entry.Effect.AutoPlayLoopLimit + incomingLimit, 1, 999);
+	}
+
+	private static void EnsureAutoPlayLoopLimitMerged(PowerEffectEntry entry)
+	{
+		if (entry?.Effect == null
+			|| entry.AutoPlayLoopLimitMerged
+			|| entry.Effect.AutoPlayLoopLimit <= 0)
+		{
+			return;
+		}
+
+		int stackCount = GetStackCount(entry);
+		if (stackCount > 1)
+		{
+			entry.Effect.AutoPlayLoopLimit = Math.Clamp(entry.Effect.AutoPlayLoopLimit * stackCount, 1, 999);
+		}
+
+		entry.AutoPlayLoopLimitMerged = true;
 	}
 
 	private static void MergeTriggerMaxTurns(PowerEffectEntry entry, int incomingMaxTurns)
@@ -258,7 +296,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		CardExtraEffect effect = CardEditorExtraEffects.CloneEffect(entry.Effect);
 		int stackCount = GetStackCount(entry);
-		if (effect.AutoPlayLoopLimit > 0 && stackCount > 1)
+		if (effect.AutoPlayLoopLimit > 0 && stackCount > 1 && !entry.AutoPlayLoopLimitMerged)
 		{
 			effect.AutoPlayLoopLimit = Math.Clamp(effect.AutoPlayLoopLimit * stackCount, 1, 999);
 		}
@@ -660,7 +698,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await TriggerCountEvent(choiceContext, CardExtraEffectCountEvent.OrbEvoked, eventActor: eventActor, amount: 1);
 	}
 
-	public override Task AfterCardGeneratedForCombat(CardModel card, Player? creator)
+	public override Task AfterCardGeneratedForCombat(CardModel card, bool addedByPlayer)
 	{
 		try
 		{
@@ -1029,7 +1067,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await RunLifecycleTriggerWithHookContext(CardExtraEffectTrigger.AfterCardEnteredCombat, card, actor, actor);
 	}
 
-	public override async Task BeforeHandDraw(Player player, PlayerChoiceContext choiceContext, ICombatState combatState)
+	public override async Task BeforeHandDraw(Player player, PlayerChoiceContext choiceContext, CombatState combatState)
 	{
 		await RunLifecycleTrigger(choiceContext, CardExtraEffectTrigger.BeforeHandDraw, eventActor: player?.Creature, target: player?.Creature);
 	}
@@ -1044,7 +1082,25 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await RunLifecycleTriggerWithHookContext(CardExtraEffectTrigger.AfterCombatEnd, eventActor: Owner, target: Owner);
 	}
 
-	public override async Task AfterAttack(PlayerChoiceContext choiceContext, AttackCommand command)
+	public override async Task AfterAttack(AttackCommand command)
+	{
+		ulong? netId = LocalContext.NetId;
+		Player? player = Owner?.Player;
+		if (!netId.HasValue || player == null)
+		{
+			return;
+		}
+
+		HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+		Task task = RunAfterAttackWithChoiceContext(choiceContext, command);
+		bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+		if (!completed && choiceContext.GameAction != null)
+		{
+			await choiceContext.GameAction.CompletionTask;
+		}
+	}
+
+	private async Task RunAfterAttackWithChoiceContext(PlayerChoiceContext choiceContext, AttackCommand command)
 	{
 		try
 		{

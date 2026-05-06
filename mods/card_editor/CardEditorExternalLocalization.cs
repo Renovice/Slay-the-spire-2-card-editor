@@ -93,8 +93,8 @@ public static class CardEditorExternalLocalization
 		// outside the PCK so users can translate them without rebuilding the mod package.
 		List<string> searchDirs = BuildSearchDirectories(modDir, language);
 
-		CardEditorBuiltTinkerCard.EnsureLocalization();
 		MergeTableFromExisting(searchDirs, "cards.loc", "cards", "CARD_EDITOR_");
+		CardEditorBuiltTinkerCard.EnsureLocalization();
 		MergeTableFromExisting(searchDirs, "extensions.loc", "extensions", "CARD_EDITOR.");
 		MergeTableFromExisting(searchDirs, "settings_ui.loc", "settings_ui", requiredKeyPrefix: null);
 

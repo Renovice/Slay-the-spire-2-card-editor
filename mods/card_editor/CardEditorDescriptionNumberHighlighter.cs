@@ -49,16 +49,15 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return lineMatched;
 		}
 
-		// Multi-line custom text is authored line-by-line. If no line can be matched
-		// safely, keep the user's text literal instead of applying unrelated numbers
-		// from earlier/later generated lines. When the numeric slot count is exactly
-		// the same, keep the 6.8 behavior: custom text number N mirrors generated
-		// text number N, including Strength/Vulnerable target previews.
+		// Multi-line custom text is authored line-by-line. Prefer semantic tokens and
+		// matched lines above; when those cannot identify a line, use a controlled
+		// 6.8-style fallback: custom text number N mirrors generated text number N.
+		// Extra custom numbers stay literal if the generated text has fewer slots.
 		if (SplitDescriptionLines(template).Length > 1 || SplitDescriptionLines(referenceDescription).Length > 1)
 		{
 			List<string> templateTokens = ExtractVisibleNumberTokens(template, includeHighlightedNumbers: false);
 			List<RenderedNumberToken> fallbackReferenceTokens = ExtractRenderedNumberTokens(referenceDescription);
-			if (templateTokens.Count == 0 || templateTokens.Count != fallbackReferenceTokens.Count)
+			if (templateTokens.Count == 0 || fallbackReferenceTokens.Count == 0)
 			{
 				return template;
 			}
@@ -116,6 +115,100 @@ internal static class CardEditorDescriptionNumberHighlighter
 		return tokenIndex > 0 ? builder.ToString() : referenceDescription;
 	}
 
+	public static string BuildLiveNumberTokenTemplateFromCustomText(string customText, string? referenceDescription)
+	{
+		if (string.IsNullOrWhiteSpace(customText))
+		{
+			return string.IsNullOrWhiteSpace(referenceDescription)
+				? customText
+				: BuildLiveNumberTokenTemplate(referenceDescription);
+		}
+
+		if (string.IsNullOrWhiteSpace(referenceDescription))
+		{
+			return BuildLiveNumberTokenTemplate(customText);
+		}
+
+		string[] customLines = SplitDescriptionLines(customText);
+		string[] referenceLines = SplitDescriptionLines(referenceDescription);
+		Dictionary<string, int> referenceLineIndexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> duplicateKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		List<List<RenderedNumberToken>> referenceTokensByLine = new List<List<RenderedNumberToken>>(referenceLines.Length);
+
+		for (int i = 0; i < referenceLines.Length; i++)
+		{
+			List<RenderedNumberToken> tokens = ExtractRenderedNumberTokens(referenceLines[i]);
+			referenceTokensByLine.Add(tokens);
+			if (tokens.Count == 0)
+			{
+				continue;
+			}
+
+			string key = NormalizeVisibleLineWithoutNumbers(referenceLines[i]);
+			if (string.IsNullOrWhiteSpace(key))
+			{
+				continue;
+			}
+
+			if (referenceLineIndexByKey.ContainsKey(key))
+			{
+				duplicateKeys.Add(key);
+				continue;
+			}
+
+			referenceLineIndexByKey[key] = i;
+		}
+
+		int globalTokenIndex = 0;
+		bool replacedAny = false;
+		List<string> renderedLines = new List<string>(customLines.Length);
+		foreach (string customLine in customLines)
+		{
+			string key = NormalizeVisibleLineWithoutNumbers(customLine);
+			if (!string.IsNullOrWhiteSpace(key)
+				&& !duplicateKeys.Contains(key)
+				&& referenceLineIndexByKey.TryGetValue(key, out int referenceLineIndex))
+			{
+				List<RenderedNumberToken> lineTokens = referenceTokensByLine[referenceLineIndex];
+				int lineTokenIndex = 0;
+				string converted = ReplaceVisibleNumbersWithTokens(customLine, _ =>
+				{
+					lineTokenIndex++;
+					globalTokenIndex++;
+					return lineTokenIndex <= lineTokens.Count
+						? $"{{{{l{(referenceLineIndex + 1).ToString(CultureInfo.InvariantCulture)}n{lineTokenIndex.ToString(CultureInfo.InvariantCulture)}}}}}"
+						: $"{{{{n{globalTokenIndex.ToString(CultureInfo.InvariantCulture)}}}}}";
+				}, out bool lineReplaced, rawToken =>
+				{
+					if (IsSemanticLiveNumberToken(rawToken))
+					{
+						lineTokenIndex++;
+						globalTokenIndex++;
+					}
+				});
+				replacedAny |= lineReplaced;
+				renderedLines.Add(converted);
+				continue;
+			}
+
+			string fallbackConverted = ReplaceVisibleNumbersWithTokens(customLine, _ =>
+			{
+				globalTokenIndex++;
+				return $"{{{{n{globalTokenIndex.ToString(CultureInfo.InvariantCulture)}}}}}";
+			}, out bool fallbackReplaced, rawToken =>
+			{
+				if (IsSemanticLiveNumberToken(rawToken))
+				{
+					globalTokenIndex++;
+				}
+			});
+			replacedAny |= fallbackReplaced;
+			renderedLines.Add(fallbackConverted);
+		}
+
+		return replacedAny ? string.Join('\n', renderedLines) : customText;
+	}
+
 	private static bool TryApplySemanticLiveNumberTokens(string template, string? referenceDescription, out string rendered)
 	{
 		rendered = template;
@@ -167,6 +260,91 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 		rendered = builder.ToString();
 		return true;
+	}
+
+	private static string ReplaceVisibleNumbersWithTokens(
+		string text,
+		Func<int, string> tokenFactory,
+		out bool replacedAny,
+		Action<string>? onExistingLiveToken = null)
+	{
+		replacedAny = false;
+		if (string.IsNullOrEmpty(text))
+		{
+			return text;
+		}
+
+		StringBuilder builder = new StringBuilder(text.Length + 16);
+		int tokenIndex = 0;
+		int imageDepth = 0;
+
+		for (int i = 0; i < text.Length;)
+		{
+			if (i + 3 < text.Length && text[i] == '{' && text[i + 1] == '{')
+			{
+				int tokenEnd = text.IndexOf("}}", i + 2, StringComparison.Ordinal);
+				if (tokenEnd >= 0)
+				{
+					onExistingLiveToken?.Invoke(text.Substring(i + 2, tokenEnd - i - 2));
+					builder.Append(text.AsSpan(i, tokenEnd + 2 - i));
+					i = tokenEnd + 2;
+					continue;
+				}
+			}
+
+			if (TryReadTag(text, i, out string tag, out int tagEndExclusive))
+			{
+				builder.Append(tag);
+				UpdateTemplateTokenTagState(tag, ref imageDepth);
+				i = tagEndExclusive;
+				continue;
+			}
+
+			if (imageDepth == 0 && TryReadNumericToken(text, i, out int tokenEndExclusive))
+			{
+				tokenIndex++;
+				builder.Append(tokenFactory(tokenIndex));
+				replacedAny = true;
+				i = tokenEndExclusive;
+				continue;
+			}
+
+			builder.Append(text[i]);
+			i++;
+		}
+
+		return replacedAny ? builder.ToString() : text;
+	}
+
+	private static bool IsSemanticLiveNumberToken(string rawToken)
+	{
+		string token = rawToken.Trim();
+		if (token.Length < 2)
+		{
+			return false;
+		}
+
+		if ((token[0] == 'n' || token[0] == 'N')
+			&& TryParsePositiveInt(token, 1, token.Length - 1, out _))
+		{
+			return true;
+		}
+
+		if (token[0] != 'l' && token[0] != 'L')
+		{
+			return false;
+		}
+
+		int numberMarker = token.IndexOf('n', 1);
+		if (numberMarker < 0)
+		{
+			numberMarker = token.IndexOf('N', 1);
+		}
+
+		return numberMarker > 1
+			&& numberMarker + 1 < token.Length
+			&& TryParsePositiveInt(token, 1, numberMarker - 1, out _)
+			&& TryParsePositiveInt(token, numberMarker + 1, token.Length - numberMarker - 1, out _);
 	}
 
 	private static bool TryResolveSemanticLiveNumberToken(

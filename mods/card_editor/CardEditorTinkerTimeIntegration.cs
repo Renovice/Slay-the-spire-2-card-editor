@@ -42,6 +42,10 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 	private const int ExpertiseStrength = 2;
 	private const int ExpertiseDexterity = 2;
 	private const int CuriousReduction = 1;
+	private const string BuiltTinkerTitleKey = "CARD_EDITOR_BUILT_TINKER_CARD.title";
+	private const string BuiltTinkerDescriptionKey = "CARD_EDITOR_BUILT_TINKER_CARD.description";
+	private const string BuiltTinkerTitleFallback = "Custom Experiment";
+	private const string BuiltTinkerDescriptionFallback = "Build a custom experiment.";
 
 	private CardType _tinkerTimeType = CardType.Attack;
 	private TinkerTime.RiderEffect _tinkerTimeRider;
@@ -187,11 +191,11 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 		{
 			try
 			{
-				title = IsMutable ? BuildTitle() : "Custom Experiment";
+				title = IsMutable ? BuildTitle() : GetCardLoc(BuiltTinkerTitleKey, BuiltTinkerTitleFallback);
 			}
 			catch
 			{
-				title = "Custom Experiment";
+				title = GetCardLoc(BuiltTinkerTitleKey, BuiltTinkerTitleFallback);
 			}
 		}
 
@@ -211,16 +215,16 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 		string fallback;
 		try
 		{
-			fallback = IsMutable ? BuildDescription() : "Build a custom experiment.";
+			fallback = IsMutable ? BuildDescription() : GetCardLoc(BuiltTinkerDescriptionKey, BuiltTinkerDescriptionFallback);
 		}
 		catch
 		{
-			fallback = "Build a custom experiment.";
+			fallback = GetCardLoc(BuiltTinkerDescriptionKey, BuiltTinkerDescriptionFallback);
 		}
 
 		if (string.IsNullOrWhiteSpace(fallback))
 		{
-			fallback = "Build a custom experiment.";
+			fallback = GetCardLoc(BuiltTinkerDescriptionKey, BuiltTinkerDescriptionFallback);
 		}
 		return CardEditorVanillaKeywordSupport.FormatDescription(this, fallback, target, isUpgradePreview);
 	}
@@ -403,7 +407,7 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 			return source.Title;
 		}
 
-		return "Mad Science";
+		return CardEditorLoc.T("tinkerTime.madScience.title", "Mad Science");
 	}
 
 	private string BuildDescription()
@@ -420,7 +424,11 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 
 		if (HasCustomBase && TinkerTimeRider == TinkerTime.RiderEffect.Violence)
 		{
-			lines.Add($"Repeat this base effect {FormatDynamicVar("ViolenceHits")} times.");
+			string count = FormatDynamicVar("ViolenceHits");
+			lines.Add(CardEditorLoc.F(
+				"tinkerTime.violenceRepeat",
+				$"Repeat this base effect {count} times.",
+				("Count", count)));
 		}
 
 		string riderDescription = HasCustomRider
@@ -568,14 +576,47 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 	{
 		try
 		{
-			LocManager.Instance?.GetTable("cards").MergeWith(new Dictionary<string, string>
+			if (LocManager.Instance == null)
 			{
-				["CARD_EDITOR_BUILT_TINKER_CARD.title"] = "Custom Experiment",
-				["CARD_EDITOR_BUILT_TINKER_CARD.description"] = "Build a custom experiment."
-			});
+				return;
+			}
+
+			Dictionary<string, string> missing = new();
+			if (!LocString.Exists("cards", BuiltTinkerTitleKey))
+			{
+				missing[BuiltTinkerTitleKey] = BuiltTinkerTitleFallback;
+			}
+			if (!LocString.Exists("cards", BuiltTinkerDescriptionKey))
+			{
+				missing[BuiltTinkerDescriptionKey] = BuiltTinkerDescriptionFallback;
+			}
+			if (missing.Count == 0)
+			{
+				return;
+			}
+
+			LocManager.Instance.GetTable("cards").MergeWith(missing);
 		}
 		catch
 		{
+		}
+	}
+
+	private static string GetCardLoc(string key, string fallback)
+	{
+		try
+		{
+			if (LocManager.Instance == null || !LocString.Exists("cards", key))
+			{
+				return fallback;
+			}
+
+			string value = new LocString("cards", key).GetFormattedText();
+			return string.IsNullOrWhiteSpace(value) ? fallback : value;
+		}
+		catch
+		{
+			return fallback;
 		}
 	}
 }
@@ -986,11 +1027,12 @@ internal static class CardEditorTinkerTimeIntegration
 
 	private static LocString RuntimeLoc(string key, string text, params (string Key, string Value)[] vars)
 	{
+		string localizedText = CardEditorLoc.T(key, text);
 		try
 		{
 			LocManager.Instance?.GetTable("extensions").MergeWith(new Dictionary<string, string>
 			{
-				[key] = text
+				[key] = localizedText
 			});
 		}
 		catch
