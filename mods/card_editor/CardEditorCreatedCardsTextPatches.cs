@@ -38,7 +38,7 @@ public static class CardModel_get_Title_CreatedCards_Patch
 
 		if (__instance.MaxUpgradeLevel > 1)
 		{
-			__result = $"{title}+{__instance.CurrentUpgradeLevel}";
+			__result = $"{title}+{__instance.GetSafeCurrentUpgradeLevel()}";
 			return false;
 		}
 
@@ -68,7 +68,7 @@ public static class CardModel_GetDescriptionForUpgradePreview_CreatedCards_Patch
 			return false;
 		}
 
-		__result = CreatedCardTextBuilder.Build(__instance, __instance.CurrentTarget, isUpgradePreview: true);
+		__result = CreatedCardTextBuilder.Build(__instance, __instance.GetSafeCurrentTarget(), isUpgradePreview: true);
 		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.CreatedGetDescriptionForUpgradePreview.prefix", __instance, PileType.None, isUpgradePreview: true, __result);
 		return false;
 	}
@@ -253,9 +253,10 @@ internal static class CreatedCardTextBuilder
 		try
 		{
 			CardModel baseCard = ModelDb.GetById<CardModel>(upgradedCard.Id).ToMutable();
-			if (upgradedCard.Owner != null && baseCard.Owner == null)
+			MegaCrit.Sts2.Core.Entities.Players.Player? owner = upgradedCard.TryGetOwner();
+			if (owner != null && baseCard.TryGetOwner() == null)
 			{
-				baseCard.Owner = upgradedCard.Owner;
+				baseCard.Owner = owner;
 			}
 
 			if (!string.IsNullOrWhiteSpace(baseDescriptionOverride))

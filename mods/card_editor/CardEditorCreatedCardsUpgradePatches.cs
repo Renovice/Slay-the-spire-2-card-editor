@@ -43,7 +43,7 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsUpgraded
 			return;
 		}
 
-		CombatState? combatState = sourceCard.GetConcreteCombatState() ?? list[0].Owner?.Creature.GetConcreteCombatState();
+		CombatState? combatState = sourceCard.GetConcreteCombatState() ?? list[0].TryGetOwnerCreature().GetConcreteCombatState();
 		IReadOnlyList<CardExtraEffect> effects = CardEditorExtraEffects.GetRuntimeEffectsForExecution(combatState, sourceCard);
 		if (effects == null || effects.Count == 0)
 		{
@@ -76,7 +76,7 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsUpgraded
 
 			foreach (CardExtraEffect effect in upgradeEffects)
 			{
-				Player? owner = card.Owner;
+				Player? owner = card.TryGetOwner();
 				if (owner != null && !CardEditorExtraEffects.MatchesAffectedCardFilters(owner, card, effect))
 				{
 					continue;

@@ -188,7 +188,8 @@ public enum CardExtraEffectKind
 	CountdownEffect = 132,
 	ConsumeCardValue = 133,
 	TargetCardMutation = 134,
-	PersistentTargetCardMutation = 135
+	PersistentTargetCardMutation = 135,
+	SelectCardsFromPile = 136
 }
 
 public enum CardExtraEffectSelfScalingOperation
@@ -248,7 +249,9 @@ public enum CardExtraEffectAmountSourceMode
 	AppliedEffectBlockedDamage = 6,
 	AppliedEffectOverkillDamage = 7,
 	AppliedEffectKills = 8,
-	AppliedEffectTotalAndOverkillDamage = 9
+	AppliedEffectTotalAndOverkillDamage = 9,
+	ConfiguredEffectAmount = 10,
+	ConfiguredEffectInstances = 11
 }
 
 public enum CardExtraEffectValueSourceMode
@@ -373,6 +376,12 @@ public enum CardExtraEffectAdditionalMoveToPiles
 	ExhaustPile = 8
 }
 
+public enum CardExtraEffectCopyMode
+{
+	OneCopyPerSelectedCard = 0,
+	AmountCopiesPerSelectedCard = 1
+}
+
 public enum CardExtraEffectCardSelectionMode
 {
 	Choose = 0,
@@ -382,7 +391,15 @@ public enum CardExtraEffectCardSelectionMode
 	Top = 4,
 	Bottom = 5,
 	EachPile = 6,
-	ThisCard = 7
+	ThisCard = 7,
+	SelectedByEffect = 8,
+	RandomOffer = 9
+}
+
+public enum CardExtraEffectGeneratedCardOwnerMode
+{
+	SourceOwner = 0,
+	EffectTarget = 1
 }
 
 public enum CardExtraEffectChooseOneOptionMode
@@ -592,7 +609,8 @@ public enum CardExtraEffectPowerHost
 {
 	CardOwner = 0,
 	TriggerTarget = 1,
-	CardOwnerWatchOpponents = 2
+	CardOwnerWatchOpponents = 2,
+	EffectTargets = 3
 }
 
 public enum CardExtraEffectPowerTriggerFrom
@@ -735,6 +753,21 @@ public enum CardExtraEffectPotionRarityFilter
 }
 
 public enum CardExtraEffectCardRewardRarityFilter
+{
+	Any = 0,
+	Basic = 1,
+	Common = 2,
+	Uncommon = 3,
+	Rare = 4,
+	Ancient = 5,
+	Event = 6,
+	Token = 7,
+	Status = 8,
+	Curse = 9,
+	Quest = 10
+}
+
+public enum CardExtraEffectCardRarityFilter
 {
 	Any = 0,
 	Basic = 1,
@@ -989,7 +1022,8 @@ public enum CardExtraEffectCountCardFilter
 	Eternal = 33,
 	CreatesCards = 34,
 	EnergyCostModifier = 35,
-	StarCostModifier = 36
+	StarCostModifier = 36,
+	CanBePlayed = 37
 }
 
 public enum CardExtraEffectCountAggregationMode
@@ -1181,6 +1215,7 @@ public sealed class CardExtraEffect
 	public CardExtraEffectCardPile BranchCountCardPile { get; set; } = CardExtraEffectCardPile.Hand;
 	public CardGeneratedCardPool BranchCountCardPool { get; set; } = CardGeneratedCardPool.All;
 	public CardGeneratedCardType BranchCountCardType { get; set; } = CardGeneratedCardType.Any;
+	public CardExtraEffectCardRarityFilter BranchCountCardRarity { get; set; } = CardExtraEffectCardRarityFilter.Any;
 	public CardExtraEffectCountCardFilter BranchCountCardFilter { get; set; } = CardExtraEffectCountCardFilter.Any;
 	public CardExtraEffectCardMatchMode BranchCountCardMatchMode { get; set; } = CardExtraEffectCardMatchMode.Any;
 	public string? BranchCountMatchCardId { get; set; }
@@ -1232,9 +1267,14 @@ public sealed class CardExtraEffect
 	public bool CardSelectionCountIsX { get; set; }
 	public int CardSelectionCount { get; set; } = 1;
 
+	// Random-offer selection: how many random candidates to present before choosing CardSelectionCount/Amount cards.
+	public bool CardSelectionOfferCountIsX { get; set; }
+	public int CardSelectionOfferCount { get; set; } = 3;
+
 	// Grant-to-card: optional candidate filters.
 	public CardGeneratedCardPool CardSelectionPool { get; set; } = CardGeneratedCardPool.All;
 	public CardGeneratedCardType CardSelectionType { get; set; } = CardGeneratedCardType.Any;
+	public CardExtraEffectCardRarityFilter CardSelectionRarity { get; set; } = CardExtraEffectCardRarityFilter.Any;
 	public CardExtraEffectCountCardFilter CardSelectionFilter { get; set; } = CardExtraEffectCountCardFilter.Any;
 	public CardExtraEffectTrigger Trigger { get; set; }
 	public CardExtraEffectCountEvent PowerTriggerCountEvent { get; set; } = CardExtraEffectCountEvent.BlockLost;
@@ -1250,6 +1290,7 @@ public sealed class CardExtraEffect
 	// Defaults are "any card" to preserve older saves/presets that didn't have these fields.
 	public CardGeneratedCardPool TriggerCardPool { get; set; } = CardGeneratedCardPool.All;
 	public CardGeneratedCardType TriggerCardType { get; set; } = CardGeneratedCardType.Any;
+	public CardExtraEffectCardRarityFilter TriggerCardRarity { get; set; } = CardExtraEffectCardRarityFilter.Any;
 	public CardExtraEffectCountCardFilter TriggerCardFilter { get; set; } = CardExtraEffectCountCardFilter.Any;
 	public CardExtraEffectEnemyStatus PowerTriggerEnemyStatus { get; set; } = CardExtraEffectEnemyStatus.AnyPowerStatus;
 	public string? PowerTriggerPowerId { get; set; }
@@ -1297,6 +1338,7 @@ public sealed class CardExtraEffect
 	public CardGeneratedCardPool GeneratedCardPool { get; set; }
 	public CardGeneratedCardType GeneratedCardType { get; set; }
 	public string? GeneratedCardCustomTag { get; set; }
+	public CardExtraEffectGeneratedCardOwnerMode GeneratedCardOwnerMode { get; set; } = CardExtraEffectGeneratedCardOwnerMode.SourceOwner;
 
 	public CardExtraEffectScaleMode ScaleMode { get; set; }
 	public CardExtraEffectCountEvent CountEvent { get; set; }
@@ -1307,6 +1349,7 @@ public sealed class CardExtraEffect
 	public CardExtraEffectCardPile CountCardPile { get; set; } = CardExtraEffectCardPile.Hand;
 	public CardGeneratedCardPool CountCardPool { get; set; }
 	public CardGeneratedCardType CountCardType { get; set; }
+	public CardExtraEffectCardRarityFilter CountCardRarity { get; set; } = CardExtraEffectCardRarityFilter.Any;
 	public CardExtraEffectCountCardFilter CountCardFilter { get; set; }
 	public bool CountOnlyBlockCards { get; set; }
 	public CardExtraEffectCountAggregationMode CountAggregationMode { get; set; } = CardExtraEffectCountAggregationMode.CardCount;
@@ -1341,6 +1384,7 @@ public sealed class CardExtraEffect
 	public bool GrantToCard { get; set; }
 	public CardExtraEffectCardSelectionMode CardSelectionMode { get; set; }
 	public CardExtraEffectCardPile CardSelectionPile { get; set; }
+	public string? CardSelectionSourceEffectId { get; set; }
 	public bool IncludeSourceCardInSelection { get; set; }
 	public bool FutureMatchingCards { get; set; }
 	public CardExtraEffectCardGrantDuration CardGrantDuration { get; set; }
@@ -1353,6 +1397,7 @@ public sealed class CardExtraEffect
 	public CardExtraEffectCardPilePosition MoveToPosition { get; set; }
 	public bool UseMoveDestinationForGeneratedCards { get; set; }
 	public CardExtraEffectAdditionalMoveToPiles AdditionalMoveToPiles { get; set; }
+	public CardExtraEffectCopyMode CopyMode { get; set; } = CardExtraEffectCopyMode.OneCopyPerSelectedCard;
 	public CardExtraEffectDelayedPileAction DelayedPileAction { get; set; } = CardExtraEffectDelayedPileAction.RemoveFromDeck;
 	public CardExtraEffectDelayedPileCounterUnit DelayedPileCounterUnit { get; set; } = CardExtraEffectDelayedPileCounterUnit.Triggers;
 	public CardExtraEffectDelayedPileCounterScope DelayedPileCounterScope { get; set; } = CardExtraEffectDelayedPileCounterScope.ThisCombat;
@@ -1517,6 +1562,7 @@ internal static class CardEditorExtraEffects
 		return effect?.PowerHost switch
 		{
 			CardExtraEffectPowerHost.TriggerTarget => CardExtraEffectPowerHost.TriggerTarget,
+			CardExtraEffectPowerHost.EffectTargets => CardExtraEffectPowerHost.EffectTargets,
 			_ => CardExtraEffectPowerHost.CardOwner
 		};
 	}
@@ -2522,6 +2568,14 @@ internal static class CardEditorExtraEffects
 		},
 		new()
 		{
+			Kind = CardExtraEffectKind.SelectCardsFromPile,
+			Label = "Select Cards from Pile",
+			AllowedTargets = new [] { CardExtraEffectTarget.Self },
+			DefaultAmount = 1,
+			DefaultTarget = CardExtraEffectTarget.Self
+		},
+		new()
+		{
 			Kind = CardExtraEffectKind.ShuffleDrawPile,
 			Label = "Shuffle Draw/Discard",
 			AllowedTargets = new [] { CardExtraEffectTarget.Self },
@@ -2778,7 +2832,7 @@ internal static class CardEditorExtraEffects
 
 		if (TryGetOverride(card.Id, out CardOverride? overrideData))
 		{
-			IReadOnlyList<CardExtraEffect> overrideEffects = GetEffectiveExtraEffects(card, overrideData!, card.CurrentUpgradeLevel > 0);
+			IReadOnlyList<CardExtraEffect> overrideEffects = GetEffectiveExtraEffects(card, overrideData!, card.GetSafeCurrentUpgradeLevel() > 0);
 			if (overrideEffects.Any(e => e != null
 				&& !IsPowerEffect(e)
 				&& !e.GrantToCard
@@ -2805,7 +2859,7 @@ internal static class CardEditorExtraEffects
 			}
 		}
 
-		Creature? ownerCreature = card.Owner?.Creature;
+		Creature? ownerCreature = card.TryGetOwnerCreature();
 		if (ownerCreature == null)
 		{
 			return false;
@@ -3503,6 +3557,7 @@ public static string CountComparisonLabel(CardExtraEffectCountComparison compari
 			CardExtraEffectCountCardFilter.CreatesCards => "Creates Cards",
 			CardExtraEffectCountCardFilter.EnergyCostModifier => "Energy Cost Effects",
 			CardExtraEffectCountCardFilter.StarCostModifier => "Star Cost Effects",
+			CardExtraEffectCountCardFilter.CanBePlayed => "Can Be Played",
 			_ => filter.ToString()
 		};
 		return CardEditorLoc.Enum("countFilter", filter, fallback);
@@ -3535,6 +3590,7 @@ public static string CountComparisonLabel(CardExtraEffectCountComparison compari
 			CardExtraEffectCountCardFilter.Retain => GrantedKeywordLabel(CardKeyword.Retain),
 			CardExtraEffectCountCardFilter.Sly => GrantedKeywordLabel(CardKeyword.Sly),
 			CardExtraEffectCountCardFilter.Eternal => GrantedKeywordLabel(CardKeyword.Eternal),
+			CardExtraEffectCountCardFilter.CanBePlayed => CardEditorLoc.T("cardText.value.playable", "playable"),
 			_ => CountCardFilterLabel(filter)
 		};
 	}
@@ -3762,6 +3818,8 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			CardExtraEffectAmountSourceMode.AppliedEffectTotalAndOverkillDamage => "Total + Overkill",
 			CardExtraEffectAmountSourceMode.AppliedEffectInstances => "Instances",
 			CardExtraEffectAmountSourceMode.AppliedEffectKills => "Kills",
+			CardExtraEffectAmountSourceMode.ConfiguredEffectAmount => "Configured Amount",
+			CardExtraEffectAmountSourceMode.ConfiguredEffectInstances => "Configured Count",
 			_ => mode.ToString()
 		};
 		return CardEditorLoc.Enum("amountSource.mode", mode, fallback);
@@ -4087,6 +4145,25 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		return CardEditorLoc.Enum("cardRewardRarityFilter", rarity, fallback);
 	}
 
+	public static string CardRarityFilterLabel(CardExtraEffectCardRarityFilter rarity)
+	{
+		string fallback = rarity switch
+		{
+			CardExtraEffectCardRarityFilter.Basic => "Basic",
+			CardExtraEffectCardRarityFilter.Common => "Common",
+			CardExtraEffectCardRarityFilter.Uncommon => "Uncommon",
+			CardExtraEffectCardRarityFilter.Rare => "Rare",
+			CardExtraEffectCardRarityFilter.Ancient => "Ancient",
+			CardExtraEffectCardRarityFilter.Event => "Event",
+			CardExtraEffectCardRarityFilter.Token => "Token",
+			CardExtraEffectCardRarityFilter.Status => "Status",
+			CardExtraEffectCardRarityFilter.Curse => "Curse",
+			CardExtraEffectCardRarityFilter.Quest => "Quest",
+			_ => "Any Rarity"
+		};
+		return CardEditorLoc.Enum("cardRarityFilter", rarity, fallback);
+	}
+
 	public static string CardRewardSourceLabel(CardExtraEffectCardRewardSource source)
 	{
 		string fallback = source switch
@@ -4212,6 +4289,26 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		return CardEditorLoc.Enum("delayedPileCounterScope", scope, fallback);
 	}
 
+	public static string CopyModeLabel(CardExtraEffectCopyMode mode)
+	{
+		string fallback = mode switch
+		{
+			CardExtraEffectCopyMode.AmountCopiesPerSelectedCard => "N Copies Each",
+			_ => "One Copy Each"
+		};
+		return CardEditorLoc.Enum("copyMode", mode, fallback);
+	}
+
+	public static string GeneratedCardOwnerModeLabel(CardExtraEffectGeneratedCardOwnerMode mode)
+	{
+		string fallback = mode switch
+		{
+			CardExtraEffectGeneratedCardOwnerMode.EffectTarget => "Effect Target",
+			_ => "Source Owner"
+		};
+		return CardEditorLoc.Enum("generatedCardOwnerMode", mode, fallback);
+	}
+
 	public static string CardSelectionModeLabel(CardExtraEffectCardSelectionMode mode)
 	{
 		string fallback = mode switch
@@ -4224,6 +4321,8 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			CardExtraEffectCardSelectionMode.Bottom => "Bottom",
 			CardExtraEffectCardSelectionMode.EachPile => "Each Pile",
 			CardExtraEffectCardSelectionMode.ThisCard => "This Card",
+			CardExtraEffectCardSelectionMode.SelectedByEffect => "Selected Row",
+			CardExtraEffectCardSelectionMode.RandomOffer => "Random Offer",
 			_ => mode.ToString()
 		};
 		return CardEditorLoc.Enum("cardSelectionMode", mode, fallback);
@@ -4691,6 +4790,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			and not CardExtraEffectKind.CopyExactCardsFromPileToDeck
 			and not CardExtraEffectKind.RemoveCardsFromDeck
 			and not CardExtraEffectKind.ConsumeCardValue
+			and not CardExtraEffectKind.SelectCardsFromPile
 			and not CardExtraEffectKind.DrawCardsThatCostLess
 			and not CardExtraEffectKind.DiscardCards
 			and not CardExtraEffectKind.ExhaustCards
@@ -4867,6 +4967,34 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			or CardExtraEffectKind.PersistentSelfScaling
 			or CardExtraEffectKind.TargetCardMutation
 			or CardExtraEffectKind.PersistentTargetCardMutation
+			or CardExtraEffectKind.DrawCards
+			or CardExtraEffectKind.DrawCardsThatCostLess
+			or CardExtraEffectKind.AddCopyOfThisCard
+			or CardExtraEffectKind.AddExactCopyOfThisCardToDeck
+			or CardExtraEffectKind.AddRandomCardToHand
+			or CardExtraEffectKind.ChooseOneOfThreeCardsToHand
+			or CardExtraEffectKind.PlayRandomGeneratedCard
+			or CardExtraEffectKind.AddSpecificCardToHand
+			or CardExtraEffectKind.FetchSpecificCardToHand
+			or CardExtraEffectKind.PlayCardFromPile
+			or CardExtraEffectKind.MoveCardsBetweenPiles
+			or CardExtraEffectKind.UpgradeCardsInPile
+			or CardExtraEffectKind.DiscardCards
+			or CardExtraEffectKind.ExhaustCards
+			or CardExtraEffectKind.TransformCards
+			or CardExtraEffectKind.GrantKeywordToPile
+			or CardExtraEffectKind.UpgradeDeckCards
+			or CardExtraEffectKind.CopyCardsFromPileToDeck
+			or CardExtraEffectKind.CopyExactCardsFromPileToDeck
+			or CardExtraEffectKind.RemoveCardsFromDeck
+			or CardExtraEffectKind.DelayedPileAction
+			or CardExtraEffectKind.ConsumeCardValue
+			or CardExtraEffectKind.SelectCardsFromPile
+			or CardExtraEffectKind.AutoPlaySelfFromPile
+			or CardExtraEffectKind.AutoDrawSelfFromPile
+			or CardExtraEffectKind.ConditionalAutoPlayFromPile
+			or CardExtraEffectKind.ConditionalAutoDrawFromPile
+			or CardExtraEffectKind.ConditionalAutoRunEffects
 			or CardExtraEffectKind.RemoveBlock
 			or CardExtraEffectKind.GainGold
 			or CardExtraEffectKind.LoseGold;
@@ -4968,7 +5096,9 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 				or CardExtraEffectAmountSourceMode.AppliedEffectOverkillDamage
 				or CardExtraEffectAmountSourceMode.AppliedEffectTotalAndOverkillDamage
 				or CardExtraEffectAmountSourceMode.AppliedEffectInstances
-				or CardExtraEffectAmountSourceMode.AppliedEffectKills;
+				or CardExtraEffectAmountSourceMode.AppliedEffectKills
+				or CardExtraEffectAmountSourceMode.ConfiguredEffectAmount
+				or CardExtraEffectAmountSourceMode.ConfiguredEffectInstances;
 	}
 
 	private static bool UsesValueSourceAmountSource(CardExtraEffect effect)
@@ -5054,7 +5184,52 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			}
 		}
 
+		CardExtraEffect? normalizedValueSourceScaling = NormalizeImplicitDefaultValueSourceScaling(result);
+		if (!ReferenceEquals(normalizedValueSourceScaling, result))
+		{
+			result = normalizedValueSourceScaling;
+		}
+
 		return result;
+	}
+
+	private static CardExtraEffect? NormalizeImplicitDefaultValueSourceScaling(CardExtraEffect? effect)
+	{
+		if (effect == null
+			|| effect.AmountSourceMode != CardExtraEffectAmountSourceMode.ValueSource
+			|| effect.ValueSourceMode != CardExtraEffectValueSourceMode.PowerStatus
+			|| !CardEditorCustomStatusRegistry.IsCustomStatusId(effect.ValueSourcePowerId)
+			|| effect.ScaleMode == CardExtraEffectScaleMode.None)
+		{
+			return effect;
+		}
+
+		bool looksLikeUntouchedDefaultCountConfig =
+			effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount
+			&& effect.CountEvent == CardExtraEffectCountEvent.Played
+			&& effect.CountWindow == CardExtraEffectCountWindow.ThisCombat
+			&& effect.CountWindowInclusion == CardExtraEffectCountWindowInclusion.IncludeThisTurn
+			&& effect.CountComparison == CardExtraEffectCountComparison.None
+			&& effect.CountConditionAmount <= 1
+			&& effect.CountCardPile == CardExtraEffectCardPile.Hand
+			&& effect.CountCardPool == CardGeneratedCardPool.All
+			&& effect.CountCardType == CardGeneratedCardType.Any
+			&& effect.CountCardFilter == CardExtraEffectCountCardFilter.Any
+			&& effect.CountAggregationMode == CardExtraEffectCountAggregationMode.CardCount
+			&& !effect.CountUsesCardEffectAmount
+			&& !effect.CountExcludeSourceCard
+			&& !effect.HistoryScalingIncludesBase
+			&& effect.HistoryScalingBaseAmount == null
+			&& effect.HistoryScalingCountStep <= 1;
+		if (!looksLikeUntouchedDefaultCountConfig)
+		{
+			return effect;
+		}
+
+		CardExtraEffect normalized = CloneEffect(effect);
+		normalized.ScaleMode = CardExtraEffectScaleMode.None;
+		normalized.CountComparison = CardExtraEffectCountComparison.None;
+		return normalized;
 	}
 
 	private static bool TryGetSignedAmountOppositeKind(CardExtraEffectKind kind, out CardExtraEffectKind oppositeKind)
@@ -5376,6 +5551,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			CardExtraEffectKind.PersistentTargetCardMutation => amount > 0,
 			CardExtraEffectKind.DelayedPileAction => amount > 0,
 			CardExtraEffectKind.ConsumeCardValue => amount > 0,
+			CardExtraEffectKind.SelectCardsFromPile => amount > 0,
 			CardExtraEffectKind.CreatedCardsCostLess => amount == -1 || amount > 0,
 			CardExtraEffectKind.CardCostsLess => amount != 0,
 			CardExtraEffectKind.CardStarCostsLess => amount != 0,
@@ -5386,6 +5562,35 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			_ when SupportsSignedAmountNormalization(kind) => true,
 			_ => amount >= 0
 		};
+	}
+
+	private static bool IsRenderableDescriptionEffect(CardExtraEffect? effect)
+	{
+		if (effect == null)
+		{
+			return false;
+		}
+
+		return effect.Kind == CardExtraEffectKind.CreatedCardsCostLess
+			? IsRenderableCreatedCardsCostLess(effect)
+			: IsValidEffectAmount(effect.Kind, effect.Amount);
+	}
+
+	private static bool IsRenderableCreatedCardsCostLess(CardExtraEffect effect)
+	{
+		if (effect == null || effect.Kind != CardExtraEffectKind.CreatedCardsCostLess)
+		{
+			return false;
+		}
+
+		if (effect.AmountIsX || IsValidEffectAmount(effect.Kind, effect.Amount))
+		{
+			return true;
+		}
+
+		return GetEffectiveCardCostsLessModifier(effect) is CardExtraEffectCostModifier.Free
+			or CardExtraEffectCostModifier.FreeToPlay
+			or CardExtraEffectCostModifier.HalfCost;
 	}
 
 	// Upgrade "extra effects" store deltas for the base slots (index-based). Those deltas can be negative to cancel/remove
@@ -5411,6 +5616,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 		if (effect.IncludeSourceCardInSelection
 			|| effect.FutureMatchingCards
+			|| !string.IsNullOrWhiteSpace(effect.CardSelectionSourceEffectId)
 			|| effect.AmountSourceMode != CardExtraEffectAmountSourceMode.Fixed
 			|| effect.AmountSourceMultiplier != 1
 			|| effect.ValueSourceMode != CardExtraEffectValueSourceMode.Common
@@ -5456,8 +5662,10 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			|| effect.CardRewardRarityFilter != CardExtraEffectCardRewardRarityFilter.Any
 			|| effect.CardRewardSource != CardExtraEffectCardRewardSource.RoomDefault
 			|| effect.CardRewardRarityOdds != CardExtraEffectCardRewardRarityOdds.RoomDefault
+			|| effect.CreatedCardsCostDuration != CardCreatedCardsCostDuration.ThisTurn
 			|| effect.CreatedCardsCostTurns != 0
 			|| effect.CreatedCardsCostResource != CardCreatedCardsCostResource.Energy
+			|| GetEffectiveCardCostsLessModifier(effect) != CardExtraEffectCostModifier.Reduce
 			|| effect.CardCostsLessTurns != 0
 			|| effect.CountTurns != 0
 			|| effect.CountConditionAmount != 0
@@ -5480,6 +5688,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			|| effect.BranchCountTurns != 0
 			|| effect.BranchCountCardPool != CardGeneratedCardPool.All
 			|| effect.BranchCountCardType != CardGeneratedCardType.Any
+			|| effect.BranchCountCardRarity != CardExtraEffectCardRarityFilter.Any
 			|| effect.BranchCountCardFilter != CardExtraEffectCountCardFilter.Any
 			|| HasBranchCountCardMatchFilter(effect)
 			|| GetEffectiveBranchCountAggregationMode(effect) != CardExtraEffectCountAggregationMode.CardCount
@@ -5498,6 +5707,9 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			|| !string.IsNullOrWhiteSpace(effect.CountPowerId)
 			|| !string.IsNullOrWhiteSpace(effect.CountResultEffectId)
 			|| effect.CountResultMetric != CardExtraEffectResultMetric.Kills
+			|| effect.CountCardRarity != CardExtraEffectCardRarityFilter.Any
+			|| effect.CardSelectionRarity != CardExtraEffectCardRarityFilter.Any
+			|| effect.TriggerCardRarity != CardExtraEffectCardRarityFilter.Any
 			|| !string.IsNullOrWhiteSpace(effect.MatchCustomKeyword)
 			|| !string.IsNullOrWhiteSpace(effect.CustomKeywordName)
 			|| !string.IsNullOrWhiteSpace(effect.CustomPowerName)
@@ -5528,6 +5740,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 		if (upgradeEffect.IncludeSourceCardInSelection
 			|| upgradeEffect.FutureMatchingCards
+			|| !string.IsNullOrWhiteSpace(upgradeEffect.CardSelectionSourceEffectId)
 			|| upgradeEffect.AmountSourceMode != CardExtraEffectAmountSourceMode.Fixed
 			|| upgradeEffect.AmountSourceMultiplier != 1
 			|| upgradeEffect.ValueSourceMode != CardExtraEffectValueSourceMode.Common
@@ -5559,8 +5772,10 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 				|| upgradeEffect.AutoPlayLoopLimit != 0
 				|| upgradeEffect.StatefulTransformDurationAmount != 0
 				|| (upgradeEffect.AutoPlayLoopLimit != 0 && upgradeEffect.UseLimitWindow != CardExtraEffectUseLimitWindow.Turn)
+				|| upgradeEffect.CreatedCardsCostDuration != CardCreatedCardsCostDuration.ThisTurn
 				|| upgradeEffect.CreatedCardsCostTurns != 0
 				|| upgradeEffect.CreatedCardsCostResource != CardCreatedCardsCostResource.Energy
+				|| GetEffectiveCardCostsLessModifier(upgradeEffect) != CardExtraEffectCostModifier.Reduce
 				|| upgradeEffect.CardCostsLessTurns != 0
 				|| upgradeEffect.CountTurns != 0
 				|| upgradeEffect.CountConditionAmount != 0
@@ -5569,6 +5784,9 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 				|| upgradeEffect.RepeatScalingExtraTimes != 0
 				|| upgradeEffect.CardGrantTurns != 0
 				|| upgradeEffect.CardSelectionCount != 0
+				|| upgradeEffect.CardSelectionRarity != CardExtraEffectCardRarityFilter.Any
+				|| upgradeEffect.TriggerCardRarity != CardExtraEffectCardRarityFilter.Any
+				|| upgradeEffect.CountCardRarity != CardExtraEffectCardRarityFilter.Any
 				|| upgradeEffect.EnchantmentTurns != 0
 				|| upgradeEffect.ConditionalBonusAmount != 0
 				|| upgradeEffect.ConditionalBonusConditionType != CardExtraEffectBranchConditionType.None
@@ -5580,6 +5798,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 				|| !string.IsNullOrWhiteSpace(upgradeEffect.BranchCountPowerId)
 				|| !string.IsNullOrWhiteSpace(upgradeEffect.BranchCountResultEffectId)
 				|| upgradeEffect.BranchCountResultMetric != CardExtraEffectResultMetric.Kills
+				|| upgradeEffect.BranchCountCardRarity != CardExtraEffectCardRarityFilter.Any
 				|| !string.IsNullOrWhiteSpace(upgradeEffect.PowerTriggerPowerId)
 				|| !string.IsNullOrWhiteSpace(upgradeEffect.CountPowerId)
 				|| !string.IsNullOrWhiteSpace(upgradeEffect.CountResultEffectId)
@@ -5602,8 +5821,10 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 				|| upgradeEffect.AutoPlayLoopLimit != 0
 				|| upgradeEffect.StatefulTransformDurationAmount != 0
 				|| (upgradeEffect.AutoPlayLoopLimit != 0 && upgradeEffect.UseLimitWindow != CardExtraEffectUseLimitWindow.Turn)
+				|| upgradeEffect.CreatedCardsCostDuration != CardCreatedCardsCostDuration.ThisTurn
 				|| upgradeEffect.CreatedCardsCostTurns != 0
 				|| upgradeEffect.CreatedCardsCostResource != CardCreatedCardsCostResource.Energy
+				|| GetEffectiveCardCostsLessModifier(upgradeEffect) != CardExtraEffectCostModifier.Reduce
 				|| upgradeEffect.CardCostsLessTurns != 0
 				|| upgradeEffect.CountTurns != 0
 				|| upgradeEffect.CountConditionAmount != 0
@@ -5655,6 +5876,11 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			}
 
 			if (baseEffect.FutureMatchingCards != upgradeEffect.FutureMatchingCards)
+			{
+				return true;
+			}
+
+			if (!string.Equals(baseEffect.CardSelectionSourceEffectId ?? string.Empty, upgradeEffect.CardSelectionSourceEffectId ?? string.Empty, StringComparison.Ordinal))
 			{
 				return true;
 			}
@@ -5798,7 +6024,19 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			{
 				return true;
 			}
+			if (baseEffect.CreatedCardsCostDuration != upgradeEffect.CreatedCardsCostDuration)
+			{
+				return true;
+			}
+			if (GetEffectiveCardCostsLessModifier(baseEffect) != GetEffectiveCardCostsLessModifier(upgradeEffect))
+			{
+				return true;
+			}
 			if (baseEffect.AdditionalMoveToPiles != upgradeEffect.AdditionalMoveToPiles)
+			{
+				return true;
+			}
+			if (baseEffect.CopyMode != upgradeEffect.CopyMode)
 			{
 				return true;
 			}
@@ -5914,7 +6152,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return Array.Empty<CardExtraEffect>();
 		}
 
-		bool considerUpgrade = isUpgradePreview || card.CurrentUpgradeLevel > 0;
+		bool considerUpgrade = isUpgradePreview || card.GetSafeCurrentUpgradeLevel() > 0;
 		IReadOnlyList<CardExtraEffect> baseEffects = Array.Empty<CardExtraEffect>();
 
 		if (CardEditorUiState.TryGetDraftOverride(card.Id, out CardOverride draft))
@@ -6013,7 +6251,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		}
 
 		CombatState? combatState = ResolveCardCombatState(card);
-		Creature? ownerCreature = card.Owner?.Creature;
+		Creature? ownerCreature = card.TryGetOwnerCreature();
 		if (combatState == null || ownerCreature == null)
 		{
 			return false;
@@ -6050,7 +6288,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			Card = card,
 			Target = target,
-			ResultPile = card.Pile?.Type ?? PileType.None,
+			ResultPile = card.TryGetPile()?.Type ?? PileType.None,
 			Resources = new ResourceInfo
 			{
 				EnergySpent = 0,
@@ -6121,9 +6359,10 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 	private static CombatState? ResolveCardCombatState(CardModel? card)
 	{
-		if (card.GetConcreteCombatState() != null)
+		CombatState? concrete = card.GetConcreteCombatState();
+		if (concrete != null)
 		{
-			return card.GetConcreteCombatState();
+			return concrete;
 		}
 
 		// Canonical/library cards are immutable and throw if we probe combat ownership while rendering compendium text.
@@ -6132,7 +6371,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return null;
 		}
 
-		return card.Owner?.Creature.GetConcreteCombatState();
+		return card.TryGetOwnerCreature().GetConcreteCombatState();
 	}
 
 	internal static bool HasActiveRuleModifier(CardExtraEffectKind kind, CardModel? card, Creature? target = null)
@@ -6145,7 +6384,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		CombatState? combatState = ResolveCardCombatState(card);
 		if (combatState != null)
 		{
-			Creature? ownerCreature = card.IsMutable ? card.Owner?.Creature : null;
+			Creature? ownerCreature = card.TryGetOwnerCreature();
 			return CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(kind, card, ownerCreature, combatState, target);
 		}
 
@@ -6224,7 +6463,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			snapshot.DynamicVarBaseValues ??= new Dictionary<string, decimal>(StringComparer.Ordinal);
 		}
 
-		bool considerUpgrade = card.CurrentUpgradeLevel > 0;
+		bool considerUpgrade = card.GetSafeCurrentUpgradeLevel() > 0;
 		IReadOnlyList<CardExtraEffect> currentEffects = Array.Empty<CardExtraEffect>();
 		if (CardEditorUiState.TryGetDraftOverride(card.Id, out CardOverride draftOverride))
 		{
@@ -7450,6 +7689,12 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		Player owner = sourceCard.Owner;
 		HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
 
+		List<CardModel> Finish()
+		{
+			CardEditorEffectExecutionAmountContext.ReportCurrentSelectedCards(selected);
+			return selected;
+		}
+
 		void AddRecipient(CardModel? card)
 		{
 			if (card == null)
@@ -7470,7 +7715,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 		if (!SelfScalingRecipientUsesSelection(effect.SelfScalingRecipientMode))
 		{
-			return selected;
+			return Finish();
 		}
 
 		List<CardModel> candidates = GetCandidatesFromConfiguredPile(
@@ -7482,7 +7727,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			includeCostFilter: true);
 		if (candidates.Count == 0)
 		{
-			return selected;
+			return Finish();
 		}
 
 		CardExtraEffectCardSelectionMode selectionMode = SelfScalingRecipientUsesAllMatches(effect.SelfScalingRecipientMode)
@@ -7492,9 +7737,9 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		desiredCount = selectionMode == CardExtraEffectCardSelectionMode.All
 			? candidates.Count
 			: Math.Clamp(desiredCount, 0, candidates.Count);
-		if (desiredCount <= 0)
+		if (desiredCount <= 0 && selectionMode != CardExtraEffectCardSelectionMode.SelectedByEffect)
 		{
-			return selected;
+			return Finish();
 		}
 
 		PileType fromPileType = effect.CardSelectionPile == CardExtraEffectCardPile.AllPiles
@@ -7511,14 +7756,15 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			sourceCard,
 			excludeSourceCardInHandSelector: true,
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, cardPlay, desiredCount));
 
 		foreach (CardModel card in chosen)
 		{
 			AddRecipient(card);
 		}
 
-		return selected;
+		return Finish();
 	}
 
 	private static async Task<bool> ApplySelfScalingMutation(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay, CardExtraEffect effect, int triggerEventAmount)
@@ -7876,13 +8122,13 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		}
 
 		CombatState? resolvedCombatState = combatState ?? ResolveCardCombatState(eventCard) ?? ResolveCardCombatState(sourceCard);
-		Creature? ownerCreature = sourceCard?.Owner?.Creature ?? eventCard?.Owner?.Creature;
+		Creature? ownerCreature = sourceCard.TryGetOwnerCreature() ?? eventCard.TryGetOwnerCreature();
 		if (resolvedCombatState == null || ownerCreature == null)
 		{
 			return false;
 		}
 
-		CardPlay playForConditions = GetPreviewConditionCardPlay(eventCard ?? sourceCard, eventCard?.CurrentTarget);
+		CardPlay playForConditions = GetPreviewConditionCardPlay(eventCard ?? sourceCard, eventCard.GetSafeCurrentTarget());
 
 		return DoesBranchConditionPass(resolvedCombatState, ownerCreature, playForConditions, effect);
 	}
@@ -8071,7 +8317,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			CardExtraEffectSpecificCardUpgradeMode.Base => 0,
 			CardExtraEffectSpecificCardUpgradeMode.Upgraded => 1,
-			_ => Math.Max(0, source?.CurrentUpgradeLevel ?? 0)
+			_ => source.GetSafeCurrentUpgradeLevel()
 		};
 		int upgrades = Math.Min(requestedUpgrades, Math.Max(0, replacement.MaxUpgradeLevel));
 		if (upgrades <= 0)
@@ -8291,7 +8537,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return false;
 		}
 
-		Creature? ownerCreature = card.Owner?.Creature ?? cardPlay.Card?.Owner?.Creature;
+		Creature? ownerCreature = card.TryGetOwnerCreature() ?? cardPlay.Card.TryGetOwnerCreature();
 		if (ownerCreature == null)
 		{
 			return false;
@@ -8311,7 +8557,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 	private static CardPlay BuildStatefulTransformConditionPlay(CardModel card)
 	{
-		return GetPreviewConditionCardPlay(card, card?.CurrentTarget);
+		return GetPreviewConditionCardPlay(card, card.GetSafeCurrentTarget());
 	}
 
 	private static bool DoesStatefulTransformRevertConditionPass(CombatState combatState, CardModel card, CardPlay cardPlay, CardExtraEffect effect)
@@ -8321,14 +8567,14 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return false;
 		}
 
-		Creature? ownerCreature = card.Owner?.Creature ?? cardPlay.Card?.Owner?.Creature;
+		Creature? ownerCreature = card.TryGetOwnerCreature() ?? cardPlay.Card.TryGetOwnerCreature();
 		return ownerCreature != null && DoesBranchConditionPass(combatState, ownerCreature, cardPlay, effect);
 	}
 
 	private static async Task ApplyStatefulTransform(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay, CardExtraEffect effect)
 	{
 		CardModel? card = cardPlay?.Card;
-		Player? owner = card?.Owner;
+		Player? owner = card.TryGetOwner();
 		if (combatState == null
 			|| choiceContext == null
 			|| card == null
@@ -8768,7 +9014,9 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			result = canonical;
 		}
 
-		if (contextCard != null && contextCard.Owner != null && result.Owner == null)
+		MegaCrit.Sts2.Core.Entities.Players.Player? contextOwner = contextCard.TryGetOwner();
+		MegaCrit.Sts2.Core.Entities.Players.Player? resultOwner = result.TryGetOwner();
+		if (contextOwner != null && resultOwner == null)
 		{
 			if (!result.IsMutable)
 			{
@@ -8782,11 +9030,19 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			}
 			if (result.IsMutable)
 			{
-				result.Owner = contextCard.Owner;
+				try
+				{
+					result.Owner = contextOwner;
+				}
+				catch
+				{
+				}
 			}
 		}
 
-		if (contextCard != null && contextCard.CurrentUpgradeLevel > result.CurrentUpgradeLevel)
+		int contextUpgradeLevel = contextCard.GetSafeCurrentUpgradeLevel();
+		int resultUpgradeLevel = result.GetSafeCurrentUpgradeLevel();
+		if (contextCard != null && contextUpgradeLevel > resultUpgradeLevel)
 		{
 			try
 			{
@@ -8795,9 +9051,10 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 					result = (CardModel)result.MutableClone();
 				}
 
+				resultUpgradeLevel = result.GetSafeCurrentUpgradeLevel();
 				int upgrades = Math.Min(
-					Math.Max(0, contextCard.CurrentUpgradeLevel - result.CurrentUpgradeLevel),
-					Math.Max(0, result.MaxUpgradeLevel - result.CurrentUpgradeLevel));
+					Math.Max(0, contextUpgradeLevel - resultUpgradeLevel),
+					Math.Max(0, result.MaxUpgradeLevel - resultUpgradeLevel));
 				for (int i = 0; i < upgrades; i++)
 				{
 					result.UpgradeInternal();
@@ -9027,7 +9284,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		IReadOnlyList<CardExtraEffect> overrideEffects = Array.Empty<CardExtraEffect>();
 		if (CardEditorOverrides.TryGetEffectiveOverride(templateCard, out CardOverride overrideData))
 		{
-			overrideEffects = GetEffectiveExtraEffects(templateCard, overrideData, templateCard.CurrentUpgradeLevel > 0);
+			overrideEffects = GetEffectiveExtraEffects(templateCard, overrideData, templateCard.GetSafeCurrentUpgradeLevel() > 0);
 		}
 
 		bool hasInlineEffectSources = false;
@@ -9177,7 +9434,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		IReadOnlyList<CardExtraEffect> overrideEffects = Array.Empty<CardExtraEffect>();
 		if (CardEditorOverrides.TryGetEffectiveOverride(templateCard, out CardOverride overrideData))
 		{
-			overrideEffects = GetEffectiveExtraEffects(templateCard, overrideData, templateCard.CurrentUpgradeLevel > 0);
+			overrideEffects = GetEffectiveExtraEffects(templateCard, overrideData, templateCard.GetSafeCurrentUpgradeLevel() > 0);
 		}
 
 		bool hasInlineEffectSources = false;
@@ -9502,7 +9759,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return new List<DescriptionEffectLine>();
 		}
 
-		bool considerUpgrade = isUpgradePreview || card.CurrentUpgradeLevel > 0;
+		bool considerUpgrade = isUpgradePreview || card.GetSafeCurrentUpgradeLevel() > 0;
 
 		bool hasOverride = TryGetOverrideForDescription(card, considerUpgrade, out CardOverride? overrideData, out IReadOnlyList<CardExtraEffect> effectiveEffects);
 		CombatState? combatState = card.GetConcreteCombatState();
@@ -9529,7 +9786,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<DescriptionEffectLine> lines = new List<DescriptionEffectLine>();
 		foreach ((CardExtraEffect effect, DescriptionUpgradeComparison upgradeComparison, bool isTemporary) in toRender)
 		{
-			if (effect == null || !IsValidEffectAmount(effect.Kind, effect.Amount))
+			if (!IsRenderableDescriptionEffect(effect))
 			{
 				continue;
 			}
@@ -9620,7 +9877,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		bool isUpgradePreview = false,
 		object? useLimitSourceInstance = null)
 	{
-		if (card == null || effect == null || !IsValidEffectAmount(effect.Kind, effect.Amount))
+		if (card == null || !IsRenderableDescriptionEffect(effect))
 		{
 			return null;
 		}
@@ -10537,6 +10794,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			&& baseEffect.CardSelectionMode == upgradeEffect.CardSelectionMode
 			&& baseEffect.CardSelectionCountIsX == upgradeEffect.CardSelectionCountIsX
 			&& baseEffect.CardSelectionPile == upgradeEffect.CardSelectionPile
+			&& string.Equals(baseEffect.CardSelectionSourceEffectId ?? string.Empty, upgradeEffect.CardSelectionSourceEffectId ?? string.Empty, StringComparison.Ordinal)
 			&& baseEffect.CardGrantDuration == upgradeEffect.CardGrantDuration
 			&& string.Equals(baseEffect.EnchantmentId ?? string.Empty, upgradeEffect.EnchantmentId ?? string.Empty, StringComparison.Ordinal)
 			&& baseEffect.EnchantmentDuration == upgradeEffect.EnchantmentDuration
@@ -10544,6 +10802,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			&& baseEffect.MoveToPosition == upgradeEffect.MoveToPosition
 			&& baseEffect.UseMoveDestinationForGeneratedCards == upgradeEffect.UseMoveDestinationForGeneratedCards
 			&& baseEffect.AdditionalMoveToPiles == upgradeEffect.AdditionalMoveToPiles
+			&& baseEffect.CopyMode == upgradeEffect.CopyMode
 			&& baseEffect.DelayedPileAction == upgradeEffect.DelayedPileAction
 			&& baseEffect.DelayedPileCounterUnit == upgradeEffect.DelayedPileCounterUnit
 			&& baseEffect.DelayedPileCounterScope == upgradeEffect.DelayedPileCounterScope
@@ -10919,19 +11178,27 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				Dictionary<Creature, List<CardExtraEffect>> powerEffectsByHost = new Dictionary<Creature, List<CardExtraEffect>>();
 				foreach (CardExtraEffect powerEffect in powerEffectsToAdd)
 				{
-					Creature? hostCreature = ResolvePowerHostCreature(combatState, cardPlay, powerEffect);
-					if (hostCreature == null)
+					IReadOnlyList<Creature> hostCreatures = ResolvePowerHostCreatures(combatState, cardPlay, powerEffect);
+					if (hostCreatures.Count == 0)
 					{
 						continue;
 					}
 
-					if (!powerEffectsByHost.TryGetValue(hostCreature, out List<CardExtraEffect>? hostEffects))
+					foreach (Creature hostCreature in hostCreatures)
 					{
-						hostEffects = new List<CardExtraEffect>();
-						powerEffectsByHost[hostCreature] = hostEffects;
-					}
+						if (hostCreature == null)
+						{
+							continue;
+						}
 
-					hostEffects.Add(powerEffect);
+						if (!powerEffectsByHost.TryGetValue(hostCreature, out List<CardExtraEffect>? hostEffects))
+						{
+							hostEffects = new List<CardExtraEffect>();
+							powerEffectsByHost[hostCreature] = hostEffects;
+						}
+
+						hostEffects.Add(powerEffect);
+					}
 				}
 
 				foreach ((Creature hostCreature, List<CardExtraEffect> hostEffects) in powerEffectsByHost)
@@ -11005,7 +11272,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return;
 		}
 
-		Creature? ownerCreature = card.Owner?.Creature;
+		Creature? ownerCreature = card.TryGetOwnerCreature();
 		VigorPreserver? vigor = null;
 		int remainingImmediateDamageEffects = 0;
 		List<CardExtraEffect>? deferredSelfScaling = null;
@@ -11705,7 +11972,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				return false;
 			}
 
-			int count = GetHistoryCountMultiplier(combatState, card.Owner?.Creature, null, normalized, card);
+			int count = GetHistoryCountMultiplier(combatState, card.TryGetOwnerCreature(), null, normalized, card);
 			if (!DoesCountConditionPass(count, normalized))
 			{
 				return false;
@@ -11963,7 +12230,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			}
 
 			int threshold = Math.Max(1, effect.Amount);
-			int count = GetHistoryCountMultiplier(combatState, card.Owner?.Creature, null, effect, card);
+			int count = GetHistoryCountMultiplier(combatState, card.TryGetOwnerCreature(), null, effect, card);
 			if (count < threshold)
 			{
 				continue;
@@ -12238,7 +12505,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			PlayIndex = 0,
 			PlayCount = 1
 		};
-		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? card.Owner?.Creature;
+		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? card.TryGetOwnerCreature();
 		if (ownerCreature == null || !TryResolveSignedAmountForCostEffect(combatState, ownerCreature, effectivePlay, effect, out int signedAmount))
 		{
 			return;
@@ -12644,6 +12911,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectAmountSourceMode.AppliedEffectTotalAndOverkillDamage => CardEditorLoc.T("cardText.amountSource.selectedEffectTotalAndOverkillDamage", "the total plus overkill damage from that effect"),
 				CardExtraEffectAmountSourceMode.AppliedEffectInstances => CardEditorLoc.T("cardText.amountSource.selectedEffectInstances", "the number of times that effect applies"),
 				CardExtraEffectAmountSourceMode.AppliedEffectKills => CardEditorLoc.T("cardText.amountSource.selectedEffectKills", "the kills from that effect"),
+				CardExtraEffectAmountSourceMode.ConfiguredEffectAmount => CardEditorLoc.T("cardText.amountSource.selectedEffectConfiguredAmount", "the configured amount from that effect"),
+				CardExtraEffectAmountSourceMode.ConfiguredEffectInstances => CardEditorLoc.T("cardText.amountSource.selectedEffectConfiguredCount", "the configured count from that effect"),
 				_ => CardEditorLoc.T("cardText.amountSource.selectedEffect", "the amount from that effect")
 			};
 		}
@@ -12695,6 +12964,16 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return candidate.Kind == CardExtraEffectKind.DealDamage
 				? CardEditorLoc.T("cardText.amountSource.damageHits", "the number of damage hits")
 				: CardEditorLoc.T("cardText.amountSource.selectedEffectInstances", "the number of times that effect applies");
+		}
+
+		if (effect.AmountSourceMode == CardExtraEffectAmountSourceMode.ConfiguredEffectAmount)
+		{
+			return CardEditorLoc.T("cardText.amountSource.configuredAmount", "the configured amount");
+		}
+
+		if (effect.AmountSourceMode == CardExtraEffectAmountSourceMode.ConfiguredEffectInstances)
+		{
+			return CardEditorLoc.T("cardText.amountSource.configuredCount", "the configured count");
 		}
 
 		if (TryGetEffectPowerMatchStatus(candidate.Kind, out CardExtraEffectEnemyStatus status))
@@ -13050,20 +13329,32 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		int turns = Math.Max(1, effect?.Turns ?? 1);
 		string timing = FormatCountdownTiming(effect?.Timing ?? CardExtraEffectTiming.EndOfTurn, turns);
 		string payload = FormatCountdownPayload(card, effect, isUpgradePreview);
-		return CardEditorLoc.F("cardText.countdownEffect", $"{timing}, run {payload}.", ("Timing", timing), ("Payload", payload));
+		return CardEditorLoc.F("cardText.countdownEffect", $"{timing}, {payload}.", ("Timing", timing), ("Payload", payload));
 	}
 
 	private static string FormatCountdownTiming(CardExtraEffectTiming timing, int turns)
 	{
-		string turnsText = turns == 1
-			? CardEditorLoc.T("cardText.countdown.turn.one", "1 turn")
-			: CardEditorLoc.F("cardText.countdown.turn.many", $"{turns} turns", ("Amount", turns.ToString(CultureInfo.InvariantCulture)));
+		string amount = turns.ToString(CultureInfo.InvariantCulture);
 		return timing switch
 		{
-			CardExtraEffectTiming.StartOfTurn or CardExtraEffectTiming.StartOfAnyTurn => CardEditorLoc.F("cardText.countdown.atStart", $"At the start in {turnsText}", ("Turns", turnsText)),
-			CardExtraEffectTiming.StartOfEnemyTurn => CardEditorLoc.F("cardText.countdown.atEnemyStart", $"At the enemy turn start in {turnsText}", ("Turns", turnsText)),
-			CardExtraEffectTiming.EndOfEnemyTurn => CardEditorLoc.F("cardText.countdown.atEnemyEnd", $"At the enemy turn end in {turnsText}", ("Turns", turnsText)),
-			_ => CardEditorLoc.F("cardText.countdown.atEnd", $"At turn end in {turnsText}", ("Turns", turnsText))
+			CardExtraEffectTiming.StartOfTurn => turns == 1
+				? CardEditorLoc.T("cardText.countdown.atStart.one", "At the start of your next turn")
+				: CardEditorLoc.F("cardText.countdown.atStart.many", $"At the start of your turn in {amount} turns", ("Amount", amount)),
+			CardExtraEffectTiming.StartOfAnyTurn => turns == 1
+				? CardEditorLoc.T("cardText.countdown.atAnyStart.one", "At the start of the next turn")
+				: CardEditorLoc.F("cardText.countdown.atAnyStart.many", $"At the start of a turn in {amount} turns", ("Amount", amount)),
+			CardExtraEffectTiming.StartOfEnemyTurn => turns == 1
+				? CardEditorLoc.T("cardText.countdown.atEnemyStart.one", "At the start of the next enemy turn")
+				: CardEditorLoc.F("cardText.countdown.atEnemyStart.many", $"At the start of the enemy turn in {amount} turns", ("Amount", amount)),
+			CardExtraEffectTiming.EndOfEnemyTurn => turns == 1
+				? CardEditorLoc.T("cardText.countdown.atEnemyEnd.one", "At the end of the next enemy turn")
+				: CardEditorLoc.F("cardText.countdown.atEnemyEnd.many", $"At the end of {amount} enemy turns", ("Amount", amount)),
+			CardExtraEffectTiming.EndOfAnyTurn or CardExtraEffectTiming.EndOfThisAnyTurn => turns == 1
+				? CardEditorLoc.T("cardText.countdown.atAnyEnd.one", "At the end of the next turn")
+				: CardEditorLoc.F("cardText.countdown.atAnyEnd.many", $"At the end of {amount} turns", ("Amount", amount)),
+			_ => turns == 1
+				? CardEditorLoc.T("cardText.countdown.atEnd.one", "At the end of this turn")
+				: CardEditorLoc.F("cardText.countdown.atEnd.many", $"At the end of {amount} turns", ("Amount", amount))
 		};
 	}
 
@@ -13072,17 +13363,28 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<string> selectedIds = ParseAutoActionEffectIds(effect);
 		if (selectedIds.Count == 0)
 		{
-			return CardEditorLoc.T("cardText.countdown.payload.none", "the selected effect rows");
+			return CardEditorLoc.T("cardText.countdown.payload.none", "perform the selected effects");
 		}
 
 		if (selectedIds.Count == 1 && TryGetEffectRowForDescription(card, selectedIds[0], isUpgradePreview, out CardExtraEffect payload))
 		{
-			return ResolveSelfScalingEffectRowLabel(card, new CardExtraEffect { SelfScalingTargetEffectId = payload.EffectId }, isUpgradePreview);
+			CardExtraEffect displayEffect = CloneEffect(payload);
+			displayEffect.Trigger = CardExtraEffectTrigger.OnPlay;
+			displayEffect.AsPower = false;
+			displayEffect.Timing = CardExtraEffectTiming.Immediate;
+			displayEffect.Turns = 0;
+			string? line = TryFormatLine(card, displayEffect, null, DescriptionUpgradeComparison.None, isUpgradePreview);
+			if (!string.IsNullOrWhiteSpace(line))
+			{
+				return LowercaseFirst(TrimTrailingSentencePunctuation(line));
+			}
+
+			return LowercaseFirst(ResolveSelfScalingEffectRowLabel(card, new CardExtraEffect { SelfScalingTargetEffectId = payload.EffectId }, isUpgradePreview));
 		}
 
 		return CardEditorLoc.F(
 			"cardText.countdown.payload.count",
-			$"{selectedIds.Count} effect rows",
+			$"perform {selectedIds.Count} selected effects",
 			("Amount", selectedIds.Count.ToString(CultureInfo.InvariantCulture)));
 	}
 
@@ -13266,7 +13568,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				return null;
 			}
 		}
-		else if (!amountIsX && !IsValidEffectAmount(effect.Kind, baseAmount))
+		else if (!amountIsX && !IsValidEffectAmount(effect.Kind, baseAmount) && !IsRenderableCreatedCardsCostLess(effect))
 		{
 			return null;
 		}
@@ -13281,14 +13583,16 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 		int historyRawCount = 0;
 		int historyMultiplier = 0;
+		CombatState? historyCombatState = card.GetConcreteCombatState();
+		Creature? historyOwnerCreature = historyCombatState != null ? card.TryGetOwnerCreature() : null;
 		if (!usesAppliedEffectRowAmount
 			&& !usesValueSourceAmount
 			&& !amountIsX && effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount
 			&& SupportsHistoryScaling(effect.Kind)
-			&& card.GetConcreteCombatState() != null
-			&& card.Owner?.Creature != null)
+			&& historyCombatState != null
+			&& historyOwnerCreature != null)
 		{
-			historyRawCount = Math.Max(0, GetHistoryCountMultiplier(card.GetConcreteCombatState(), card.Owner.Creature, cardPlay: null, effect, card));
+			historyRawCount = Math.Max(0, GetHistoryCountMultiplier(historyCombatState, historyOwnerCreature, cardPlay: null, effect, card));
 			historyMultiplier = ResolveHistoryScalingMultiplier(effect, historyRawCount);
 		}
 
@@ -13356,8 +13660,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			&& !usesHistoryScalingWording
 			&& effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount
 			&& SupportsHistoryScaling(effect.Kind)
-			&& card.GetConcreteCombatState() != null
-			&& card.Owner?.Creature != null;
+			&& historyCombatState != null
+			&& historyOwnerCreature != null;
 
 		string? FormatLineForAmount(int baseAmountForLine, string amountTextForLine, int grammarAmountForLine, bool allowDamageBlockPreview, bool forceNumericEnergyStars)
 		{
@@ -13562,6 +13866,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.AddSpecificCardToHand => FormatAddSpecificCardToHand(effect, grammarAmount, amountText),
 				CardExtraEffectKind.PlayCardFromPile => FormatPlayCardFromPile(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.ConsumeCardValue => FormatConsumeCardValue(card, effect, grammarAmount, amountText),
+				CardExtraEffectKind.SelectCardsFromPile => FormatSelectCardsFromPile(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.AutoPlaySelfFromPile => FormatAutoPlaySelfFromPile(effect),
 				CardExtraEffectKind.DrawCardsThatCostLess => FormatDrawCardsThatCostLess(card, effect, grammarAmount, amountText, cardCostsLessDurationSuffix),
 				CardExtraEffectKind.AutoDrawSelfFromPile => FormatAutoDrawSelfFromPile(effect),
@@ -15683,12 +15988,15 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardGeneratedCardType.Quest => GeneratedCardTypeLabel(CardGeneratedCardType.Quest) + " ",
 			_ => string.Empty
 		};
+		string rarityAdj = effect.CountCardRarity == CardExtraEffectCardRarityFilter.Any
+			? string.Empty
+			: CardRarityFilterLabel(effect.CountCardRarity) + " ";
 
 		CardExtraEffectCountCardFilter filter = GetEffectiveCountCardFilter(effect);
 
 		string effectAdj = filter == CardExtraEffectCountCardFilter.Any ? string.Empty : CountCardFilterPrefixLabel(filter) + " ";
 
-		string prefix = (effectAdj + poolAdj + typeAdj).Trim();
+		string prefix = (effectAdj + poolAdj + rarityAdj + typeAdj).Trim();
 		return string.IsNullOrEmpty(prefix) ? string.Empty : prefix + " ";
 	}
 
@@ -15708,8 +16016,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardGeneratedCardType.Quest => GeneratedCardTypeLabel(CardGeneratedCardType.Quest),
 			_ => null
 		};
+		CardExtraEffectCardRarityFilter rarity = GetCreatesCardsOutputRarity(pool, type, effect);
+		string? rarityPrefix = rarity == CardExtraEffectCardRarityFilter.Any
+			? null
+			: CardRarityFilterLabel(rarity);
 
-		string descriptor = string.Join(" ", new[] { poolPrefix, typePrefix, cardWord }.Where(s => !string.IsNullOrWhiteSpace(s)));
+		string descriptor = string.Join(" ", new[] { poolPrefix, rarityPrefix, typePrefix, cardWord }.Where(s => !string.IsNullOrWhiteSpace(s)));
 		if (!string.IsNullOrWhiteSpace(poolSuffix))
 		{
 			descriptor = string.Join(" ", new[] { descriptor, poolSuffix }.Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -16950,6 +17262,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		CardExtraEffect descriptorEffect = CloneEffect(effect ?? new CardExtraEffect());
 		descriptorEffect.CardSelectionPool = effect?.TriggerCardPool ?? CardGeneratedCardPool.All;
 		descriptorEffect.CardSelectionType = effect?.TriggerCardType ?? CardGeneratedCardType.Any;
+		descriptorEffect.CardSelectionRarity = effect?.TriggerCardRarity ?? CardExtraEffectCardRarityFilter.Any;
 		descriptorEffect.CardSelectionFilter = effect?.TriggerCardFilter ?? CardExtraEffectCountCardFilter.Any;
 		return BuildCardSelectionDescriptor(descriptorEffect, plural, preferAllCardsKeyword: true);
 	}
@@ -17501,9 +17814,55 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool all = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
 		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
 		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
+		bool selectedByEffect = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
+		bool copiesPerSelectedCard = effect.CopyMode == CardExtraEffectCopyMode.AmountCopiesPerSelectedCard;
 
 		string result;
-		if (all)
+		if (copiesPerSelectedCard)
+		{
+			if (all)
+			{
+				result = amount == 1
+					? (exact
+						? CardEditorLoc.F("cardText.copyPileToDeck.exact.amountEach.all.one", $"Add an exact copy of each card from {from} to {to}.", ("From", from), ("To", to))
+						: CardEditorLoc.F("cardText.copyPileToDeck.amountEach.all.one", $"Add a copy of each card from {from} to {to}.", ("From", from), ("To", to)))
+					: (exact
+						? CardEditorLoc.F("cardText.copyPileToDeck.exact.amountEach.all.many", $"Add {amountText} exact copies of each card from {from} to {to}.", ("Amount", amountText), ("From", from), ("To", to))
+						: CardEditorLoc.F("cardText.copyPileToDeck.amountEach.all.many", $"Add {amountText} copies of each card from {from} to {to}.", ("Amount", amountText), ("From", from), ("To", to)));
+			}
+			else if (selectedByEffect)
+			{
+				result = amount == 1
+					? (exact
+						? CardEditorLoc.F("cardText.copyPileToDeck.exact.amountEach.selected.one", $"Add an exact copy of each selected card to {to}.", ("To", to))
+						: CardEditorLoc.F("cardText.copyPileToDeck.amountEach.selected.one", $"Add a copy of each selected card to {to}.", ("To", to)))
+					: (exact
+						? CardEditorLoc.F("cardText.copyPileToDeck.exact.amountEach.selected.many", $"Add {amountText} exact copies of each selected card to {to}.", ("Amount", amountText), ("To", to))
+						: CardEditorLoc.F("cardText.copyPileToDeck.amountEach.selected.many", $"Add {amountText} copies of each selected card to {to}.", ("Amount", amountText), ("To", to)));
+			}
+			else
+			{
+				string selectionText = upTo
+					? CardEditorLoc.T("cardText.selection.upToMatching", "up to the selected number of matching cards")
+					: random
+						? CardEditorLoc.T("cardText.selection.randomMatching", "the selected number of random matching cards")
+						: CardEditorLoc.T("cardText.selection.chosenMatching", "the selected matching cards");
+				result = amount == 1
+					? (exact
+						? CardEditorLoc.F("cardText.copyPileToDeck.exact.amountEach.choose.one", $"Choose from {from}. Add an exact copy of each selected card to {to}.", ("From", from), ("To", to))
+						: CardEditorLoc.F("cardText.copyPileToDeck.amountEach.choose.one", $"Choose from {from}. Add a copy of each selected card to {to}.", ("From", from), ("To", to)))
+					: (exact
+						? CardEditorLoc.F("cardText.copyPileToDeck.exact.amountEach.choose.many", $"Choose {selectionText} from {from}. Add {amountText} exact copies of each selected card to {to}.", ("Selection", selectionText), ("Amount", amountText), ("From", from), ("To", to))
+						: CardEditorLoc.F("cardText.copyPileToDeck.amountEach.choose.many", $"Choose {selectionText} from {from}. Add {amountText} copies of each selected card to {to}.", ("Selection", selectionText), ("Amount", amountText), ("From", from), ("To", to)));
+			}
+		}
+		else if (selectedByEffect)
+		{
+			result = exact
+				? CardEditorLoc.F("cardText.copyPileToDeck.exact.selected", $"Add exact copies of the selected cards to {to}.", ("To", to))
+				: CardEditorLoc.F("cardText.copyPileToDeck.selected", $"Add copies of the selected cards to {to}.", ("To", to));
+		}
+		else if (all)
 		{
 			result = exact
 				? CardEditorLoc.F("cardText.copyPileToDeck.exact.all", $"Add exact copies of all cards from {from} to {to}.", ("From", from), ("To", to))
@@ -17534,6 +17893,46 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				: (random
 					? CardEditorLoc.F("cardText.copyPileToDeck.random.many", $"Add copies of {amountText} random cards from {from} to {to}.", ("Amount", amountText), ("From", from), ("To", to))
 					: CardEditorLoc.F("cardText.copyPileToDeck.choose.many", $"Choose {amountText} cards from {from}. Add copies to {to}.", ("Amount", amountText), ("From", from), ("To", to)));
+		}
+
+		result = AppendCardSelectionNote(result, effect);
+		return BuildCostFilteredText(card, result, effect);
+	}
+
+	private static string FormatSelectCardsFromPile(CardModel? card, CardExtraEffect effect, int amount, string amountText)
+	{
+		if (effect == null)
+		{
+			return string.Empty;
+		}
+
+		string from = effect.CardSelectionPile == CardExtraEffectCardPile.Deck
+			? CardEditorLoc.T("cardText.deck", "your deck")
+			: GetCardPilePossessive(effect.CardSelectionPile);
+		bool all = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
+		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
+		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
+
+		string result;
+		if (all)
+		{
+			result = CardEditorLoc.F("cardText.selectPile.all", $"Select all matching cards from {from}.", ("From", from));
+		}
+		else if (upTo)
+		{
+			result = CardEditorLoc.F("cardText.selectPile.upTo", $"Select up to {amountText} cards from {from}.", ("Amount", amountText), ("From", from));
+		}
+		else if (amount == 1)
+		{
+			result = random
+				? CardEditorLoc.F("cardText.selectPile.random.one", $"Select a random card from {from}.", ("From", from))
+				: CardEditorLoc.F("cardText.selectPile.choose.one", $"Choose a card from {from}.", ("From", from));
+		}
+		else
+		{
+			result = random
+				? CardEditorLoc.F("cardText.selectPile.random.many", $"Select {amountText} random cards from {from}.", ("Amount", amountText), ("From", from))
+				: CardEditorLoc.F("cardText.selectPile.choose.many", $"Choose {amountText} cards from {from}.", ("Amount", amountText), ("From", from));
 		}
 
 		result = AppendCardSelectionNote(result, effect);
@@ -17806,6 +18205,23 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 
 	private static string FormatPlayCardFromPile(CardModel? card, CardExtraEffect effect, int amount, string amountText)
 	{
+		if (UsesSelectedCardReplay(effect))
+		{
+			int replayCount = ResolveSelectedCardReplayCount(effect);
+			string replayText = replayCount.ToString(CultureInfo.InvariantCulture);
+			string selectedCards = amount == 1
+				? CardEditorLoc.T("cardText.playSelected.card", "the selected card")
+				: CardEditorLoc.T("cardText.playSelected.cards", "each selected card");
+			string selectedResult = replayCount == 1
+				? CardEditorLoc.F("cardText.playSelected.once", $"Play {selectedCards}.", ("Cards", selectedCards))
+				: CardEditorLoc.F("cardText.playSelected.replay", $"Play {selectedCards} {replayText} times.", ("Cards", selectedCards), ("Times", replayText));
+			if (effect.AutoPlayForceExhaust)
+			{
+				selectedResult = AppendSentenceNote(selectedResult, CardEditorLoc.T("cardText.playFromPile.forceExhaust", "The played card exhausts."));
+			}
+			return BuildCostFilteredText(card, selectedResult, effect);
+		}
+
 		string pile = GetCardPilePossessive(effect.CardSelectionPile);
 		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
 		bool all = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
@@ -19613,21 +20029,26 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			CardExtraEffectTarget requestedTarget = isOstyAttack && effect.OstyAction == CardExtraEffectOstyAction.AttackAll
 				? CardExtraEffectTarget.AllEnemies
 				: effect.Target;
+			CardExtraEffectTarget effectiveRequestedTarget = GetEffectivePreviewTarget(modifierCard, requestedTarget);
+			CardPreviewMode visualPreviewMode = CardEditorCardVisualPreviewContext.GetPreviewMode(modifierCard);
 			Creature? selfTarget = isOstyAttack ? owner.Osty : ownerCreature;
-			IReadOnlyList<Creature?> previewTargets = ResolvePreviewTargetsForEffect(combatState, ownerCreature, modifierCard, target, requestedTarget, selfTarget);
-			if (TryGetUniformHookedPreview(previewTargets, previewTarget =>
-				Hook.ModifyDamage(owner.RunState, combatState, previewTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, ModifyDamageHookType.All, CardPreviewMode.Normal, out IEnumerable<AbstractModel> _), out preview))
+			if (ShouldResolveConcreteMovePreviewTargets(modifierCard, requestedTarget, target, visualPreviewMode))
 			{
-				return true;
+				IReadOnlyList<Creature?> previewTargets = ResolvePreviewTargetsForEffect(combatState, ownerCreature, modifierCard, target, requestedTarget, selfTarget);
+				if (TryGetUniformHookedPreview(previewTargets, previewTarget =>
+					Hook.ModifyDamage(owner.RunState, combatState, previewTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, ModifyDamageHookType.All, CardPreviewMode.Normal, out IEnumerable<AbstractModel> _), out preview))
+				{
+					return true;
+				}
 			}
 
-			Creature? fallbackTarget = requestedTarget switch
+			Creature? fallbackTarget = effectiveRequestedTarget switch
 			{
 				CardExtraEffectTarget.Self => selfTarget,
 				CardExtraEffectTarget.Target => target,
 				_ => null
 			};
-			CardPreviewMode previewMode = requestedTarget == CardExtraEffectTarget.AllEnemies || requestedTarget == CardExtraEffectTarget.RandomEnemy
+			CardPreviewMode previewMode = ShouldUseMultiCreatureMovePreview(modifierCard, requestedTarget, visualPreviewMode)
 				? CardPreviewMode.MultiCreatureTargeting
 				: CardPreviewMode.Normal;
 			preview = Hook.ModifyDamage(owner.RunState, combatState, fallbackTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, ModifyDamageHookType.All, previewMode, out IEnumerable<AbstractModel> _);
@@ -19660,6 +20081,32 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 		}
 
 		return false;
+	}
+
+	private static bool ShouldResolveConcreteMovePreviewTargets(CardModel card, CardExtraEffectTarget requestedTarget, Creature? hoveredTarget, CardPreviewMode previewMode)
+	{
+		CardExtraEffectTarget effectiveTarget = GetEffectivePreviewTarget(card, requestedTarget);
+		return effectiveTarget switch
+		{
+			CardExtraEffectTarget.Self => true,
+			CardExtraEffectTarget.AllEnemies or CardExtraEffectTarget.RandomEnemy => previewMode == CardPreviewMode.MultiCreatureTargeting,
+			CardExtraEffectTarget.OtherEnemies => previewMode == CardPreviewMode.MultiCreatureTargeting && hoveredTarget != null,
+			CardExtraEffectTarget.AllAllies => previewMode == CardPreviewMode.MultiCreatureTargeting,
+			CardExtraEffectTarget.AnyPlayer => hoveredTarget != null,
+			CardExtraEffectTarget.AnyAlly => hoveredTarget != null,
+			_ => hoveredTarget != null
+		};
+	}
+
+	private static bool ShouldUseMultiCreatureMovePreview(CardModel card, CardExtraEffectTarget requestedTarget, CardPreviewMode previewMode)
+	{
+		if (previewMode != CardPreviewMode.MultiCreatureTargeting)
+		{
+			return false;
+		}
+
+		CardExtraEffectTarget effectiveTarget = GetEffectivePreviewTarget(card, requestedTarget);
+		return effectiveTarget is CardExtraEffectTarget.AllEnemies or CardExtraEffectTarget.RandomEnemy;
 	}
 
 	private static bool TryGetUniformHookedPreview(IReadOnlyList<Creature?> targets, Func<Creature?, decimal> previewForTarget, out decimal preview)
@@ -20573,6 +21020,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectKind.AddCopyOfThisCard => false,
 			CardExtraEffectKind.AddSpecificCardToHand => false,
 			CardExtraEffectKind.PlayCardFromPile => false,
+			CardExtraEffectKind.SelectCardsFromPile => false,
 			CardExtraEffectKind.ConsumeCardValue => false,
 			CardExtraEffectKind.DiscardCards => false,
 			CardExtraEffectKind.ExhaustCards => false,
@@ -20604,6 +21052,22 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectKind.FetchSpecificCardToHand => false,
 			_ => true
 		};
+	}
+
+	internal static bool UsesSelectedCardReplay(CardExtraEffect? effect)
+	{
+		return effect?.Kind == CardExtraEffectKind.PlayCardFromPile
+			&& effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
+	}
+
+	internal static int ResolveSelectedCardReplayCount(CardExtraEffect? effect)
+	{
+		if (!UsesSelectedCardReplay(effect))
+		{
+			return 1;
+		}
+
+		return Math.Clamp(effect!.RepeatCount <= 0 ? 1 : effect.RepeatCount, 1, 99);
 	}
 
 	internal static bool SupportsAutoPlayLoopControls(CardExtraEffectKind kind)
@@ -20721,9 +21185,11 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		int baseRepeat = ResolveBaseRepeatCount(cardPlay: null, effect);
 		int repeatComparison = upgradeHighlightComparison;
 		int? resolvedRepeat = null;
-		if (scalesRepeat && card.GetConcreteCombatState() != null && card.Owner?.Creature != null)
+		CombatState? repeatCombatState = scalesRepeat ? card.GetConcreteCombatState() : null;
+		Creature? repeatOwnerCreature = repeatCombatState != null ? card.TryGetOwnerCreature() : null;
+		if (scalesRepeat && repeatCombatState != null && repeatOwnerCreature != null)
 		{
-			int rawCount = Math.Max(0, GetHistoryCountMultiplier(card.GetConcreteCombatState(), card.Owner.Creature, cardPlay: null, effect, card));
+			int rawCount = Math.Max(0, GetHistoryCountMultiplier(repeatCombatState, repeatOwnerCreature, cardPlay: null, effect, card));
 			bool countPasses = effect.CountComparison == CardExtraEffectCountComparison.None || DoesCountConditionPass(rawCount, effect);
 			if (countPasses)
 			{
@@ -21363,6 +21829,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CountCardPile = effect.BranchCountCardPile,
 			CountCardPool = effect.BranchCountCardPool,
 			CountCardType = effect.BranchCountCardType,
+			CountCardRarity = effect.BranchCountCardRarity,
 			CountCardFilter = effect.BranchCountCardFilter,
 			CardMatchMode = HasBranchCountCardMatchFilter(effect) ? effect.BranchCountCardMatchMode : effect.CardMatchMode,
 			MatchCardId = HasBranchCountCardMatchFilter(effect) ? effect.BranchCountMatchCardId : effect.MatchCardId,
@@ -21455,6 +21922,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		destination.CountCardPile = source.CountCardPile;
 		destination.CountCardPool = source.CountCardPool;
 		destination.CountCardType = source.CountCardType;
+		destination.CountCardRarity = source.CountCardRarity;
 		destination.CountCardFilter = source.CountCardFilter;
 		destination.CountOnlyBlockCards = source.CountOnlyBlockCards;
 		destination.CountAggregationMode = source.CountAggregationMode;
@@ -22059,17 +22527,17 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		}
 	}
 
-	private static Task ScheduleCountdownEffectRows(CombatState combatState, CardPlay cardPlay, CardExtraEffect countdownEffect, Creature ownerCreature)
+	private static async Task ScheduleCountdownEffectRows(CombatState combatState, CardPlay cardPlay, CardExtraEffect countdownEffect, Creature ownerCreature)
 	{
 		if (combatState == null || cardPlay?.Card == null || countdownEffect == null || ownerCreature == null)
 		{
-			return Task.CompletedTask;
+			return;
 		}
 
 		List<string> selectedIds = ParseAutoActionEffectIds(countdownEffect);
 		if (selectedIds.Count == 0)
 		{
-			return Task.CompletedTask;
+			return;
 		}
 
 		Dictionary<string, CardExtraEffect> runtimeEffectsById = GetRuntimeEffectsIncludingBorrowedSources(combatState, cardPlay.Card)
@@ -22081,6 +22549,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			? CardExtraEffectTiming.EndOfTurn
 			: countdownEffect.Timing;
 		int turns = Math.Max(1, countdownEffect.Turns);
+		List<CardEditorCountdownEffectPower.PayloadEntry> payloads = new List<CardEditorCountdownEffectPower.PayloadEntry>();
 
 		foreach (string id in selectedIds)
 		{
@@ -22097,11 +22566,11 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 				continue;
 			}
 
-			CardExtraEffect runnable = CloneEffect(payload);
+			CardExtraEffect runnable = CloneForDeferredExecution(cardPlay, payload);
 			runnable.Trigger = CardExtraEffectTrigger.OnPlay;
 			runnable.AsPower = false;
-			runnable.Timing = timing;
-			runnable.Turns = turns;
+			runnable.Timing = CardExtraEffectTiming.Immediate;
+			runnable.Turns = 0;
 
 			Creature? lockedTarget = null;
 			if (runnable.Target == CardExtraEffectTarget.Target)
@@ -22109,10 +22578,117 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 				lockedTarget = ResolveSingleTarget(combatState, ownerCreature, cardPlay);
 			}
 
-			CardEditorExtraEffectScheduler.Schedule(combatState, cardPlay, runnable, lockedTarget);
+			payloads.Add(new CardEditorCountdownEffectPower.PayloadEntry(runnable, lockedTarget));
 		}
 
-		return Task.CompletedTask;
+		if (payloads.Count == 0)
+		{
+			return;
+		}
+
+		Player? owner = cardPlay.Card.Owner;
+		if (owner == null)
+		{
+			return;
+		}
+
+		CardEditorCountdownEffectPower.PayloadSpec payloadSpec = new CardEditorCountdownEffectPower.PayloadSpec(
+			card: CreateDeferredExecutionCardSnapshot(owner, cardPlay.Card),
+			sourceCardInstance: cardPlay.Card,
+			payloads: payloads,
+			selectedCardsByEffectId: CardEditorEffectExecutionAmountContext.CaptureCurrentSelectedCards(cloneCards: true),
+			resources: cardPlay.Resources,
+			resultPile: cardPlay.ResultPile,
+			timing: timing,
+			executionHost: ownerCreature,
+			useLimitSourceInstance: cardPlay.Card,
+			triggerEventAmount: 1,
+			payloadDescription: FormatCountdownPayload(cardPlay.Card, countdownEffect, isUpgradePreview: false));
+
+		using IDisposable _ = CardEditorCountdownEffectPower.PushPendingPayload(payloadSpec);
+		await PowerCmd.Apply<CardEditorCountdownEffectPower>(ownerCreature, turns, ownerCreature, cardPlay.Card);
+	}
+
+	internal static async Task ExecuteCountdownPayloads(CombatState combatState, PlayerChoiceContext choiceContext, CardEditorCountdownEffectPower.PayloadSpec payload)
+	{
+		if (combatState == null || choiceContext == null || payload?.Card == null || payload.Payloads.Count == 0)
+		{
+			return;
+		}
+
+		try
+		{
+			using IDisposable _ = CardEditorEffectSourceContext.PushScoped(payload.SourceCardInstance ?? payload.Card);
+			using IDisposable __ = CardEditorPowerExecutionHostContext.PushScoped(payload.ExecutionHost);
+			using IDisposable ___ = CardEditorAutoPlayLoopGuard.PushUseLimitSourceInstance(payload.UseLimitSourceInstance ?? payload.Card);
+			using IDisposable ____ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
+			using IDisposable selectedScope = CardEditorEffectExecutionAmountContext.PushSelectedCardsScoped(payload.SelectedCardsByEffectId);
+
+			foreach (CardEditorCountdownEffectPower.PayloadEntry entry in payload.Payloads)
+			{
+				if (entry?.Effect == null
+					|| !IsValidEffectAmount(entry.Effect.Kind, entry.Effect.Amount)
+					|| CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(payload.Card, entry.Effect))
+				{
+					continue;
+				}
+
+				CardPlay play = new CardPlay
+				{
+					Card = payload.Card,
+					Target = entry.LockedTarget,
+					ResultPile = payload.ResultPile,
+					Resources = payload.Resources,
+					IsAutoPlay = true,
+					PlayIndex = 0,
+					PlayCount = 1
+				};
+
+				using IDisposable _____ = CardEditorCardPlayContext.PushScoped(play);
+				await ExecuteEffect(combatState, choiceContext, play, CloneEffect(entry.Effect), payload.TriggerEventAmount);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Countdown effect payload failed: {ex}");
+		}
+	}
+
+	internal static CardModel CreateDeferredExecutionCardSnapshot(Player owner, CardModel sourceCard)
+	{
+		if (owner == null || sourceCard == null)
+		{
+			return sourceCard;
+		}
+
+		try
+		{
+			CardModel snapshot = owner.RunState.CloneCard(sourceCard);
+			if (snapshot == null)
+			{
+				return sourceCard;
+			}
+
+			try
+			{
+				snapshot.Owner = sourceCard.Owner;
+			}
+			catch
+			{
+			}
+
+			if (CardEditorOverrides.TryGetEffectiveOverride(sourceCard, out CardOverride effectiveOverride))
+			{
+				CardEditorOverrides.SetInstanceOverride(snapshot, effectiveOverride);
+			}
+
+			return snapshot;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed cloning deferred effect card snapshot for {sourceCard.Id}: {ex}");
+			return sourceCard;
+		}
 	}
 
 	private static int GetMultiplierStatAmount(Creature target, CardExtraEffectMultiplierStat stat)
@@ -22198,6 +22774,10 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			active.SyncDefinition(definition);
 			await PowerCmd.ModifyAmount(active, amount, applier, cardSource);
 			ApplyDurationTickPolicy(active, effect, targetAlreadyHadPower);
+			if (amount > 0)
+			{
+				await EnsureCustomStatusBehaviorPower(target, definition, applier, cardSource);
+			}
 			return;
 		}
 
@@ -22209,6 +22789,72 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		using IDisposable _ = CardEditorCustomStatusPower.PushPendingPayload(definition);
 		CardEditorCustomStatusPower? applied = await PowerCmd.Apply<CardEditorCustomStatusPower>(target, amount, applier, cardSource);
 		ApplyDurationTickPolicy(applied, effect, targetAlreadyHadPower);
+		await EnsureCustomStatusBehaviorPower(target, definition, applier, cardSource);
+	}
+
+	private static async Task EnsureCustomStatusBehaviorPower(
+		Creature target,
+		CardEditorCustomStatusDefinition definition,
+		Creature? applier,
+		CardModel? cardSource)
+	{
+		if (target == null || definition == null || definition.BehaviorEffects.Count == 0)
+		{
+			return;
+		}
+
+		CardModel? behaviorSourceCard = BuildCustomStatusBehaviorSourceCard(definition, applier, cardSource);
+		if (behaviorSourceCard == null)
+		{
+			return;
+		}
+
+		CardEditorExtraEffectPower? behaviorPower = target.GetPower<CardEditorExtraEffectPower>();
+		if (behaviorPower == null)
+		{
+			behaviorPower = await PowerCmd.Apply<CardEditorExtraEffectPower>(target, 1, target, behaviorSourceCard, silent: true);
+		}
+		if (behaviorPower != null)
+		{
+			await behaviorPower.AddCustomStatusBehaviorEffects(behaviorSourceCard, definition.Id, definition.BehaviorEffects);
+		}
+	}
+
+	private static CardModel? BuildCustomStatusBehaviorSourceCard(
+		CardEditorCustomStatusDefinition definition,
+		Creature? applier,
+		CardModel? fallbackCard)
+	{
+		CardModel? sourceCard = null;
+		if (definition.SourceCardId is ModelId sourceCardId && sourceCardId != ModelId.none)
+		{
+			try
+			{
+				CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(sourceCardId);
+				if (canonical != null)
+				{
+					sourceCard = CardEditorOverrides.BuildPreview(canonical);
+				}
+			}
+			catch
+			{
+				sourceCard = null;
+			}
+		}
+
+		sourceCard ??= fallbackCard;
+		if (sourceCard != null)
+		{
+			try
+			{
+				sourceCard.Owner = applier?.Player ?? fallbackCard?.Owner;
+			}
+			catch
+			{
+			}
+		}
+
+		return sourceCard;
 	}
 
 	private static async Task ExecuteCreatureCommand(PlayerChoiceContext choiceContext, CardPlay cardPlay, CardExtraEffect effect, int amount, Creature target)
@@ -22357,6 +23003,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		CardExtraEffect? branchEffect = GetUsableBranchEffect(effect);
+		ownerCreature = CardEditorPowerExecutionHostContext.Current ?? ownerCreature;
 		bool shouldRunBranch = branchEffect != null
 			&& cardPlay != null
 			&& ownerCreature != null
@@ -22569,6 +23216,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					: 0,
 				CardExtraEffectAmountSourceMode.AppliedEffectInstances => CardEditorEffectExecutionAmountContext.TryGetAppliedCount(effect.AmountSourceEffectId, out int appliedCount)
 					? appliedCount
+					: 0,
+				CardExtraEffectAmountSourceMode.ConfiguredEffectAmount => CardEditorEffectExecutionAmountContext.TryGetConfiguredAmount(effect.AmountSourceEffectId, out int configuredAmount)
+					? configuredAmount
+					: 0,
+				CardExtraEffectAmountSourceMode.ConfiguredEffectInstances => CardEditorEffectExecutionAmountContext.TryGetConfiguredCount(effect.AmountSourceEffectId, out int configuredCount)
+					? configuredCount
 					: 0,
 				_ => CardEditorEffectExecutionAmountContext.TryGetAppliedAmount(effect.AmountSourceEffectId, out int appliedAmount)
 					? appliedAmount
@@ -23453,17 +24106,21 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.DrawCards:
 			{
+				int drawnCount = 0;
 				foreach (Player targetPlayer in ResolveTargetPlayers(combatState, owner, ownerCreature, cardPlay, effect))
 				{
-					await DrawMatchingCards(choiceContext, targetPlayer, amount, effect);
+					drawnCount += (await DrawMatchingCards(choiceContext, targetPlayer, amount, effect)).Count;
 				}
+				CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(drawnCount);
 				break;
 			}
 			case CardExtraEffectKind.DrawCardsThatCostLess:
 			{
+				int drawnCount = 0;
 				foreach (Player targetPlayer in ResolveTargetPlayers(combatState, owner, ownerCreature, cardPlay, effect))
 				{
 					List<CardModel> drawnCards = await DrawMatchingCards(choiceContext, targetPlayer, amount, effect);
+					drawnCount += drawnCards.Count;
 
 					int costLess = effect.CardSelectionCount > 0 ? effect.CardSelectionCount : 1;
 					if (costLess != 0)
@@ -23475,6 +24132,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 						}
 					}
 				}
+				CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(drawnCount);
 				break;
 			}
 			case CardExtraEffectKind.GainEnergy:
@@ -23760,13 +24418,13 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			case CardExtraEffectKind.AddRandomCardToHand:
 			{
 				CardModel? effectSourceCard = CardEditorEffectSourceContext.Current ?? cardPlay?.Card;
-				await AddRandomCardsToHand(combatState, owner, amount, effect.GeneratedCardPool, effect.GeneratedCardType, effect, effectSourceCard);
+				await AddRandomCardsToHand(combatState, owner, cardPlay, amount, effect.GeneratedCardPool, effect.GeneratedCardType, effect, effectSourceCard);
 				break;
 			}
 			case CardExtraEffectKind.ChooseOneOfThreeCardsToHand:
 			{
 				CardModel? effectSourceCard = CardEditorEffectSourceContext.Current ?? cardPlay?.Card;
-				await ChooseOneOfThreeCardsToHand(combatState, choiceContext, owner, amount, effect.GeneratedCardPool, effect.GeneratedCardType, effect, effectSourceCard);
+				await ChooseOneOfThreeCardsToHand(combatState, choiceContext, owner, cardPlay, amount, effect.GeneratedCardPool, effect.GeneratedCardType, effect, effectSourceCard);
 				break;
 			}
 			case CardExtraEffectKind.PlayRandomGeneratedCard:
@@ -24015,12 +24673,17 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.CopyCardsFromPileToDeck:
 			{
-				await CopyCardsFromPileToDeck(choiceContext, owner, amount, effect, sourceCard: cardPlay?.Card);
+				await CopyCardsFromPileToDeck(choiceContext, owner, cardPlay, amount, effect, sourceCard: cardPlay?.Card);
 				break;
 			}
 			case CardExtraEffectKind.CopyExactCardsFromPileToDeck:
 			{
-				await CopyCardsFromPileToDeck(choiceContext, owner, amount, effect, sourceCard: cardPlay?.Card, exact: true);
+				await CopyCardsFromPileToDeck(choiceContext, owner, cardPlay, amount, effect, sourceCard: cardPlay?.Card, exact: true);
+				break;
+			}
+			case CardExtraEffectKind.SelectCardsFromPile:
+			{
+				await SelectCardsFromPile(choiceContext, owner, amount, effect, sourceCard: cardPlay?.Card);
 				break;
 			}
 			case CardExtraEffectKind.RemoveCardsFromDeck:
@@ -24031,7 +24694,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			case CardExtraEffectKind.AddSpecificCardToHand:
 			{
 				CardModel? effectSourceCard = CardEditorEffectSourceContext.Current ?? cardPlay?.Card;
-				await AddSpecificCardsToHand(combatState, owner, amount, effect, effectSourceCard);
+				await AddSpecificCardsToHand(combatState, owner, cardPlay, amount, effect, effectSourceCard);
 				break;
 			}
 			case CardExtraEffectKind.FetchSpecificCardToHand:
@@ -24337,7 +25000,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return;
 		}
 
-		Creature? ownerCreature = card.Owner?.Creature;
+		Creature? ownerCreature = card.TryGetOwnerCreature();
 		if (ownerCreature == null)
 		{
 			return;
@@ -24450,6 +25113,29 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All)
 		{
 			selected = candidates;
+		}
+		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.RandomOffer)
+		{
+			if (desiredCount <= 0)
+			{
+				return;
+			}
+			PileType selectorPileType = effect.CardSelectionPile == CardExtraEffectCardPile.AllPiles
+				? PileType.None
+				: ResolvePileType(effect.CardSelectionPile);
+			selected = await SelectCardsFromCandidates(
+				choiceContext,
+				owner,
+				candidates,
+				Math.Min(desiredCount, candidates.Count),
+				effect.CardSelectionMode,
+				selectorPileType,
+				new LocString("gameplay_ui", "CHOOSE_CARD_HEADER"),
+				sourceCard,
+				ShouldExcludeSourceCardFromSelection(effect),
+				preferHandDiscardSelector: false,
+				owner.RunState?.Rng?.Shuffle,
+				ResolveCardSelectionOfferCount(effect, cardPlay, Math.Min(desiredCount, candidates.Count)));
 		}
 		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random)
 		{
@@ -24588,7 +25274,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle);
+				owner.RunState?.Rng?.Shuffle,
+				ResolveCardSelectionOfferCount(effect, cardPlay, Math.Min(desiredCount, candidates.Count)));
 
 		if (selected.Count == 0 && !useFutureAura)
 		{
@@ -24727,7 +25414,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle);
+				owner.RunState?.Rng?.Shuffle,
+				ResolveCardSelectionOfferCount(effect, cardPlay, Math.Min(desiredCount, candidates.Count)));
 
 		if (selected.Count == 0 && !useFutureAura)
 		{
@@ -24793,6 +25481,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			or CardExtraEffectKind.DelayedPileAction
 			or CardExtraEffectKind.CopyCardsFromPileToDeck
 			or CardExtraEffectKind.CopyExactCardsFromPileToDeck
+			or CardExtraEffectKind.SelectCardsFromPile
 			or CardExtraEffectKind.RemoveCardsFromDeck
 			or CardExtraEffectKind.PlayCardFromPile
 			or CardExtraEffectKind.FetchSpecificCardToHand
@@ -24874,6 +25563,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			or CardExtraEffectKind.TransformCards
 			or CardExtraEffectKind.CopyCardsFromPileToDeck
 			or CardExtraEffectKind.CopyExactCardsFromPileToDeck
+			or CardExtraEffectKind.SelectCardsFromPile
 			or CardExtraEffectKind.RemoveCardsFromDeck
 			or CardExtraEffectKind.FetchSpecificCardToHand
 			or CardExtraEffectKind.PlayCardFromPile;
@@ -24890,38 +25580,62 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		CardModel? sourceCard,
 		bool excludeSourceCardInHandSelector,
 		bool preferHandDiscardSelector,
-		MegaCrit.Sts2.Core.Random.Rng? shuffleRng)
+		MegaCrit.Sts2.Core.Random.Rng? shuffleRng,
+		int randomOfferCount = 0)
 	{
-		if (choiceContext == null || owner == null || candidates == null || candidates.Count == 0 || count <= 0)
+		if (choiceContext == null
+			|| owner == null
+			|| candidates == null
+			|| candidates.Count == 0
+			|| (count <= 0 && selectionMode != CardExtraEffectCardSelectionMode.SelectedByEffect))
 		{
 			return new List<CardModel>();
 		}
 
 		if (selectionMode == CardExtraEffectCardSelectionMode.All)
 		{
-			return candidates.Where(c => c != null).ToList();
+			return ReportSelectedCards(candidates.Where(c => c != null).ToList());
+		}
+
+		if (selectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			return ReportSelectedCards(candidates.Where(c => c != null).ToList());
 		}
 
 		if (selectionMode == CardExtraEffectCardSelectionMode.ThisCard)
 		{
-			return sourceCard != null && candidates.Any(candidate => ReferenceEquals(candidate, sourceCard))
+			return ReportSelectedCards(sourceCard != null && candidates.Any(candidate => ReferenceEquals(candidate, sourceCard))
 				? new List<CardModel> { sourceCard }
-				: new List<CardModel>();
+				: new List<CardModel>());
 		}
 
 		if (selectionMode == CardExtraEffectCardSelectionMode.Random)
 		{
-			return PickRandomDistinct(candidates, count, shuffleRng);
+			return ReportSelectedCards(PickRandomDistinct(candidates, count, shuffleRng));
+		}
+
+		if (selectionMode == CardExtraEffectCardSelectionMode.RandomOffer)
+		{
+			int offerCount = randomOfferCount > 0 ? randomOfferCount : count;
+			offerCount = Math.Clamp(offerCount, Math.Max(1, count), candidates.Count);
+			List<CardModel> offered = PickRandomDistinct(candidates, offerCount, shuffleRng);
+			if (offered.Count <= count)
+			{
+				return ReportSelectedCards(offered);
+			}
+
+			CardSelectorPrefs offerPrefs = new CardSelectorPrefs(prompt, count);
+			return ReportSelectedCards((await CardSelectCmd.FromSimpleGrid(choiceContext, offered, owner, offerPrefs)).OfType<CardModel>().ToList());
 		}
 
 		if (selectionMode == CardExtraEffectCardSelectionMode.Top)
 		{
-			return candidates.Where(c => c != null).Take(count).ToList();
+			return ReportSelectedCards(candidates.Where(c => c != null).Take(count).ToList());
 		}
 
 		if (selectionMode == CardExtraEffectCardSelectionMode.Bottom)
 		{
-			return candidates.Where(c => c != null).Reverse().Take(count).Reverse().ToList();
+			return ReportSelectedCards(candidates.Where(c => c != null).Reverse().Take(count).Reverse().ToList());
 		}
 
 		bool isUpTo = selectionMode == CardExtraEffectCardSelectionMode.UpTo;
@@ -24941,10 +25655,33 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				? await CardSelectCmd.FromHandForDiscard(choiceContext, owner, prefs, filter, source)
 				: await CardSelectCmd.FromHand(choiceContext, owner, prefs, filter, source);
 
-			return selected.Where(c => c != null).ToList();
+			return ReportSelectedCards(selected.Where(c => c != null).ToList());
 		}
 
-		return (await CardSelectCmd.FromSimpleGrid(choiceContext, candidates, owner, prefs)).OfType<CardModel>().ToList();
+		return ReportSelectedCards((await CardSelectCmd.FromSimpleGrid(choiceContext, candidates, owner, prefs)).OfType<CardModel>().ToList());
+	}
+
+	private static int ResolveCardSelectionOfferCount(CardExtraEffect? effect, CardPlay? cardPlay, int fallbackCount)
+	{
+		if (effect == null || effect.CardSelectionMode != CardExtraEffectCardSelectionMode.RandomOffer)
+		{
+			return 0;
+		}
+
+		int offerCount = effect.CardSelectionOfferCountIsX && cardPlay != null
+			? ResolveXAmountWithPlus(cardPlay, effect.CardSelectionOfferCount)
+			: effect.CardSelectionOfferCount;
+		if (offerCount <= 0)
+		{
+			offerCount = fallbackCount;
+		}
+		return Math.Clamp(offerCount, 0, 999);
+	}
+
+	private static List<CardModel> ReportSelectedCards(List<CardModel> selected)
+	{
+		CardEditorEffectExecutionAmountContext.ReportCurrentSelectedCards(selected);
+		return selected;
 	}
 
 	private static CardExtraEffectCardPile GetEffectiveDrawSourcePile(CardExtraEffect effect)
@@ -24968,7 +25705,9 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		bool useCustomDrawRouting = HasCardSelectionCriteria(effect) || sourcePile != CardExtraEffectCardPile.DrawPile;
 		if (!useCustomDrawRouting)
 		{
-			return (await CardPileCmd.Draw(choiceContext, amount, owner)).Where(c => c != null).ToList();
+			List<CardModel> drawn = (await CardPileCmd.Draw(choiceContext, amount, owner)).Where(c => c != null).ToList();
+			CardEditorEffectExecutionAmountContext.ReportCurrentSelectedCards(drawn);
+			return drawn;
 		}
 
 		List<CardModel> drawnCards = new List<CardModel>();
@@ -25028,6 +25767,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			matchingCard.InvokeDrawn();
 		}
 
+		CardEditorEffectExecutionAmountContext.ReportCurrentSelectedCards(drawnCards);
 		return drawnCards;
 	}
 
@@ -25081,7 +25821,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: toPileType == PileType.Discard,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
 		{
@@ -25092,28 +25833,35 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		if (toPileType == PileType.Discard)
 		{
 			await CardCmd.Discard(choiceContext, selected);
+			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 			return;
 		}
 		if (toPileType == PileType.Exhaust)
 		{
+			int exhausted = 0;
 			foreach (CardModel card in selected)
 			{
 				if (card != null)
 				{
 					await CardCmd.Exhaust(choiceContext, card);
+					exhausted++;
 				}
 			}
+			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(exhausted);
 			return;
 		}
 
 		CardPilePosition position = ResolvePilePosition(effect.MoveToPosition);
+		int moved = 0;
 		foreach (CardModel card in selected)
 		{
 			if (card != null)
 			{
 				await CardPileCmd.Add(card, toPileType, position);
+				moved++;
 			}
 		}
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(moved);
 	}
 
 	private static async Task DelayedPileAction(PlayerChoiceContext choiceContext, CombatState combatState, Player owner, int threshold, CardExtraEffect effect, CardModel? sourceCard)
@@ -25180,7 +25928,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: effect.DelayedPileAction == CardExtraEffectDelayedPileAction.Discard,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, actionCount));
 
 		if (selected.Count == 0)
 		{
@@ -25188,6 +25937,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		await ExecuteDelayedPileAction(choiceContext, owner, selected, effect);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 		foreach (CardModel card in selected)
 		{
 			CardEditorRunCardCounterState.Clear(combatState, card, counterKey, persistent);
@@ -25325,7 +26075,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
 		{
@@ -25333,6 +26084,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		CardCmd.Upgrade(selected, CardPreviewStyle.None);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 
 		var duration = effect.CardCostsLessDuration;
 		if (duration != CardExtraEffectCardCostsLessDuration.Permanent && combatState != null)
@@ -25385,7 +26137,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle);
+				owner.RunState?.Rng?.Shuffle,
+				ResolveCardSelectionOfferCount(effect, null, count));
 			selected.AddRange(pileSelected.Where(card => card != null));
 		}
 
@@ -25395,6 +26148,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		CardCmd.Upgrade(selected, CardPreviewStyle.None);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 
 		var duration = effect.CardCostsLessDuration;
 		if (duration != CardExtraEffectCardCostsLessDuration.Permanent && combatState != null)
@@ -25445,7 +26199,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: true,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
 		{
@@ -25453,6 +26208,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		await CardCmd.Discard(choiceContext, selected);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 	}
 
 	private static async Task ExhaustCards(PlayerChoiceContext choiceContext, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
@@ -25497,20 +26253,24 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
 		{
 			return;
 		}
 
+		int exhausted = 0;
 		foreach (CardModel card in selected)
 		{
 			if (card != null)
 			{
 				await CardCmd.Exhaust(choiceContext, card);
+				exhausted++;
 			}
 		}
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(exhausted);
 	}
 
 	private static async Task TransformCards(PlayerChoiceContext choiceContext, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
@@ -25557,7 +26317,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
 		{
@@ -25604,6 +26365,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 			IReadOnlyList<CardTransformation> transformationList = transformations;
 			List<CardPileAddResult> results = (await CardCmd.Transform(transformationList, rng: null, CardPreviewStyle.HorizontalLayout)).ToList();
+			int transformed = 0;
 			for (int i = 0; i < transformationList.Count && i < results.Count; i++)
 			{
 				CardModel? replacement = results[i].cardAdded;
@@ -25611,8 +26373,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				if (replacement != null && replacementCombatState != null)
 				{
 					CardEditorTemporaryEnchantmentController.OnCardTransformed(replacementCombatState, transformationList[i].Original, replacement);
+					transformed++;
 				}
 			}
+			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(transformed);
 			return;
 		}
 
@@ -25627,6 +26391,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 		IReadOnlyList<CardTransformation> randomTransformationList = randomTransformations;
 		List<CardPileAddResult> randomResults = (await CardCmd.Transform(randomTransformationList, owner.PlayerRng.Transformations, CardPreviewStyle.HorizontalLayout)).ToList();
+		int randomTransformed = 0;
 		for (int i = 0; i < randomTransformationList.Count && i < randomResults.Count; i++)
 		{
 			CardModel? replacement = randomResults[i].cardAdded;
@@ -25634,8 +26399,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			if (replacement != null && replacementCombatState != null)
 			{
 				CardEditorTemporaryEnchantmentController.OnCardTransformed(replacementCombatState, randomTransformationList[i].Original, replacement);
+				randomTransformed++;
 			}
 		}
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(randomTransformed);
 	}
 
 	private static async Task GrantKeywordToCards(PlayerChoiceContext choiceContext, CombatState combatState, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
@@ -25695,14 +26462,17 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle);
+				owner.RunState?.Rng?.Shuffle,
+				ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (useFutureAura)
 		{
 			CardEditorMatchingCardAuraController.ApplyKeywordAura(combatState, owner, effect, sourceCard, selected);
+			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 			return;
 		}
 
+		int granted = 0;
 		foreach (CardModel card in selected)
 		{
 			if (card != null)
@@ -25731,8 +26501,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 						CardEditorTemporaryKeywordController.ApplyThisCombat(combatState, card, effect.GrantedKeyword);
 						break;
 				}
+				granted++;
 			}
 		}
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(granted);
 	}
 
 	private static async Task UpgradeDeckCards(Player owner, int amount, CardExtraEffect effect)
@@ -25771,6 +26543,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		CardCmd.Upgrade(selected, CardPreviewStyle.None);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 		await Task.CompletedTask;
 	}
 
@@ -25789,6 +26562,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			await AddDeckCardCopy(owner, cardPlay.Card, exact: true, results);
 		}
 		PreviewGeneratedPileAdds(results);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(results.Count);
 	}
 
 	private static List<CardModel> GetCandidatesFromConfiguredPile(Player owner, CardExtraEffect effect, CardModel? sourceCard, bool includeDeck, bool requireDeckVersion, bool includeCostFilter)
@@ -25797,6 +26571,11 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		if (owner == null || effect == null)
 		{
 			return candidates;
+		}
+
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			return GetCandidatesFromSelectedEffectSource(owner, effect, sourceCard, includeDeck, requireDeckVersion, includeCostFilter);
 		}
 
 		IEnumerable<PileType> pileTypes;
@@ -25847,6 +26626,60 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		return candidates;
 	}
 
+	private static List<CardModel> GetCandidatesFromSelectedEffectSource(Player owner, CardExtraEffect effect, CardModel? sourceCard, bool includeDeck, bool requireDeckVersion, bool includeCostFilter)
+	{
+		List<CardModel> candidates = new();
+		if (owner == null || effect == null)
+		{
+			return candidates;
+		}
+
+		if (!CardEditorEffectExecutionAmountContext.TryGetSelectedCards(effect.CardSelectionSourceEffectId, out List<CardModel> selectedCards))
+		{
+			return candidates;
+		}
+
+		HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
+		foreach (CardModel? selectedCard in selectedCards)
+		{
+			CardModel? candidate = ResolveSelectedEffectCardCandidate(selectedCard, includeDeck, requireDeckVersion);
+			if (candidate == null
+				|| (ShouldExcludeSourceCardFromSelection(effect) && ReferenceEquals(candidate, sourceCard))
+				|| !MatchesCardSelectionFilters(owner, candidate, effect, includeCostFilter))
+			{
+				continue;
+			}
+
+			if (seen.Add(candidate))
+			{
+				candidates.Add(candidate);
+			}
+		}
+		return candidates;
+	}
+
+	private static CardModel? ResolveSelectedEffectCardCandidate(CardModel? selectedCard, bool includeDeck, bool requireDeckVersion)
+	{
+		if (selectedCard == null)
+		{
+			return null;
+		}
+
+		if (requireDeckVersion)
+		{
+			return selectedCard.Pile?.Type == PileType.Deck
+				? selectedCard
+				: selectedCard.DeckVersion;
+		}
+
+		if (!includeDeck && selectedCard.Pile?.Type == PileType.Deck)
+		{
+			return null;
+		}
+
+		return selectedCard;
+	}
+
 	private static IEnumerable<PileType> GetCombatCardPileTypes()
 	{
 		yield return PileType.Hand;
@@ -25855,7 +26688,28 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		yield return PileType.Exhaust;
 	}
 
-	private static async Task CopyCardsFromPileToDeck(PlayerChoiceContext choiceContext, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard, bool exact = false)
+	private static int ResolveCopySourceSelectionCount(CardExtraEffect effect, CardPlay? cardPlay, int amount, int candidateCount)
+	{
+		if (effect == null || candidateCount <= 0)
+		{
+			return 0;
+		}
+
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All
+			|| effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			return candidateCount;
+		}
+
+		int desiredCount = effect.CopyMode == CardExtraEffectCopyMode.AmountCopiesPerSelectedCard
+			? (effect.CardSelectionCountIsX && cardPlay != null
+				? ResolveXAmountWithPlus(cardPlay, effect.CardSelectionCount)
+				: effect.CardSelectionCount)
+			: amount;
+		return Math.Clamp(desiredCount, 0, candidateCount);
+	}
+
+	private static async Task CopyCardsFromPileToDeck(PlayerChoiceContext choiceContext, Player owner, CardPlay? cardPlay, int amount, CardExtraEffect effect, CardModel? sourceCard, bool exact = false)
 	{
 		if (choiceContext == null || owner == null || effect == null || amount <= 0)
 		{
@@ -25864,6 +26718,80 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 		CombatState? combatState = owner.Creature.GetConcreteCombatState();
 		if (combatState == null)
+		{
+			return;
+		}
+
+		List<CardModel> candidates = GetCandidatesFromConfiguredPile(
+			owner,
+			effect,
+			sourceCard,
+			includeDeck: true,
+			requireDeckVersion: false,
+			includeCostFilter: true);
+		if (candidates.Count == 0)
+		{
+			return;
+		}
+
+		int count = ResolveCopySourceSelectionCount(effect, cardPlay, amount, candidates.Count);
+		if (count <= 0)
+		{
+			return;
+		}
+
+		PileType fromPileType = effect.CardSelectionPile == CardExtraEffectCardPile.AllPiles
+			? PileType.None
+			: ResolvePileType(effect.CardSelectionPile);
+		List<CardModel> selected = await SelectCardsFromCandidates(
+			choiceContext,
+			owner,
+			candidates,
+			count,
+			effect.CardSelectionMode,
+			fromPileType,
+			new LocString("gameplay_ui", "CHOOSE_CARD_HEADER"),
+			sourceCard,
+			ShouldExcludeSourceCardFromSelection(effect),
+			preferHandDiscardSelector: false,
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, cardPlay, count));
+
+		if (selected.Count == 0)
+		{
+			return;
+		}
+
+		List<(PileType PileType, CardPilePosition Position)> destinations = GetCopyCardDestinations(effect)
+			.Select(dest => (ResolvePileType(dest.Pile), ResolvePilePosition(dest.Position)))
+			.ToList();
+		List<(CardPileAddResult Result, PileType PileType)> results = new();
+		int copiesPerSelectedCard = effect.CopyMode == CardExtraEffectCopyMode.AmountCopiesPerSelectedCard
+			? Math.Clamp(amount, 0, 99)
+			: 1;
+		if (copiesPerSelectedCard <= 0)
+		{
+			return;
+		}
+
+		foreach (CardModel selectedCard in selected)
+		{
+			if (selectedCard != null)
+			{
+				CardModel? effectSourceCard = CardEditorEffectSourceContext.Current ?? sourceCard;
+				for (int i = 0; i < copiesPerSelectedCard; i++)
+				{
+					await AddCardCopyToConfiguredDestinations(combatState, owner, selectedCard, exact, destinations, results, effectSourceCard);
+				}
+			}
+		}
+		PreviewGeneratedPileAdds(results);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(results.Count);
+	}
+
+	private static async Task SelectCardsFromPile(PlayerChoiceContext choiceContext, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
+	{
+		if (choiceContext == null || owner == null || effect == null || amount <= 0)
 		{
 			return;
 		}
@@ -25902,26 +26830,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
-		if (selected.Count == 0)
-		{
-			return;
-		}
-
-		List<(PileType PileType, CardPilePosition Position)> destinations = GetCopyCardDestinations(effect)
-			.Select(dest => (ResolvePileType(dest.Pile), ResolvePilePosition(dest.Position)))
-			.ToList();
-		List<(CardPileAddResult Result, PileType PileType)> results = new();
-		foreach (CardModel selectedCard in selected)
-		{
-			if (selectedCard != null)
-			{
-				CardModel? effectSourceCard = CardEditorEffectSourceContext.Current ?? sourceCard;
-				await AddCardCopyToConfiguredDestinations(combatState, owner, selectedCard, exact, destinations, results, effectSourceCard);
-			}
-		}
-		PreviewGeneratedPileAdds(results);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 	}
 
 	private static async Task RemoveCardsFromDeck(PlayerChoiceContext choiceContext, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
@@ -25962,7 +26874,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
 		{
@@ -25988,6 +26901,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		if (deckCards.Count > 0)
 		{
 			await CardPileCmd.RemoveFromDeck(deckCards.ToList(), showPreview: true);
+			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(deckCards.Count);
 		}
 	}
 
@@ -26031,9 +26945,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 		}
 		PreviewGeneratedPileAdds(results);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(results.Count);
 	}
 
-	private static async Task AddSpecificCardsToHand(CombatState combatState, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
+	private static async Task AddSpecificCardsToHand(CombatState combatState, Player owner, CardPlay? cardPlay, int amount, CardExtraEffect effect, CardModel? sourceCard)
 	{
 		if (combatState == null || owner == null || effect == null || amount <= 0)
 		{
@@ -26055,11 +26970,20 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			.Select(dest => (ResolvePileType(dest.Pile), ResolvePilePosition(dest.Position)))
 			.ToList();
 		List<(CardPileAddResult Result, PileType PileType)> results = new();
-		for (int i = 0; i < amount; i++)
+		foreach (Player generatedOwner in ResolveGeneratedCardOwners(combatState, owner, cardPlay, effect))
 		{
-			await AddCanonicalCardToConfiguredDestinations(combatState, owner, canonical, destinations, results, sourceCard);
+			if (generatedOwner == null)
+			{
+				continue;
+			}
+
+			for (int i = 0; i < amount; i++)
+			{
+				await AddCanonicalCardToConfiguredDestinations(combatState, generatedOwner, canonical, destinations, results, sourceCard);
+			}
 		}
 		PreviewGeneratedPileAdds(results);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(results.Count);
 	}
 
 	private static async Task FetchSpecificCardsToHand(CombatState combatState, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
@@ -26096,6 +27020,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		{
 			await CardPileCmd.Add(card, toPileType, position);
 		}
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(candidates.Count);
 	}
 
 private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoiceContext choiceContext, Player owner, int amount, CardExtraEffect effect, CardModel? sourceCard)
@@ -26144,13 +27069,16 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
 		{
 			return;
 		}
 
+			int replayCount = ResolveSelectedCardReplayCount(effect);
+			int played = 0;
 			foreach (CardModel card in selected)
 			{
 				if (card == null)
@@ -26158,29 +27086,34 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 					continue;
 				}
 
-				if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayedCard(combatState, owner, sourceCard, effect, card))
+				for (int replay = 0; replay < replayCount; replay++)
 				{
-					continue;
-				}
+					if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayedCard(combatState, owner, sourceCard, effect, card))
+					{
+						continue;
+					}
 
-				if (effect.AutoPlayForceExhaust)
-				{
-					SetOneShotCardPlayResultPileOverride(card, PileType.Exhaust, CardPilePosition.Bottom);
-				}
-
-				try
-				{
-					await CardPileCmd.Add(card, PileType.Play);
-					await CardCmd.AutoPlay(choiceContext, card, target: null);
-				}
-				finally
-				{
 					if (effect.AutoPlayForceExhaust)
 					{
-						ClearOneShotCardPlayResultPileOverride(card);
+						SetOneShotCardPlayResultPileOverride(card, PileType.Exhaust, CardPilePosition.Bottom);
+					}
+
+					try
+					{
+						await CardPileCmd.Add(card, PileType.Play);
+						await CardCmd.AutoPlay(choiceContext, card, target: null);
+						played++;
+					}
+					finally
+					{
+						if (effect.AutoPlayForceExhaust)
+						{
+							ClearOneShotCardPlayResultPileOverride(card);
+						}
 					}
 				}
 			}
+			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(played);
 	}
 	}
 
@@ -26231,7 +27164,8 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: effect.ConsumedCardAction == CardExtraEffectConsumedCardAction.Discard,
-			owner.RunState?.Rng?.Shuffle);
+			owner.RunState?.Rng?.Shuffle,
+			ResolveCardSelectionOfferCount(effect, cardPlay, count));
 		if (selected.Count == 0)
 		{
 			return;
@@ -26602,6 +27536,35 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 		return card != null && GetCardNameForMatching(card).Contains(desiredName, StringComparison.OrdinalIgnoreCase);
 	}
 
+	private static CardRarity? ToCardRarity(CardExtraEffectCardRarityFilter rarity)
+	{
+		return rarity switch
+		{
+			CardExtraEffectCardRarityFilter.Basic => CardRarity.Basic,
+			CardExtraEffectCardRarityFilter.Common => CardRarity.Common,
+			CardExtraEffectCardRarityFilter.Uncommon => CardRarity.Uncommon,
+			CardExtraEffectCardRarityFilter.Rare => CardRarity.Rare,
+			CardExtraEffectCardRarityFilter.Ancient => CardRarity.Ancient,
+			CardExtraEffectCardRarityFilter.Event => CardRarity.Event,
+			CardExtraEffectCardRarityFilter.Token => CardRarity.Token,
+			CardExtraEffectCardRarityFilter.Status => CardRarity.Status,
+			CardExtraEffectCardRarityFilter.Curse => CardRarity.Curse,
+			CardExtraEffectCardRarityFilter.Quest => CardRarity.Quest,
+			_ => null
+		};
+	}
+
+	private static bool PassesRarityFilter(CardModel? card, CardExtraEffectCardRarityFilter rarity)
+	{
+		if (rarity == CardExtraEffectCardRarityFilter.Any)
+		{
+			return true;
+		}
+
+		CardRarity? desired = ToCardRarity(rarity);
+		return card != null && desired.HasValue && card.Rarity == desired.Value;
+	}
+
 	private static bool MatchesGeneratedCardType(CardModel? card, CardGeneratedCardType type)
 	{
 		if (card == null)
@@ -26634,15 +27597,41 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 		return GetEffectiveCardType(card) == desired;
 	}
 
+	private static CardExtraEffectCardRarityFilter GetCreatesCardsOutputRarity(CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect? effect)
+	{
+		if (effect == null)
+		{
+			return CardExtraEffectCardRarityFilter.Any;
+		}
+
+		if (effect.CountCardFilter == CardExtraEffectCountCardFilter.CreatesCards
+			&& effect.CountCardPool == pool
+			&& effect.CountCardType == type)
+		{
+			return effect.CountCardRarity;
+		}
+
+		if (effect.TriggerCardFilter == CardExtraEffectCountCardFilter.CreatesCards
+			&& effect.TriggerCardPool == pool
+			&& effect.TriggerCardType == type)
+		{
+			return effect.TriggerCardRarity;
+		}
+
+		return effect.CardSelectionRarity;
+	}
+
 	private static bool HasCreatesCardsOutputConstraints(CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect? effect)
 	{
+		CardExtraEffectCardRarityFilter rarity = GetCreatesCardsOutputRarity(pool, type, effect);
 		return pool != CardGeneratedCardPool.All
 			|| type != CardGeneratedCardType.Any
+			|| rarity != CardExtraEffectCardRarityFilter.Any
 			|| (effect != null && effect.CostFilterEnabled)
 			|| (effect != null && effect.NameFilterEnabled && NormalizeNameFilterText(effect.NameFilterText) != null);
 	}
 
-	private static bool MatchesCreatedCardOutputFilters(Player? owner, CardModel? candidate, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect effect)
+	private static bool MatchesCreatedCardOutputFilters(Player? owner, CardModel? candidate, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect effect, CardExtraEffectCardRarityFilter rarity)
 	{
 		if (candidate == null || effect == null)
 		{
@@ -26664,6 +27653,11 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			return false;
 		}
 
+		if (!PassesRarityFilter(candidate, rarity))
+		{
+			return false;
+		}
+
 		if (!PassesCostFilter(candidate, effect, type))
 		{
 			return false;
@@ -26680,6 +27674,7 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 		}
 
 		visitedSourceCardIds ??= new HashSet<string>(StringComparer.Ordinal);
+		CardExtraEffectCardRarityFilter outputRarity = GetCreatesCardsOutputRarity(pool, type, effect);
 		string visitKey = card.Id.ToString();
 		if (!visitedSourceCardIds.Add(visitKey))
 		{
@@ -26690,7 +27685,7 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 		{
 			foreach (CardExtraEffect candidateEffect in GetRuntimeEffectsIncludingBorrowedSources(card.GetConcreteCombatState(), card))
 			{
-				if (EffectCreatesMatchingCards(owner, card, candidateEffect, pool, type, effect, visitedSourceCardIds))
+				if (EffectCreatesMatchingCards(owner, card, candidateEffect, pool, type, effect, outputRarity, visitedSourceCardIds))
 				{
 					return true;
 				}
@@ -26707,7 +27702,7 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			{
 				foreach (CardExtraEffect candidateEffect in CardEditorTemporaryExtraEffectController.GetEffects(combatState, card))
 				{
-					if (EffectCreatesMatchingCards(owner, card, candidateEffect, pool, type, effect, visitedSourceCardIds))
+					if (EffectCreatesMatchingCards(owner, card, candidateEffect, pool, type, effect, outputRarity, visitedSourceCardIds))
 					{
 						return true;
 					}
@@ -26722,14 +27717,14 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			&& CardTypeCreatesCardsViaIl(card.GetType());
 	}
 
-	private static bool EffectCreatesMatchingCards(Player? owner, CardModel hostCard, CardExtraEffect? effect, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect filterEffect, HashSet<string> visitedSourceCardIds)
+	private static bool EffectCreatesMatchingCards(Player? owner, CardModel hostCard, CardExtraEffect? effect, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect filterEffect, CardExtraEffectCardRarityFilter outputRarity, HashSet<string> visitedSourceCardIds)
 	{
 		if (effect == null || hostCard == null || filterEffect == null)
 		{
 			return false;
 		}
 
-		if (effect.BranchEffect != null && EffectCreatesMatchingCards(owner, hostCard, effect.BranchEffect, pool, type, filterEffect, visitedSourceCardIds))
+		if (effect.BranchEffect != null && EffectCreatesMatchingCards(owner, hostCard, effect.BranchEffect, pool, type, filterEffect, outputRarity, visitedSourceCardIds))
 		{
 			return true;
 		}
@@ -26745,17 +27740,17 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 				}
 
 				return GetCardGenerationCandidates(owner, effect.GeneratedCardPool, effect.GeneratedCardType, effect.GeneratedCardCustomTag, effect)
-					.Any(candidate => MatchesCreatedCardOutputFilters(owner, candidate, pool, type, filterEffect));
+					.Any(candidate => MatchesCreatedCardOutputFilters(owner, candidate, pool, type, filterEffect, outputRarity));
 			case CardExtraEffectKind.AddSpecificCardToHand:
 				if (!TryParseSpecificCardId(effect.SpecificCardId ?? string.Empty, out ModelId specificId))
 				{
 					return false;
 				}
 
-				return MatchesCreatedCardOutputFilters(owner, ModelDb.GetByIdOrNull<CardModel>(specificId), pool, type, filterEffect);
+				return MatchesCreatedCardOutputFilters(owner, ModelDb.GetByIdOrNull<CardModel>(specificId), pool, type, filterEffect, outputRarity);
 			case CardExtraEffectKind.AddCopyOfThisCard:
 			case CardExtraEffectKind.AddExactCopyOfThisCardToDeck:
-				return MatchesCreatedCardOutputFilters(owner, hostCard, pool, type, filterEffect);
+				return MatchesCreatedCardOutputFilters(owner, hostCard, pool, type, filterEffect, outputRarity);
 			case CardExtraEffectKind.CopyCardsFromPileToDeck:
 			case CardExtraEffectKind.CopyExactCardsFromPileToDeck:
 				if (owner == null)
@@ -26770,7 +27765,7 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 						includeDeck: true,
 						requireDeckVersion: false,
 						includeCostFilter: true)
-					.Any(candidate => MatchesCreatedCardOutputFilters(owner, candidate, pool, type, filterEffect));
+					.Any(candidate => MatchesCreatedCardOutputFilters(owner, candidate, pool, type, filterEffect, outputRarity));
 			case CardExtraEffectKind.RunEffectSourceCard:
 				if (!string.IsNullOrWhiteSpace(effect.SpecificCardId)
 					&& TryParseSpecificCardId(effect.SpecificCardId.Trim(), out ModelId sourceId))
@@ -26906,6 +27901,7 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 		return effect != null
 			&& (effect.CardSelectionPool != CardGeneratedCardPool.All
 				|| effect.CardSelectionType != CardGeneratedCardType.Any
+				|| effect.CardSelectionRarity != CardExtraEffectCardRarityFilter.Any
 				|| effect.CardSelectionFilter != CardExtraEffectCountCardFilter.Any
 				|| effect.CardMatchMode != CardExtraEffectCardMatchMode.Any
 				|| effect.CostFilterEnabled
@@ -26949,6 +27945,11 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			return false;
 		}
 
+		if (!PassesRarityFilter(card, effect.CardSelectionRarity))
+		{
+			return false;
+		}
+
 		if (!PassesNameFilter(card, effect))
 		{
 			return false;
@@ -26987,13 +27988,16 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			CardGeneratedCardType.Quest => GeneratedCardTypeLabel(CardGeneratedCardType.Quest),
 			_ => null
 		};
+		string? rarityPrefix = effect.CardSelectionRarity == CardExtraEffectCardRarityFilter.Any
+			? null
+			: CardRarityFilterLabel(effect.CardSelectionRarity);
 
 		if (useAllCardsKeyword)
 		{
 			cardWord = "[gold]" + GetAllCardsKeywordTitle() + "[/gold]";
 		}
 
-		string descriptor = string.Join(" ", new[] { poolPrefix, typePrefix, cardWord }.Where(s => !string.IsNullOrWhiteSpace(s)));
+		string descriptor = string.Join(" ", new[] { poolPrefix, rarityPrefix, typePrefix, cardWord }.Where(s => !string.IsNullOrWhiteSpace(s)));
 		if (!string.IsNullOrWhiteSpace(poolSuffix))
 		{
 			descriptor = string.Join(" ", new[] { descriptor, poolSuffix }.Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -27401,7 +28405,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			return 0;
 		}
 
-		Creature? ownerCreature = card.Owner?.Creature ?? dealer;
+		Creature? ownerCreature = card.TryGetOwnerCreature() ?? dealer;
 		if (ownerCreature == null)
 		{
 			return 0;
@@ -27587,7 +28591,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 		IReadOnlyList<CardExtraEffect> effects;
 		try
 		{
-			effects = GetEffectiveExtraEffects(card, overrideData!, card.CurrentUpgradeLevel > 0);
+			effects = GetEffectiveExtraEffects(card, overrideData!, card.GetSafeCurrentUpgradeLevel() > 0);
 		}
 		catch
 		{
@@ -27889,7 +28893,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 
 		if (CardEditorOverrides.TryGet(card.Id, out CardOverride overrideData))
 		{
-			Accumulate(GetEffectiveExtraEffects(card, overrideData, card.CurrentUpgradeLevel > 0), includeTimedIntrinsic: false);
+			Accumulate(GetEffectiveExtraEffects(card, overrideData, card.GetSafeCurrentUpgradeLevel() > 0), includeTimedIntrinsic: false);
 		}
 
 		Accumulate(GetActiveGrantedExtraEffects(combatState, card), includeTimedIntrinsic: true);
@@ -28067,7 +29071,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 
 		if (CardEditorOverrides.TryGet(card.Id, out CardOverride overrideData))
 		{
-			Accumulate(GetEffectiveExtraEffects(card, overrideData, card.CurrentUpgradeLevel > 0), includeTimedIntrinsic: false);
+			Accumulate(GetEffectiveExtraEffects(card, overrideData, card.GetSafeCurrentUpgradeLevel() > 0), includeTimedIntrinsic: false);
 		}
 
 		Accumulate(GetActiveGrantedExtraEffects(combatState, card), includeTimedIntrinsic: true);
@@ -29068,6 +30072,11 @@ private static bool MatchesCountCardFilters(Player owner, CardModel card, CardEx
 			return false;
 		}
 
+		if (!PassesRarityFilter(card, effect.CountCardRarity))
+		{
+			return false;
+		}
+
 		if (!PassesNameFilter(card, effect))
 		{
 			return false;
@@ -29208,7 +30217,7 @@ private static bool MatchesCountCardFilters(Player owner, CardModel card, CardEx
 		{
 			CardModel canonical = ModelDb.GetById<CardModel>(card.Id);
 			CardModel preview = canonical.ToMutable();
-			int upgradeLevels = Math.Max(0, card.CurrentUpgradeLevel);
+			int upgradeLevels = card.GetSafeCurrentUpgradeLevel();
 			bool prevSuppressAll = CardEditorOverrides.SuppressAllOverrides;
 			bool prevSuppressUpgrade = CardEditorOverrides.SuppressUpgradeOverrides;
 			try
@@ -29588,6 +30597,11 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 			return false;
 		}
 
+		if (!PassesRarityFilter(card, effect.CardSelectionRarity))
+		{
+			return false;
+		}
+
 		if (!PassesNameFilter(card, effect))
 		{
 			return false;
@@ -29617,6 +30631,7 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 
 		return effect.TriggerCardPool != CardGeneratedCardPool.All
 			|| effect.TriggerCardType != CardGeneratedCardType.Any
+			|| effect.TriggerCardRarity != CardExtraEffectCardRarityFilter.Any
 			|| effect.TriggerCardFilter != CardExtraEffectCountCardFilter.Any
 			|| hasCardMatchFilter
 			|| effect.CostFilterEnabled
@@ -29686,6 +30701,11 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 			return false;
 		}
 
+		if (!PassesRarityFilter(triggeringCard, effect.TriggerCardRarity))
+		{
+			return false;
+		}
+
 		if (!PassesNameFilter(triggeringCard, effect))
 		{
 			return false;
@@ -29702,24 +30722,40 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 
 	internal static Creature? ResolvePowerHostCreature(CombatState combatState, CardPlay cardPlay, CardExtraEffect effect)
 	{
+		return ResolvePowerHostCreatures(combatState, cardPlay, effect).FirstOrDefault();
+	}
+
+	internal static IReadOnlyList<Creature> ResolvePowerHostCreatures(CombatState combatState, CardPlay cardPlay, CardExtraEffect effect)
+	{
 		if (combatState == null || cardPlay?.Card?.Owner?.Creature == null || effect == null)
 		{
-			return null;
+			return Array.Empty<Creature>();
 		}
 
 		Creature ownerCreature = cardPlay.Card.Owner.Creature;
-		if (GetEffectivePowerHost(effect) != CardExtraEffectPowerHost.TriggerTarget)
+		switch (GetEffectivePowerHost(effect))
 		{
-			return ownerCreature;
+			case CardExtraEffectPowerHost.CardOwner:
+				return new[] { ownerCreature };
+			case CardExtraEffectPowerHost.EffectTargets:
+				return ResolveTargets(combatState, ownerCreature, cardPlay, effect.Target)
+					.Where(creature => creature != null && creature.IsAlive)
+					.Distinct(ReferenceEqualityComparer<Creature>.Instance)
+					.ToList();
+			case CardExtraEffectPowerHost.TriggerTarget:
+			default:
+				Creature? target = effect.Target switch
+				{
+					CardExtraEffectTarget.Self => ownerCreature,
+					CardExtraEffectTarget.RandomEnemy => combatState.RunState.Rng.CombatTargets.NextItem(combatState.GetOpponentsOf(ownerCreature).Where(c => c.IsAlive)),
+					CardExtraEffectTarget.AnyPlayer => ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: true),
+					CardExtraEffectTarget.AnyAlly => ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: false),
+					CardExtraEffectTarget.AllAllies => ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: true),
+					CardExtraEffectTarget.AllEnemies => ResolveSingleTarget(combatState, ownerCreature, cardPlay),
+					_ => ResolveSingleTarget(combatState, ownerCreature, cardPlay)
+				};
+				return target != null ? new[] { target } : Array.Empty<Creature>();
 		}
-
-		return effect.Target switch
-		{
-			CardExtraEffectTarget.Self => ownerCreature,
-			CardExtraEffectTarget.RandomEnemy => combatState.RunState.Rng.CombatTargets.NextItem(combatState.GetOpponentsOf(ownerCreature).Where(c => c.IsAlive)),
-			CardExtraEffectTarget.AllEnemies => ResolveSingleTarget(combatState, ownerCreature, cardPlay),
-			_ => ResolveSingleTarget(combatState, ownerCreature, cardPlay)
-		};
 	}
 
 	internal static bool MatchesAffectedCardFilters(Player owner, CardModel card, CardExtraEffect effect)
@@ -29755,6 +30791,11 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 		}
 
 		if (!MatchesGeneratedCardType(card, effect.TriggerCardType))
+		{
+			return false;
+		}
+
+		if (!PassesRarityFilter(card, effect.TriggerCardRarity))
 		{
 			return false;
 		}
@@ -29949,6 +30990,8 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 				return HasAnyExtraEffectKind(CardExtraEffectKind.CardCostsLess, CardExtraEffectKind.CardTypeCostsLess, CardExtraEffectKind.DrawnCardsCostLess, CardExtraEffectKind.GeneratedCardsCostLess);
 			case CardExtraEffectCountCardFilter.StarCostModifier:
 				return HasAnyExtraEffectKind(CardExtraEffectKind.CardStarCostsLess, CardExtraEffectKind.CardTypeStarCostsLess);
+			case CardExtraEffectCountCardFilter.CanBePlayed:
+				return CanCardBePlayed(card);
 			case CardExtraEffectCountCardFilter.Exhaust:
 				return card.Keywords.Contains(CardKeyword.Exhaust);
 			case CardExtraEffectCountCardFilter.Ethereal:
@@ -29966,6 +31009,17 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 			default:
 				return true;
 		}
+	}
+
+	private static bool CanCardBePlayed(CardModel? card)
+	{
+		if (card == null || card.Keywords.Contains(CardKeyword.Unplayable))
+		{
+			return false;
+		}
+
+		CardType effectiveType = GetEffectiveCardType(card);
+		return effectiveType is CardType.Attack or CardType.Skill or CardType.Power;
 	}
 
 	private static bool CardCreatesCards(CardModel? card, HashSet<string>? visitedSourceCardIds = null)
@@ -30472,7 +31526,7 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 
 		CardModel canonical = source.CanonicalInstance ?? ModelDb.GetById<CardModel>(source.Id);
 		CardModel copy = owner.RunState.CreateCard(canonical, owner);
-		int upgradeLevels = Math.Clamp(source.CurrentUpgradeLevel, 0, copy.MaxUpgradeLevel);
+		int upgradeLevels = Math.Clamp(source.GetSafeCurrentUpgradeLevel(), 0, copy.MaxUpgradeLevel);
 		for (int i = 0; i < upgradeLevels && copy.IsUpgradable; i++)
 		{
 			copy.UpgradeInternal();
@@ -30495,7 +31549,7 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 
 		CardModel canonical = source.CanonicalInstance ?? ModelDb.GetById<CardModel>(source.Id);
 		CardModel copy = combatState.CreateCard(canonical, owner);
-		int upgradeLevels = Math.Clamp(source.CurrentUpgradeLevel, 0, copy.MaxUpgradeLevel);
+		int upgradeLevels = Math.Clamp(source.GetSafeCurrentUpgradeLevel(), 0, copy.MaxUpgradeLevel);
 		for (int i = 0; i < upgradeLevels && copy.IsUpgradable; i++)
 		{
 			copy.UpgradeInternal();
@@ -30567,11 +31621,11 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 		}
 	}
 
-	private static async Task AddGeneratedChoiceToConfiguredDestinations(Player owner, CardModel selected, IReadOnlyList<(PileType PileType, CardPilePosition Position)> destinations, CardModel? sourceCard)
+	private static async Task<int> AddGeneratedChoiceToConfiguredDestinations(Player owner, CardModel selected, IReadOnlyList<(PileType PileType, CardPilePosition Position)> destinations, CardModel? sourceCard)
 	{
 		if (owner == null || selected == null || destinations == null || destinations.Count == 0)
 		{
-			return;
+			return 0;
 		}
 
 		List<(CardPileAddResult Result, PileType PileType)> results = new();
@@ -30591,9 +31645,10 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 			}
 		}
 		PreviewGeneratedPileAdds(results);
+		return results.Count;
 	}
 
-	private static async Task RecoverCanceledGeneratedChoice(PlayerChoiceContext choiceContext, CardExtraEffect effect)
+	private static async Task RecoverCanceledGeneratedChoice(PlayerChoiceContext choiceContext, CardExtraEffect? effect)
 	{
 		string effectLabel = effect?.EffectId ?? effect?.Kind.ToString() ?? "unknown";
 		Log.Warn($"[CardEditor] Generated card choice canceled for {effectLabel}; treating as skipped.");
@@ -30616,35 +31671,71 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 		}
 	}
 
-	private static async Task AddRandomCardsToHand(CombatState combatState, Player owner, int amount, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect effect, CardModel? sourceCard)
+	private static IReadOnlyList<Player> ResolveGeneratedCardOwners(CombatState combatState, Player owner, CardPlay? cardPlay, CardExtraEffect? effect)
+	{
+		if (combatState == null || owner == null)
+		{
+			return Array.Empty<Player>();
+		}
+
+		if (effect?.GeneratedCardOwnerMode != CardExtraEffectGeneratedCardOwnerMode.EffectTarget)
+		{
+			return new[] { owner };
+		}
+
+		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current
+			?? cardPlay?.Card?.Owner?.Creature
+			?? owner.Creature;
+		IReadOnlyList<Player> targetPlayers = ResolveTargetPlayers(combatState, owner, ownerCreature, cardPlay, effect);
+		return targetPlayers.Count > 0
+			? targetPlayers
+			: new[] { owner };
+	}
+
+	private static MegaCrit.Sts2.Core.Random.Rng? ResolveGeneratedCardRng(Player sourceOwner, Player generatedOwner)
+		=> sourceOwner?.RunState?.Rng?.CombatCardGeneration ?? generatedOwner?.RunState?.Rng?.CombatCardGeneration;
+
+	private static async Task AddRandomCardsToHand(CombatState combatState, Player owner, CardPlay? cardPlay, int amount, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect effect, CardModel? sourceCard)
 	{
 		if (combatState == null || owner == null || amount <= 0)
 		{
 			return;
 		}
 
-		List<CardModel> candidates = GetCardGenerationCandidates(owner, pool, type, effect.GeneratedCardCustomTag, effect);
-		if (candidates.Count == 0)
-		{
-			return;
-		}
-
 		List<(PileType PileType, CardPilePosition Position)> destinations = ResolveGeneratedCombatDestinations(effect, effect?.MoveToPile ?? CardExtraEffectCardPile.Hand, effect?.MoveToPosition ?? CardExtraEffectCardPilePosition.Bottom);
 		List<(CardPileAddResult Result, PileType PileType)> results = new();
-		for (int i = 0; i < amount; i++)
+		foreach (Player generatedOwner in ResolveGeneratedCardOwners(combatState, owner, cardPlay, effect))
 		{
-			CardModel canonical = owner.RunState.Rng.CombatCardGeneration.NextItem(candidates);
-			if (canonical == null)
+			if (generatedOwner == null)
 			{
 				continue;
 			}
 
-			await AddCanonicalCardToConfiguredDestinations(combatState, owner, canonical, destinations, results, sourceCard);
+			List<CardModel> candidates = GetCardGenerationCandidates(generatedOwner, pool, type, effect.GeneratedCardCustomTag, effect);
+			if (candidates.Count == 0)
+			{
+				continue;
+			}
+
+			MegaCrit.Sts2.Core.Random.Rng? rng = ResolveGeneratedCardRng(owner, generatedOwner);
+			for (int i = 0; i < amount; i++)
+			{
+				CardModel? canonical = rng != null
+					? rng.NextItem(candidates)
+					: candidates.FirstOrDefault();
+				if (canonical == null)
+				{
+					continue;
+				}
+
+				await AddCanonicalCardToConfiguredDestinations(combatState, generatedOwner, canonical, destinations, results, sourceCard);
+			}
 		}
 		PreviewGeneratedPileAdds(results);
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(results.Count);
 	}
 
-	private static async Task ChooseOneOfThreeCardsToHand(CombatState combatState, PlayerChoiceContext choiceContext, Player owner, int times, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect effect, CardModel? sourceCard)
+	private static async Task ChooseOneOfThreeCardsToHand(CombatState combatState, PlayerChoiceContext choiceContext, Player owner, CardPlay? cardPlay, int times, CardGeneratedCardPool pool, CardGeneratedCardType type, CardExtraEffect effect, CardModel? sourceCard)
 	{
 		if (combatState == null || choiceContext == null || owner == null)
 		{
@@ -30652,51 +31743,64 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 		}
 		times = Math.Max(1, times);
 
-		List<CardModel> candidates = GetCardGenerationCandidates(owner, pool, type, effect.GeneratedCardCustomTag, effect);
-		if (candidates.Count == 0)
-		{
-			return;
-		}
-
 		List<(PileType PileType, CardPilePosition Position)> destinations = ResolveGeneratedCombatDestinations(effect, effect?.MoveToPile ?? CardExtraEffectCardPile.Hand, effect?.MoveToPosition ?? CardExtraEffectCardPilePosition.Bottom);
-		for (int i = 0; i < times; i++)
+		int added = 0;
+		foreach (Player generatedOwner in ResolveGeneratedCardOwners(combatState, owner, cardPlay, effect))
 		{
-			List<CardModel> options = new List<CardModel>();
-			HashSet<ModelId> used = new HashSet<ModelId>();
-			int tries = 0;
-			while (options.Count < 3 && used.Count < candidates.Count && tries < 50)
+			if (generatedOwner == null)
 			{
-				tries++;
-				CardModel canonical = owner.RunState.Rng.CombatCardGeneration.NextItem(candidates);
-				if (canonical == null || used.Contains(canonical.Id))
+				continue;
+			}
+
+			List<CardModel> candidates = GetCardGenerationCandidates(generatedOwner, pool, type, effect.GeneratedCardCustomTag, effect);
+			if (candidates.Count == 0)
+			{
+				continue;
+			}
+
+			MegaCrit.Sts2.Core.Random.Rng? rng = ResolveGeneratedCardRng(owner, generatedOwner);
+			for (int i = 0; i < times; i++)
+			{
+				List<CardModel> options = new List<CardModel>();
+				HashSet<ModelId> used = new HashSet<ModelId>();
+				int tries = 0;
+				while (options.Count < 3 && used.Count < candidates.Count && tries < 50)
+				{
+					tries++;
+					CardModel? canonical = rng != null
+						? rng.NextItem(candidates)
+						: candidates.FirstOrDefault(card => card != null && !used.Contains(card.Id));
+					if (canonical == null || used.Contains(canonical.Id))
+					{
+						continue;
+					}
+					used.Add(canonical.Id);
+					options.Add(combatState.CreateCard(canonical, generatedOwner));
+				}
+
+				if (options.Count == 0)
 				{
 					continue;
 				}
-				used.Add(canonical.Id);
-				options.Add(combatState.CreateCard(canonical, owner));
-			}
 
-			if (options.Count == 0)
-			{
-				return;
-			}
+				CardModel? selected;
+				try
+				{
+					selected = await CardSelectCmd.FromChooseACardScreen(choiceContext, options, generatedOwner, canSkip: true);
+				}
+				catch (OperationCanceledException)
+				{
+					await RecoverCanceledGeneratedChoice(choiceContext, effect);
+					return;
+				}
 
-			CardModel? selected;
-			try
-			{
-				selected = await CardSelectCmd.FromChooseACardScreen(choiceContext, options, owner, canSkip: true);
-			}
-			catch (OperationCanceledException)
-			{
-				await RecoverCanceledGeneratedChoice(choiceContext, effect);
-				return;
-			}
-
-			if (selected != null)
-			{
-				await AddGeneratedChoiceToConfiguredDestinations(owner, selected, destinations, sourceCard);
+				if (selected != null)
+				{
+					added += await AddGeneratedChoiceToConfiguredDestinations(generatedOwner, selected, destinations, sourceCard);
+				}
 			}
 		}
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(added);
 	}
 
 	private static async Task CreatePotions(Player owner, CardExtraEffect effect, int amount)
@@ -30928,9 +32032,10 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 		using (autoScope)
 		{
 			using IDisposable sourceScope = PushGeneratedCardSourceScope(sourceCard);
+			int played = 0;
 			for (int i = 0; i < amount; i++)
 			{
-				CardModel canonical = owner.RunState.Rng.CombatCardGeneration.NextItem(candidates);
+				CardModel? canonical = owner.RunState.Rng.CombatCardGeneration.NextItem(candidates);
 				if (canonical == null)
 				{
 					continue;
@@ -30944,7 +32049,9 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 				CardModel generated = combatState.CreateCard(canonical, owner);
 				await CardPileCmd.AddGeneratedCardToCombat(generated, PileType.Play, owner, CardPilePosition.Bottom);
 				await CardCmd.AutoPlay(choiceContext, generated, target: null);
+				played++;
 			}
+			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(played);
 		}
 	}
 
@@ -30990,9 +32097,10 @@ private static CardModel? BuildChooseOneQueryDisplayCard(Player owner, CardModel
 
 	try
 	{
-		if (hostCard.GetConcreteCombatState() != null)
+		CombatState? hostCombatState = hostCard.GetConcreteCombatState();
+		if (hostCombatState != null)
 		{
-			return hostCard.GetConcreteCombatState().CreateCard(representative, owner);
+			return hostCombatState.CreateCard(representative, owner);
 		}
 
 		return representative.ToMutable();
@@ -31035,7 +32143,8 @@ private static async Task PlayMatchingGeneratedCards(CombatState? combatState, P
 		sourceCard: null,
 		excludeSourceCardInHandSelector: true,
 		preferHandDiscardSelector: false,
-		owner.RunState?.Rng?.Shuffle);
+		owner.RunState?.Rng?.Shuffle,
+		ResolveCardSelectionOfferCount(effect, null, count));
 	if (selected.Count == 0)
 	{
 		return;
@@ -31050,6 +32159,7 @@ private static async Task PlayMatchingGeneratedCards(CombatState? combatState, P
 	using (autoScope)
 	{
 		using IDisposable sourceScope = PushGeneratedCardSourceScope(sourceCard);
+		int played = 0;
 		foreach (CardModel canonical in selected)
 		{
 			if (canonical == null)
@@ -31065,7 +32175,9 @@ private static async Task PlayMatchingGeneratedCards(CombatState? combatState, P
 			CardModel generated = combatState.CreateCard(canonical, owner);
 			await CardPileCmd.AddGeneratedCardToCombat(generated, PileType.Play, owner, CardPilePosition.Bottom);
 			await CardCmd.AutoPlay(choiceContext, generated, target: null);
+			played++;
 		}
+		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(played);
 	}
 }
 
@@ -31246,7 +32358,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 
 	private static string GetEffectSourceRuntimeInstanceKey(CardModel card, CardExtraEffect effect)
 	{
-		return effect?.Kind == CardExtraEffectKind.ScalingStage
+		return effect.Kind == CardExtraEffectKind.ScalingStage
 			? GetScalingStageRuntimeInstanceKey(card, effect)
 			: GetRunEffectSourceRuntimeInstanceKey(card, effect);
 	}
@@ -31364,6 +32476,11 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 	if (effect != null && effect.CostFilterEnabled)
 	{
 		filtered = filtered.Where(card => PassesCostFilter(card, effect, type));
+	}
+
+	if (effect != null && effect.CardSelectionRarity != CardExtraEffectCardRarityFilter.Any)
+	{
+		filtered = filtered.Where(card => PassesRarityFilter(card, effect.CardSelectionRarity));
 	}
 
 	if (effect != null && effect.CardMatchMode != CardExtraEffectCardMatchMode.Any)
@@ -31849,7 +32966,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			return 1;
 		}
 
-		return Math.Max(1, card.CurrentUpgradeLevel);
+		return Math.Max(1, card.GetSafeCurrentUpgradeLevel());
 	}
 
 	private static CardExtraEffect MergeUpgradeBaseSlotEffect(CardExtraEffect baseEffect, CardExtraEffect upgradeEffect, bool numericFieldsAreDeltas)
@@ -31939,6 +33056,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			fused.RepeatScalingExtraTimes = ResolveRepeatScalingExtraTimes(upgradeEffect);
 			fused.CardGrantTurns = upgradeEffect.CardGrantTurns;
 			fused.CardSelectionCount = upgradeEffect.CardSelectionCount;
+			fused.CardSelectionOfferCount = upgradeEffect.CardSelectionOfferCount;
 			fused.EnchantmentTurns = upgradeEffect.EnchantmentTurns;
 			fused.ConditionalBonusAmount = upgradeEffect.ConditionalBonusAmount;
 		}
@@ -31973,10 +33091,13 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 		fused.CardRewardRarityOdds = upgradeEffect.CardRewardRarityOdds;
 		fused.CountAggregationMode = GetEffectiveCountAggregationMode(upgradeEffect);
 		fused.CountUsesCardEffectAmount = fused.CountAggregationMode == CardExtraEffectCountAggregationMode.MatchingEffectAmount;
+		fused.CreatedCardsCostDuration = upgradeEffect.CreatedCardsCostDuration;
 		fused.CreatedCardsCostResource = upgradeEffect.CreatedCardsCostResource;
 		fused.CardCostsLessModifier = upgradeEffect.CardCostsLessModifier;
 		fused.UseMoveDestinationForGeneratedCards = upgradeEffect.UseMoveDestinationForGeneratedCards;
 		fused.AdditionalMoveToPiles = upgradeEffect.AdditionalMoveToPiles;
+		fused.CopyMode = upgradeEffect.CopyMode;
+		fused.GeneratedCardOwnerMode = upgradeEffect.GeneratedCardOwnerMode;
 		fused.DelayedPileAction = upgradeEffect.DelayedPileAction;
 		fused.DelayedPileCounterUnit = upgradeEffect.DelayedPileCounterUnit;
 		fused.DelayedPileCounterScope = upgradeEffect.DelayedPileCounterScope;
@@ -32002,6 +33123,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 		fused.BranchCountCardPile = upgradeEffect.BranchCountCardPile;
 		fused.BranchCountCardPool = upgradeEffect.BranchCountCardPool;
 		fused.BranchCountCardType = upgradeEffect.BranchCountCardType;
+		fused.BranchCountCardRarity = upgradeEffect.BranchCountCardRarity;
 		fused.BranchCountCardFilter = upgradeEffect.BranchCountCardFilter;
 		fused.BranchCountCardMatchMode = upgradeEffect.BranchCountCardMatchMode;
 		fused.BranchCountMatchCardId = upgradeEffect.BranchCountMatchCardId;
@@ -32030,6 +33152,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 		fused.ConditionalBonusPowerId = upgradeEffect.ConditionalBonusPowerId;
 		fused.BranchPowerId = upgradeEffect.BranchPowerId;
 		fused.CountPowerId = upgradeEffect.CountPowerId;
+		fused.CountCardRarity = upgradeEffect.CountCardRarity;
 		fused.CountDamageTarget = upgradeEffect.CountDamageTarget;
 		fused.CountDamageDealer = upgradeEffect.CountDamageDealer;
 		fused.CountDamageSource = upgradeEffect.CountDamageSource;
@@ -32048,6 +33171,8 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 		fused.CostFilterEnabled = upgradeEffect.CostFilterEnabled;
 		fused.CostFilterMode = upgradeEffect.CostFilterMode;
 		fused.CostFilterMax = upgradeEffect.CostFilterMax;
+		fused.CardSelectionRarity = upgradeEffect.CardSelectionRarity;
+		fused.TriggerCardRarity = upgradeEffect.TriggerCardRarity;
 		string? upgradeKeyword = NormalizeCustomKeywordName(upgradeEffect.CustomKeywordName);
 		if (upgradeKeyword != null)
 		{
@@ -32084,6 +33209,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 		fused.ValueSourcePowerId = upgradeEffect.ValueSourcePowerId;
 		fused.MultiplierSourceMode = upgradeEffect.MultiplierSourceMode;
 		fused.MultiplierPowerId = upgradeEffect.MultiplierPowerId;
+		fused.CardSelectionSourceEffectId = upgradeEffect.CardSelectionSourceEffectId;
 		fused.IncludeSourceCardInSelection = upgradeEffect.IncludeSourceCardInSelection;
 		fused.FutureMatchingCards = upgradeEffect.FutureMatchingCards;
 		fused.ResourceConsumptionMode = upgradeEffect.ResourceConsumptionMode;
@@ -32170,6 +33296,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			&& a.AsPower == b.AsPower
 			&& a.TriggerCardPool == b.TriggerCardPool
 			&& a.TriggerCardType == b.TriggerCardType
+			&& a.TriggerCardRarity == b.TriggerCardRarity
 			&& a.TriggerCardFilter == b.TriggerCardFilter
 			&& a.AutoPlayAllowSelfTrigger == b.AutoPlayAllowSelfTrigger
 			&& a.AutoPlayLoopLimit == b.AutoPlayLoopLimit
@@ -32198,6 +33325,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			&& a.GeneratedCardPool == b.GeneratedCardPool
 			&& a.GeneratedCardType == b.GeneratedCardType
 			&& string.Equals(a.GeneratedCardCustomTag ?? string.Empty, b.GeneratedCardCustomTag ?? string.Empty, StringComparison.Ordinal)
+			&& a.GeneratedCardOwnerMode == b.GeneratedCardOwnerMode
 			&& a.ScaleMode == b.ScaleMode
 			&& a.CountEvent == b.CountEvent
 			&& a.CountWindow == b.CountWindow
@@ -32207,6 +33335,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			&& a.CountCardPile == b.CountCardPile
 			&& a.CountCardPool == b.CountCardPool
 			&& a.CountCardType == b.CountCardType
+			&& a.CountCardRarity == b.CountCardRarity
 			&& a.CountCardFilter == b.CountCardFilter
 			&& a.CountOnlyBlockCards == b.CountOnlyBlockCards
 			&& GetEffectiveCountAggregationMode(a) == GetEffectiveCountAggregationMode(b)
@@ -32236,10 +33365,14 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			&& a.CardSelectionMode == b.CardSelectionMode
 			&& a.CardSelectionCountIsX == b.CardSelectionCountIsX
 			&& a.CardSelectionCount == b.CardSelectionCount
+			&& a.CardSelectionOfferCountIsX == b.CardSelectionOfferCountIsX
+			&& a.CardSelectionOfferCount == b.CardSelectionOfferCount
 			&& a.CardSelectionPool == b.CardSelectionPool
 			&& a.CardSelectionType == b.CardSelectionType
+			&& a.CardSelectionRarity == b.CardSelectionRarity
 			&& a.CardSelectionFilter == b.CardSelectionFilter
 			&& a.CardSelectionPile == b.CardSelectionPile
+			&& string.Equals(a.CardSelectionSourceEffectId ?? string.Empty, b.CardSelectionSourceEffectId ?? string.Empty, StringComparison.Ordinal)
 			&& a.IncludeSourceCardInSelection == b.IncludeSourceCardInSelection
 			&& a.FutureMatchingCards == b.FutureMatchingCards
 			&& a.CardGrantDuration == b.CardGrantDuration
@@ -32251,6 +33384,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			&& a.MoveToPosition == b.MoveToPosition
 			&& a.UseMoveDestinationForGeneratedCards == b.UseMoveDestinationForGeneratedCards
 			&& a.AdditionalMoveToPiles == b.AdditionalMoveToPiles
+			&& a.CopyMode == b.CopyMode
 			&& a.DelayedPileAction == b.DelayedPileAction
 			&& a.DelayedPileCounterUnit == b.DelayedPileCounterUnit
 			&& a.DelayedPileCounterScope == b.DelayedPileCounterScope
@@ -32293,6 +33427,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			&& a.BranchCountCardPile == b.BranchCountCardPile
 			&& a.BranchCountCardPool == b.BranchCountCardPool
 			&& a.BranchCountCardType == b.BranchCountCardType
+			&& a.BranchCountCardRarity == b.BranchCountCardRarity
 			&& a.BranchCountCardFilter == b.BranchCountCardFilter
 			&& a.BranchCountCardMatchMode == b.BranchCountCardMatchMode
 			&& string.Equals(a.BranchCountMatchCardId ?? string.Empty, b.BranchCountMatchCardId ?? string.Empty, StringComparison.Ordinal)
@@ -32482,6 +33617,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			BranchCountCardPile = source.BranchCountCardPile,
 			BranchCountCardPool = source.BranchCountCardPool,
 			BranchCountCardType = source.BranchCountCardType,
+			BranchCountCardRarity = source.BranchCountCardRarity,
 			BranchCountCardFilter = source.BranchCountCardFilter,
 			BranchCountCardMatchMode = source.BranchCountCardMatchMode,
 			BranchCountMatchCardId = source.BranchCountMatchCardId,
@@ -32528,6 +33664,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			AsPower = source.AsPower,
 			TriggerCardPool = source.TriggerCardPool,
 			TriggerCardType = source.TriggerCardType,
+			TriggerCardRarity = source.TriggerCardRarity,
 			TriggerCardFilter = source.TriggerCardFilter,
 			TriggerEveryN = source.TriggerEveryN,
 			TriggerMaxFires = source.TriggerMaxFires,
@@ -32559,6 +33696,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			GeneratedCardPool = source.GeneratedCardPool,
 			GeneratedCardType = source.GeneratedCardType,
 			GeneratedCardCustomTag = source.GeneratedCardCustomTag,
+			GeneratedCardOwnerMode = source.GeneratedCardOwnerMode,
 			ScaleMode = source.ScaleMode,
 			CountEvent = source.CountEvent,
 			CountWindow = source.CountWindow,
@@ -32568,6 +33706,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			CountCardPile = source.CountCardPile,
 			CountCardPool = source.CountCardPool,
 			CountCardType = source.CountCardType,
+			CountCardRarity = source.CountCardRarity,
 			CountCardFilter = source.CountCardFilter,
 			CountOnlyBlockCards = source.CountOnlyBlockCards,
 			CountAggregationMode = source.CountAggregationMode,
@@ -32598,10 +33737,14 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			CardSelectionMode = source.CardSelectionMode,
 			CardSelectionCountIsX = source.CardSelectionCountIsX,
 			CardSelectionCount = source.CardSelectionCount,
+			CardSelectionOfferCountIsX = source.CardSelectionOfferCountIsX,
+			CardSelectionOfferCount = source.CardSelectionOfferCount,
 			CardSelectionPool = source.CardSelectionPool,
 			CardSelectionType = source.CardSelectionType,
+			CardSelectionRarity = source.CardSelectionRarity,
 			CardSelectionFilter = source.CardSelectionFilter,
 			CardSelectionPile = source.CardSelectionPile,
+			CardSelectionSourceEffectId = source.CardSelectionSourceEffectId,
 			CardGrantDuration = source.CardGrantDuration,
 			CardGrantTurns = source.CardGrantTurns,
 			EnchantmentId = source.EnchantmentId,
@@ -32611,6 +33754,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 			MoveToPosition = source.MoveToPosition,
 			UseMoveDestinationForGeneratedCards = source.UseMoveDestinationForGeneratedCards,
 			AdditionalMoveToPiles = source.AdditionalMoveToPiles,
+			CopyMode = source.CopyMode,
 			DelayedPileAction = source.DelayedPileAction,
 			DelayedPileCounterUnit = source.DelayedPileCounterUnit,
 			DelayedPileCounterScope = source.DelayedPileCounterScope,
@@ -32742,6 +33886,12 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 		{
 			effect.CardSelectionCount = Math.Max(0, ResolveXAmountWithPlus(sourcePlay, effect.CardSelectionCount));
 			effect.CardSelectionCountIsX = false;
+		}
+
+		if (effect.CardSelectionOfferCountIsX)
+		{
+			effect.CardSelectionOfferCount = Math.Max(0, ResolveXAmountWithPlus(sourcePlay, effect.CardSelectionOfferCount));
+			effect.CardSelectionOfferCountIsX = false;
 		}
 
 		if (effect.BranchEffect != null)

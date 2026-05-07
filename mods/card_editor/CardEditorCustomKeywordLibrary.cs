@@ -9,12 +9,15 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal sealed class CardEditorCustomKeywordLibraryEntry
 {
+	public string? DefinitionId { get; init; }
 	public string KeywordName { get; init; } = string.Empty;
 	public string Description { get; init; } = string.Empty;
 	public string PlainDescription { get; init; } = string.Empty;
 	public ModelId SourceCardId { get; init; } = ModelId.none;
 	public string SourceCardTitle { get; init; } = string.Empty;
 	public string SearchText { get; init; } = string.Empty;
+	public IReadOnlyList<CardExtraEffect> Effects { get; init; } = Array.Empty<CardExtraEffect>();
+	public bool IsExplicitDefinition { get; init; }
 }
 
 internal static class CardEditorCustomKeywordLibrary
@@ -23,6 +26,42 @@ internal static class CardEditorCustomKeywordLibrary
 	{
 		List<CardEditorCustomKeywordLibraryEntry> entries = new List<CardEditorCustomKeywordLibraryEntry>();
 		HashSet<string> seenEntryKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		foreach (CardEditorCustomKeywordDefinition definition in CardEditorDefinitionStore.GetKeywordDefinitions())
+		{
+			string keywordName = definition.Name?.Trim() ?? string.Empty;
+			if (string.IsNullOrWhiteSpace(keywordName))
+			{
+				continue;
+			}
+
+			string entryKey = NormalizeKeywordKey(keywordName);
+			if (!seenEntryKeys.Add(entryKey))
+			{
+				continue;
+			}
+
+			string description = definition.Description?.Trim() ?? string.Empty;
+			string plainDescription = StripMarkup(description);
+			entries.Add(new CardEditorCustomKeywordLibraryEntry
+			{
+				DefinitionId = definition.Id,
+				KeywordName = keywordName,
+				Description = description,
+				PlainDescription = plainDescription,
+				SourceCardId = ModelId.none,
+				SourceCardTitle = "Keyword Definition",
+				SearchText = string.Join('\n', new[]
+				{
+					keywordName,
+					"Keyword Definition",
+					plainDescription,
+					definition.Id
+				}),
+				Effects = definition.Effects.Select(CardEditorExtraEffects.CloneEffect).ToList(),
+				IsExplicitDefinition = true
+			});
+		}
 
 		foreach (ModelId cardId in EnumerateCandidateCardIds())
 		{
@@ -61,7 +100,7 @@ internal static class CardEditorCustomKeywordLibrary
 						continue;
 					}
 
-					string entryKey = cardId + "|" + keywordName;
+					string entryKey = NormalizeKeywordKey(keywordName);
 					if (!seenEntryKeys.Add(entryKey))
 					{
 						continue;
@@ -82,7 +121,11 @@ internal static class CardEditorCustomKeywordLibrary
 							sourceTitle,
 							plainDescription,
 							cardId.ToString()
-						})
+						}),
+						Effects = CardEditorExtraEffects.GetEffectsForDescription(preview, isUpgradePreview: false)
+							.Where(effect => string.Equals(effect?.CustomKeywordName?.Trim(), keywordName, StringComparison.OrdinalIgnoreCase))
+							.Select(CardEditorExtraEffects.CloneEffect)
+							.ToList()
 					});
 				}
 			}
@@ -109,6 +152,11 @@ internal static class CardEditorCustomKeywordLibrary
 		});
 
 		return entries;
+	}
+
+	private static string NormalizeKeywordKey(string? keywordName)
+	{
+		return string.IsNullOrWhiteSpace(keywordName) ? string.Empty : keywordName.Trim();
 	}
 
 	private static IEnumerable<ModelId> EnumerateCandidateCardIds()
@@ -142,6 +190,11 @@ internal static class CardEditorCustomKeywordLibrary
 				yield return createdId;
 			}
 		}
+	}
+
+	internal static string StripMarkupForDisplay(string text)
+	{
+		return StripMarkup(text);
 	}
 
 	private static string StripMarkup(string text)

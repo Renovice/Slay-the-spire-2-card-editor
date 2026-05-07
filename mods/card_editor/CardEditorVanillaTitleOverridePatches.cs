@@ -42,7 +42,7 @@ internal static class CardModel_get_Title_VanillaTitleOverride_Patch
 		}
 		if (__instance.MaxUpgradeLevel > 1)
 		{
-			__result = $"{title}+{__instance.CurrentUpgradeLevel}";
+			__result = $"{title}+{__instance.GetSafeCurrentUpgradeLevel()}";
 			return;
 		}
 		__result = title + "+";

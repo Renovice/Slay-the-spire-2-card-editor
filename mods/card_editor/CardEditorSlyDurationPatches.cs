@@ -47,7 +47,7 @@ internal static class CardCmd_ApplySingleTurnSly_DurationOverride_Patch
 			return true;
 		}
 
-		CombatState? combatState = sourceCard.GetConcreteCombatState() ?? card.GetConcreteCombatState() ?? card.Owner?.Creature.GetConcreteCombatState();
+		CombatState? combatState = sourceCard.GetConcreteCombatState() ?? card.GetConcreteCombatState() ?? card.TryGetOwnerCreature().GetConcreteCombatState();
 		if (combatState == null)
 		{
 			return true;
@@ -73,4 +73,3 @@ internal static class CardCmd_ApplySingleTurnSly_DurationOverride_Patch
 		}
 	}
 }
-

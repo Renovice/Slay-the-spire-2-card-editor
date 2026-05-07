@@ -392,7 +392,7 @@ Value source kinds:
 - `Blur`
 - `Ritual`
 
-Actual damage-result sources are part of the shared amount/count baseline, not one-off behavior inside individual effects. Effects can read prior row results for HP damage, blocked damage, total damage, overkill damage, total plus overkill damage, killed-count, and application/instance count. Count Logic can also use `Effect Result` for thresholds and repeat scaling, including self-repeating damage loops like Echoing Slash.
+Actual result sources are part of the shared amount/count baseline, not one-off behavior inside individual effects. Effects can read prior row results for HP damage, blocked damage, total damage, overkill damage, total plus overkill damage, killed-count, and application/instance count. Pile-operation and generated-card rows should also report their live applied count by `EffectId`, so later compatible rows can use the actual number of cards moved, exhausted, drawn, generated, played, transformed, or otherwise touched. The paired configured amount/count modes expose what the source row tried to do before runtime caps or eligibility reduce it. Count Logic can also use `Effect Result` for thresholds and repeat scaling, including self-repeating damage loops like Echoing Slash.
 
 Omnislice-style follow-ups use the shared target/amount-source system: first row damages the original target, then later rows can target `Other Enemies` and source their amount from the first row's `Total + Overkill` result. The same setup should work for damage, Doom, block, power application, or any numeric effect that supports amount sources.
 
@@ -948,6 +948,20 @@ Rules:
 - Upgrade rows must retain identity.
 - Deleted rows should fail gracefully and update text/UI.
 - If a picker targets one row, add another effect for another row instead of bolting on one-off add/clear UI.
+
+## Selected Card Source Baseline
+
+Rows that select, draw, move, mutate, grant to, or otherwise resolve concrete `CardModel` instances should publish those selected cards by stable `EffectId`.
+
+Later rows can use selection mode `Selected Row` to consume those exact card references instead of running a second selector. This is the universal path for cards like Transfigure: first row chooses and mutates the hand card, later rows grant replay, enchant, transform, move, or mutate that same selected card.
+
+Rules:
+
+- `Selected Row` must only list earlier rows, never later rows.
+- It should preserve exact runtime card references when possible.
+- Deck-only operations may map a runtime card to its `DeckVersion` when required.
+- If the source row selects nothing, the consuming row should safely do nothing.
+- The feature must stay independent from visible row numbers; store and resolve stable ids.
 
 ## Required Final Checks
 

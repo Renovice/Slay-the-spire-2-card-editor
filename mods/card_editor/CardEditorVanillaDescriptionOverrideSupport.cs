@@ -241,9 +241,10 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		try
 		{
 			CardModel baseCard = ModelDb.GetById<CardModel>(upgradedCard.Id).ToMutable();
-			if (upgradedCard.Owner != null && baseCard.Owner == null)
+			MegaCrit.Sts2.Core.Entities.Players.Player? owner = upgradedCard.TryGetOwner();
+			if (owner != null && baseCard.TryGetOwner() == null)
 			{
-				baseCard.Owner = upgradedCard.Owner;
+				baseCard.Owner = owner;
 			}
 
 			CardEditorOverrides.ApplyOverrideToCard(baseCard, overrideData);

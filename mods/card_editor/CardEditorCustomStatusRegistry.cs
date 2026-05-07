@@ -11,6 +11,8 @@ internal sealed class CardEditorCustomStatusDefinition
 	public string Id { get; init; } = string.Empty;
 	public string Name { get; init; } = string.Empty;
 	public string? Description { get; init; }
+	public ModelId? SourceCardId { get; init; }
+	public IReadOnlyList<CardExtraEffect> BehaviorEffects { get; init; } = Array.Empty<CardExtraEffect>();
 	public PowerType Type { get; init; } = PowerType.Buff;
 	public CardExtraEffectStatusIconMode IconMode { get; init; } = CardExtraEffectStatusIconMode.Auto;
 	public string? IconPowerId { get; init; }
@@ -59,15 +61,23 @@ internal static class CardEditorCustomStatusRegistry
 	{
 		Dictionary<string, CardEditorCustomStatusDefinition> definitions = new(StringComparer.OrdinalIgnoreCase);
 
+		foreach (CardEditorCustomStatusDefinition definition in CardEditorDefinitionStore.GetStatusDefinitions())
+		{
+			if (!string.IsNullOrWhiteSpace(definition.Id))
+			{
+				definitions[definition.Id] = definition;
+			}
+		}
+
 		if (preferredCardId != null && preferredCardId != ModelId.none
 			&& CardEditorOverrides.TryGetEffectiveOverride(preferredCardId, out CardOverride preferredOverride))
 		{
-			AddDefinitions(definitions, preferredOverride);
+			AddDefinitions(definitions, preferredCardId, preferredOverride);
 		}
 
-		foreach (CardOverride overrideData in CardEditorOverrides.AllOverrides.Values)
+		foreach ((ModelId cardId, CardOverride overrideData) in CardEditorOverrides.AllOverrides)
 		{
-			AddDefinitions(definitions, overrideData);
+			AddDefinitions(definitions, cardId, overrideData);
 		}
 
 		return definitions.Values
@@ -105,30 +115,47 @@ internal static class CardEditorCustomStatusRegistry
 	}
 
 	private static void AddDefinitions(Dictionary<string, CardEditorCustomStatusDefinition> definitions, CardOverride? overrideData)
+		=> AddDefinitions(definitions, null, overrideData);
+
+	private static void AddDefinitions(Dictionary<string, CardEditorCustomStatusDefinition> definitions, ModelId? sourceCardId, CardOverride? overrideData)
 	{
 		if (overrideData == null)
 		{
 			return;
 		}
 
-		AddDefinitions(definitions, overrideData.ExtraEffects);
-		AddDefinitions(definitions, overrideData.Upgrade?.ExtraEffects);
+		AddDefinitions(definitions, sourceCardId, overrideData.ExtraEffects);
+		AddDefinitions(definitions, sourceCardId, overrideData.Upgrade?.ExtraEffects);
 	}
 
 	private static void AddDefinitions(Dictionary<string, CardEditorCustomStatusDefinition> definitions, IEnumerable<CardExtraEffect>? effects)
+		=> AddDefinitions(definitions, null, effects);
+
+	private static void AddDefinitions(Dictionary<string, CardEditorCustomStatusDefinition> definitions, ModelId? sourceCardId, IEnumerable<CardExtraEffect>? effects)
 	{
 		if (effects == null)
 		{
 			return;
 		}
 
+		List<CardExtraEffect> siblingEffects = effects
+			.Where(effect => effect != null)
+			.ToList();
+
 		foreach (CardExtraEffect effect in effects)
 		{
-			AddDefinition(definitions, effect);
+			AddDefinition(definitions, sourceCardId, siblingEffects, effect);
 		}
 	}
 
 	private static void AddDefinition(Dictionary<string, CardEditorCustomStatusDefinition> definitions, CardExtraEffect? effect)
+		=> AddDefinition(definitions, null, null, effect);
+
+	private static void AddDefinition(
+		Dictionary<string, CardEditorCustomStatusDefinition> definitions,
+		ModelId? sourceCardId,
+		IReadOnlyList<CardExtraEffect>? siblingEffects,
+		CardExtraEffect? effect)
 	{
 		if (effect == null)
 		{
@@ -148,6 +175,8 @@ internal static class CardEditorCustomStatusRegistry
 					Id = id,
 					Name = name,
 					Description = string.IsNullOrWhiteSpace(effect.CustomPowerDescription) ? null : effect.CustomPowerDescription.Trim(),
+					SourceCardId = sourceCardId,
+					BehaviorEffects = BuildBehaviorEffects(name, siblingEffects ?? new[] { effect }),
 					Type = InferPowerType(effect),
 					IconMode = effect.StatusIconMode,
 					IconPowerId = string.IsNullOrWhiteSpace(effect.StatusIconPowerId) ? null : effect.StatusIconPowerId.Trim(),
@@ -157,7 +186,46 @@ internal static class CardEditorCustomStatusRegistry
 			}
 		}
 
-		AddDefinition(definitions, effect.BranchEffect);
+		AddDefinition(definitions, sourceCardId, null, effect.BranchEffect);
+	}
+
+	private static IReadOnlyList<CardExtraEffect> BuildBehaviorEffects(string customStatusName, IReadOnlyList<CardExtraEffect> siblingEffects)
+	{
+		if (siblingEffects == null || siblingEffects.Count == 0)
+		{
+			return Array.Empty<CardExtraEffect>();
+		}
+
+		int namedStatusCount = siblingEffects
+			.Count(effect => effect != null
+				&& effect.AsPower
+				&& CardEditorExtraEffects.SupportsAsPower(effect.Kind)
+				&& !string.IsNullOrWhiteSpace(effect.CustomPowerName));
+		bool includeUnnamedSiblings = namedStatusCount == 1;
+
+		List<CardExtraEffect> behaviorEffects = new();
+		foreach (CardExtraEffect effect in siblingEffects)
+		{
+			if (effect == null
+				|| !effect.AsPower
+				|| !CardEditorExtraEffects.SupportsAsPower(effect.Kind))
+			{
+				continue;
+			}
+
+			string effectName = NormalizeName(effect.CustomPowerName);
+			bool matchesNamedStatus = !string.IsNullOrWhiteSpace(effectName)
+				&& string.Equals(effectName, customStatusName, StringComparison.OrdinalIgnoreCase);
+			bool matchesSingleUnnamedStatus = includeUnnamedSiblings && string.IsNullOrWhiteSpace(effectName);
+			if (!matchesNamedStatus && !matchesSingleUnnamedStatus)
+			{
+				continue;
+			}
+
+			behaviorEffects.Add(CardEditorExtraEffects.CloneEffect(effect));
+		}
+
+		return behaviorEffects;
 	}
 
 	private static PowerType InferPowerType(CardExtraEffect effect)

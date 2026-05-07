@@ -25,15 +25,19 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	private sealed class PowerEffectEntry
 	{
 		public required long EntryId { get; init; }
-		public required CardModel SourceCard { get; init; }
-		public required CardExtraEffect Effect { get; init; }
-		public required CardExtraEffect MergeTemplate { get; init; }
+		public required CardModel SourceCard { get; set; }
+		public required CardExtraEffect Effect { get; set; }
+		public required CardExtraEffect MergeTemplate { get; set; }
+		public Dictionary<string, List<CardModel>> SelectedCardsByEffectId { get; init; } = new(StringComparer.Ordinal);
+		public string? CustomStatusBehaviorId { get; set; }
+		public string? CustomStatusBehaviorKey { get; set; }
 		public Creature? RememberedTarget { get; set; }
 		public int StackCount { get; set; } = 1;
 		public int TriggerCounter { get; set; }
 		public int TriggerFireCount { get; set; }
 		public int TurnCounter { get; set; }
 		public bool AutoPlayLoopLimitMerged { get; set; }
+		public string? LastTurnBoundaryExecutionKey { get; set; }
 	}
 
 	private static long _nextEntryId;
@@ -70,8 +74,12 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 						TriggerFireCount = e.TriggerFireCount,
 						TurnCounter = e.TurnCounter,
 						AutoPlayLoopLimitMerged = e.AutoPlayLoopLimitMerged,
+						LastTurnBoundaryExecutionKey = e.LastTurnBoundaryExecutionKey,
 						Effect = CardEditorExtraEffects.CloneEffect(e.Effect),
-						MergeTemplate = CardEditorExtraEffects.CloneEffect(e.MergeTemplate ?? e.Effect)
+						MergeTemplate = CardEditorExtraEffects.CloneEffect(e.MergeTemplate ?? e.Effect),
+						SelectedCardsByEffectId = CardEditorEffectExecutionAmountContext.CloneSelectedCardsSnapshot(e.SelectedCardsByEffectId, cloneCards: true),
+						CustomStatusBehaviorId = e.CustomStatusBehaviorId,
+						CustomStatusBehaviorKey = e.CustomStatusBehaviorKey,
 					})
 					.ToList();
 			}
@@ -140,8 +148,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				continue;
 			}
 			stored.AsPower = true;
+			Dictionary<string, List<CardModel>> selectedCardsByEffectId = CardEditorEffectExecutionAmountContext.CaptureCurrentSelectedCards(cloneCards: true);
 
-			PowerEffectEntry? existingEntry = FindMergeTarget(sourceCard, stored);
+			PowerEffectEntry? existingEntry = FindMergeTarget(sourceCard, stored, selectedCardsByEffectId);
 			if (existingEntry != null)
 			{
 				MergeIntoEntry(existingEntry, stored);
@@ -154,6 +163,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				SourceCard = sourceCard,
 				Effect = stored,
 				MergeTemplate = CardEditorExtraEffects.CloneEffect(stored),
+				SelectedCardsByEffectId = selectedCardsByEffectId,
 				StackCount = 1
 			});
 		}
@@ -161,7 +171,77 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await SyncVisibleMirrorPowers();
 	}
 
-	private PowerEffectEntry? FindMergeTarget(CardModel sourceCard, CardExtraEffect stored)
+	public async Task AddCustomStatusBehaviorEffects(CardModel sourceCard, string? customStatusId, IReadOnlyList<CardExtraEffect> effects)
+	{
+		AssertMutable();
+		string normalizedStatusId = customStatusId?.Trim() ?? string.Empty;
+		if (sourceCard == null
+			|| string.IsNullOrWhiteSpace(normalizedStatusId)
+			|| effects == null
+			|| effects.Count == 0)
+		{
+			return;
+		}
+
+		HashSet<string> desiredKeys = new(StringComparer.Ordinal);
+		for (int i = 0; i < effects.Count; i++)
+		{
+			CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effects[i]);
+			if (normalizedEffect == null
+				|| !normalizedEffect.AsPower
+				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind))
+			{
+				continue;
+			}
+
+			CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(normalizedEffect);
+			if (!CardEditorExtraEffects.IsValidEffectAmount(stored.Kind, stored.Amount) || stored.RepeatCount < 0)
+			{
+				continue;
+			}
+
+			stored.AsPower = true;
+			string behaviorKey = !string.IsNullOrWhiteSpace(stored.EffectId)
+				? stored.EffectId.Trim()
+				: $"{normalizedStatusId}:{i}";
+			desiredKeys.Add(behaviorKey);
+
+			PowerEffectEntry? existingEntry = Entries.FirstOrDefault(entry =>
+				entry != null
+				&& string.Equals(entry.CustomStatusBehaviorId ?? string.Empty, normalizedStatusId, StringComparison.OrdinalIgnoreCase)
+				&& string.Equals(entry.CustomStatusBehaviorKey ?? string.Empty, behaviorKey, StringComparison.Ordinal));
+			if (existingEntry != null)
+			{
+				existingEntry.SourceCard = sourceCard;
+				existingEntry.Effect = stored;
+				existingEntry.MergeTemplate = CardEditorExtraEffects.CloneEffect(stored);
+				existingEntry.StackCount = 1;
+				existingEntry.LastTurnBoundaryExecutionKey = null;
+				continue;
+			}
+
+			Entries.Add(new PowerEffectEntry
+			{
+				EntryId = Interlocked.Increment(ref _nextEntryId),
+				SourceCard = sourceCard,
+				Effect = stored,
+				MergeTemplate = CardEditorExtraEffects.CloneEffect(stored),
+				CustomStatusBehaviorId = normalizedStatusId,
+				CustomStatusBehaviorKey = behaviorKey,
+				StackCount = 1
+			});
+		}
+
+		Entries.RemoveAll(entry =>
+			entry != null
+			&& string.Equals(entry.CustomStatusBehaviorId ?? string.Empty, normalizedStatusId, StringComparison.OrdinalIgnoreCase)
+			&& !string.IsNullOrWhiteSpace(entry.CustomStatusBehaviorKey)
+			&& !desiredKeys.Contains(entry.CustomStatusBehaviorKey));
+
+		await SyncVisibleMirrorPowers();
+	}
+
+	private PowerEffectEntry? FindMergeTarget(CardModel sourceCard, CardExtraEffect stored, IReadOnlyDictionary<string, List<CardModel>> selectedCardsByEffectId)
 	{
 		if (sourceCard == null
 			|| stored == null
@@ -170,10 +250,10 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			return null;
 		}
 
-		return Entries.FirstOrDefault(entry => CanMergeIntoEntry(entry, sourceCard, stored));
+		return Entries.FirstOrDefault(entry => CanMergeIntoEntry(entry, sourceCard, stored, selectedCardsByEffectId));
 	}
 
-	private static bool CanMergeIntoEntry(PowerEffectEntry? entry, CardModel sourceCard, CardExtraEffect stored)
+	private static bool CanMergeIntoEntry(PowerEffectEntry? entry, CardModel sourceCard, CardExtraEffect stored, IReadOnlyDictionary<string, List<CardModel>> selectedCardsByEffectId)
 	{
 		if (entry == null
 			|| entry.SourceCard == null
@@ -188,12 +268,23 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			return false;
 		}
 
+		if (HasSelectedCardSnapshots(entry.SelectedCardsByEffectId) || HasSelectedCardSnapshots(selectedCardsByEffectId))
+		{
+			return false;
+		}
+
 		return stored.AutoPlayLoopScope switch
 		{
 			CardExtraEffectAutoPlayLoopScope.ThisCard => ReferenceEquals(entry.SourceCard, sourceCard),
 			CardExtraEffectAutoPlayLoopScope.AllCopies => string.Equals(GetCardIdText(entry.SourceCard), GetCardIdText(sourceCard), StringComparison.Ordinal),
 			_ => true
 		};
+	}
+
+	private static bool HasSelectedCardSnapshots(IReadOnlyDictionary<string, List<CardModel>>? selectedCardsByEffectId)
+	{
+		return selectedCardsByEffectId != null
+			&& selectedCardsByEffectId.Values.Any(cards => cards != null && cards.Count > 0);
 	}
 
 	private static void MergeIntoEntry(PowerEffectEntry entry, CardExtraEffect incoming)
@@ -355,6 +446,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		return (0, false);
 	}
 
+	private static bool IsCustomStatusBehaviorEntry(PowerEffectEntry? entry)
+		=> !string.IsNullOrWhiteSpace(entry?.CustomStatusBehaviorId);
+
 	public async Task SyncVisibleMirrorPowers()
 	{
 		try
@@ -369,11 +463,17 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				.OfType<CardEditorVisibleExtraEffectPower>()
 				.Where(power => power != null)
 				.ToList();
-			HashSet<long> desiredEntryIds = new HashSet<long>(Entries.Select(entry => entry.EntryId));
+			HashSet<long> desiredEntryIds = new HashSet<long>(Entries
+				.Where(entry => !IsCustomStatusBehaviorEntry(entry))
+				.Select(entry => entry.EntryId));
 
 			foreach (PowerEffectEntry entry in Entries)
 			{
 				if (entry?.SourceCard == null || entry.Effect == null)
+				{
+					continue;
+				}
+				if (IsCustomStatusBehaviorEntry(entry))
 				{
 					continue;
 				}
@@ -519,6 +619,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		{
 			return 0;
 		}
+
+		using IDisposable selectedSession = CardEditorEffectExecutionAmountContext.PushSessionScoped();
+		using IDisposable selectedScope = CardEditorEffectExecutionAmountContext.PushSelectedCardsScoped(entry.SelectedCardsByEffectId);
 
 		CardExtraEffect effect = entry.Effect;
 		CardModel sourceCard = entry.SourceCard;
@@ -702,7 +805,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
-			if (card?.Owner?.Creature == null || !ReferenceEquals(card.Owner.Creature, Owner))
+			Creature? cardOwner = card.TryGetOwnerCreature();
+			if (cardOwner == null || !ReferenceEquals(cardOwner, Owner))
 			{
 				return Task.CompletedTask;
 			}
@@ -1282,6 +1386,11 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 				continue;
 			}
 
+			if (!TryMarkTurnBoundaryExecution(entry, combatState, boundary, side))
+			{
+				continue;
+			}
+
 			if (entry.Effect.TriggerEveryN >= 2)
 			{
 				entry.TriggerCounter++;
@@ -1323,6 +1432,27 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 	}
 }
 
+private static bool TryMarkTurnBoundaryExecution(
+	PowerEffectEntry entry,
+	CombatState combatState,
+	CardExtraEffectTurnBoundary boundary,
+	CardExtraEffectTurnBoundarySide side)
+{
+	if (entry == null || combatState == null)
+	{
+		return false;
+	}
+
+	string key = $"{combatState.RoundNumber}|{combatState.CurrentSide}|{boundary}|{side}";
+	if (string.Equals(entry.LastTurnBoundaryExecutionKey, key, StringComparison.Ordinal))
+	{
+		return false;
+	}
+
+	entry.LastTurnBoundaryExecutionKey = key;
+	return true;
+}
+
 private void ExpireNonStatusDurationEntries(CardExtraEffectTurnBoundary boundary, CardExtraEffectTurnBoundarySide side)
 {
 	Creature? owner = Owner;
@@ -1331,14 +1461,10 @@ private void ExpireNonStatusDurationEntries(CardExtraEffectTurnBoundary boundary
 		return;
 	}
 
-	CardExtraEffectTurnBoundarySide ownerSide = owner.Side == CombatSide.Enemy
-		? CardExtraEffectTurnBoundarySide.EnemyTurn
-		: CardExtraEffectTurnBoundarySide.YourTurn;
-
 	Entries.RemoveAll(e => e != null
 		&& e.Effect != null
 		&& !CardEditorExtraEffects.SupportsDuration(e.Effect.Kind)
-		&& side == ownerSide
+		&& side == CardExtraEffectTurnBoundarySide.YourTurn
 		&& DoesDurationExpireAt(e.Effect.Duration, boundary));
 }
 

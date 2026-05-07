@@ -28,7 +28,7 @@ internal static class NCardHolder_CreateHoverTips_HiddenBodyText_Patch
 			List<IHoverTip> hoverTips = new();
 			hoverTips.AddRange(card.HoverTips ?? Array.Empty<IHoverTip>());
 
-			string description = card.GetDescriptionForPile(__instance.CardNode.DisplayingPile, card.CurrentTarget);
+			string description = card.GetDescriptionForPile(__instance.CardNode.DisplayingPile, card.GetSafeCurrentTarget());
 			if (!string.IsNullOrWhiteSpace(description))
 			{
 				hoverTips.Add(CardEditorVanillaKeywordSupport.CreateDynamicHoverTip(card.Title, description));

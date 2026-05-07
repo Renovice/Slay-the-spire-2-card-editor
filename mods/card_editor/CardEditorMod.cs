@@ -63,6 +63,7 @@ public static class CardEditorMod
 	{
 		CardEditorExternalLocalization.Init();
 		CardEditorCreatedCardsStore.EnsureLoaded();
+		CardEditorDefinitionStore.EnsureLoaded();
 		RegisterCreatedCardsInPools();
 
 		Harmony harmony = new Harmony(HarmonyId);
@@ -695,7 +696,7 @@ public static class CardModel_GetDescriptionForUpgradePreview_Patch
 			return;
 		}
 
-		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, __instance.CurrentTarget, isUpgradePreview: true);
+		CardEditorVanillaDescriptionOverrideSupport.ApplyVanillaDescriptionPostfix(__instance, ref __result, __instance.GetSafeCurrentTarget(), isUpgradePreview: true);
 		CardEditorUpgradeDeltaDebugLog.LogDescription("Description.GetDescriptionForUpgradePreview.postfix", __instance, PileType.None, isUpgradePreview: true, __result);
 	}
 }
@@ -703,15 +704,22 @@ public static class CardModel_GetDescriptionForUpgradePreview_Patch
 [HarmonyPatch(typeof(NCard), nameof(NCard.UpdateVisuals))]
 internal static class NCard_UpdateVisuals_RunSelfScalingRestore_Patch
 {
-	public static void Prefix(NCard __instance)
+	public static void Prefix(NCard __instance, PileType pileType, CardPreviewMode previewMode, out IDisposable? __state)
 	{
+		__state = null;
 		try
 		{
 			CardEditorRunSelfScalingState.TryRestoreCard(__instance?.Model);
+			__state = CardEditorCardVisualPreviewContext.Push(__instance?.Model, pileType, previewMode);
 		}
 		catch
 		{
 		}
+	}
+
+	public static void Finalizer(IDisposable? __state)
+	{
+		__state?.Dispose();
 	}
 }
 
@@ -780,7 +788,29 @@ internal static class TargetTypeOverrideDescriptionFix
 			: template.Contains("{0}", StringComparison.Ordinal)
 				? string.Format(CultureInfo.InvariantCulture, template, label)
 				: $"Targeting: {label}.";
+		if (ContainsDescriptionLine(description, line))
+		{
+			return;
+		}
 		description = string.IsNullOrEmpty(description) ? line : description + "\n" + line;
+	}
+
+	private static bool ContainsDescriptionLine(string description, string line)
+	{
+		if (string.IsNullOrWhiteSpace(description) || string.IsNullOrWhiteSpace(line))
+		{
+			return false;
+		}
+
+		foreach (string existingLine in description.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+		{
+			if (string.Equals(existingLine.Trim(), line.Trim(), StringComparison.Ordinal))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 }
 
@@ -2668,6 +2698,124 @@ internal static class CardEditorCreatedCards_OnPlay_RunExtraEffects_Patch
 	}
 }
 
+internal static class CardEditorPowerTurnBoundaryRunner
+{
+	public static async Task RunForObservedSide(
+		CombatState combatState,
+		PlayerChoiceContext choiceContext,
+		CardExtraEffectTurnBoundary boundary,
+		CombatSide observedSide)
+	{
+		if (combatState == null || choiceContext == null || observedSide == CombatSide.None)
+		{
+			return;
+		}
+
+		foreach (Creature creature in SnapshotCreatures(combatState))
+		{
+			await RunForCreature(creature, choiceContext, boundary, observedSide);
+		}
+	}
+
+	public static async Task RunForObservedSideWithHookContexts(
+		CombatState combatState,
+		CardExtraEffectTurnBoundary boundary,
+		CombatSide observedSide)
+	{
+		if (combatState == null || observedSide == CombatSide.None)
+		{
+			return;
+		}
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		foreach (Creature creature in SnapshotCreatures(combatState))
+		{
+			if (creature.GetPower<CardEditorExtraEffectPower>() == null)
+			{
+				continue;
+			}
+
+			Player? contextPlayer = FindContextPlayer(combatState, creature);
+			if (contextPlayer == null)
+			{
+				continue;
+			}
+
+			HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(contextPlayer, netId.Value, GameActionType.Combat);
+			Task powerTask = RunForCreature(creature, choiceContext, boundary, observedSide);
+			bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
+			if (!completed && choiceContext.GameAction != null)
+			{
+				await choiceContext.GameAction.CompletionTask;
+			}
+		}
+	}
+
+	private static async Task RunForCreature(
+		Creature creature,
+		PlayerChoiceContext choiceContext,
+		CardExtraEffectTurnBoundary boundary,
+		CombatSide observedSide)
+	{
+		if (creature == null || choiceContext == null)
+		{
+			return;
+		}
+
+		CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
+		if (power == null)
+		{
+			return;
+		}
+
+		await power.RunTurnBoundary(choiceContext, boundary, GetOwnerRelativeSide(creature, observedSide));
+	}
+
+	private static CardExtraEffectTurnBoundarySide GetOwnerRelativeSide(Creature owner, CombatSide observedSide)
+	{
+		if (owner == null || observedSide == CombatSide.None)
+		{
+			return CardExtraEffectTurnBoundarySide.Both;
+		}
+
+		return owner.Side == observedSide
+			? CardExtraEffectTurnBoundarySide.YourTurn
+			: CardExtraEffectTurnBoundarySide.EnemyTurn;
+	}
+
+	private static IEnumerable<Creature> SnapshotCreatures(CombatState combatState)
+	{
+		HashSet<Creature> seen = new HashSet<Creature>();
+
+		foreach (Creature creature in combatState.PlayerCreatures ?? Enumerable.Empty<Creature>())
+		{
+			if (creature != null && seen.Add(creature))
+			{
+				yield return creature;
+			}
+		}
+
+		foreach (Creature creature in combatState.Enemies ?? Enumerable.Empty<Creature>())
+		{
+			if (creature != null && seen.Add(creature))
+			{
+				yield return creature;
+			}
+		}
+	}
+
+	private static Player? FindContextPlayer(CombatState combatState, Creature creature)
+	{
+		Player? ownerPlayer = combatState.Players?.FirstOrDefault(player => ReferenceEquals(player?.Creature, creature));
+		return ownerPlayer ?? combatState.Players?.FirstOrDefault(player => player?.Creature != null);
+	}
+}
+
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterPlayerTurnStart))]
 public static class Hook_AfterPlayerTurnStart_Patch
 {
@@ -2688,13 +2836,13 @@ public static class Hook_AfterPlayerTurnStart_Patch
 			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.YourTurn);
 			await CardEditorExtraEffectScheduler.RunAfterPlayerTurnStart(combatState, choiceContext, player);
 			CardEditorCreatedCardsCostController.OnAfterPlayerTurnStart(combatState, player);
+			await CardEditorPowerTurnBoundaryRunner.RunForObservedSide(combatState, choiceContext, CardExtraEffectTurnBoundary.StartAfterDraw, CombatSide.Player);
 			Creature? creature = player?.Creature;
 			if (creature != null)
 			{
 				CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
 				if (power != null)
 				{
-					await power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.YourTurn);
 					await power.RunStartOfTurn(choiceContext);
 				}
 			}
@@ -2725,17 +2873,7 @@ public static class Hook_BeforeHandDraw_CardEditorTurnBoundaryPower_Patch
 		try
 		{
 			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.YourTurn);
-			Creature? creature = player?.Creature;
-			if (creature == null)
-			{
-				return;
-			}
-
-			CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
-			if (power != null)
-			{
-				await power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.YourTurn);
-			}
+			await CardEditorPowerTurnBoundaryRunner.RunForObservedSide(combatState, choiceContext, CardExtraEffectTurnBoundary.Start, CombatSide.Player);
 		}
 		catch (Exception ex)
 		{
@@ -2782,22 +2920,25 @@ public static class Hook_AfterSideTurnStart_Patch
 				{
 					await choiceContext.GameAction.CompletionTask;
 				}
+			}
 
+			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.StartAfterDraw, CombatSide.Enemy);
+
+			foreach (Player player in combatState.Players)
+			{
 				Creature? creature = player?.Creature;
-				if (creature != null)
+				CardEditorExtraEffectPower? power = creature?.GetPower<CardEditorExtraEffectPower>();
+				if (power == null)
 				{
-					CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
-					if (power != null)
-					{
-						HookPlayerChoiceContext powerCtx = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
-						await power.RunTurnBoundary(powerCtx, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.EnemyTurn);
-						Task powerTask = power.RunStartOfEnemyTurn(powerCtx);
-						bool powerCompleted = await powerCtx.AssignTaskAndWaitForPauseOrCompletion(powerTask);
-						if (!powerCompleted && powerCtx.GameAction != null)
-						{
-							await powerCtx.GameAction.CompletionTask;
-						}
-					}
+					continue;
+				}
+
+				HookPlayerChoiceContext powerCtx = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+				Task powerTask = power.RunStartOfEnemyTurn(powerCtx);
+				bool powerCompleted = await powerCtx.AssignTaskAndWaitForPauseOrCompletion(powerTask);
+				if (!powerCompleted && powerCtx.GameAction != null)
+				{
+					await powerCtx.GameAction.CompletionTask;
 				}
 			}
 		}
@@ -2833,28 +2974,7 @@ public static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryPower_Patch
 				return;
 			}
 
-			foreach (Player player in combatState.Players)
-			{
-				Creature? creature = player?.Creature;
-				if (creature == null)
-				{
-					continue;
-				}
-
-				CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
-				if (power == null)
-				{
-					continue;
-				}
-
-				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
-				Task powerTask = power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.EnemyTurn);
-				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
-				if (!completed && choiceContext.GameAction != null)
-				{
-					await choiceContext.GameAction.CompletionTask;
-				}
-			}
+			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.Start, CombatSide.Enemy);
 		}
 		catch (Exception ex)
 		{
@@ -2892,28 +3012,7 @@ public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 				return;
 			}
 
-			foreach (Player player in combatState.Players)
-			{
-				Creature? creature = player?.Creature;
-				if (creature == null)
-				{
-					continue;
-				}
-
-				CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
-				if (power == null)
-				{
-					continue;
-				}
-
-				HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
-				Task powerTask = power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.End, boundarySide);
-				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
-				if (!completed && choiceContext.GameAction != null)
-				{
-					await choiceContext.GameAction.CompletionTask;
-				}
-			}
+			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.End, side);
 		}
 		catch (Exception ex)
 		{
@@ -2948,28 +3047,7 @@ public static class Hook_AfterTurnEnd_Patch
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue)
 			{
-				foreach (Player player in combatState.Players)
-				{
-					Creature? creature = player?.Creature;
-					if (creature == null)
-					{
-						continue;
-					}
-
-					CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
-					if (power == null)
-					{
-						continue;
-					}
-
-					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
-					Task powerTask = power.RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.EndAfterDiscard, boundarySide);
-					bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
-					if (!completed && choiceContext.GameAction != null)
-					{
-						await choiceContext.GameAction.CompletionTask;
-					}
-				}
+				await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.EndAfterDiscard, side);
 			}
 			if (side == CombatSide.Player)
 			{

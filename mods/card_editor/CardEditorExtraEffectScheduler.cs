@@ -29,6 +29,7 @@ internal static class CardEditorExtraEffectScheduler
 		public Creature? ExecutionHost { get; init; }
 		public CardModel? SourceCardInstance { get; init; }
 		public object? UseLimitSourceInstance { get; init; }
+		public Dictionary<string, List<CardModel>> SelectedCardsByEffectId { get; init; } = new(StringComparer.Ordinal);
 		public int TriggerEventAmount { get; init; } = 1;
 		public int RemainingTriggers { get; set; }
 		public int SkipTriggers { get; set; }
@@ -96,6 +97,7 @@ internal static class CardEditorExtraEffectScheduler
 			ExecutionHost = executionHost,
 			SourceCardInstance = sourcePlay.Card,
 			UseLimitSourceInstance = useLimitSourceInstance ?? sourcePlay.Card,
+			SelectedCardsByEffectId = CardEditorEffectExecutionAmountContext.CaptureCurrentSelectedCards(cloneCards: true),
 			TriggerEventAmount = Math.Max(0, triggerEventAmount),
 			RemainingTriggers = remaining,
 			SkipTriggers = skip,
@@ -326,6 +328,7 @@ internal static class CardEditorExtraEffectScheduler
 			using IDisposable ___ = CardEditorPowerExecutionHostContext.PushScoped(scheduled.ExecutionHost);
 			using IDisposable ____ = CardEditorAutoPlayLoopGuard.PushUseLimitSourceInstance(scheduled.UseLimitSourceInstance ?? scheduled.Card);
 			using IDisposable _____ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
+			using IDisposable ______ = CardEditorEffectExecutionAmountContext.PushSelectedCardsScoped(scheduled.SelectedCardsByEffectId);
 			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, scheduled.Effect, scheduled.TriggerEventAmount);
 		}
 		catch (Exception ex)

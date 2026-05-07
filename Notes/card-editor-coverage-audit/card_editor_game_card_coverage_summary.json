@@ -1,0 +1,177 @@
+﻿{
+    "total":  577,
+    "all":  {
+                "Exact":  384,
+                "Almost":  186,
+                "Partial":  5,
+                "No":  2,
+                "Unknown":  0
+            },
+    "non_deprecated":  {
+                           "Exact":  383,
+                           "Almost":  186,
+                           "Partial":  5,
+                           "No":  2,
+                           "Unknown":  0
+                       },
+    "by_pool":  {
+                    "Colorless":  {
+                                      "Exact":  43,
+                                      "Almost":  20,
+                                      "Partial":  1,
+                                      "No":  0,
+                                      "Unknown":  0,
+                                      "Total":  64
+                                  },
+                    "Curse":  {
+                                  "Exact":  12,
+                                  "Almost":  6,
+                                  "Partial":  0,
+                                  "No":  0,
+                                  "Unknown":  0,
+                                  "Total":  18
+                              },
+                    "Defect":  {
+                                   "Exact":  49,
+                                   "Almost":  39,
+                                   "Partial":  0,
+                                   "No":  0,
+                                   "Unknown":  0,
+                                   "Total":  88
+                               },
+                    "Deprecated":  {
+                                       "Exact":  1,
+                                       "Almost":  0,
+                                       "Partial":  0,
+                                       "No":  0,
+                                       "Unknown":  0,
+                                       "Total":  1
+                                   },
+                    "Event":  {
+                                  "Exact":  19,
+                                  "Almost":  7,
+                                  "Partial":  1,
+                                  "No":  0,
+                                  "Unknown":  0,
+                                  "Total":  27
+                              },
+                    "Ironclad":  {
+                                     "Exact":  69,
+                                     "Almost":  18,
+                                     "Partial":  0,
+                                     "No":  0,
+                                     "Unknown":  0,
+                                     "Total":  87
+                                 },
+                    "Necrobinder":  {
+                                        "Exact":  55,
+                                        "Almost":  33,
+                                        "Partial":  0,
+                                        "No":  0,
+                                        "Unknown":  0,
+                                        "Total":  88
+                                    },
+                    "Quest":  {
+                                  "Exact":  0,
+                                  "Almost":  1,
+                                  "Partial":  0,
+                                  "No":  2,
+                                  "Unknown":  0,
+                                  "Total":  3
+                              },
+                    "Regent":  {
+                                   "Exact":  63,
+                                   "Almost":  23,
+                                   "Partial":  2,
+                                   "No":  0,
+                                   "Unknown":  0,
+                                   "Total":  88
+                               },
+                    "Silent":  {
+                                   "Exact":  55,
+                                   "Almost":  32,
+                                   "Partial":  1,
+                                   "No":  0,
+                                   "Unknown":  0,
+                                   "Total":  88
+                               },
+                    "Status":  {
+                                   "Exact":  7,
+                                   "Almost":  4,
+                                   "Partial":  0,
+                                   "No":  0,
+                                   "Unknown":  0,
+                                   "Total":  11
+                               },
+                    "Token":  {
+                                  "Exact":  11,
+                                  "Almost":  3,
+                                  "Partial":  0,
+                                  "No":  0,
+                                  "Unknown":  0,
+                                  "Total":  14
+                              }
+                },
+    "blockers":  [
+                     {
+                         "Name":  "repeat same selected card",
+                         "Count":  2
+                     },
+                     {
+                         "Name":  "generated card target player",
+                         "Count":  1
+                     },
+                     {
+                         "Name":  "map/event generation",
+                         "Count":  1
+                     },
+                     {
+                         "Name":  "map/reward generation",
+                         "Count":  1
+                     },
+                     {
+                         "Name":  "power payload selected card",
+                         "Count":  1
+                     },
+                     {
+                         "Name":  "random subset then choose one",
+                         "Count":  1
+                     }
+                 ],
+    "corrected_selector_cards":  [
+                                     "Armaments",
+                                     "BurningPact",
+                                     "Headbutt",
+                                     "TrueGrit",
+                                     "Acrobatics",
+                                     "DaggerThrow",
+                                     "Prepared",
+                                     "Survivor",
+                                     "Hologram",
+                                     "Scavenge",
+                                     "Brand",
+                                     "Purity",
+                                     "SecretTechnique",
+                                     "SecretWeapon",
+                                     "Wish",
+                                     "ThinkingAhead"
+                                 ],
+    "corrected_generation_cards":  [
+                                       "Discovery",
+                                       "InfernalBlade",
+                                       "WhiteNoise",
+                                       "Distraction",
+                                       "Jackpot",
+                                       "Metamorphosis",
+                                       "ManifestAuthority",
+                                       "Quasar",
+                                       "Splash"
+                                   ],
+    "remaining_true_partial_cards":  [
+                                         "Nightmare",
+                                         "DecisionsDecisions",
+                                         "Largesse",
+                                         "SeekerStrike",
+                                         "DualWield"
+                                     ]
+}

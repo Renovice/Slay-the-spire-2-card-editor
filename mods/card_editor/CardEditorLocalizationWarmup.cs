@@ -201,6 +201,7 @@ popup.editorTitle
 popup.upgradeEditorTitle
 powerHost.cardOwner
 powerHost.cardOwnerWatchOpponents
+powerHost.effectTargets
 powerHost.triggerTarget
 powerTriggerFrom.self
 powerTriggerFrom.anyEnemy
@@ -402,6 +403,7 @@ tooltip.powerCountEvent
 tooltip.powerHost
 tooltip.powerHost.cardOwner
 tooltip.powerHost.cardOwnerWatchOpponents
+tooltip.powerHost.effectTargets
 tooltip.powerHost.triggerTarget
 tooltip.powerTriggerFrom
 tooltip.powerTargeting

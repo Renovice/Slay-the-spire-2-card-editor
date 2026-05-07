@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using Godot;
+using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 
@@ -11,7 +12,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorCreatorPresetStore
 {
-	private const int CurrentVersion = 1;
+	private const int CurrentVersion = 2;
 	private const int OverrideDtoVersion = 3;
 	private const string PresetExtension = ".json";
 	private const string SettingsPath = "user://card_editor/creator_presets_settings.json";
@@ -78,6 +79,7 @@ internal static class CardEditorCreatorPresetStore
 				CardEditorCreatedCardDefinition def = dto.ToDefinitionSafe(cardId);
 				definitions[cardId] = def;
 			}
+			ImportDefinitionsFromPreset(data);
 
 			return true;
 		}
@@ -113,7 +115,13 @@ internal static class CardEditorCreatorPresetStore
 					.ToDictionary(
 						kvp => kvp.Key.ToString(),
 						kvp => CreatedCardDto.FromDefinition(kvp.Value),
-						StringComparer.Ordinal)
+						StringComparer.Ordinal),
+				KeywordDefinitions = CardEditorDefinitionStore.GetKeywordDefinitions()
+					.Select(CustomKeywordDefinitionDto.FromDefinition)
+					.ToList(),
+				StatusDefinitions = CardEditorDefinitionStore.GetStatusDefinitions()
+					.Select(CustomStatusDefinitionDto.FromDefinition)
+					.ToList()
 			};
 
 			string json = JsonSerializer.Serialize(data, CreateJsonOptions());
@@ -304,12 +312,180 @@ internal static class CardEditorCreatorPresetStore
 		};
 	}
 
+	private static void ImportDefinitionsFromPreset(CreatorPresetFileDto data)
+	{
+		try
+		{
+			List<CardEditorCustomKeywordDefinition> keywords = new();
+			foreach (CustomKeywordDefinitionDto dto in data.KeywordDefinitions ?? new List<CustomKeywordDefinitionDto>())
+			{
+				CardEditorCustomKeywordDefinition? def = dto.ToDefinitionSafe();
+				if (def != null)
+				{
+					keywords.Add(def);
+				}
+			}
+
+			List<CardEditorCustomStatusDefinition> statuses = new();
+			foreach (CustomStatusDefinitionDto dto in data.StatusDefinitions ?? new List<CustomStatusDefinitionDto>())
+			{
+				CardEditorCustomStatusDefinition? def = dto.ToDefinitionSafe();
+				if (def != null)
+				{
+					statuses.Add(def);
+				}
+			}
+
+			if (keywords.Count > 0 || statuses.Count > 0)
+			{
+				CardEditorDefinitionStore.ImportDefinitions(keywords, statuses);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed importing creator preset definition library: {ex}");
+		}
+	}
+
+	private static List<CardExtraEffect> DeserializeDefinitionEffects(IEnumerable<CardEditorPresetStore.CardExtraEffectDto?>? dtos)
+	{
+		if (dtos == null)
+		{
+			return new List<CardExtraEffect>();
+		}
+
+		List<CardExtraEffect> effects = new();
+		foreach (CardEditorPresetStore.CardExtraEffectDto? dto in dtos)
+		{
+			if (dto == null || !dto.TryToEffect(out CardExtraEffect effect))
+			{
+				continue;
+			}
+
+			effects.Add(effect);
+		}
+
+		return effects;
+	}
+
+	private static List<CardEditorPresetStore.CardExtraEffectDto?> SerializeDefinitionEffects(IEnumerable<CardExtraEffect>? effects)
+	{
+		return (effects ?? Array.Empty<CardExtraEffect>())
+			.Where(effect => effect != null)
+			.Select(effect => (CardEditorPresetStore.CardExtraEffectDto?)CardEditorPresetStore.CardExtraEffectDto.FromEffect(effect))
+			.ToList();
+	}
+
 	private sealed class CreatorPresetFileDto
 	{
 		public int Version { get; set; } = CurrentVersion;
 		public DateTime SavedAtUtc { get; set; }
 		public int SlotCount { get; set; }
 		public Dictionary<string, CreatedCardDto> Cards { get; set; } = new Dictionary<string, CreatedCardDto>(StringComparer.Ordinal);
+		public List<CustomKeywordDefinitionDto> KeywordDefinitions { get; set; } = new();
+		public List<CustomStatusDefinitionDto> StatusDefinitions { get; set; } = new();
+	}
+
+	private sealed class CustomKeywordDefinitionDto
+	{
+		public string? Id { get; set; }
+		public string? Name { get; set; }
+		public string? Description { get; set; }
+		public List<CardEditorPresetStore.CardExtraEffectDto?>? Effects { get; set; }
+
+		public static CustomKeywordDefinitionDto FromDefinition(CardEditorCustomKeywordDefinition def)
+		{
+			return new CustomKeywordDefinitionDto
+			{
+				Id = def.Id,
+				Name = def.Name,
+				Description = def.Description,
+				Effects = SerializeDefinitionEffects(def.Effects)
+			};
+		}
+
+		public CardEditorCustomKeywordDefinition? ToDefinitionSafe()
+		{
+			string name = string.IsNullOrWhiteSpace(Name) ? string.Empty : Name.Trim();
+			string? id = string.IsNullOrWhiteSpace(Id) ? CardEditorDefinitionStore.BuildKeywordId(name) : Id.Trim();
+			if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+			{
+				return null;
+			}
+
+			return new CardEditorCustomKeywordDefinition
+			{
+				Id = id,
+				Name = name,
+				Description = string.IsNullOrWhiteSpace(Description) ? string.Empty : Description.Trim(),
+				Effects = DeserializeDefinitionEffects(Effects)
+			};
+		}
+	}
+
+	private sealed class CustomStatusDefinitionDto
+	{
+		public string? Id { get; set; }
+		public string? Name { get; set; }
+		public string? Description { get; set; }
+		public string? Type { get; set; }
+		public string? IconMode { get; set; }
+		public string? IconPowerId { get; set; }
+		public string? CustomPackedIconPath { get; set; }
+		public string? CustomBigIconPath { get; set; }
+		public List<CardEditorPresetStore.CardExtraEffectDto?>? BehaviorEffects { get; set; }
+
+		public static CustomStatusDefinitionDto FromDefinition(CardEditorCustomStatusDefinition def)
+		{
+			return new CustomStatusDefinitionDto
+			{
+				Id = def.Id,
+				Name = def.Name,
+				Description = def.Description,
+				Type = def.Type.ToString(),
+				IconMode = def.IconMode.ToString(),
+				IconPowerId = def.IconPowerId,
+				CustomPackedIconPath = def.CustomPackedIconPath,
+				CustomBigIconPath = def.CustomBigIconPath,
+				BehaviorEffects = SerializeDefinitionEffects(def.BehaviorEffects)
+			};
+		}
+
+		public CardEditorCustomStatusDefinition? ToDefinitionSafe()
+		{
+			string name = string.IsNullOrWhiteSpace(Name) ? string.Empty : Name.Trim();
+			string? id = string.IsNullOrWhiteSpace(Id) ? CardEditorCustomStatusRegistry.BuildId(name) : Id.Trim();
+			if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+			{
+				return null;
+			}
+
+			PowerType type = PowerType.Buff;
+			if (!string.IsNullOrWhiteSpace(Type) && Enum.TryParse(Type, out PowerType parsedType))
+			{
+				type = parsedType;
+			}
+
+			CardExtraEffectStatusIconMode iconMode = CardExtraEffectStatusIconMode.Auto;
+			if (!string.IsNullOrWhiteSpace(IconMode) && Enum.TryParse(IconMode, out CardExtraEffectStatusIconMode parsedIconMode))
+			{
+				iconMode = parsedIconMode;
+			}
+
+			return new CardEditorCustomStatusDefinition
+			{
+				Id = id,
+				Name = name,
+				Description = string.IsNullOrWhiteSpace(Description) ? string.Empty : Description.Trim(),
+				SourceCardId = null,
+				BehaviorEffects = DeserializeDefinitionEffects(BehaviorEffects),
+				Type = type,
+				IconMode = iconMode,
+				IconPowerId = string.IsNullOrWhiteSpace(IconPowerId) ? null : IconPowerId.Trim(),
+				CustomPackedIconPath = string.IsNullOrWhiteSpace(CustomPackedIconPath) ? null : CustomPackedIconPath.Trim(),
+				CustomBigIconPath = string.IsNullOrWhiteSpace(CustomBigIconPath) ? null : CustomBigIconPath.Trim()
+			};
+		}
 	}
 
 	private sealed class CreatorPresetSettingsDto

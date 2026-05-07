@@ -53,7 +53,19 @@ internal static class CardEditorVanillaKeywordSupport
 			return false;
 		}
 
-		return card is CardEditorCreatedCardBase || CardEditorExtraEffects.GetEffectsForDescription(card, isUpgradePreview: false).Count > 0;
+		if (card is CardEditorCreatedCardBase)
+		{
+			return true;
+		}
+
+		try
+		{
+			return CardEditorExtraEffects.GetEffectsForDescription(card, isUpgradePreview: false).Count > 0;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	public static string FormatDescription(string description)
@@ -216,8 +228,15 @@ internal static class CardEditorVanillaKeywordSupport
 			return baseCache;
 		}
 
-		IReadOnlyList<CardExtraEffectKeywordSummary> customKeywordSummaries =
-			CardEditorExtraEffects.GetCustomKeywordSummaries(card, target, isUpgradePreview);
+		IReadOnlyList<CardExtraEffectKeywordSummary> customKeywordSummaries;
+		try
+		{
+			customKeywordSummaries = CardEditorExtraEffects.GetCustomKeywordSummaries(card, target, isUpgradePreview);
+		}
+		catch
+		{
+			return baseCache;
+		}
 		if (customKeywordSummaries.Count == 0)
 		{
 			return baseCache;
@@ -533,7 +552,7 @@ internal static class CardModel_HoverTips_CardEditorKeywordSupport_Patch
 
 	public static void Postfix(CardModel __instance, ref IEnumerable<IHoverTip> __result)
 	{
-		if (_isAugmentingHoverTips || __instance == null || !CardEditorVanillaKeywordSupport.ShouldAugmentCard(__instance))
+		if (_isAugmentingHoverTips || __instance == null)
 		{
 			return;
 		}
@@ -541,10 +560,16 @@ internal static class CardModel_HoverTips_CardEditorKeywordSupport_Patch
 		try
 		{
 			_isAugmentingHoverTips = true;
-			string description = __instance.GetDescriptionForPile(PileType.Hand, __instance.CurrentTarget);
+			if (!CardEditorVanillaKeywordSupport.ShouldAugmentCard(__instance))
+			{
+				return;
+			}
+
+			Creature? currentTarget = __instance.GetSafeCurrentTarget();
+			string description = __instance.GetDescriptionForPile(PileType.Hand, currentTarget);
 			IReadOnlyList<IHoverTip> inferredTips = CardEditorVanillaKeywordSupport.InferHoverTips(description);
 			IReadOnlyList<CardExtraEffectKeywordSummary> customKeywordSummaries =
-				CardEditorExtraEffects.GetCustomKeywordSummaries(__instance, __instance.CurrentTarget, isUpgradePreview: false);
+				CardEditorExtraEffects.GetCustomKeywordSummaries(__instance, currentTarget, isUpgradePreview: false);
 
 			IEnumerable<IHoverTip> existingTips = __result ?? Array.Empty<IHoverTip>();
 			IEnumerable<IHoverTip> combinedTips = existingTips.Concat(inferredTips);

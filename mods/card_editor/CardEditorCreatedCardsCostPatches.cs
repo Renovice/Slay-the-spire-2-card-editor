@@ -161,7 +161,7 @@ internal static class CardEditorCreatedCardsCostController
 			return false;
 		}
 
-		CombatState? combatState = card.GetConcreteCombatState() ?? card.Owner?.Creature.GetConcreteCombatState();
+		CombatState? combatState = card.GetConcreteCombatState() ?? card.TryGetOwnerCreature().GetConcreteCombatState();
 		if (combatState == null)
 		{
 			return false;
@@ -722,7 +722,7 @@ internal static class CardEditorCreatedCardsCostController
 			return;
 		}
 
-		CombatState? combatState = card.GetConcreteCombatState() ?? card.Owner?.Creature.GetConcreteCombatState();
+		CombatState? combatState = card.GetConcreteCombatState() ?? card.TryGetOwnerCreature().GetConcreteCombatState();
 		if (combatState == null)
 		{
 			return;
@@ -818,7 +818,7 @@ internal static class CardPileCmd_AddGeneratedCardsToCombat_CreatedCardsCostLess
 			return;
 		}
 
-		CombatState? combatState = sourceCard.GetConcreteCombatState() ?? list[0].Owner?.Creature.GetConcreteCombatState();
+		CombatState? combatState = sourceCard.GetConcreteCombatState() ?? list[0].TryGetOwnerCreature().GetConcreteCombatState();
 		if (combatState == null)
 		{
 			return;

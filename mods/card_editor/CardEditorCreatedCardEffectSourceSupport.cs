@@ -10,6 +10,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Logging;
@@ -102,7 +103,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 				return;
 			}
 
-			int desiredUpgradeLevel = card.CurrentUpgradeLevel;
+			int desiredUpgradeLevel = card.GetSafeCurrentUpgradeLevel();
 			if (isUpgradePreview)
 			{
 				desiredUpgradeLevel = Math.Max(desiredUpgradeLevel, 1);
@@ -440,7 +441,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			{
 				Card = createdCard,
 				Target = target,
-				ResultPile = createdCard.Pile?.Type ?? PileType.None,
+				ResultPile = createdCard.TryGetPile()?.Type ?? PileType.None,
 				Resources = new ResourceInfo
 				{
 					EnergySpent = 0,
@@ -596,9 +597,10 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 	{
 		try
 		{
-			if (createdCard.Owner != null && effectSourceCard.Owner == null)
+			Player? owner = createdCard.TryGetOwner();
+			if (owner != null && effectSourceCard.Owner == null)
 			{
-				effectSourceCard.Owner = createdCard.Owner;
+				effectSourceCard.Owner = owner;
 			}
 		}
 		catch (Exception ex)
@@ -606,7 +608,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			Log.Warn($"[CardEditor] Failed syncing Owner to effect source card: {ex}");
 		}
 
-		int desiredUpgradeLevel = createdCard.CurrentUpgradeLevel;
+		int desiredUpgradeLevel = createdCard.GetSafeCurrentUpgradeLevel();
 		if (isUpgradePreview)
 		{
 			desiredUpgradeLevel = Math.Max(desiredUpgradeLevel, 1);
@@ -687,7 +689,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			return null;
 		}
 
-		CombatState? hostCombatState = createdCard.GetConcreteCombatState() ?? createdCard.Owner?.Creature.GetConcreteCombatState();
+		CombatState? hostCombatState = createdCard.GetConcreteCombatState() ?? createdCard.TryGetOwnerCreature().GetConcreteCombatState();
 		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
 		Dictionary<string, RuntimeVanillaEffectSourceState> states = _runtimeVanillaEffectSourceStates.GetOrCreateValue(createdCard);
 		if (states.TryGetValue(stateKey, out RuntimeVanillaEffectSourceState? state)
@@ -720,7 +722,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 
 		string stateKey = runtimeSourceInstanceKey ?? CreateRuntimeSourceInstanceKey(effectSourceId, 0, "default");
-		CombatState? hostCombatState = createdCard.GetConcreteCombatState() ?? createdCard.Owner?.Creature.GetConcreteCombatState();
+		CombatState? hostCombatState = createdCard.GetConcreteCombatState() ?? createdCard.TryGetOwnerCreature().GetConcreteCombatState();
 		if (!_runtimeVanillaEffectSourceStates.TryGetValue(createdCard, out Dictionary<string, RuntimeVanillaEffectSourceState>? states))
 		{
 			return false;
@@ -751,9 +753,10 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		CardModel hostCard = cardPlay.Card;
 		try
 		{
-			if (hostCard.Owner != null && effectSourceCard.Owner == null)
+			Player? owner = hostCard.TryGetOwner();
+			if (owner != null && effectSourceCard.Owner == null)
 			{
-				effectSourceCard.Owner = hostCard.Owner;
+				effectSourceCard.Owner = owner;
 			}
 		}
 		catch (Exception ex)
@@ -763,7 +766,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 
 		try
 		{
-			if ((hostCard.GetConcreteCombatState() != null || hostCard.Owner?.Creature.GetConcreteCombatState() != null)
+			if ((hostCard.GetConcreteCombatState() != null || hostCard.TryGetOwnerCreature().GetConcreteCombatState() != null)
 				&& effectSourceCard.UpgradePreviewType != CardUpgradePreviewType.Combat)
 			{
 				effectSourceCard.UpgradePreviewType = CardUpgradePreviewType.Combat;

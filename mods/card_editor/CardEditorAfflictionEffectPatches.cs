@@ -26,7 +26,7 @@ internal static class CardEditorAfflictionEffects
 			return 0;
 		}
 
-		Creature? owner = card.Owner?.Creature;
+		Creature? owner = card.TryGetOwnerCreature();
 		if (owner == null)
 		{
 			return 0;
@@ -55,7 +55,7 @@ internal static class CardEditorAfflictionEffects
 			return false;
 		}
 
-		Creature? owner = card.Owner?.Creature;
+		Creature? owner = card.TryGetOwnerCreature();
 		if (owner == null)
 		{
 			return false;
@@ -115,7 +115,7 @@ internal static class CardEditorAfflictionEffects
 				return;
 			}
 
-			Creature? owner = card.Owner?.Creature;
+			Creature? owner = card.TryGetOwnerCreature();
 			if (owner == null)
 			{
 				return;
@@ -220,7 +220,7 @@ internal static class Hexed_AfterCardEnteredCombat_DoNotAutoClear_Patch
 				return true;
 			}
 
-			Creature? owner = card.Owner?.Creature;
+			Creature? owner = card.TryGetOwnerCreature();
 			if (owner == null)
 			{
 				return true;
@@ -239,4 +239,3 @@ internal static class Hexed_AfterCardEnteredCombat_DoNotAutoClear_Patch
 		return true;
 	}
 }
-

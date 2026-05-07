@@ -53,12 +53,13 @@ internal static class Hook_AfterEnergySpent_CardEditorPowerCountEvent_Patch
 {
 	public static void Postfix(CombatState combatState, CardModel card, int amount, ref Task __result)
 	{
-		if (__result == null || combatState == null || card?.Owner?.Creature == null)
+		Creature? ownerCreature = card.TryGetOwnerCreature();
+		if (__result == null || combatState == null || ownerCreature == null)
 		{
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, card.Owner.Creature, card, amount);
+		__result = TrackAfter(__result, combatState, ownerCreature, card, amount);
 	}
 
 	private static async Task TrackAfter(Task original, CombatState combatState, Creature creature, CardModel? triggeringCard, int amount)

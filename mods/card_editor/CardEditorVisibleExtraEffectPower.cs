@@ -132,7 +132,7 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 			try
 			{
 				string description = string.Empty;
-				if (CardEditorExtraEffects.TryAppendDescription(_sourceCard, ref description, _sourceCard.CurrentTarget, isUpgradePreview: false)
+				if (CardEditorExtraEffects.TryAppendDescription(_sourceCard, ref description, _sourceCard.GetSafeCurrentTarget(), isUpgradePreview: false)
 					&& !string.IsNullOrWhiteSpace(description))
 				{
 					return description.Trim();

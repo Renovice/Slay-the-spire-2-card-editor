@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 
@@ -12,7 +13,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorPresetStore
 {
-	private const int CurrentVersion = 14;
+	private const int CurrentVersion = 15;
 	private const string PresetExtension = ".json";
 	private const string SettingsPath = "user://card_editor/presets_settings.json";
 
@@ -92,6 +93,7 @@ internal static class CardEditorPresetStore
 			{
 				baseDecks = DeserializeBaseDecks(data.BaseDecks);
 			}
+			ImportDefinitionsFromPreset(data);
 
 			return true;
 		}
@@ -128,7 +130,13 @@ internal static class CardEditorPresetStore
 					kvp => kvp.Key.ToString(),
 					kvp => CardOverrideDto.FromOverride(kvp.Value),
 					StringComparer.Ordinal),
-				BaseDecks = SerializeBaseDecks(baseDecks)
+				BaseDecks = SerializeBaseDecks(baseDecks),
+				KeywordDefinitions = CardEditorDefinitionStore.GetKeywordDefinitions()
+					.Select(CustomKeywordDefinitionDto.FromDefinition)
+					.ToList(),
+				StatusDefinitions = CardEditorDefinitionStore.GetStatusDefinitions()
+					.Select(CustomStatusDefinitionDto.FromDefinition)
+					.ToList()
 			};
 
 			string json = JsonSerializer.Serialize(data, CreateJsonOptions());
@@ -332,6 +340,70 @@ internal static class CardEditorPresetStore
 		}
 
 		return baseDecks;
+	}
+
+	private static void ImportDefinitionsFromPreset(PresetFileDto data)
+	{
+		try
+		{
+			List<CardEditorCustomKeywordDefinition> keywords = new();
+			foreach (CustomKeywordDefinitionDto dto in data.KeywordDefinitions ?? new List<CustomKeywordDefinitionDto>())
+			{
+				CardEditorCustomKeywordDefinition? def = dto.ToDefinitionSafe();
+				if (def != null)
+				{
+					keywords.Add(def);
+				}
+			}
+
+			List<CardEditorCustomStatusDefinition> statuses = new();
+			foreach (CustomStatusDefinitionDto dto in data.StatusDefinitions ?? new List<CustomStatusDefinitionDto>())
+			{
+				CardEditorCustomStatusDefinition? def = dto.ToDefinitionSafe();
+				if (def != null)
+				{
+					statuses.Add(def);
+				}
+			}
+
+			if (keywords.Count > 0 || statuses.Count > 0)
+			{
+				CardEditorDefinitionStore.ImportDefinitions(keywords, statuses);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed importing preset definition library: {ex}");
+		}
+	}
+
+	private static List<CardExtraEffect> DeserializeDefinitionEffects(IEnumerable<CardExtraEffectDto?>? dtos)
+	{
+		if (dtos == null)
+		{
+			return new List<CardExtraEffect>();
+		}
+
+		List<CardExtraEffect> effects = new();
+		foreach (CardExtraEffectDto? dto in dtos)
+		{
+			if (dto == null || !dto.TryToEffect(out CardExtraEffect effect))
+			{
+				continue;
+			}
+
+			effects.Add(effect);
+		}
+
+		return effects;
+	}
+
+	private static List<CardExtraEffectDto?> SerializeDefinitionEffects(IEnumerable<CardExtraEffect>? effects)
+	{
+		return (effects ?? Array.Empty<CardExtraEffect>())
+			.Where(effect => effect != null)
+			.Select(effect => (CardExtraEffectDto?)CardExtraEffectDto.FromEffect(effect))
+			.ToList();
 	}
 
 	private static JsonSerializerOptions CreateJsonOptions()
@@ -580,6 +652,110 @@ internal static class CardEditorPresetStore
 		public DateTime SavedAtUtc { get; set; }
 		public Dictionary<string, CardOverrideDto> Overrides { get; set; } = new Dictionary<string, CardOverrideDto>(StringComparer.Ordinal);
 		public Dictionary<string, List<string>> BaseDecks { get; set; } = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+		public List<CustomKeywordDefinitionDto> KeywordDefinitions { get; set; } = new();
+		public List<CustomStatusDefinitionDto> StatusDefinitions { get; set; } = new();
+	}
+
+	private sealed class CustomKeywordDefinitionDto
+	{
+		public string? Id { get; set; }
+		public string? Name { get; set; }
+		public string? Description { get; set; }
+		public List<CardExtraEffectDto?>? Effects { get; set; }
+
+		public static CustomKeywordDefinitionDto FromDefinition(CardEditorCustomKeywordDefinition def)
+		{
+			return new CustomKeywordDefinitionDto
+			{
+				Id = def.Id,
+				Name = def.Name,
+				Description = def.Description,
+				Effects = SerializeDefinitionEffects(def.Effects)
+			};
+		}
+
+		public CardEditorCustomKeywordDefinition? ToDefinitionSafe()
+		{
+			string name = string.IsNullOrWhiteSpace(Name) ? string.Empty : Name.Trim();
+			string? id = string.IsNullOrWhiteSpace(Id) ? CardEditorDefinitionStore.BuildKeywordId(name) : Id.Trim();
+			if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+			{
+				return null;
+			}
+
+			return new CardEditorCustomKeywordDefinition
+			{
+				Id = id,
+				Name = name,
+				Description = string.IsNullOrWhiteSpace(Description) ? string.Empty : Description.Trim(),
+				Effects = DeserializeDefinitionEffects(Effects)
+			};
+		}
+	}
+
+	private sealed class CustomStatusDefinitionDto
+	{
+		public string? Id { get; set; }
+		public string? Name { get; set; }
+		public string? Description { get; set; }
+		public string? Type { get; set; }
+		public string? IconMode { get; set; }
+		public string? IconPowerId { get; set; }
+		public string? CustomPackedIconPath { get; set; }
+		public string? CustomBigIconPath { get; set; }
+		public List<CardExtraEffectDto?>? BehaviorEffects { get; set; }
+
+		public static CustomStatusDefinitionDto FromDefinition(CardEditorCustomStatusDefinition def)
+		{
+			return new CustomStatusDefinitionDto
+			{
+				Id = def.Id,
+				Name = def.Name,
+				Description = def.Description,
+				Type = def.Type.ToString(),
+				IconMode = def.IconMode.ToString(),
+				IconPowerId = def.IconPowerId,
+				CustomPackedIconPath = def.CustomPackedIconPath,
+				CustomBigIconPath = def.CustomBigIconPath,
+				BehaviorEffects = SerializeDefinitionEffects(def.BehaviorEffects)
+			};
+		}
+
+		public CardEditorCustomStatusDefinition? ToDefinitionSafe()
+		{
+			string name = string.IsNullOrWhiteSpace(Name) ? string.Empty : Name.Trim();
+			string? id = string.IsNullOrWhiteSpace(Id) ? CardEditorCustomStatusRegistry.BuildId(name) : Id.Trim();
+			if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+			{
+				return null;
+			}
+
+			PowerType type = PowerType.Buff;
+			if (!string.IsNullOrWhiteSpace(Type) && Enum.TryParse(Type, out PowerType parsedType))
+			{
+				type = parsedType;
+			}
+
+			CardExtraEffectStatusIconMode iconMode = CardExtraEffectStatusIconMode.Auto;
+			if (!string.IsNullOrWhiteSpace(IconMode) && Enum.TryParse(IconMode, out CardExtraEffectStatusIconMode parsedIconMode))
+			{
+				iconMode = parsedIconMode;
+			}
+
+			return new CardEditorCustomStatusDefinition
+			{
+				Id = id,
+				Name = name,
+				Description = string.IsNullOrWhiteSpace(Description) ? string.Empty : Description.Trim(),
+				SourceCardId = null,
+				BehaviorEffects = DeserializeDefinitionEffects(BehaviorEffects),
+				Type = type,
+				IconMode = iconMode,
+				IconPowerId = string.IsNullOrWhiteSpace(IconPowerId) ? null : IconPowerId.Trim(),
+				CustomPackedIconPath = string.IsNullOrWhiteSpace(CustomPackedIconPath) ? null : CustomPackedIconPath.Trim(),
+				CustomBigIconPath = string.IsNullOrWhiteSpace(CustomBigIconPath) ? null : CustomBigIconPath.Trim()
+			};
+		}
 	}
 
 	private sealed class PresetSettingsDto
@@ -1265,6 +1441,7 @@ internal static class CardEditorPresetStore
 		public string? GeneratedCardPool { get; set; }
 		public string? GeneratedCardType { get; set; }
 		public string? GeneratedCardCustomTag { get; set; }
+		public string? GeneratedCardOwnerMode { get; set; }
 		public string? ScaleMode { get; set; }
 		public string? CountEvent { get; set; }
 		public string? CountWindow { get; set; }
@@ -1287,6 +1464,7 @@ internal static class CardEditorPresetStore
 		public bool GrantToCard { get; set; }
 		public string? CardSelectionMode { get; set; }
 		public string? CardSelectionPile { get; set; }
+		public string? CardSelectionSourceEffectId { get; set; }
 		public bool IncludeSourceCardInSelection { get; set; }
 		public bool FutureMatchingCards { get; set; }
 		public string? CardGrantDuration { get; set; }
@@ -1298,6 +1476,8 @@ internal static class CardEditorPresetStore
 		public int RepeatCount { get; set; } = 1;
 		public bool CardSelectionCountIsX { get; set; }
 		public int CardSelectionCount { get; set; } = 1;
+		public bool CardSelectionOfferCountIsX { get; set; }
+		public int CardSelectionOfferCount { get; set; } = 3;
 		public string? CardSelectionPool { get; set; }
 		public string? CardSelectionType { get; set; }
 		public string? CardSelectionFilter { get; set; }
@@ -1305,6 +1485,7 @@ internal static class CardEditorPresetStore
 		public string? MoveToPosition { get; set; }
 		public bool UseMoveDestinationForGeneratedCards { get; set; }
 		public string? AdditionalMoveToPiles { get; set; }
+		public string? CopyMode { get; set; }
 		public string? DelayedPileAction { get; set; }
 		public string? DelayedPileCounterUnit { get; set; }
 		public string? DelayedPileCounterScope { get; set; }
@@ -1565,6 +1746,7 @@ internal static class CardEditorPresetStore
 				GeneratedCardPool = effect.GeneratedCardPool.ToString(),
 				GeneratedCardType = effect.GeneratedCardType.ToString(),
 				GeneratedCardCustomTag = effect.GeneratedCardCustomTag,
+				GeneratedCardOwnerMode = effect.GeneratedCardOwnerMode.ToString(),
 				ScaleMode = effect.ScaleMode.ToString(),
 				CountEvent = effect.CountEvent.ToString(),
 				CountWindow = effect.CountWindow.ToString(),
@@ -1590,6 +1772,7 @@ internal static class CardEditorPresetStore
 				GrantToCard = effect.GrantToCard,
 				CardSelectionMode = effect.CardSelectionMode.ToString(),
 				CardSelectionPile = effect.CardSelectionPile.ToString(),
+				CardSelectionSourceEffectId = effect.CardSelectionSourceEffectId,
 				IncludeSourceCardInSelection = effect.IncludeSourceCardInSelection,
 				FutureMatchingCards = effect.FutureMatchingCards,
 				CardGrantDuration = effect.CardGrantDuration.ToString(),
@@ -1601,6 +1784,8 @@ internal static class CardEditorPresetStore
 				RepeatCount = effect.RepeatCount,
 				CardSelectionCountIsX = effect.CardSelectionCountIsX,
 				CardSelectionCount = effect.CardSelectionCount,
+				CardSelectionOfferCountIsX = effect.CardSelectionOfferCountIsX,
+				CardSelectionOfferCount = effect.CardSelectionOfferCount,
 				CardSelectionPool = effect.CardSelectionPool.ToString(),
 				CardSelectionType = effect.CardSelectionType.ToString(),
 				CardSelectionFilter = effect.CardSelectionFilter.ToString(),
@@ -1608,6 +1793,7 @@ internal static class CardEditorPresetStore
 				MoveToPosition = effect.MoveToPosition.ToString(),
 				UseMoveDestinationForGeneratedCards = effect.UseMoveDestinationForGeneratedCards,
 				AdditionalMoveToPiles = effect.AdditionalMoveToPiles.ToString(),
+				CopyMode = effect.CopyMode.ToString(),
 				DelayedPileAction = effect.DelayedPileAction.ToString(),
 				DelayedPileCounterUnit = effect.DelayedPileCounterUnit.ToString(),
 				DelayedPileCounterScope = effect.DelayedPileCounterScope.ToString(),
@@ -2025,6 +2211,14 @@ internal static class CardEditorPresetStore
 				? null
 				: GeneratedCardCustomTag.Trim();
 
+			CardExtraEffectGeneratedCardOwnerMode generatedOwnerMode = CardExtraEffectGeneratedCardOwnerMode.SourceOwner;
+			if (!string.IsNullOrWhiteSpace(GeneratedCardOwnerMode)
+				&& Enum.TryParse(GeneratedCardOwnerMode, out CardExtraEffectGeneratedCardOwnerMode parsedGeneratedOwnerMode))
+			{
+				generatedOwnerMode = parsedGeneratedOwnerMode;
+			}
+			effect.GeneratedCardOwnerMode = generatedOwnerMode;
+
 			CardExtraEffectScaleMode scaleMode = CardExtraEffectScaleMode.None;
 			if (!string.IsNullOrWhiteSpace(ScaleMode) && Enum.TryParse(ScaleMode, out CardExtraEffectScaleMode parsedScaleMode))
 			{
@@ -2130,6 +2324,9 @@ internal static class CardEditorPresetStore
 				selectionPile = parsedSelectionPile;
 			}
 			effect.CardSelectionPile = selectionPile;
+			effect.CardSelectionSourceEffectId = string.IsNullOrWhiteSpace(CardSelectionSourceEffectId)
+				? null
+				: CardSelectionSourceEffectId.Trim();
 			effect.IncludeSourceCardInSelection = IncludeSourceCardInSelection;
 			effect.FutureMatchingCards = FutureMatchingCards;
 
@@ -2174,6 +2371,14 @@ internal static class CardEditorPresetStore
 			}
 			effect.CardSelectionCount = selectionCount;
 
+			effect.CardSelectionOfferCountIsX = CardSelectionOfferCountIsX;
+			int selectionOfferCount = CardSelectionOfferCount;
+			if (!numericFieldsAreDeltas)
+			{
+				selectionOfferCount = Math.Clamp(selectionOfferCount, 0, 99);
+			}
+			effect.CardSelectionOfferCount = selectionOfferCount;
+
 			CardGeneratedCardPool selectionPool = CardGeneratedCardPool.All;
 			if (!string.IsNullOrWhiteSpace(CardSelectionPool) && Enum.TryParse(CardSelectionPool, out CardGeneratedCardPool parsedSelectionPool))
 			{
@@ -2213,6 +2418,12 @@ internal static class CardEditorPresetStore
 			if (!string.IsNullOrWhiteSpace(AdditionalMoveToPiles) && Enum.TryParse(AdditionalMoveToPiles, out CardExtraEffectAdditionalMoveToPiles parsedAdditionalMoveToPiles))
 			{
 				effect.AdditionalMoveToPiles = parsedAdditionalMoveToPiles;
+			}
+
+			effect.CopyMode = CardExtraEffectCopyMode.OneCopyPerSelectedCard;
+			if (!string.IsNullOrWhiteSpace(CopyMode) && Enum.TryParse(CopyMode, out CardExtraEffectCopyMode parsedCopyMode))
+			{
+				effect.CopyMode = parsedCopyMode;
 			}
 
 			effect.DelayedPileAction = CardExtraEffectDelayedPileAction.RemoveFromDeck;
