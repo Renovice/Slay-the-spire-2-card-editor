@@ -581,13 +581,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			return;
 		}
 
-		if (IsLocalizedSharedCreatedPopupLocaleActive())
-		{
-			QueueLocalizedSharedPopupWarmup(owner);
-			return;
-		}
-
-		RunUiWarmup();
+		QueueLocalizedSharedPopupWarmup(owner);
 	}
 
 	internal static void InvalidateLocalizationSensitiveCaches()
@@ -641,79 +635,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private static void RunUiWarmup()
 	{
-		if (_uiWarmupComplete || _uiWarmupRunning)
-		{
-			return;
-		}
-
-		if (IsLocalizedSharedCreatedPopupLocaleActive())
-		{
-			QueueLocalizedSharedPopupWarmup();
-			return;
-		}
-
-		_uiWarmupRunning = true;
-		ulong warmupStartMs = Time.GetTicksMsec();
-		try
-		{
-			Control? cacheHost = EnsurePrebuiltPopupCacheHost();
-			if (cacheHost == null || !GodotObject.IsInstanceValid(cacheHost))
-			{
-				Log.Warn("[CardEditor] Prebuilt popup warmup skipped: no cache host was available.");
-				return;
-			}
-
-			int queued = 0;
-			List<ModelId> warmupCreatedIds = CardEditorCreatedCardsStore.GetAllCreatedCardIds()
-				.Where(id => id != null && id != ModelId.none)
-				.OrderByDescending(CountUiWarmupExtraEffectRows)
-				.ToList();
-			if (IsLocalizedSharedCreatedPopupLocaleActive() && warmupCreatedIds.Count > 1)
-			{
-				warmupCreatedIds = warmupCreatedIds.Take(1).ToList();
-			}
-
-			foreach (ModelId createdId in warmupCreatedIds)
-			{
-				QueuePrebuiltPopupBuild(createdId, isUpgradeEditor: false);
-				queued++;
-				if (ShouldWarmUpgradePopup(createdId))
-				{
-					QueuePrebuiltPopupBuild(createdId, isUpgradeEditor: true);
-					queued++;
-				}
-			}
-
-			int built = 0;
-			while (_prebuiltPopupBuildQueue.Count > 0)
-			{
-				if (BuildNextPrebuiltPopup(cacheHost))
-				{
-					built++;
-				}
-			}
-
-			int hydratedSteps = 0;
-			while (_prebuiltPopupHydrationQueue.Count > 0)
-			{
-				if (HydrateQueuedPrebuiltPopupNow(scheduleRemaining: false))
-				{
-					hydratedSteps++;
-				}
-			}
-
-			ulong totalElapsedMs = Time.GetTicksMsec() - warmupStartMs;
-			CardEditorMod.VerboseLog($"[CardEditor][Perf] PrebuiltPopupWarmup totalMs={totalElapsedMs} queued={queued} built={built} hydratedSteps={hydratedSteps} cacheSize={_prebuiltPopupCache.Count}");
-			_uiWarmupComplete = true;
-		}
-		catch (Exception ex)
-		{
-			Log.Warn($"[CardEditor] Prebuilt popup warmup failed: {ex}");
-		}
-		finally
-		{
-			_uiWarmupRunning = false;
-		}
+		QueueLocalizedSharedPopupWarmup();
 	}
 
 	private static void QueueLocalizedSharedPopupWarmup(Node? owner = null)
@@ -833,14 +755,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private static bool ShouldUseLocalizedSharedCreatedPopup(ModelId cardId)
 	{
-		return IsLocalizedSharedCreatedPopupLocaleActive()
-			&& CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
+		return CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
 	}
 
 	private static bool ShouldUseLocalizedSharedVanillaPopup(ModelId cardId)
 	{
-		return IsLocalizedSharedCreatedPopupLocaleActive()
-			&& cardId != null
+		return cardId != null
 			&& cardId != ModelId.none
 			&& !CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
 	}
