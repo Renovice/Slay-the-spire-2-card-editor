@@ -10,6 +10,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 internal sealed class CardEditorPerformanceSettingsData
 {
 	public bool PreloadEditorPopupsOnLaunch { get; set; } = true;
+	public bool LegacyPreloadEveryEditorPopupOnLaunch { get; set; } = false;
 	public bool IncrementalPopupHydrationOnOpen { get; set; } = false;
 	public bool BackgroundPopupWarmupAfterDirtyClose { get; set; } = false;
 	public double BackgroundPopupWarmupDelaySeconds { get; set; } = 0.08;
@@ -36,6 +37,15 @@ internal static class CardEditorPerformanceSettings
 		{
 			EnsureLoaded();
 			return _data.PreloadEditorPopupsOnLaunch;
+		}
+	}
+
+	public static bool LegacyPreloadEveryEditorPopupOnLaunch
+	{
+		get
+		{
+			EnsureLoaded();
+			return _data.LegacyPreloadEveryEditorPopupOnLaunch;
 		}
 	}
 

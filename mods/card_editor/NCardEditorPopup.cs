@@ -581,6 +581,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			return;
 		}
 
+		if (CardEditorPerformanceSettings.LegacyPreloadEveryEditorPopupOnLaunch)
+		{
+			RunUiWarmup();
+			return;
+		}
+
 		QueueLocalizedSharedPopupWarmup(owner);
 	}
 
@@ -635,7 +641,69 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private static void RunUiWarmup()
 	{
-		QueueLocalizedSharedPopupWarmup();
+		if (_uiWarmupComplete || _uiWarmupRunning)
+		{
+			return;
+		}
+
+		_uiWarmupRunning = true;
+		ulong warmupStartMs = Time.GetTicksMsec();
+		try
+		{
+			Control? cacheHost = EnsurePrebuiltPopupCacheHost();
+			if (cacheHost == null || !GodotObject.IsInstanceValid(cacheHost))
+			{
+				Log.Warn("[CardEditor] Legacy prebuilt popup warmup skipped: no cache host was available.");
+				return;
+			}
+
+			int queued = 0;
+			List<ModelId> warmupCreatedIds = CardEditorCreatedCardsStore.GetAllCreatedCardIds()
+				.Where(id => id != null && id != ModelId.none)
+				.OrderByDescending(CountUiWarmupExtraEffectRows)
+				.ToList();
+
+			foreach (ModelId createdId in warmupCreatedIds)
+			{
+				QueuePrebuiltPopupBuild(createdId, isUpgradeEditor: false);
+				queued++;
+				if (ShouldWarmUpgradePopup(createdId))
+				{
+					QueuePrebuiltPopupBuild(createdId, isUpgradeEditor: true);
+					queued++;
+				}
+			}
+
+			int built = 0;
+			while (_prebuiltPopupBuildQueue.Count > 0)
+			{
+				if (BuildNextPrebuiltPopup(cacheHost))
+				{
+					built++;
+				}
+			}
+
+			int hydratedSteps = 0;
+			while (_prebuiltPopupHydrationQueue.Count > 0)
+			{
+				if (HydrateQueuedPrebuiltPopupNow(scheduleRemaining: false))
+				{
+					hydratedSteps++;
+				}
+			}
+
+			ulong totalElapsedMs = Time.GetTicksMsec() - warmupStartMs;
+			CardEditorMod.VerboseLog($"[CardEditor][Perf] LegacyPrebuiltPopupWarmup totalMs={totalElapsedMs} queued={queued} built={built} hydratedSteps={hydratedSteps} cacheSize={_prebuiltPopupCache.Count}");
+			_uiWarmupComplete = true;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Legacy prebuilt popup warmup failed: {ex}");
+		}
+		finally
+		{
+			_uiWarmupRunning = false;
+		}
 	}
 
 	private static void QueueLocalizedSharedPopupWarmup(Node? owner = null)
@@ -755,12 +823,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private static bool ShouldUseLocalizedSharedCreatedPopup(ModelId cardId)
 	{
-		return CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
+		return !CardEditorPerformanceSettings.LegacyPreloadEveryEditorPopupOnLaunch
+			&& CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
 	}
 
 	private static bool ShouldUseLocalizedSharedVanillaPopup(ModelId cardId)
 	{
-		return cardId != null
+		return !CardEditorPerformanceSettings.LegacyPreloadEveryEditorPopupOnLaunch
+			&& cardId != null
 			&& cardId != ModelId.none
 			&& !CardEditorCreatedCardsStore.IsCreatedCardId(cardId);
 	}
