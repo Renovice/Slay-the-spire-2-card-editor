@@ -121,6 +121,36 @@ internal static class CardEditorPerformanceSettings
 		}
 	}
 
+	public static void SetPreloadEditorPopupsOnLaunch(bool value)
+	{
+		EnsureLoaded();
+		lock (_lock)
+		{
+			if (_data.PreloadEditorPopupsOnLaunch == value)
+			{
+				return;
+			}
+
+			_data.PreloadEditorPopupsOnLaunch = value;
+			WriteSettings(GetSettingsPath(), created: false);
+		}
+	}
+
+	public static void SetLegacyPreloadEveryEditorPopupOnLaunch(bool value)
+	{
+		EnsureLoaded();
+		lock (_lock)
+		{
+			if (_data.LegacyPreloadEveryEditorPopupOnLaunch == value)
+			{
+				return;
+			}
+
+			_data.LegacyPreloadEveryEditorPopupOnLaunch = value;
+			WriteSettings(GetSettingsPath(), created: false);
+		}
+	}
+
 	public static void EnsureLoaded()
 	{
 		lock (_lock)
@@ -145,6 +175,7 @@ internal static class CardEditorPerformanceSettings
 				if (loaded != null)
 				{
 					_data = loaded;
+					WriteSettings(path, created: false);
 				}
 			}
 			catch (Exception ex)
@@ -156,6 +187,11 @@ internal static class CardEditorPerformanceSettings
 
 	private static void WriteDefaultSettings(string path)
 	{
+		WriteSettings(path, created: true);
+	}
+
+	private static void WriteSettings(string path, bool created)
+	{
 		try
 		{
 			string? directory = Path.GetDirectoryName(path);
@@ -166,11 +202,14 @@ internal static class CardEditorPerformanceSettings
 
 			string json = JsonSerializer.Serialize(_data, CreateJsonOptions());
 			File.WriteAllText(path, json);
-			Log.Info($"[CardEditor] Created performance settings file: {path}");
+			if (created)
+			{
+				Log.Info($"[CardEditor] Created performance settings file: {path}");
+			}
 		}
 		catch (Exception ex)
 		{
-			Log.Warn($"[CardEditor] Failed creating performance settings file '{path}': {ex}");
+			Log.Warn($"[CardEditor] Failed writing performance settings file '{path}': {ex}");
 		}
 	}
 

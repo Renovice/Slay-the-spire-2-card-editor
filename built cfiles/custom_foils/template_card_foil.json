@@ -1,0 +1,59 @@
+{
+  "id": "template_card_foil",
+  "name": "Template Card Foil",
+  "shader": "template_card_foil.gdshader",
+  "description": "Minimal UV-based canvas_item shader foil template for Card Editor custom finishes.",
+  "version": 1,
+  "defaults": {
+    "intensity": 1.0,
+    "opacity": 0.65,
+    "speed": 1.0,
+    "pattern_scale": 1.0,
+    "tint": "#E6F2FFFF",
+    "foil_size": [320.0, 446.0]
+  },
+  "knobs": [
+    {
+      "key": "intensity",
+      "label": "Intensity",
+      "type": "float",
+      "min": 0.0,
+      "max": 3.0,
+      "step": 0.05,
+      "default": 1.0
+    },
+    {
+      "key": "opacity",
+      "label": "Opacity",
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01,
+      "default": 0.65
+    },
+    {
+      "key": "speed",
+      "label": "Speed",
+      "type": "float",
+      "min": 0.0,
+      "max": 5.0,
+      "step": 0.05,
+      "default": 1.0
+    },
+    {
+      "key": "pattern_scale",
+      "label": "Pattern Scale",
+      "type": "float",
+      "min": 0.25,
+      "max": 8.0,
+      "step": 0.05,
+      "default": 1.0
+    },
+    {
+      "key": "tint",
+      "label": "Tint",
+      "type": "color",
+      "default": "#E6F2FFFF"
+    }
+  ]
+}

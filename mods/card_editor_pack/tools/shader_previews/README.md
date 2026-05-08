@@ -8,8 +8,10 @@ These scenes are quick Godot previews for the shaders in `slay-the-spire-2/Holo 
 2. In the FileSystem dock, go to: `res://tools/shader_previews/`
 3. Open any of:
    - `preview_purple_waves_ocean.tscn`
-   - `preview_flame.tscn`
-   - `preview_lightning.tscn`
+   - `preview_whirlpool.tscn`
+   - `preview_miasma.tscn`
+   - `preview_aurora.tscn`
+   - `preview_constellation.tscn`
 
 ## Notes
 

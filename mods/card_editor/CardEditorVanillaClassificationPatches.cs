@@ -206,3 +206,39 @@ internal static class CardModel_get_GainsBlock_DynamicIdentity_Patch
 		}
 	}
 }
+
+[HarmonyPatch(typeof(CardModel), "get_CanBeGeneratedInCombat")]
+internal static class CardModel_get_CanBeGeneratedInCombat_CardEditorOverride_Patch
+{
+	public static void Postfix(CardModel __instance, ref bool __result)
+	{
+		if (__instance?.Id == null || CardEditorOverrides.SuppressAllOverrides)
+		{
+			return;
+		}
+
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
+			&& overrideData.CanBeGeneratedInCombat.HasValue)
+		{
+			__result = overrideData.CanBeGeneratedInCombat.Value;
+		}
+	}
+}
+
+[HarmonyPatch(typeof(CardModel), "get_CanBeGeneratedByModifiers")]
+internal static class CardModel_get_CanBeGeneratedByModifiers_CardEditorOverride_Patch
+{
+	public static void Postfix(CardModel __instance, ref bool __result)
+	{
+		if (__instance?.Id == null || CardEditorOverrides.SuppressAllOverrides)
+		{
+			return;
+		}
+
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
+			&& overrideData.CanBeGeneratedByModifiers.HasValue)
+		{
+			__result = overrideData.CanBeGeneratedByModifiers.Value;
+		}
+	}
+}

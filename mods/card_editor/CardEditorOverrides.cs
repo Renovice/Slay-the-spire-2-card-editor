@@ -15,6 +15,8 @@ public sealed class CardOverride
 	public string? PoolTitle { get; set; }
 	public CardRarity? Rarity { get; set; }
 	public bool? Enabled { get; set; } // Dangerous for vanilla: removes from pools when false.
+	public bool? CanBeGeneratedInCombat { get; set; }
+	public bool? CanBeGeneratedByModifiers { get; set; }
 	public string? TitleOverride { get; set; } // Cosmetic only (not localized).
 	public bool? ModifiedBaseTextEnabled { get; set; }
 	public string? ModifiedBaseText { get; set; }
@@ -22,6 +24,11 @@ public sealed class CardOverride
 	public bool? FullArt { get; set; } // Cosmetic only (render-time).
 	public CardEditorVisualFinish? Finish { get; set; } // Cosmetic only (render-time).
 	public Dictionary<string, float>? FinishParams { get; set; } // Cosmetic only (render-time).
+	public string? CustomFinishId { get; set; } // Cosmetic only (runtime-loaded shader).
+	public Dictionary<string, string>? CustomFinishParams { get; set; } // Cosmetic only (runtime-loaded shader).
+	public float? PortraitOffsetX { get; set; } // Cosmetic only (render-time).
+	public float? PortraitOffsetY { get; set; } // Cosmetic only (render-time).
+	public float? PortraitZoom { get; set; } // Cosmetic only (render-time). 1 = vanilla scale.
 	public CardType? CardType { get; set; }
 	public TargetType? TargetType { get; set; }
 	public int? EnergyCost { get; set; }
@@ -73,6 +80,8 @@ public sealed class CardOverride
 		return string.IsNullOrWhiteSpace(PoolTitle)
 			&& Rarity == null
 			&& Enabled == null
+			&& CanBeGeneratedInCombat == null
+			&& CanBeGeneratedByModifiers == null
 			&& string.IsNullOrWhiteSpace(TitleOverride)
 			&& ModifiedBaseTextEnabled == null
 			&& string.IsNullOrWhiteSpace(ModifiedBaseText)
@@ -80,6 +89,11 @@ public sealed class CardOverride
 			&& FullArt == null
 			&& Finish == null
 			&& (FinishParams == null || FinishParams.Count == 0)
+			&& string.IsNullOrWhiteSpace(CustomFinishId)
+			&& (CustomFinishParams == null || CustomFinishParams.Count == 0)
+			&& PortraitOffsetX == null
+			&& PortraitOffsetY == null
+			&& PortraitZoom == null
 			&& CardType == null
 			&& TargetType == null
 			&& EnergyCost == null
@@ -132,7 +146,20 @@ public enum CardEditorVisualFinish
 	RainbowRareFoil = 1,
 	RainbowGlitterArt = 2,
 	PrismaticBandGlare = 5,
-	PurpleWavesOcean = 6
+	PurpleWavesOcean = 6,
+	Whirlpool = 7,
+	Miasma = 8,
+	Aurora = 9,
+	Constellation = 10,
+	DvdRipple = 11,
+	Lightning = 12,
+	BaseGameInfection = 100,
+	BaseGameGalvanized = 101,
+	BaseGameBound = 102,
+	BaseGameEntangled = 103,
+	BaseGameHexed = 104,
+	BaseGameRinging = 105,
+	BaseGameSmog = 106
 }
 
 public enum CardKeywordGrantDuration
@@ -444,12 +471,20 @@ public static class CardEditorOverrides
 			PoolTitle = source.PoolTitle,
 			Rarity = source.Rarity,
 			Enabled = source.Enabled,
+			CanBeGeneratedInCombat = source.CanBeGeneratedInCombat,
+			CanBeGeneratedByModifiers = source.CanBeGeneratedByModifiers,
 			TitleOverride = source.TitleOverride,
 			ModifiedBaseTextEnabled = source.ModifiedBaseTextEnabled,
 			ModifiedBaseText = source.ModifiedBaseText,
 			EndlessUpgrades = source.EndlessUpgrades,
 			FullArt = source.FullArt,
 			Finish = source.Finish,
+			FinishParams = source.FinishParams != null ? new Dictionary<string, float>(source.FinishParams) : null,
+			CustomFinishId = source.CustomFinishId,
+			CustomFinishParams = source.CustomFinishParams != null ? new Dictionary<string, string>(source.CustomFinishParams, StringComparer.Ordinal) : null,
+			PortraitOffsetX = source.PortraitOffsetX,
+			PortraitOffsetY = source.PortraitOffsetY,
+			PortraitZoom = source.PortraitZoom,
 			CardType = source.CardType,
 			TargetType = source.TargetType,
 			EnergyCost = source.EnergyCost,

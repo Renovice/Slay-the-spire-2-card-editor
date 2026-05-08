@@ -1,9 +1,12 @@
 {
   "PreloadEditorPopupsOnLaunch": true,
+  "LegacyPreloadEveryEditorPopupOnLaunch": false,
   "IncrementalPopupHydrationOnOpen": false,
   "BackgroundPopupWarmupAfterDirtyClose": false,
   "BackgroundPopupWarmupDelaySeconds": 0.08,
   "EnableCardEditorAutoPlayLoopCap": true,
   "CardEditorAutoPlayLoopCapPerTurn": 100,
-  "PreventCardEditorAutoPlaySelfLoops": false
+  "PreventCardEditorAutoPlaySelfLoops": false,
+  "VerboseLogging": false,
+  "VerboseDamageDebugLogging": false
 }

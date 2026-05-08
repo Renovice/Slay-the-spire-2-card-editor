@@ -184,6 +184,7 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 	{
 		await original;
 		CardEditorRunSelfScalingState.RestoreForCombat(combatState);
+		await CardEditorRunPowerState.ApplyForCombat(combatState);
 
 		if (!CardEditorOverrides.HasAnyOverrides)
 		{
@@ -253,7 +254,7 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 
 		try
 		{
-			Creature? attackTarget = command.Results?.FirstOrDefault()?.Receiver;
+			Creature? attackTarget = CardEditorExtraEffects.FlattenDamageResults(command.Results).FirstOrDefault()?.Receiver;
 			foreach (Player player in combatState.Players)
 			{
 				if (player == null)
@@ -584,6 +585,7 @@ internal static class Hook_AfterCardDrawn_CardEditorExtraEffects_Patch
 		try
 		{
 			await CardEditorExtraEffects.RunAfterCardDrawn(combatState, choiceContext, card);
+			await CardEditorQuestEffects.RecordCardDrawn(combatState, card);
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue && combatState != null)
 			{
@@ -631,6 +633,7 @@ internal static class Hook_AfterCardDiscarded_CardEditorExtraEffects_Patch
 		try
 		{
 			await CardEditorExtraEffects.RunAfterCardDiscarded(combatState, choiceContext, card);
+			await CardEditorQuestEffects.RecordCardDiscarded(combatState, card);
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue && combatState != null)
 			{
@@ -678,6 +681,7 @@ internal static class Hook_AfterCardExhausted_CardEditorExtraEffects_Patch
 		try
 		{
 			await CardEditorExtraEffects.RunAfterCardExhausted(combatState, choiceContext, card);
+			await CardEditorQuestEffects.RecordCardExhausted(combatState, card);
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue && combatState != null)
 			{
@@ -699,6 +703,37 @@ internal static class Hook_AfterCardExhausted_CardEditorExtraEffects_Patch
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] On-exhaust extra effects failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardGeneratedForCombat))]
+internal static class Hook_AfterCardGeneratedForCombat_CardEditorQuestEffects_Patch
+{
+	public static void Postfix(CombatState combatState, CardModel card, ref Task __result)
+	{
+		if (__result == null || combatState == null || card == null)
+		{
+			return;
+		}
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, combatState, card);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState, CardModel card)
+	{
+		await original;
+		try
+		{
+			await CardEditorQuestEffects.RecordCardGenerated(combatState, card);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Generated-card quest progress failed: {ex}");
 		}
 	}
 }
@@ -821,55 +856,59 @@ internal static class Hook_AfterOrbChanneled_CardEditorExtraEffects_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardRetained))]
-internal static class Hook_AfterCardRetained_CardEditorExtraEffects_Patch
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterFlush))]
+internal static class Hook_AfterFlush_RetainedCards_CardEditorExtraEffects_Patch
 {
-	public static void Postfix(CombatState combatState, CardModel card, ref Task __result)
+	public static void Postfix(ICombatState combatState, Player player, IReadOnlyCollection<CardModel> retainedCards, ref Task __result)
 	{
-		if (__result == null || card == null)
+		if (__result == null || combatState is not CombatState concreteCombatState || player == null || retainedCards == null || retainedCards.Count == 0)
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(concreteCombatState))
 		{
 			return;
 		}
-		__result = RunAfter(__result, combatState, card);
+		__result = RunAfter(__result, concreteCombatState, player, retainedCards);
 	}
 
-	private static async Task RunAfter(Task original, CombatState combatState, CardModel card)
+	private static async Task RunAfter(Task original, CombatState combatState, Player player, IReadOnlyCollection<CardModel> retainedCards)
 	{
 		await original;
-
-		if (CardEditorEndOfTurnInHandTracker.WasProcessed(combatState, card))
-		{
-			return;
-		}
 
 		ulong? netId = LocalContext.NetId;
 		if (!netId.HasValue)
 		{
 			return;
 		}
-		Player? owner = card.Owner;
-		if (owner == null)
-		{
-			return;
-		}
 
-		HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(owner, netId.Value, GameActionType.Combat);
-		try
+		foreach (CardModel card in retainedCards.Where(card => card != null).ToList())
 		{
-			Task task = CardEditorExtraEffects.RunEndOfTurnInHand(combatState, choiceContext, card);
-			bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
-			if (!completed && choiceContext.GameAction != null)
+			if (CardEditorEndOfTurnInHandTracker.WasProcessed(combatState, card))
 			{
-				await choiceContext.GameAction.CompletionTask;
+				continue;
 			}
-		}
-		catch (Exception ex)
-		{
-			Log.Warn($"[CardEditor] End-of-turn-in-hand extra effects failed: {ex}");
+
+			Player? owner = card.Owner ?? player;
+			if (owner == null)
+			{
+				continue;
+			}
+
+			HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(owner, netId.Value, GameActionType.Combat);
+			try
+			{
+				Task task = CardEditorExtraEffects.RunEndOfTurnInHand(combatState, choiceContext, card);
+				bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
+				if (!completed && choiceContext.GameAction != null)
+				{
+					await choiceContext.GameAction.CompletionTask;
+				}
+			}
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor] Retained-card end-of-turn extra effects failed: {ex}");
+			}
 		}
 	}
 }
@@ -1159,6 +1198,7 @@ internal static class Hook_AfterCardPlayed_AutoPlayDrawSelfFromPile_Patch
 	private static async Task RunAfter(Task original, CombatState combatState, CardPlay cardPlay)
 	{
 		await original;
+		await CardEditorQuestEffects.RecordCardPlayed(combatState, cardPlay);
 
 		ulong? netId = LocalContext.NetId;
 		if (!netId.HasValue)

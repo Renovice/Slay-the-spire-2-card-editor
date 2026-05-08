@@ -1220,7 +1220,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 			if (choiceContext != null)
 			{
-				Creature? attackTarget = command.Results?.FirstOrDefault()?.Receiver;
+				Creature? attackTarget = CardEditorExtraEffects.FlattenDamageResults(command.Results).FirstOrDefault()?.Receiver;
 				await RunLifecycleTrigger(
 					choiceContext,
 					CardExtraEffectTrigger.AfterAttack,

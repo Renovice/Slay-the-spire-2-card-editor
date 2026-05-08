@@ -678,6 +678,18 @@ internal static class CardEditorEffectExecutionAmountContext
 		}
 	}
 
+	public static void ReplaceCurrentSelectedCards(IEnumerable<CardModel>? cards)
+	{
+		EffectFrame? frame = GetCurrentFrame();
+		if (frame?.Effect == null)
+		{
+			return;
+		}
+
+		frame.SelectedCards.Clear();
+		ReportCurrentSelectedCards(cards);
+	}
+
 	public static void ReportCurrentPowerAmountChanged(PowerModel power, int amount)
 	{
 		if (power == null || amount <= 0)

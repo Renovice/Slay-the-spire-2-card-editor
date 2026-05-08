@@ -27,9 +27,18 @@ internal static class CardEditorRunCardCounterState
 
 	public static int Increment(CombatState? combatState, CardModel? card, string counterKey, bool persistent)
 	{
+		return Add(combatState, card, counterKey, 1, persistent);
+	}
+
+	public static int Add(CombatState? combatState, CardModel? card, string counterKey, int amount, bool persistent)
+	{
 		if (card == null || string.IsNullOrWhiteSpace(counterKey))
 		{
 			return 0;
+		}
+		if (amount <= 0)
+		{
+			return Get(combatState, card, counterKey, persistent);
 		}
 
 		if (!persistent)
@@ -38,10 +47,25 @@ internal static class CardEditorRunCardCounterState
 			{
 				return 0;
 			}
-			return IncrementCombatCounter(combatState, card, counterKey);
+			return AddCombatCounter(combatState, card, counterKey, amount);
 		}
 
-		return IncrementPersistentCounter(card, counterKey);
+		return AddPersistentCounter(card, counterKey, amount);
+	}
+
+	public static int Get(CombatState? combatState, CardModel? card, string counterKey, bool persistent)
+	{
+		if (card == null || string.IsNullOrWhiteSpace(counterKey))
+		{
+			return 0;
+		}
+
+		if (!persistent)
+		{
+			return combatState == null ? 0 : GetCombatCounter(combatState, card, counterKey);
+		}
+
+		return GetPersistentCounter(card, counterKey);
 	}
 
 	public static void Clear(CombatState? combatState, CardModel? card, string counterKey, bool persistent)
@@ -63,13 +87,20 @@ internal static class CardEditorRunCardCounterState
 		ClearPersistentCounter(card, counterKey);
 	}
 
-	private static int IncrementCombatCounter(CombatState combatState, CardModel card, string counterKey)
+	private static int AddCombatCounter(CombatState combatState, CardModel card, string counterKey, int amount)
 	{
 		CombatCounterStore store = _combatStores.GetValue(combatState, _ => new CombatCounterStore());
-		return store.Increment(card, counterKey);
+		return store.Add(card, counterKey, amount);
 	}
 
-	private static int IncrementPersistentCounter(CardModel card, string counterKey)
+	private static int GetCombatCounter(CombatState combatState, CardModel card, string counterKey)
+	{
+		return _combatStores.TryGetValue(combatState, out CombatCounterStore? store)
+			? store.Get(card, counterKey)
+			: 0;
+	}
+
+	private static int AddPersistentCounter(CardModel card, string counterKey, int amount)
 	{
 		IRunState? runState = TryGetRunState(card);
 		if (!TryBuildRunKey(runState, out string runKey)
@@ -93,11 +124,33 @@ internal static class CardEditorRunCardCounterState
 		}
 		cardCounters.Counters ??= new Dictionary<string, int>(StringComparer.Ordinal);
 		cardCounters.Counters.TryGetValue(counterKey, out int value);
-		value++;
+		value = Math.Max(0, value) + amount;
 		cardCounters.Counters[counterKey] = value;
 		PruneOldRuns(file);
 		Save(file);
 		return value;
+	}
+
+	private static int GetPersistentCounter(CardModel card, string counterKey)
+	{
+		IRunState? runState = TryGetRunState(card);
+		if (!TryBuildRunKey(runState, out string runKey)
+			|| !TryBuildCardInstanceKey(card, runState, out string cardKey))
+		{
+			return 0;
+		}
+
+		FileDto file = Load();
+		if (!file.Runs.TryGetValue(runKey, out RunDto? run)
+			|| run?.Cards == null
+			|| !run.Cards.TryGetValue(cardKey, out CardCounterDto? cardCounters)
+			|| cardCounters?.Counters == null
+			|| !cardCounters.Counters.TryGetValue(counterKey, out int value))
+		{
+			return 0;
+		}
+
+		return Math.Max(0, value);
 	}
 
 	private static void ClearPersistentCounter(CardModel card, string counterKey)
@@ -172,6 +225,9 @@ internal static class CardEditorRunCardCounterState
 		key = $"{runState.GetType().FullName}|{character}|{seed}";
 		return true;
 	}
+
+	internal static bool TryBuildRunKeyForCardEditor(IRunState? runState, out string key)
+		=> TryBuildRunKey(runState, out key);
 
 	private static string TryReadRunIdentity(object runState)
 	{
@@ -455,13 +511,21 @@ internal static class CardEditorRunCardCounterState
 	{
 		private readonly ConditionalWeakTable<CardModel, CardCounters> _cards = new ConditionalWeakTable<CardModel, CardCounters>();
 
-		public int Increment(CardModel card, string counterKey)
+		public int Add(CardModel card, string counterKey, int amount)
 		{
 			CardCounters counters = _cards.GetValue(card, _ => new CardCounters());
 			counters.Values.TryGetValue(counterKey, out int value);
-			value++;
+			value = Math.Max(0, value) + amount;
 			counters.Values[counterKey] = value;
 			return value;
+		}
+
+		public int Get(CardModel card, string counterKey)
+		{
+			return _cards.TryGetValue(card, out CardCounters? counters)
+				&& counters.Values.TryGetValue(counterKey, out int value)
+				? Math.Max(0, value)
+				: 0;
 		}
 
 		public void Clear(CardModel card, string counterKey)

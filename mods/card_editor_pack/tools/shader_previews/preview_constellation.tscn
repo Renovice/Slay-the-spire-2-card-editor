@@ -1,7 +1,7 @@
-[gd_scene load_steps=5 format=3 uid="uid://djdxh343a2k5y"]
+[gd_scene load_steps=5 format=3 uid="uid://d0p8l0constel"]
 
 [ext_resource type="Shader" uid="uid://2nnj2gj0yp7s" path="res://tools/shader_previews/sts2_card_base.gdshader" id="1_base"]
-[ext_resource type="Shader" uid="uid://celpol22k56y" path="res://tools/shader_previews/flame.gdshader" id="2_fx"]
+[ext_resource type="Shader" uid="uid://b7qs6n3ctnstl" path="res://tools/shader_previews/constellation.gdshader" id="2_fx"]
 
 [sub_resource type="ShaderMaterial" id="1_base_mat"]
 shader = ExtResource("1_base")
@@ -18,15 +18,37 @@ shader_parameter/highlight_strength = 0.18
 
 [sub_resource type="ShaderMaterial" id="2_fx_mat"]
 shader = ExtResource("2_fx")
-shader_parameter/speed = 3.0
-shader_parameter/swirl_strength = 4.7010002232975
-shader_parameter/line_count = 6.0000002375
-shader_parameter/line_sharpness = 0.046000002185
-shader_parameter/deep_color = Color(0.05, 0.12, 0.25, 1)
-shader_parameter/mid_color = Color(0.3, 0.55, 0.75, 1)
-shader_parameter/line_color = Color(0.65, 0.85, 1, 1)
+shader_parameter/line_strength = 1.0
+shader_parameter/line_width = 0.012
+shader_parameter/line_softness = 0.004
+shader_parameter/connection_range = 1.3
+shader_parameter/target_length = 0.75
+shader_parameter/target_band = 0.04
+shader_parameter/long_line_strength = 0.5
+shader_parameter/sparkle_strength = 1.0
+shader_parameter/sparkle_power = 1.5
+shader_parameter/sparkle_pulse = 0.4
+shader_parameter/node_jitter = 0.4
+shader_parameter/point_speed = 1.0
+shader_parameter/layer_count = 5.0
+shader_parameter/grid_scale = 1.5
+shader_parameter/layer_min_scale = 0.1
+shader_parameter/layer_max_scale = 15.0
+shader_parameter/layer_speed = 1.0
+shader_parameter/background_glow = 0.18
+shader_parameter/color_speed = 2.0
+shader_parameter/color_spread = 1.0
+shader_parameter/brightness = 1.0
+shader_parameter/pastel = 0.0
+shader_parameter/saturation = 1.0
+shader_parameter/hue_shift = 0.0
+shader_parameter/speed = 1.0
+shader_parameter/time_offset = 0.0
+shader_parameter/pattern_scale = 1.0
+shader_parameter/network_color = Color(1, 1, 1, 1)
+shader_parameter/network_tint_strength = 0.0
 
-[node name="PreviewFlame" type="Control"]
+[node name="PreviewConstellation" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -64,6 +86,5 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -3.0
 grow_horizontal = 2
 grow_vertical = 2

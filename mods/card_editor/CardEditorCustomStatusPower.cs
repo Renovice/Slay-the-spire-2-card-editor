@@ -57,7 +57,7 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 
 	public override PowerStackType StackType => PowerStackType.Counter;
 
-	public override bool IsInstanced => true;
+	public override PowerInstanceType InstanceType => PowerInstanceType.Instanced;
 
 	public override bool ShouldPlayVfx => false;
 

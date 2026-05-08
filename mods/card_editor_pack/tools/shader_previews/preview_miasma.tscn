@@ -1,7 +1,7 @@
 [gd_scene load_steps=5 format=3 uid="uid://dgwfgy8udym1s"]
 
 [ext_resource type="Shader" uid="uid://2nnj2gj0yp7s" path="res://tools/shader_previews/sts2_card_base.gdshader" id="1_base"]
-[ext_resource type="Shader" uid="uid://cjdv0cd3klmwx" path="res://tools/shader_previews/lightning.gdshader" id="2_fx"]
+[ext_resource type="Shader" uid="uid://cjdv0cd3klmwx" path="res://tools/shader_previews/miasma.gdshader" id="2_fx"]
 
 [sub_resource type="ShaderMaterial" id="1_base_mat"]
 shader = ExtResource("1_base")
@@ -24,7 +24,7 @@ shader_parameter/colorC = Color(1, 0.2, 0.4, 1)
 shader_parameter/discomode = false
 shader_parameter/speed = 0.5
 
-[node name="PreviewLightning" type="Control"]
+[node name="PreviewMiasma" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

@@ -14,9 +14,12 @@ internal static class CardEditorCardTypeCostAuras
 	private sealed class AuraGrant
 	{
 		public ModelId? SourceCardId { get; init; }
+		public CardModel? SourceCard { get; init; }
 		public required CardExtraEffect Effect { get; init; }
 		public required CardExtraEffectCardGrantDuration Duration { get; init; }
 		public int RemainingTurns { get; set; }
+		public int RemainingUses { get; set; }
+		public bool SkipNextPlayForSourceCard { get; set; }
 	}
 
 	private sealed class PlayerState
@@ -144,6 +147,8 @@ internal static class CardEditorCardTypeCostAuras
 				&& a.CardCostsLessDuration == b.CardCostsLessDuration
 				&& a.CardCostsLessTurns == b.CardCostsLessTurns
 				&& a.CardCostsLessModifier == b.CardCostsLessModifier
+				&& a.MatchingCostUseLimitMode == b.MatchingCostUseLimitMode
+				&& a.MatchingCostUseLimit == b.MatchingCostUseLimit
 				&& a.TriggerCardPool == b.TriggerCardPool
 				&& a.TriggerCardType == b.TriggerCardType;
 		}
@@ -170,10 +175,12 @@ internal static class CardEditorCardTypeCostAuras
 			remainingTurns = baseTurns + (IsPlayerEndBoundary(combatState, effect) ? 1 : 0);
 		}
 
+		CardModel? sourceCard = null;
 		ModelId? sourceCardId = null;
 		try
 		{
-			sourceCardId = CardEditorCardPlayContext.Current?.Card?.Id;
+			sourceCard = CardEditorCardPlayContext.Current?.Card;
+			sourceCardId = sourceCard?.Id;
 		}
 		catch
 		{
@@ -190,7 +197,8 @@ internal static class CardEditorCardTypeCostAuras
 		// Keep the grant list compact by accumulating into the existing grant for the same source + configuration.
 		if (sourceCardId != null
 			&& duration == CardExtraEffectCardGrantDuration.ThisCombat
-			&& IsTimedTrigger(effect.Trigger))
+			&& IsTimedTrigger(effect.Trigger)
+			&& !CardEditorExtraEffects.IsMatchingCostUseLimited(effect))
 		{
 			for (int i = 0; i < state.Grants.Count; i++)
 			{
@@ -214,10 +222,86 @@ internal static class CardEditorCardTypeCostAuras
 		state.Grants.Add(new AuraGrant
 		{
 			SourceCardId = sourceCardId,
+			SourceCard = sourceCard,
 			Effect = CardEditorExtraEffects.CloneEffect(effect),
 			Duration = duration,
-			RemainingTurns = remainingTurns
+			RemainingTurns = remainingTurns,
+			RemainingUses = CardEditorExtraEffects.GetMatchingCostUseLimit(effect),
+			SkipNextPlayForSourceCard = CardEditorExtraEffects.IsMatchingCostUseLimited(effect) && sourceCard != null
 		});
+		NotifyOwnerCardCostsChanged(owner);
+	}
+
+	public static void OnAfterCardPlayed(CombatState combatState, CardModel card)
+	{
+		if (combatState == null || card == null)
+		{
+			return;
+		}
+
+		Player? owner = card.Owner;
+		if (owner == null)
+		{
+			return;
+		}
+
+		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule) || schedule.States.Count == 0)
+		{
+			return;
+		}
+		if (!schedule.States.TryGetValue(owner, out PlayerState? state) || state.Grants.Count == 0)
+		{
+			return;
+		}
+
+		bool changed = false;
+		for (int i = state.Grants.Count - 1; i >= 0; i--)
+		{
+			AuraGrant? grant = state.Grants[i];
+			if (grant?.Effect == null)
+			{
+				state.Grants.RemoveAt(i);
+				changed = true;
+				continue;
+			}
+
+			if (!CardEditorExtraEffects.IsMatchingCostUseLimited(grant.Effect))
+			{
+				continue;
+			}
+
+			if (grant.SkipNextPlayForSourceCard && ReferenceEquals(grant.SourceCard, card))
+			{
+				grant.SkipNextPlayForSourceCard = false;
+				continue;
+			}
+
+			if (!MatchesAura(owner, card, grant.Effect))
+			{
+				continue;
+			}
+
+			grant.RemainingUses--;
+			changed = true;
+			if (grant.RemainingUses <= 0)
+			{
+				state.Grants.RemoveAt(i);
+			}
+		}
+
+		if (state.Grants.Count == 0)
+		{
+			schedule.States.Remove(owner);
+			if (schedule.States.Count == 0)
+			{
+				_schedules.Remove(combatState);
+			}
+		}
+
+		if (changed)
+		{
+			NotifyOwnerCardCostsChanged(owner);
+		}
 	}
 
 	public static CardExtraEffect.CardCostAdjustment GetEnergyCostAdjustment(CombatState combatState, CardModel card)
@@ -265,16 +349,13 @@ internal static class CardEditorCardTypeCostAuras
 		CardExtraEffect.CardCostAdjustment adjustment = new(0, false, false);
 		for (int i = 0; i < state.Grants.Count; i++)
 		{
-			CardExtraEffect? effect = state.Grants[i]?.Effect;
+			AuraGrant? grant = state.Grants[i];
+			CardExtraEffect? effect = grant?.Effect;
 			if (effect == null || effect.Kind != kind)
 			{
 				continue;
 			}
-			if (!CardEditorExtraEffects.MatchesCountPool(owner, card, effect.TriggerCardPool))
-			{
-				continue;
-			}
-			if (!MatchesType(card, effect.TriggerCardType))
+			if (!HasRemainingUses(grant) || !MatchesAura(owner, card, effect))
 			{
 				continue;
 			}
@@ -296,6 +377,42 @@ internal static class CardEditorCardTypeCostAuras
 		}
 
 		return adjustment;
+	}
+
+	private static bool HasRemainingUses(AuraGrant? grant)
+	{
+		if (grant?.Effect == null)
+		{
+			return false;
+		}
+
+		return !CardEditorExtraEffects.IsMatchingCostUseLimited(grant.Effect)
+			|| grant.RemainingUses > 0;
+	}
+
+	private static bool MatchesAura(Player owner, CardModel card, CardExtraEffect effect)
+	{
+		return CardEditorExtraEffects.MatchesCountPool(owner, card, effect.TriggerCardPool)
+			&& MatchesType(card, effect.TriggerCardType);
+	}
+
+	private static void NotifyOwnerCardCostsChanged(Player owner)
+	{
+		try
+		{
+			if (owner?.PlayerCombatState?.AllCards == null)
+			{
+				return;
+			}
+
+			foreach (CardModel? card in owner.PlayerCombatState.AllCards)
+			{
+				card?.InvokeEnergyCostChanged();
+			}
+		}
+		catch
+		{
+		}
 	}
 
 	private static bool MatchesType(CardModel card, CardGeneratedCardType type)

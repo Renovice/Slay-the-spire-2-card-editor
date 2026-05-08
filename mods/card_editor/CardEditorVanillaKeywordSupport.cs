@@ -58,6 +58,11 @@ internal static class CardEditorVanillaKeywordSupport
 			return true;
 		}
 
+		if (!CardEditorExtraEffects.HasCardEditorDescriptionSurface(card))
+		{
+			return false;
+		}
+
 		try
 		{
 			return CardEditorExtraEffects.GetEffectsForDescription(card, isUpgradePreview: false).Count > 0;

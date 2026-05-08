@@ -1,6 +1,7 @@
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace SlayTheSpire2Mod.CardEditor;
@@ -105,9 +106,13 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		if (wantsUpgradeText && overrideData?.Upgrade?.ModifiedBaseTextEnabled == true)
 		{
 			string referenceDescription = GetModifiedTextReferenceDescription(card, description, target, isUpgradePreview);
+			IReadOnlyList<string> fallbackLiveNumbers = CardEditorExtraEffects.GetLiveNumberFallbackTokensForDescription(card, isUpgradePreview);
+			IReadOnlyDictionary<string, string> stableLiveNumbers = CardEditorExtraEffects.GetStableLiveNumberTokensForDescription(card, isUpgradePreview);
 			string upgradedDescription = CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(
 				overrideData.Upgrade.ModifiedBaseText ?? string.Empty,
-				referenceDescription);
+				referenceDescription,
+				fallbackLiveNumbers,
+				stableLiveNumbers);
 			description = isUpgradePreview
 				? CardEditorDescriptionNumberHighlighter.HighlightChangedNumbers(
 					BuildBaseModifiedTextForUpgradePreview(card, target, overrideData) ?? string.Empty,
@@ -119,9 +124,13 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		if (!wantsUpgradeText && overrideData?.ModifiedBaseTextEnabled == true)
 		{
 			string referenceDescription = GetModifiedTextReferenceDescription(card, description, target, isUpgradePreview);
+			IReadOnlyList<string> fallbackLiveNumbers = CardEditorExtraEffects.GetLiveNumberFallbackTokensForDescription(card, isUpgradePreview);
+			IReadOnlyDictionary<string, string> stableLiveNumbers = CardEditorExtraEffects.GetStableLiveNumberTokensForDescription(card, isUpgradePreview);
 			description = CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(
 				overrideData.ModifiedBaseText ?? string.Empty,
-				referenceDescription);
+				referenceDescription,
+				fallbackLiveNumbers,
+				stableLiveNumbers);
 			return true;
 		}
 
@@ -252,7 +261,13 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 			string template = overrideData.ModifiedBaseTextEnabled == true
 				? overrideData.ModifiedBaseText ?? string.Empty
 				: liveBaseDescription;
-			return CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(template, liveBaseDescription);
+			IReadOnlyList<string> fallbackLiveNumbers = CardEditorExtraEffects.GetLiveNumberFallbackTokensForDescription(baseCard, isUpgradePreview: false);
+			IReadOnlyDictionary<string, string> stableLiveNumbers = CardEditorExtraEffects.GetStableLiveNumberTokensForDescription(baseCard, isUpgradePreview: false);
+			return CardEditorDescriptionNumberHighlighter.ApplyLiveNumbersAndManagedLinesFromReference(
+				template,
+				liveBaseDescription,
+				fallbackLiveNumbers,
+				stableLiveNumbers);
 		}
 		catch
 		{

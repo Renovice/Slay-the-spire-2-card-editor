@@ -179,6 +179,8 @@ internal sealed class CardEditorPowerDurationTrackerPower : PowerModel
 			return;
 		}
 
+		await CardEditorPowerPersistenceTrackerPower.RunDurationBoundary(combatState, boundary, side);
+
 		foreach (Creature creature in SnapshotCreatures(combatState))
 		{
 			if (creature == null)

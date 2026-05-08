@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://cov7qxl8xxi8t"
+
+[deps]
+
+files=["res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.pools.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.type.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.rarity.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.cost.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.target.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.keywords.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.coverage.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.confidence.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.needed.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.blockers.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.source.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.applied.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.dynamic.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.override.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.note.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.source.translation"]
+
+source_file="res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.csv"
+dest_files=["res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.pools.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.type.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.rarity.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.cost.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.target.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.keywords.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.coverage.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.confidence.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.needed.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.blockers.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.source.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.applied.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.dynamic.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.override.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.note.translation", "res://Notes/card-editor-coverage-audit/card_editor_game_card_coverage.source.translation"]
+
+[params]
+
+compress=true
+delimiter=0

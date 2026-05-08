@@ -768,6 +768,8 @@ internal static class CardEditorPresetStore
 		public string? PoolTitle { get; set; }
 		public string? Rarity { get; set; }
 		public bool? Enabled { get; set; }
+		public bool? CanBeGeneratedInCombat { get; set; }
+		public bool? CanBeGeneratedByModifiers { get; set; }
 		public string? TitleOverride { get; set; }
 		public bool? ModifiedBaseTextEnabled { get; set; }
 		public string? ModifiedBaseText { get; set; }
@@ -775,6 +777,11 @@ internal static class CardEditorPresetStore
 		public bool? FullArt { get; set; }
 		public string? Finish { get; set; }
 		public Dictionary<string, decimal>? FinishParams { get; set; }
+		public string? CustomFinishId { get; set; }
+		public Dictionary<string, string>? CustomFinishParams { get; set; }
+		public decimal? PortraitOffsetX { get; set; }
+		public decimal? PortraitOffsetY { get; set; }
+		public decimal? PortraitZoom { get; set; }
 		public string? CardType { get; set; }
 		public string? TargetType { get; set; }
 		public int? EnergyCost { get; set; }
@@ -827,6 +834,8 @@ internal static class CardEditorPresetStore
 				PoolTitle = source.PoolTitle,
 				Rarity = source.Rarity?.ToString(),
 				Enabled = source.Enabled,
+				CanBeGeneratedInCombat = source.CanBeGeneratedInCombat,
+				CanBeGeneratedByModifiers = source.CanBeGeneratedByModifiers,
 				TitleOverride = source.TitleOverride,
 				ModifiedBaseTextEnabled = source.ModifiedBaseTextEnabled,
 				ModifiedBaseText = source.ModifiedBaseText,
@@ -836,6 +845,13 @@ internal static class CardEditorPresetStore
 				FinishParams = source.FinishParams != null && source.FinishParams.Count > 0
 					? source.FinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value)
 					: null,
+				CustomFinishId = source.CustomFinishId,
+				CustomFinishParams = source.CustomFinishParams != null && source.CustomFinishParams.Count > 0
+					? new Dictionary<string, string>(source.CustomFinishParams, StringComparer.Ordinal)
+					: null,
+				PortraitOffsetX = source.PortraitOffsetX.HasValue ? (decimal)source.PortraitOffsetX.Value : null,
+				PortraitOffsetY = source.PortraitOffsetY.HasValue ? (decimal)source.PortraitOffsetY.Value : null,
+				PortraitZoom = source.PortraitZoom.HasValue ? (decimal)source.PortraitZoom.Value : null,
 				CardType = source.CardType?.ToString(),
 				TargetType = source.TargetType?.ToString(),
 				EnergyCost = source.EnergyCost,
@@ -927,11 +943,20 @@ internal static class CardEditorPresetStore
 			CardOverride result = new CardOverride
 			{
 				Enabled = Enabled,
+				CanBeGeneratedInCombat = CanBeGeneratedInCombat,
+				CanBeGeneratedByModifiers = CanBeGeneratedByModifiers,
 				TitleOverride = string.IsNullOrWhiteSpace(TitleOverride) ? null : TitleOverride.Trim(),
 				ModifiedBaseTextEnabled = ModifiedBaseTextEnabled,
 				ModifiedBaseText = ModifiedBaseText != null ? ModifiedBaseText : null,
 				EndlessUpgrades = EndlessUpgrades,
 				FullArt = FullArt,
+				CustomFinishId = string.IsNullOrWhiteSpace(CustomFinishId) ? null : CustomFinishId.Trim(),
+				CustomFinishParams = CustomFinishParams != null && CustomFinishParams.Count > 0
+					? new Dictionary<string, string>(CustomFinishParams, StringComparer.Ordinal)
+					: null,
+				PortraitOffsetX = PortraitOffsetX.HasValue ? (float)PortraitOffsetX.Value : null,
+				PortraitOffsetY = PortraitOffsetY.HasValue ? (float)PortraitOffsetY.Value : null,
+				PortraitZoom = PortraitZoom.HasValue ? (float)PortraitZoom.Value : null,
 				EnergyCost = EnergyCost,
 				EnergyCostX = EnergyCostX,
 				StarCost = StarCost,
@@ -1418,8 +1443,16 @@ internal static class CardEditorPresetStore
 		public string? AutoPlayLoopScope { get; set; }
 		public string? UseLimitWindow { get; set; }
 		public string? PowerStackMode { get; set; }
+		public string? PowerPersistenceMode { get; set; }
 		public string? DurationTickPolicy { get; set; }
 		public bool AutoPlayForceExhaust { get; set; }
+		public string? PlayPreventionBlockMode { get; set; }
+		public string? PlayPreventionExemption { get; set; }
+		public string? GlowColorMode { get; set; }
+		public string? GlowCustomColor { get; set; }
+		public string? QuestMode { get; set; }
+		public int QuestActIndex { get; set; } = -1;
+		public string? QuestEventId { get; set; }
 		public string? ConsumedCardAction { get; set; }
 		public string? ConsumedCardValueSource { get; set; }
 		public string? PotionMode { get; set; }
@@ -1546,6 +1579,7 @@ internal static class CardEditorPresetStore
 		public string? CountEnemyIntent { get; set; }
 		public string? CountComparison { get; set; }
 		public int CountConditionAmount { get; set; } = 1;
+		public string? ConditionProgressDisplay { get; set; }
 		public bool CountExcludeSourceCard { get; set; }
 		public string? OstyAction { get; set; }
 		public string? MultiplierStat { get; set; }
@@ -1723,8 +1757,16 @@ internal static class CardEditorPresetStore
 				AutoPlayLoopScope = effect.AutoPlayLoopScope.ToString(),
 				UseLimitWindow = effect.UseLimitWindow.ToString(),
 				PowerStackMode = effect.PowerStackMode.ToString(),
+				PowerPersistenceMode = effect.PowerPersistenceMode.ToString(),
 				DurationTickPolicy = effect.DurationTickPolicy.ToString(),
 				AutoPlayForceExhaust = effect.AutoPlayForceExhaust,
+				PlayPreventionBlockMode = effect.PlayPreventionBlockMode.ToString(),
+				PlayPreventionExemption = effect.PlayPreventionExemption.ToString(),
+				GlowColorMode = effect.GlowColorMode.ToString(),
+				GlowCustomColor = effect.GlowCustomColor,
+				QuestMode = effect.QuestMode.ToString(),
+				QuestActIndex = effect.QuestActIndex,
+				QuestEventId = effect.QuestEventId,
 				ConsumedCardAction = effect.ConsumedCardAction.ToString(),
 				ConsumedCardValueSource = effect.ConsumedCardValueSource.ToString(),
 				PotionMode = effect.PotionMode.ToString(),
@@ -1856,6 +1898,7 @@ internal static class CardEditorPresetStore
 				CountEnemyIntent = effect.CountEnemyIntent.ToString(),
 				CountComparison = effect.CountComparison.ToString(),
 				CountConditionAmount = effect.CountConditionAmount,
+				ConditionProgressDisplay = effect.ConditionProgressDisplay.ToString(),
 				CountExcludeSourceCard = effect.CountExcludeSourceCard,
 				OstyAction = effect.OstyAction.ToString(),
 				MultiplierStat = effect.MultiplierStat.ToString(),
@@ -2090,6 +2133,12 @@ internal static class CardEditorPresetStore
 			{
 				effect.PowerStackMode = parsedPowerStackMode;
 			}
+			effect.PowerPersistenceMode = CardExtraEffectPowerPersistenceMode.Normal;
+			if (!string.IsNullOrWhiteSpace(PowerPersistenceMode)
+				&& Enum.TryParse(PowerPersistenceMode, out CardExtraEffectPowerPersistenceMode parsedPowerPersistenceMode))
+			{
+				effect.PowerPersistenceMode = parsedPowerPersistenceMode;
+			}
 			effect.DurationTickPolicy = CardExtraEffectDurationTickPolicy.Default;
 			if (!string.IsNullOrWhiteSpace(DurationTickPolicy)
 				&& Enum.TryParse(DurationTickPolicy, out CardExtraEffectDurationTickPolicy parsedDurationTickPolicy))
@@ -2097,6 +2146,33 @@ internal static class CardEditorPresetStore
 				effect.DurationTickPolicy = parsedDurationTickPolicy;
 			}
 			effect.AutoPlayForceExhaust = AutoPlayForceExhaust;
+			effect.PlayPreventionBlockMode = CardExtraEffectPlayPreventionBlockMode.ManualAndAutoPlay;
+			if (!string.IsNullOrWhiteSpace(PlayPreventionBlockMode)
+				&& Enum.TryParse(PlayPreventionBlockMode, out CardExtraEffectPlayPreventionBlockMode parsedPlayPreventionBlockMode))
+			{
+				effect.PlayPreventionBlockMode = parsedPlayPreventionBlockMode;
+			}
+			effect.PlayPreventionExemption = CardExtraEffectPlayPreventionExemption.None;
+			if (!string.IsNullOrWhiteSpace(PlayPreventionExemption)
+				&& Enum.TryParse(PlayPreventionExemption, out CardExtraEffectPlayPreventionExemption parsedPlayPreventionExemption))
+			{
+				effect.PlayPreventionExemption = parsedPlayPreventionExemption;
+			}
+			effect.GlowColorMode = CardExtraEffectGlowColorMode.Red;
+			if (!string.IsNullOrWhiteSpace(GlowColorMode)
+				&& Enum.TryParse(GlowColorMode, out CardExtraEffectGlowColorMode parsedGlowColorMode))
+			{
+				effect.GlowColorMode = parsedGlowColorMode;
+			}
+			effect.GlowCustomColor = string.IsNullOrWhiteSpace(GlowCustomColor) ? null : GlowCustomColor.Trim();
+			effect.QuestMode = CardExtraEffectQuestMode.RunProgress;
+			if (!string.IsNullOrWhiteSpace(QuestMode)
+				&& Enum.TryParse(QuestMode, out CardExtraEffectQuestMode parsedQuestMode))
+			{
+				effect.QuestMode = parsedQuestMode;
+			}
+			effect.QuestActIndex = QuestActIndex <= 0 ? -1 : QuestActIndex;
+			effect.QuestEventId = string.IsNullOrWhiteSpace(QuestEventId) ? null : QuestEventId.Trim();
 			effect.ConsumedCardAction = CardExtraEffectConsumedCardAction.Exhaust;
 			if (!string.IsNullOrWhiteSpace(ConsumedCardAction)
 				&& Enum.TryParse(ConsumedCardAction, out CardExtraEffectConsumedCardAction parsedConsumedCardAction))
@@ -2763,6 +2839,13 @@ internal static class CardEditorPresetStore
 			}
 			effect.CountComparison = countComparison;
 			effect.CountConditionAmount = CountConditionAmount;
+			CardExtraEffectConditionProgressDisplay conditionProgressDisplay = CardExtraEffectConditionProgressDisplay.Hidden;
+			if (!string.IsNullOrWhiteSpace(ConditionProgressDisplay)
+				&& Enum.TryParse(ConditionProgressDisplay, out CardExtraEffectConditionProgressDisplay parsedConditionProgressDisplay))
+			{
+				conditionProgressDisplay = parsedConditionProgressDisplay;
+			}
+			effect.ConditionProgressDisplay = conditionProgressDisplay;
 
 			CardExtraEffectOstyAction ostyAction = CardExtraEffectOstyAction.Attack;
 			if (!string.IsNullOrWhiteSpace(OstyAction) && Enum.TryParse(OstyAction, out CardExtraEffectOstyAction parsedOstyAction))

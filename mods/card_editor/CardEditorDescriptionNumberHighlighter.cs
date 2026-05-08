@@ -26,14 +26,19 @@ internal static class CardEditorDescriptionNumberHighlighter
 	private static readonly Lazy<HashSet<string>> _runtimeKeywordLineKeys = new Lazy<HashSet<string>>(BuildRuntimeKeywordLineKeys);
 	private static readonly Lazy<HashSet<string>> _runtimeReplayLineKeys = new Lazy<HashSet<string>>(BuildRuntimeReplayLineKeys);
 
-	public static string ApplyLiveNumbersFromReference(string template, string? referenceDescription)
+	public static string ApplyLiveNumbersFromReference(
+		string template,
+		string? referenceDescription,
+		IReadOnlyList<string>? fallbackNumberTokens = null,
+		IReadOnlyDictionary<string, string>? stableTokenValues = null)
 	{
 		if (string.IsNullOrWhiteSpace(template))
 		{
 			return template;
 		}
 
-		if (TryApplySemanticLiveNumberTokens(template, referenceDescription, out string semanticText))
+		List<RenderedNumberToken> fallbackTokens = BuildFallbackRenderedNumberTokens(fallbackNumberTokens);
+		if (TryApplySemanticLiveNumberTokens(template, referenceDescription, fallbackTokens, stableTokenValues, out string semanticText))
 		{
 			return semanticText;
 		}
@@ -57,6 +62,10 @@ internal static class CardEditorDescriptionNumberHighlighter
 		{
 			List<string> templateTokens = ExtractVisibleNumberTokens(template, includeHighlightedNumbers: false);
 			List<RenderedNumberToken> fallbackReferenceTokens = ExtractRenderedNumberTokens(referenceDescription);
+			if (fallbackReferenceTokens.Count == 0 && fallbackTokens.Count > 0)
+			{
+				fallbackReferenceTokens = fallbackTokens;
+			}
 			if (templateTokens.Count == 0 || fallbackReferenceTokens.Count == 0)
 			{
 				return template;
@@ -66,6 +75,10 @@ internal static class CardEditorDescriptionNumberHighlighter
 		}
 
 		List<RenderedNumberToken> referenceTokens = ExtractRenderedNumberTokens(referenceDescription);
+		if (referenceTokens.Count == 0 && fallbackTokens.Count > 0)
+		{
+			referenceTokens = fallbackTokens;
+		}
 		if (referenceTokens.Count == 0)
 		{
 			return template;
@@ -74,7 +87,13 @@ internal static class CardEditorDescriptionNumberHighlighter
 		return ApplyRenderedNumberTokens(template, referenceTokens);
 	}
 
-	public static string BuildLiveNumberTokenTemplate(string referenceDescription)
+	public static string BuildStableEffectAmountToken(string effectId)
+		=> "e:" + (effectId ?? string.Empty).Trim();
+
+	public static string NormalizeLiveNumberLineKey(string text)
+		=> NormalizeVisibleLineWithoutNumbers(text);
+
+	public static string BuildLiveNumberTokenTemplate(string referenceDescription, IReadOnlyDictionary<string, string>? liveTokenByLineKey = null)
 	{
 		if (string.IsNullOrWhiteSpace(referenceDescription))
 		{
@@ -84,6 +103,34 @@ internal static class CardEditorDescriptionNumberHighlighter
 		StringBuilder builder = new StringBuilder(referenceDescription.Length + 16);
 		int tokenIndex = 0;
 		int imageDepth = 0;
+		string[] lines = SplitDescriptionLines(referenceDescription);
+		if (liveTokenByLineKey != null && liveTokenByLineKey.Count > 0 && lines.Length > 0)
+		{
+			bool replacedLine = false;
+			List<string> renderedLines = new List<string>(lines.Length);
+			foreach (string line in lines)
+			{
+				string key = NormalizeVisibleLineWithoutNumbers(line);
+				if (!string.IsNullOrWhiteSpace(key) && liveTokenByLineKey.TryGetValue(key, out string? stableToken))
+				{
+					string converted = ReplaceVisibleNumbersWithTokens(
+						line,
+						_ => "{{" + stableToken + "}}",
+						out bool lineReplaced);
+					renderedLines.Add(converted);
+					replacedLine |= lineReplaced;
+				}
+				else
+				{
+					renderedLines.Add(line);
+				}
+			}
+
+			if (replacedLine)
+			{
+				return string.Join('\n', renderedLines);
+			}
+		}
 
 		for (int i = 0; i < referenceDescription.Length;)
 		{
@@ -115,13 +162,16 @@ internal static class CardEditorDescriptionNumberHighlighter
 		return tokenIndex > 0 ? builder.ToString() : referenceDescription;
 	}
 
-	public static string BuildLiveNumberTokenTemplateFromCustomText(string customText, string? referenceDescription)
+	public static string BuildLiveNumberTokenTemplateFromCustomText(
+		string customText,
+		string? referenceDescription,
+		IReadOnlyDictionary<string, string>? liveTokenByLineKey = null)
 	{
 		if (string.IsNullOrWhiteSpace(customText))
 		{
 			return string.IsNullOrWhiteSpace(referenceDescription)
 				? customText
-				: BuildLiveNumberTokenTemplate(referenceDescription);
+				: BuildLiveNumberTokenTemplate(referenceDescription, liveTokenByLineKey);
 		}
 
 		if (string.IsNullOrWhiteSpace(referenceDescription))
@@ -166,6 +216,26 @@ internal static class CardEditorDescriptionNumberHighlighter
 		{
 			string key = NormalizeVisibleLineWithoutNumbers(customLine);
 			if (!string.IsNullOrWhiteSpace(key)
+				&& liveTokenByLineKey != null
+				&& liveTokenByLineKey.TryGetValue(key, out string? stableToken))
+			{
+				string converted = ReplaceVisibleNumbersWithTokens(
+					customLine,
+					_ => "{{" + stableToken + "}}",
+					out bool stableReplaced,
+					rawToken =>
+					{
+						if (IsSemanticLiveNumberToken(rawToken))
+						{
+							globalTokenIndex++;
+						}
+					});
+				replacedAny |= stableReplaced;
+				renderedLines.Add(converted);
+				continue;
+			}
+
+			if (!string.IsNullOrWhiteSpace(key)
 				&& !duplicateKeys.Contains(key)
 				&& referenceLineIndexByKey.TryGetValue(key, out int referenceLineIndex))
 			{
@@ -209,7 +279,34 @@ internal static class CardEditorDescriptionNumberHighlighter
 		return replacedAny ? string.Join('\n', renderedLines) : customText;
 	}
 
-	private static bool TryApplySemanticLiveNumberTokens(string template, string? referenceDescription, out string rendered)
+	private static List<RenderedNumberToken> BuildFallbackRenderedNumberTokens(IReadOnlyList<string>? fallbackNumberTokens)
+	{
+		if (fallbackNumberTokens == null || fallbackNumberTokens.Count == 0)
+		{
+			return new List<RenderedNumberToken>();
+		}
+
+		List<RenderedNumberToken> tokens = new List<RenderedNumberToken>(fallbackNumberTokens.Count);
+		foreach (string? rawToken in fallbackNumberTokens)
+		{
+			string token = rawToken?.Trim() ?? string.Empty;
+			if (string.IsNullOrWhiteSpace(token))
+			{
+				continue;
+			}
+
+			tokens.Add(new RenderedNumberToken(token, token));
+		}
+
+		return tokens;
+	}
+
+	private static bool TryApplySemanticLiveNumberTokens(
+		string template,
+		string? referenceDescription,
+		IReadOnlyList<RenderedNumberToken> fallbackGlobalTokens,
+		IReadOnlyDictionary<string, string>? stableTokenValues,
+		out string rendered)
 	{
 		rendered = template;
 		if (!template.Contains("{{", StringComparison.Ordinal))
@@ -239,7 +336,7 @@ internal static class CardEditorDescriptionNumberHighlighter
 				if (tokenEnd >= 0)
 				{
 					string token = template.Substring(i + 2, tokenEnd - i - 2);
-					if (TryResolveSemanticLiveNumberToken(token, globalTokens, lineTokens, out string replacement))
+					if (TryResolveSemanticLiveNumberToken(token, globalTokens, lineTokens, fallbackGlobalTokens, stableTokenValues, out string replacement))
 					{
 						builder.Append(replacement);
 						replacedAny = true;
@@ -324,6 +421,11 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return false;
 		}
 
+		if (token.StartsWith("e:", StringComparison.OrdinalIgnoreCase))
+		{
+			return token.Length > 2;
+		}
+
 		if ((token[0] == 'n' || token[0] == 'N')
 			&& TryParsePositiveInt(token, 1, token.Length - 1, out _))
 		{
@@ -351,6 +453,8 @@ internal static class CardEditorDescriptionNumberHighlighter
 		string rawToken,
 		IReadOnlyList<RenderedNumberToken> globalTokens,
 		IReadOnlyList<List<RenderedNumberToken>> lineTokens,
+		IReadOnlyList<RenderedNumberToken> fallbackGlobalTokens,
+		IReadOnlyDictionary<string, string>? stableTokenValues,
 		out string replacement)
 	{
 		replacement = string.Empty;
@@ -360,11 +464,17 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return false;
 		}
 
+		if (stableTokenValues != null && stableTokenValues.TryGetValue(token, out string? stableReplacement))
+		{
+			replacement = stableReplacement;
+			return true;
+		}
+
 		if ((token[0] == 'n' || token[0] == 'N')
 			&& TryParsePositiveInt(token, 1, token.Length - 1, out int globalNumberIndex))
 		{
-			replacement = GetRenderedTokenOrFallback(globalTokens, globalNumberIndex - 1);
-			return true;
+			return TryGetRenderedToken(globalTokens, globalNumberIndex - 1, out replacement)
+				|| TryGetRenderedToken(fallbackGlobalTokens, globalNumberIndex - 1, out replacement);
 		}
 
 		if (token[0] == 'l' || token[0] == 'L')
@@ -386,8 +496,7 @@ internal static class CardEditorDescriptionNumberHighlighter
 				{
 					tokens = lineTokens[zeroBasedLineIndex];
 				}
-				replacement = GetRenderedTokenOrFallback(tokens, lineNumberIndex - 1);
-				return true;
+				return TryGetRenderedToken(tokens, lineNumberIndex - 1, out replacement);
 			}
 		}
 
@@ -415,11 +524,16 @@ internal static class CardEditorDescriptionNumberHighlighter
 		return value > 0;
 	}
 
-	private static string GetRenderedTokenOrFallback(IReadOnlyList<RenderedNumberToken> tokens, int zeroBasedIndex)
+	private static bool TryGetRenderedToken(IReadOnlyList<RenderedNumberToken> tokens, int zeroBasedIndex, out string renderedText)
 	{
-		return zeroBasedIndex >= 0 && zeroBasedIndex < tokens.Count
-			? tokens[zeroBasedIndex].RenderedText
-			: "0";
+		renderedText = string.Empty;
+		if (zeroBasedIndex < 0 || zeroBasedIndex >= tokens.Count)
+		{
+			return false;
+		}
+
+		renderedText = tokens[zeroBasedIndex].RenderedText;
+		return true;
 	}
 
 	private static string? TryApplyLiveNumbersByMatchingLines(string template, string referenceDescription)
@@ -512,9 +626,13 @@ internal static class CardEditorDescriptionNumberHighlighter
 		return builder.ToString();
 	}
 
-	public static string ApplyLiveNumbersAndManagedLinesFromReference(string template, string? referenceDescription)
+	public static string ApplyLiveNumbersAndManagedLinesFromReference(
+		string template,
+		string? referenceDescription,
+		IReadOnlyList<string>? fallbackNumberTokens = null,
+		IReadOnlyDictionary<string, string>? stableTokenValues = null)
 	{
-		string synced = ApplyLiveNumbersFromReference(template, referenceDescription);
+		string synced = ApplyLiveNumbersFromReference(template, referenceDescription, fallbackNumberTokens, stableTokenValues);
 		return ApplyManagedLinesFromReference(synced, referenceDescription);
 	}
 

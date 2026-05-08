@@ -1,0 +1,15 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://b3k8dmoh7tbno"
+valid=false
+
+[deps]
+
+source_file="res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards_semicolon.csv"
+
+[params]
+
+compress=true
+delimiter=0

@@ -36,18 +36,37 @@ internal static class CardEditorCombatStateCompat
 			return reflected;
 		}
 
-		return source switch
+		try
 		{
-			CardModel card => card.TryGetOwnerCreature().GetConcreteCombatState(),
-			Creature => null,
-			PowerModel power => power.TryGetOwner().GetConcreteCombatState(),
-			_ => null
-		};
+			return source switch
+			{
+				CardModel card => card.TryGetOwnerCreature().GetConcreteCombatState(),
+				Creature => null,
+				PowerModel power => power.TryGetOwner().GetConcreteCombatState(),
+				_ => null
+			};
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	internal static bool IsMutableSafe(this AbstractModel? model)
+	{
+		try
+		{
+			return model?.IsMutable == true;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	internal static Player? TryGetOwner(this CardModel? card)
 	{
-		if (card == null || !card.IsMutable)
+		if (card == null || !card.IsMutableSafe())
 		{
 			return null;
 		}
@@ -86,7 +105,7 @@ internal static class CardEditorCombatStateCompat
 
 	internal static Creature? TryGetOwner(this PowerModel? power)
 	{
-		if (power == null || !power.IsMutable)
+		if (power == null || !power.IsMutableSafe())
 		{
 			return null;
 		}

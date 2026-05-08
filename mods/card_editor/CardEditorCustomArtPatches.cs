@@ -25,6 +25,25 @@ internal static class CardEditorCustomPortraitLoader
 	[ThreadStatic]
 	private static HashSet<ModelId>? _resolvingSourcePortraitPaths;
 
+	internal readonly struct PortraitTransform
+	{
+		public PortraitTransform(float offsetX, float offsetY, float zoom)
+		{
+			OffsetX = offsetX;
+			OffsetY = offsetY;
+			Zoom = zoom <= 0f ? 1f : zoom;
+		}
+
+		public float OffsetX { get; }
+		public float OffsetY { get; }
+		public float Zoom { get; }
+
+		public bool IsDefault =>
+			Math.Abs(OffsetX) < 0.01f
+			&& Math.Abs(OffsetY) < 0.01f
+			&& Math.Abs(Zoom - 1f) < 0.001f;
+	}
+
 	public static bool TryGetCustomPortrait(ModelId cardId, out Texture2D texture)
 	{
 		texture = null!;
@@ -102,6 +121,32 @@ internal static class CardEditorCustomPortraitLoader
 		}
 
 		return TryGetPoolOverridePortraitFallback(card, out texture);
+	}
+
+	public static bool TryGetPortraitTransform(CardModel? card, out PortraitTransform transform)
+	{
+		transform = default;
+
+		if (card?.Id == null || CardEditorOverrides.SuppressAllOverrides)
+		{
+			return false;
+		}
+
+		if (CardEditorExtraEffects.TryGetDynamicIdentitySource(card, out CardModel identitySource))
+		{
+			card = identitySource;
+		}
+
+		if (!CardEditorOverrides.TryGetEffectiveOverride(card.Id, out CardOverride overrideData))
+		{
+			return false;
+		}
+
+		float x = overrideData.PortraitOffsetX ?? 0f;
+		float y = overrideData.PortraitOffsetY ?? 0f;
+		float zoom = overrideData.PortraitZoom ?? 1f;
+		transform = new PortraitTransform(x, y, Math.Clamp(zoom, 0.25f, 4f));
+		return !transform.IsDefault;
 	}
 
 	public static bool TryGetPortraitPath(CardModel? card, bool beta, out string portraitPath)
@@ -519,6 +564,10 @@ internal static class NCard_Reload_CustomPortrait_Patch
 		AccessTools.FieldRefAccess<NCard, TextureRect>("_portrait");
 	private static readonly AccessTools.FieldRef<NCard, TextureRect> AncientPortraitRef =
 		AccessTools.FieldRefAccess<NCard, TextureRect>("_ancientPortrait");
+	private const string OriginalPositionMeta = "card_editor_original_portrait_position";
+	private const string OriginalScaleMeta = "card_editor_original_portrait_scale";
+	private const string OriginalPivotMeta = "card_editor_original_portrait_pivot";
+	private const string TransformAppliedMeta = "card_editor_portrait_transform_applied";
 
 	public static void Postfix(NCard __instance)
 	{
@@ -528,28 +577,112 @@ internal static class NCard_Reload_CustomPortrait_Patch
 			return;
 		}
 
-		if (!CardEditorCustomPortraitLoader.TryGetPortrait(model, out Texture2D texture))
-		{
-			return;
-		}
+		bool hasCustomPortrait = CardEditorCustomPortraitLoader.TryGetPortrait(model, out Texture2D texture);
+		bool hasTransform = CardEditorCustomPortraitLoader.TryGetPortraitTransform(model, out CardEditorCustomPortraitLoader.PortraitTransform transform);
 
 		try
 		{
 			TextureRect portrait = PortraitRef(__instance);
 			if (portrait != null)
 			{
-				portrait.Texture = texture;
+				if (hasCustomPortrait)
+				{
+					portrait.Texture = texture;
+				}
+				SyncPortraitTransform(portrait, hasTransform && portrait.Visible, transform);
 			}
 
 			TextureRect ancientPortrait = AncientPortraitRef(__instance);
 			if (ancientPortrait != null)
 			{
-				ancientPortrait.Texture = texture;
+				if (hasCustomPortrait)
+				{
+					ancientPortrait.Texture = texture;
+				}
+				SyncPortraitTransform(ancientPortrait, hasTransform && ancientPortrait.Visible, transform);
 			}
 		}
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Failed applying custom portrait to NCard: {ex.GetType().Name}: {ex.Message}");
+		}
+	}
+
+	private static void SyncPortraitTransform(TextureRect portrait, bool hasTransform, CardEditorCustomPortraitLoader.PortraitTransform transform)
+	{
+		if (hasTransform)
+		{
+			ApplyPortraitTransform(portrait, transform);
+			return;
+		}
+
+		ResetPortraitTransformIfNeeded(portrait);
+	}
+
+	private static void ApplyPortraitTransform(TextureRect portrait, CardEditorCustomPortraitLoader.PortraitTransform transform)
+	{
+		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		{
+			return;
+		}
+
+		CacheOriginalPortraitLayout(portrait);
+		Vector2 originalPosition = portrait.GetMeta(OriginalPositionMeta).AsVector2();
+		Vector2 originalScale = portrait.GetMeta(OriginalScaleMeta).AsVector2();
+		Vector2 originalPivot = portrait.GetMeta(OriginalPivotMeta).AsVector2();
+
+		portrait.Position = originalPosition;
+		portrait.Scale = originalScale;
+		portrait.PivotOffset = originalPivot;
+
+		if (transform.IsDefault)
+		{
+			return;
+		}
+
+		portrait.Position = originalPosition + new Vector2(transform.OffsetX, transform.OffsetY);
+		portrait.Scale = originalScale * transform.Zoom;
+		portrait.SetMeta(TransformAppliedMeta, true);
+	}
+
+	private static void ResetPortraitTransformIfNeeded(TextureRect portrait)
+	{
+		if (portrait == null
+			|| !GodotObject.IsInstanceValid(portrait)
+			|| !portrait.HasMeta(TransformAppliedMeta)
+			|| !portrait.GetMeta(TransformAppliedMeta).AsBool())
+		{
+			return;
+		}
+
+		if (portrait.HasMeta(OriginalPositionMeta))
+		{
+			portrait.Position = portrait.GetMeta(OriginalPositionMeta).AsVector2();
+		}
+		if (portrait.HasMeta(OriginalScaleMeta))
+		{
+			portrait.Scale = portrait.GetMeta(OriginalScaleMeta).AsVector2();
+		}
+		if (portrait.HasMeta(OriginalPivotMeta))
+		{
+			portrait.PivotOffset = portrait.GetMeta(OriginalPivotMeta).AsVector2();
+		}
+		portrait.SetMeta(TransformAppliedMeta, false);
+	}
+
+	private static void CacheOriginalPortraitLayout(TextureRect portrait)
+	{
+		if (!portrait.HasMeta(OriginalPositionMeta))
+		{
+			portrait.SetMeta(OriginalPositionMeta, portrait.Position);
+		}
+		if (!portrait.HasMeta(OriginalScaleMeta))
+		{
+			portrait.SetMeta(OriginalScaleMeta, portrait.Scale);
+		}
+		if (!portrait.HasMeta(OriginalPivotMeta))
+		{
+			portrait.SetMeta(OriginalPivotMeta, portrait.PivotOffset);
 		}
 	}
 }

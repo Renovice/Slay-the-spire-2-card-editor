@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://vvg0v1xv2nmu"
+
+[deps]
+
+files=["res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.pools.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.type.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.rarity.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.cost.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.target.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.coverage.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.confidence.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.needed.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.blockers.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.note.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.source.translation"]
+
+source_file="res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.csv"
+dest_files=["res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.pools.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.type.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.rarity.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.cost.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.target.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.coverage.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.confidence.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.needed.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.blockers.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.note.translation", "res://Notes/card-editor-coverage-audit/card_editor_partial_and_no_cards.source.translation"]
+
+[params]
+
+compress=true
+delimiter=0

@@ -205,6 +205,7 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 internal sealed class CardEditorMultiplayerSyncRequestMessage : INetMessage, IPacketSerializable
 {
 	public bool ShouldBroadcast => false;
+	public bool ShouldBuffer => true;
 	public NetTransferMode Mode => NetTransferMode.Reliable;
 	public LogLevel LogLevel => LogLevel.Debug;
 
@@ -223,6 +224,7 @@ internal sealed class CardEditorMultiplayerSnapshotMessage : INetMessage, IPacke
 	public string StateJson { get; set; } = string.Empty;
 
 	public bool ShouldBroadcast => true;
+	public bool ShouldBuffer => true;
 	public NetTransferMode Mode => NetTransferMode.Reliable;
 	public LogLevel LogLevel => LogLevel.Debug;
 
@@ -244,6 +246,7 @@ internal sealed class CardEditorMultiplayerEditRequestMessage : INetMessage, IPa
 	public string StateJson { get; set; } = string.Empty;
 
 	public bool ShouldBroadcast => false;
+	public bool ShouldBuffer => true;
 	public NetTransferMode Mode => NetTransferMode.Reliable;
 	public LogLevel LogLevel => LogLevel.Debug;
 
@@ -283,15 +286,27 @@ internal static class CardEditorMultiplayerSync
 {
 	private const string TickboxTemplateLineName = "LimitFpsInBackground";
 	private const string TickboxTemplateFallbackLineName = "CommonTooltips";
+	private const string PreloadLineName = "CardEditorPreloadOnLaunchLine";
+	private const string LegacyPreloadLineName = "CardEditorLegacyPreloadLine";
 	private const string SyncLineName = "CardEditorMultiplayerSyncLine";
 	private const string AuthorityLineName = "CardEditorMultiplayerAuthorityLine";
+	private const string PreloadDividerName = "CardEditorPreloadOnLaunchRowDivider";
+	private const string LegacyPreloadDividerName = "CardEditorLegacyPreloadRowDivider";
 	private const string SyncDividerName = "CardEditorMultiplayerSyncRowDivider";
 	private const string AuthorityDividerName = "CardEditorMultiplayerAuthorityRowDivider";
+	private const string PreloadLabelName = "CardEditorPreloadOnLaunchLabel";
+	private const string LegacyPreloadLabelName = "CardEditorLegacyPreloadLabel";
 	private const string SyncLabelName = "CardEditorMultiplayerSyncLabel";
 	private const string AuthorityLabelName = "CardEditorMultiplayerAuthorityLabel";
+	private const string PreloadTickboxName = "CardEditorPreloadOnLaunchTickbox";
+	private const string LegacyPreloadTickboxName = "CardEditorLegacyPreloadTickbox";
 	private const string SyncTickboxName = "CardEditorMultiplayerSyncTickbox";
 	private const string AuthorityTickboxName = "CardEditorMultiplayerAuthorityTickbox";
 	private const string SendFeedbackLineName = "SendFeedback";
+	private const string PreloadHeaderLocKey = "CARD_EDITOR_PRELOAD_ON_LAUNCH_HEADER";
+	private const string PreloadDescriptionLocKey = "CARD_EDITOR_PRELOAD_ON_LAUNCH_DESCRIPTION";
+	private const string LegacyPreloadHeaderLocKey = "CARD_EDITOR_LEGACY_PRELOAD_HEADER";
+	private const string LegacyPreloadDescriptionLocKey = "CARD_EDITOR_LEGACY_PRELOAD_DESCRIPTION";
 	private const string SyncHeaderLocKey = "CARD_EDITOR_MULTIPLAYER_SYNC_HEADER";
 	private const string SyncDescriptionLocKey = "CARD_EDITOR_MULTIPLAYER_SYNC_DESCRIPTION";
 	private const string AuthorityHeaderLocKey = "CARD_EDITOR_MULTIPLAYER_AUTHORITY_HEADER";
@@ -496,6 +511,40 @@ internal static class CardEditorMultiplayerSync
 
 		EnsureSettingsTickboxLine(
 			content,
+			PreloadLineName,
+			PreloadLabelName,
+			PreloadTickboxName,
+			GetSettingsUiText(PreloadHeaderLocKey, "Preload On Launch"),
+			ticked =>
+			{
+				if (_isRefreshingSettingsUi)
+				{
+					return;
+				}
+
+				CardEditorPerformanceSettings.SetPreloadEditorPopupsOnLaunch(ticked);
+				RefreshSettingsUi(content);
+			});
+
+		EnsureSettingsTickboxLine(
+			content,
+			LegacyPreloadLineName,
+			LegacyPreloadLabelName,
+			LegacyPreloadTickboxName,
+			GetSettingsUiText(LegacyPreloadHeaderLocKey, "Legacy Popup Preload"),
+			ticked =>
+			{
+				if (_isRefreshingSettingsUi)
+				{
+					return;
+				}
+
+				CardEditorPerformanceSettings.SetLegacyPreloadEveryEditorPopupOnLaunch(ticked);
+				RefreshSettingsUi(content);
+			});
+
+		EnsureSettingsTickboxLine(
+			content,
 			SyncLineName,
 			SyncLabelName,
 			SyncTickboxName,
@@ -544,6 +593,8 @@ internal static class CardEditorMultiplayerSync
 				RefreshSettingsUi(content);
 			});
 
+		EnsureSettingsDivider(content, PreloadDividerName);
+		EnsureSettingsDivider(content, LegacyPreloadDividerName);
 		EnsureSettingsDivider(content, SyncDividerName);
 		EnsureSettingsDivider(content, AuthorityDividerName);
 
@@ -556,9 +607,25 @@ internal static class CardEditorMultiplayerSync
 		_isRefreshingSettingsUi = true;
 		try
 		{
+			NSettingsTickbox? preloadTickbox = FindSettingsTickbox(content, PreloadLineName);
+			NSettingsTickbox? legacyPreloadTickbox = FindSettingsTickbox(content, LegacyPreloadLineName);
 			NSettingsTickbox? syncTickbox = FindSettingsTickbox(content, SyncLineName);
 			NSettingsTickbox? authorityTickbox = FindSettingsTickbox(content, AuthorityLineName);
+			RichTextLabel? legacyPreloadLabel = FindNamedDescendant<RichTextLabel>(content.GetNodeOrNull(LegacyPreloadLineName), LegacyPreloadLabelName);
 			RichTextLabel? authorityLabel = FindNamedDescendant<RichTextLabel>(content.GetNodeOrNull(AuthorityLineName), AuthorityLabelName);
+
+			if (preloadTickbox != null)
+			{
+				preloadTickbox.IsTicked = CardEditorPerformanceSettings.PreloadEditorPopupsOnLaunch;
+				SetSettingsLineInteractive(preloadTickbox, null, interactive: true);
+			}
+
+			if (legacyPreloadTickbox != null)
+			{
+				bool preloadEnabled = CardEditorPerformanceSettings.PreloadEditorPopupsOnLaunch;
+				legacyPreloadTickbox.IsTicked = CardEditorPerformanceSettings.LegacyPreloadEveryEditorPopupOnLaunch;
+				SetSettingsLineInteractive(legacyPreloadTickbox, legacyPreloadLabel, preloadEnabled);
+			}
 
 			if (syncTickbox != null)
 			{
@@ -566,29 +633,16 @@ internal static class CardEditorMultiplayerSync
 					? _remoteSyncActive || CardEditorMultiplayerSettings.MultiplayerSyncEnabled
 					: CardEditorMultiplayerSettings.MultiplayerSyncEnabled;
 				syncTickbox.IsTicked = displayedSyncEnabled;
+				SetSettingsLineInteractive(syncTickbox, null, interactive: true);
 			}
 
 			CardEditorMultiplayerAuthorityMode displayedAuthorityMode = GetDisplayedAuthorityMode();
-			bool authorityInteractive = IsSyncEnabledForCurrentSession && CanChangeAuthorityModeSetting();
+			bool authorityInteractive = CanChangeAuthorityModeSetting();
 
 			if (authorityTickbox != null)
 			{
 				authorityTickbox.IsTicked = displayedAuthorityMode == CardEditorMultiplayerAuthorityMode.AnyPlayer;
-				if (authorityInteractive)
-				{
-					authorityTickbox.Enable();
-					authorityTickbox.Modulate = Colors.White;
-				}
-				else
-				{
-					authorityTickbox.Disable();
-					authorityTickbox.Modulate = StsColors.gray;
-				}
-			}
-
-			if (authorityLabel != null)
-			{
-				authorityLabel.Modulate = authorityInteractive ? Colors.White : StsColors.gray;
+				SetSettingsLineInteractive(authorityTickbox, authorityLabel, authorityInteractive);
 			}
 
 			LogSettingsUiState(content, "RefreshSettingsUi:end");
@@ -596,6 +650,28 @@ internal static class CardEditorMultiplayerSync
 		finally
 		{
 			_isRefreshingSettingsUi = false;
+		}
+	}
+
+	private static void SetSettingsLineInteractive(NSettingsTickbox tickbox, RichTextLabel? label, bool interactive)
+	{
+		if (interactive)
+		{
+			tickbox.Enable();
+			tickbox.Modulate = Colors.White;
+			if (label != null)
+			{
+				label.Modulate = Colors.White;
+			}
+
+			return;
+		}
+
+		tickbox.Disable();
+		tickbox.Modulate = StsColors.gray;
+		if (label != null)
+		{
+			label.Modulate = StsColors.gray;
 		}
 	}
 
@@ -655,6 +731,7 @@ internal static class CardEditorMultiplayerSync
 		if (tickbox != null)
 		{
 			tickbox.Name = tickboxName;
+			IsolateDuplicatedSettingsTickbox(tickbox);
 			tickbox.Toggled += toggled => onToggled(toggled.IsTicked);
 		}
 		else
@@ -667,6 +744,28 @@ internal static class CardEditorMultiplayerSync
 		CardEditorMod.VerboseLog(
 			$"[CardEditor][MultiplayerSettings] Added line '{lineName}' label='{labelName}' tickbox='{tickboxName}' " +
 			$"contentChildren={content.GetChildCount()} template='{templateLine.Name}' tickboxFound={(tickbox != null)}.");
+	}
+
+	private static void IsolateDuplicatedSettingsTickbox(NSettingsTickbox tickbox)
+	{
+		try
+		{
+			tickbox.FocusNeighborLeft = new NodePath(".");
+			tickbox.FocusNeighborRight = new NodePath(".");
+			tickbox.FocusNeighborTop = new NodePath(".");
+			tickbox.FocusNeighborBottom = new NodePath(".");
+
+			Control? visuals = tickbox.GetNodeOrNull<Control>("%TickboxVisuals")
+				?? FindNamedDescendant<Control>(tickbox, "TickboxVisuals");
+			if (visuals?.Material is Material material)
+			{
+				visuals.Material = (Material)material.Duplicate(true);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][Settings] Failed isolating duplicated settings tickbox '{tickbox.Name}': {ex}");
+		}
 	}
 
 	private static void EnsureSettingsDivider(VBoxContainer content, string dividerName)
@@ -692,6 +791,10 @@ internal static class CardEditorMultiplayerSync
 
 	private static void PositionSettingsLines(VBoxContainer content)
 	{
+		Node? preloadLine = content.GetNodeOrNull(PreloadLineName);
+		Node? preloadDivider = content.GetNodeOrNull(PreloadDividerName);
+		Node? legacyPreloadLine = content.GetNodeOrNull(LegacyPreloadLineName);
+		Node? legacyPreloadDivider = content.GetNodeOrNull(LegacyPreloadDividerName);
 		Node? syncLine = content.GetNodeOrNull(SyncLineName);
 		Node? syncDivider = content.GetNodeOrNull(SyncDividerName);
 		Node? authorityLine = content.GetNodeOrNull(AuthorityLineName);
@@ -700,6 +803,26 @@ internal static class CardEditorMultiplayerSync
 		if (sendFeedbackLine == null)
 		{
 			return;
+		}
+
+		if (preloadLine != null)
+		{
+			content.MoveChild(preloadLine, sendFeedbackLine.GetIndex());
+		}
+
+		if (preloadDivider != null)
+		{
+			content.MoveChild(preloadDivider, sendFeedbackLine.GetIndex());
+		}
+
+		if (legacyPreloadLine != null)
+		{
+			content.MoveChild(legacyPreloadLine, sendFeedbackLine.GetIndex());
+		}
+
+		if (legacyPreloadDivider != null)
+		{
+			content.MoveChild(legacyPreloadDivider, sendFeedbackLine.GetIndex());
 		}
 
 		if (syncLine != null)
@@ -735,6 +858,10 @@ internal static class CardEditorMultiplayerSync
 			LocTable table = LocManager.Instance.GetTable("settings_ui");
 			table.MergeWith(new Dictionary<string, string>
 			{
+				{ PreloadHeaderLocKey, "Preload On Launch" },
+				{ PreloadDescriptionLocKey, "Warms Card Editor popup UI during startup. Disable this for faster startup; the first editor opens will do more work." },
+				{ LegacyPreloadHeaderLocKey, "Legacy Popup Preload" },
+				{ LegacyPreloadDescriptionLocKey, "Uses the old per-card popup prebuild path instead of the shared popup cache. This can make editor opens instant, but may create a very large hidden UI tree and cause hitches." },
 				{ SyncHeaderLocKey, "Multiplayer Sync" },
 				{ SyncDescriptionLocKey, "Automatically syncs the host's Card Editor changes for the current multiplayer session without overwriting your own local preset files." },
 				{ AuthorityHeaderLocKey, "Any Player Control" },
@@ -859,16 +986,24 @@ internal static class CardEditorMultiplayerSync
 	{
 		try
 		{
-			Node? syncLine = content.GetNodeOrNull("CardEditorMultiplayerSyncLine");
-			Node? authorityLine = content.GetNodeOrNull("CardEditorMultiplayerAuthorityLine");
+			Node? preloadLine = content.GetNodeOrNull(PreloadLineName);
+			Node? legacyPreloadLine = content.GetNodeOrNull(LegacyPreloadLineName);
+			Node? syncLine = content.GetNodeOrNull(SyncLineName);
+			Node? authorityLine = content.GetNodeOrNull(AuthorityLineName);
+			NSettingsTickbox? preloadTickbox = FindDescendantOfType<NSettingsTickbox>(preloadLine);
+			NSettingsTickbox? legacyPreloadTickbox = FindDescendantOfType<NSettingsTickbox>(legacyPreloadLine);
 			NSettingsTickbox? syncTickbox = FindDescendantOfType<NSettingsTickbox>(syncLine);
 			NSettingsTickbox? authorityTickbox = FindDescendantOfType<NSettingsTickbox>(authorityLine);
-			RichTextLabel? syncLabel = FindNamedDescendant<RichTextLabel>(syncLine, "CardEditorMultiplayerSyncLabel");
-			RichTextLabel? authorityLabel = FindNamedDescendant<RichTextLabel>(authorityLine, "CardEditorMultiplayerAuthorityLabel");
+			RichTextLabel? preloadLabel = FindNamedDescendant<RichTextLabel>(preloadLine, PreloadLabelName);
+			RichTextLabel? legacyPreloadLabel = FindNamedDescendant<RichTextLabel>(legacyPreloadLine, LegacyPreloadLabelName);
+			RichTextLabel? syncLabel = FindNamedDescendant<RichTextLabel>(syncLine, SyncLabelName);
+			RichTextLabel? authorityLabel = FindNamedDescendant<RichTextLabel>(authorityLine, AuthorityLabelName);
 
 			CardEditorMod.VerboseLog(
 				$"[CardEditor][MultiplayerSettings] {context} " +
 				$"contentChildren={content.GetChildCount()} " +
+				$"preloadLine={DescribeNode(preloadLine)} preloadLabel={DescribeControl(preloadLabel)} preloadTickbox={DescribeControl(preloadTickbox)} " +
+				$"legacyPreloadLine={DescribeNode(legacyPreloadLine)} legacyPreloadLabel={DescribeControl(legacyPreloadLabel)} legacyPreloadTickbox={DescribeControl(legacyPreloadTickbox)} " +
 				$"syncLine={DescribeNode(syncLine)} syncLabel={DescribeControl(syncLabel)} syncTickbox={DescribeControl(syncTickbox)} " +
 				$"authorityLine={DescribeNode(authorityLine)} authorityLabel={DescribeControl(authorityLabel)} authorityTickbox={DescribeControl(authorityTickbox)}");
 		}
@@ -1348,6 +1483,18 @@ internal static class CardEditorMultiplayerSync
 		lineKind = CardEditorMultiplayerSettingsLineKind.None;
 		for (Node? current = node; current != null; current = current.GetParent())
 		{
+			if (current.Name == PreloadLineName)
+			{
+				lineKind = CardEditorMultiplayerSettingsLineKind.PreloadOnLaunch;
+				return true;
+			}
+
+			if (current.Name == LegacyPreloadLineName)
+			{
+				lineKind = CardEditorMultiplayerSettingsLineKind.LegacyPreload;
+				return true;
+			}
+
 			if (current.Name == SyncLineName)
 			{
 				lineKind = CardEditorMultiplayerSettingsLineKind.Sync;
@@ -1368,6 +1515,12 @@ internal static class CardEditorMultiplayerSync
 	{
 		switch (lineKind)
 		{
+			case CardEditorMultiplayerSettingsLineKind.PreloadOnLaunch:
+				CardEditorPerformanceSettings.SetPreloadEditorPopupsOnLaunch(ticked);
+				break;
+			case CardEditorMultiplayerSettingsLineKind.LegacyPreload:
+				CardEditorPerformanceSettings.SetLegacyPreloadEveryEditorPopupOnLaunch(ticked);
+				break;
 			case CardEditorMultiplayerSettingsLineKind.Sync:
 				CardEditorMultiplayerSettings.MultiplayerSyncEnabled = ticked;
 				if (IsBoundToMultiplayerSession)
@@ -1427,6 +1580,12 @@ internal static class CardEditorMultiplayerSync
 
 		hoverTip = lineKind switch
 		{
+			CardEditorMultiplayerSettingsLineKind.PreloadOnLaunch => new HoverTip(
+				new LocString("settings_ui", PreloadHeaderLocKey),
+				GetSettingsUiText(PreloadDescriptionLocKey, "Warms Card Editor popup UI during startup. Disable this for faster startup; the first editor opens will do more work.")),
+			CardEditorMultiplayerSettingsLineKind.LegacyPreload => new HoverTip(
+				new LocString("settings_ui", LegacyPreloadHeaderLocKey),
+				GetSettingsUiText(LegacyPreloadDescriptionLocKey, "Uses the old per-card popup prebuild path instead of the shared popup cache. This can make editor opens instant, but may create a very large hidden UI tree and cause hitches.")),
 			CardEditorMultiplayerSettingsLineKind.Sync => new HoverTip(
 				new LocString("settings_ui", SyncHeaderLocKey),
 				GetSettingsUiText(SyncDescriptionLocKey, "Automatically syncs the host's Card Editor changes for the current multiplayer session without overwriting your own local preset files.")),
@@ -1481,6 +1640,8 @@ internal static class CardEditorMultiplayerSettingsTickboxSetFromSettingsPatch
 
 		__instance.IsTicked = lineKind switch
 		{
+			CardEditorMultiplayerSettingsLineKind.PreloadOnLaunch => CardEditorPerformanceSettings.PreloadEditorPopupsOnLaunch,
+			CardEditorMultiplayerSettingsLineKind.LegacyPreload => CardEditorPerformanceSettings.LegacyPreloadEveryEditorPopupOnLaunch,
 			CardEditorMultiplayerSettingsLineKind.Sync => CardEditorMultiplayerSettings.MultiplayerSyncEnabled,
 			CardEditorMultiplayerSettingsLineKind.Authority => CardEditorMultiplayerSettings.AuthorityMode == CardEditorMultiplayerAuthorityMode.AnyPlayer,
 			_ => __instance.IsTicked
@@ -1528,8 +1689,10 @@ internal static class CardEditorMultiplayerCommonTooltipsHoverTipHidePatch
 internal enum CardEditorMultiplayerSettingsLineKind
 {
 	None = 0,
-	Sync = 1,
-	Authority = 2
+	PreloadOnLaunch = 1,
+	LegacyPreload = 2,
+	Sync = 3,
+	Authority = 4
 }
 
 [HarmonyPatch(typeof(StartRunLobby), MethodType.Constructor, typeof(GameMode), typeof(INetGameService), typeof(IStartRunLobbyListener), typeof(int))]

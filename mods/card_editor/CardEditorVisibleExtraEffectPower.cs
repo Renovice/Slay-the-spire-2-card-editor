@@ -54,7 +54,7 @@ internal sealed class CardEditorVisibleExtraEffectPower : PowerModel
 
 	public override PowerStackType StackType => _showAmountLabel ? PowerStackType.Counter : PowerStackType.Single;
 
-	public override bool IsInstanced => true;
+	public override PowerInstanceType InstanceType => PowerInstanceType.Instanced;
 
 	public override bool ShouldPlayVfx => false;
 
