@@ -25,6 +25,7 @@ using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardLibrary;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+using MegaCrit.Sts2.Core.Nodes.Screens.RelicCollection;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Localization.Formatters;
 using MegaCrit.Sts2.Core.Models;
@@ -35,6 +36,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Saves.Runs;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Hooks;
@@ -61,16 +63,44 @@ public static class CardEditorMod
 
 	public static void Init()
 	{
+		Log.Info("[CardEditor] Build tag: border lightning vanilla flipbook lane 2026-05-11");
 		CardEditorExternalLocalization.Init();
 		CardEditorCreatedCardsStore.EnsureLoaded();
 		CardEditorDefinitionStore.EnsureLoaded();
+		CardEditorRelicOverrides.EnsureLoaded();
 		RegisterCreatedCardsInPools();
 
 		Harmony harmony = new Harmony(HarmonyId);
 		PatchPrivateGetDescriptionForPile(harmony);
-		harmony.PatchAll(Assembly.GetExecutingAssembly());
+		PatchAssemblySafely(harmony, Assembly.GetExecutingAssembly());
 		EnsureIgnoreDamagePatches(harmony);
 
+	}
+
+	private static void PatchAssemblySafely(Harmony harmony, Assembly assembly)
+	{
+		int patched = 0;
+		int failed = 0;
+		foreach (Type type in assembly.GetTypes())
+		{
+			if (!type.GetCustomAttributes(typeof(HarmonyPatch), inherit: false).Any())
+			{
+				continue;
+			}
+
+			try
+			{
+				harmony.CreateClassProcessor(type).Patch();
+				patched++;
+			}
+			catch (Exception ex)
+			{
+				failed++;
+				Log.Warn($"[CardEditor] Skipping incompatible Harmony patch type {type.FullName}: {ex}");
+			}
+		}
+
+		Log.Info($"[CardEditor] Applied Harmony patch classes: {patched} succeeded, {failed} skipped.");
 	}
 
 	private static void PatchPrivateGetDescriptionForPile(Harmony harmony)
@@ -223,6 +253,11 @@ public static class CardEditorMod
 				Log.Warn($"[CardEditor] Created card slots requested={desired} but only found={cards.Count} types.");
 			}
 
+			foreach (Type cardType in cards)
+			{
+				SavedPropertiesTypeCache.InjectTypeIntoCache(cardType);
+			}
+
 			foreach (Type poolType in pools)
 			{
 				foreach (Type cardType in cards)
@@ -231,6 +266,7 @@ public static class CardEditorMod
 				}
 			}
 
+			SavedPropertiesTypeCache.InjectTypeIntoCache(typeof(CardEditorBuiltTinkerCard));
 			ModHelper.AddModelToPool(typeof(EventCardPool), typeof(CardEditorBuiltTinkerCard));
 		}
 		catch (Exception ex)
@@ -1731,6 +1767,7 @@ public static class MainMenu_Ready_Patch
 	{
 		TryAddEditorButton(__instance);
 		TryAddCreatorButton(__instance);
+		TryAddRelicButton(__instance);
 		RefreshCustomButtons(__instance);
 		TryApplyStartupPresetsOnce();
 		NCardEditorPopup.TryQueueUiWarmup(__instance);
@@ -1847,6 +1884,7 @@ public static class MainMenu_Ready_Patch
 
 		RefreshCustomButton(menu, buttonContainer.GetNodeOrNull<NMainMenuTextButton>("EditorButton"), "menu.editor", "Editor");
 		RefreshCustomButton(menu, buttonContainer.GetNodeOrNull<NMainMenuTextButton>("CreatorButton"), "menu.creator", "Creator");
+		RefreshCustomButton(menu, buttonContainer.GetNodeOrNull<NMainMenuTextButton>("RelicButton"), "menu.relic", "Relic");
 	}
 
 	private static void RefreshCustomButton(NMainMenu menu, NMainMenuTextButton? button, string locKey, string fallback)
@@ -1927,6 +1965,43 @@ public static class MainMenu_Ready_Patch
 		}
 		CardEditorMod.VerboseLog("[CardEditor] OpenCreator: Pushing library (deferred)");
 		Callable.From(() => menu.SubmenuStack.Push(library)).CallDeferred();
+	}
+
+	private static void TryAddRelicButton(NMainMenu menu)
+	{
+		Control buttonContainer = menu.GetNodeOrNull<Control>("MainMenuTextButtons");
+		if (buttonContainer == null || buttonContainer.HasNode("RelicButton"))
+		{
+			return;
+		}
+		NMainMenuTextButton compendium = menu.GetNodeOrNull<NMainMenuTextButton>("MainMenuTextButtons/CompendiumButton");
+		if (compendium == null)
+		{
+			return;
+		}
+
+		NMainMenuTextButton relicButton = (NMainMenuTextButton)compendium.Duplicate(MainMenuButtonDuplicateFlags);
+		relicButton.Name = "RelicButton";
+		Label label = relicButton.GetNode<Label>("Label");
+		label.Text = CardEditorLoc.T("menu.relic", "Relic");
+		relicButton.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(_ => OpenRelicEditor(menu)));
+		ConnectFocusHooks(menu, relicButton);
+		buttonContainer.AddChild(relicButton);
+
+		int insertAt = buttonContainer.GetNodeOrNull("CreatorButton")?.GetIndex() + 1
+			?? buttonContainer.GetNodeOrNull("EditorButton")?.GetIndex() + 2
+			?? compendium.GetIndex() + 3;
+		buttonContainer.MoveChild(relicButton, insertAt);
+
+		RefreshCustomButton(menu, relicButton, "menu.relic", "Relic");
+	}
+
+	private static void OpenRelicEditor(NMainMenu menu)
+	{
+		Log.Info("[CardEditor][RelicEditor] Opening relic editor collection");
+		CardEditorLibrarySelectionState.ClearSelections();
+		CardEditorRelicEditorSession.Begin();
+		Callable.From(() => menu.SubmenuStack.PushSubmenuType<NRelicCollection>()).CallDeferred();
 	}
 }
 
@@ -2087,6 +2162,10 @@ public static class CardLibrary_ShowCardDetail_Patch
 		if (holder?.CardModel == null)
 		{
 			return false;
+		}
+		if (CardEditorUiState.IsBaseDeckActive || CardEditorUiState.IsBaseDeckAddActive)
+		{
+			CardEditorBaseDeckUiState.ClearSelections(__instance);
 		}
 		OpenEditorPopupDeferred(holder.CardModel.Id, __instance);
 		return false;
@@ -2531,14 +2610,16 @@ public static class PowerCmd_Apply_Patch
 	private static readonly ModelId _resonanceId = ModelDb.GetId<Resonance>();
 	private static readonly ModelId _strengthPowerId = ModelDb.GetId<StrengthPower>();
 
-	private static MethodBase TargetMethod()
+	private static IEnumerable<MethodBase> TargetMethods()
 	{
 		MethodInfo? method = CardEditorPowerCmdCompat.FindApplyPowerMethod();
 		if (method == null)
 		{
-			throw new MissingMethodException(typeof(PowerCmd).FullName, nameof(PowerCmd.Apply));
+			Log.Warn("[CardEditor] PowerCmd.Apply patch target was not found for this game version; power source/duration adjustments will use fallback paths only.");
+			yield break;
 		}
-		return method;
+
+		yield return method;
 	}
 
 	public static void Prefix(PowerModel power, ref decimal amount, CardModel? cardSource)
@@ -2589,18 +2670,25 @@ public static class PowerCmd_Apply_Patch
 [HarmonyPatch]
 public static class PowerCmd_ModifyAmount_Patch
 {
-	private static MethodBase TargetMethod()
+	private static IEnumerable<MethodBase> TargetMethods()
 	{
 		MethodInfo? method = CardEditorPowerCmdCompat.FindModifyAmountMethod();
 		if (method == null)
 		{
-			throw new MissingMethodException(typeof(PowerCmd).FullName, nameof(PowerCmd.ModifyAmount));
+			Log.Warn("[CardEditor] PowerCmd.ModifyAmount patch target was not found for this game version; power amount overrides will use fallback paths only.");
+			yield break;
 		}
-		return method;
+
+		yield return method;
 	}
 
 	public static void Prefix(PowerModel power, ref decimal offset, CardModel? cardSource)
 	{
+		if (power != null && cardSource != null)
+		{
+			CardEditorPowerSourceMap.RegisterIfMissing(power, cardSource);
+		}
+
 		CardModel? durationSourceCard = cardSource;
 		if (durationSourceCard == null && CardEditorHookModelContext.Current is PowerModel ctxPower)
 		{

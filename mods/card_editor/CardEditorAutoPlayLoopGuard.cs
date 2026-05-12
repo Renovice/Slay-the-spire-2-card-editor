@@ -17,10 +17,8 @@ internal static class CardEditorAutoPlayLoopGuard
 	{
 		public int RoundNumber { get; set; } = -1;
 		public CombatSide CurrentSide { get; set; }
-		public Dictionary<Player, int> PlaysByPlayer { get; } = new();
 		public Dictionary<string, int> PlaysBySource { get; } = new(StringComparer.Ordinal);
 		public Dictionary<string, int> CombatUsesBySource { get; } = new(StringComparer.Ordinal);
-		public HashSet<string> WarnedCapKeys { get; } = new(StringComparer.Ordinal);
 		public HashSet<string> WarnedUseLimitKeys { get; } = new(StringComparer.Ordinal);
 	}
 
@@ -158,8 +156,7 @@ internal static class CardEditorAutoPlayLoopGuard
 		Player? effectiveOwner = owner ?? sourceCard?.Owner;
 		string sourceKey = effectiveOwner != null ? BuildSourceKey(effectiveOwner, sourceCard, sourceEffect) : string.Empty;
 
-		bool suppressSelfLoops = !sourceEffect.AutoPlayAllowSelfTrigger
-			|| CardEditorPerformanceSettings.PreventCardEditorAutoPlaySelfLoops;
+		bool suppressSelfLoops = !sourceEffect.AutoPlayAllowSelfTrigger;
 		if (!suppressSelfLoops && string.IsNullOrWhiteSpace(sourceKey))
 		{
 			return true;
@@ -315,13 +312,7 @@ internal static class CardEditorAutoPlayLoopGuard
 		CardExtraEffect? sourceEffect,
 		CardModel? playedCard)
 	{
-		if (combatState == null || !CardEditorPerformanceSettings.EnableCardEditorAutoPlayLoopCap)
-		{
-			return true;
-		}
-
-		Player? effectiveOwner = owner ?? playedCard?.Owner ?? sourceCard?.Owner;
-		return effectiveOwner == null || TryConsumeGlobalPlay(combatState, effectiveOwner, sourceCard, sourceEffect, playedCard);
+		return true;
 	}
 
 	public static bool ShouldSuppressEffect(CardModel? effectOwnerCard, CardExtraEffect? effect)
@@ -371,9 +362,7 @@ internal static class CardEditorAutoPlayLoopGuard
 		{
 			state.RoundNumber = combatState.RoundNumber;
 			state.CurrentSide = combatState.CurrentSide;
-			state.PlaysByPlayer.Clear();
 			state.PlaysBySource.Clear();
-			state.WarnedCapKeys.Clear();
 			state.WarnedUseLimitKeys.Clear();
 		}
 
@@ -536,28 +525,6 @@ internal static class CardEditorAutoPlayLoopGuard
 		catch
 		{
 		}
-	}
-
-	private static bool TryConsumeGlobalPlay(CombatState combatState, Player owner, CardModel? sourceCard, CardExtraEffect? sourceEffect, CardModel? playedCard)
-	{
-		CombatGuardState state = GetTurnState(combatState);
-		int cap = CardEditorPerformanceSettings.CardEditorAutoPlayLoopCapPerTurn;
-		state.PlaysByPlayer.TryGetValue(owner, out int globalCount);
-		if (globalCount >= cap)
-		{
-			string warnKey = $"global|{RuntimeHelpers.GetHashCode(owner)}|{combatState.RoundNumber}|{combatState.CurrentSide}";
-			if (state.WarnedCapKeys.Add(warnKey))
-			{
-				Log.Warn(
-					$"[CardEditor][LoopGuard] Card Editor autoplay cap reached for player={owner} " +
-					$"round={combatState.RoundNumber} side={combatState.CurrentSide} cap={cap}. " +
-					$"Skipped card={GetCardIdText(playedCard)} source={BuildSourceLabel(sourceCard, sourceEffect)}");
-			}
-			return false;
-		}
-
-		state.PlaysByPlayer[owner] = globalCount + 1;
-		return true;
 	}
 
 	private static string BuildSourceKey(Player owner, CardModel? sourceCard, CardExtraEffect sourceEffect)

@@ -100,6 +100,52 @@ internal static class CardEditorCardFinishResolver
 			? overrideData.CustomFinishParams
 			: null;
 	}
+
+	public static CardEditorVisualFinish GetDesiredBorderFinish(CardModel? model)
+	{
+		if (model?.Id == null)
+		{
+			return CardEditorVisualFinish.None;
+		}
+
+		if (CardEditorCreatedCardsStore.IsCreatedCardId(model.Id))
+		{
+			return CardEditorCreatedCardsStore.GetBorderFinish(model.Id);
+		}
+
+		if (CardEditorOverrides.SuppressAllOverrides)
+		{
+			return CardEditorVisualFinish.None;
+		}
+
+		if (CardEditorUiState.IsActive && CardEditorUiState.TryGetDraftOverride(model.Id, out CardOverride draftOverride))
+		{
+			return draftOverride.BorderFinish ?? CardEditorVisualFinish.None;
+		}
+
+		return CardEditorOverrides.TryGetEffectiveOverride(model.Id, out CardOverride overrideData)
+			? overrideData.BorderFinish ?? CardEditorVisualFinish.None
+			: CardEditorVisualFinish.None;
+	}
+
+	public static Dictionary<string, float>? GetDesiredBorderFinishParams(CardModel? model)
+	{
+		if (model?.Id == null)
+			return null;
+
+		if (CardEditorCreatedCardsStore.IsCreatedCardId(model.Id))
+			return CardEditorCreatedCardsStore.GetBorderFinishParams(model.Id);
+
+		if (CardEditorOverrides.SuppressAllOverrides)
+			return null;
+
+		if (CardEditorUiState.IsActive && CardEditorUiState.TryGetDraftOverride(model.Id, out CardOverride draftOverride))
+			return draftOverride.BorderFinishParams;
+
+		return CardEditorOverrides.TryGetEffectiveOverride(model.Id, out CardOverride overrideData)
+			? overrideData.BorderFinishParams
+			: null;
+	}
 }
 
 internal sealed class CardEditorRainbowFoilOverlay : Control
@@ -497,6 +543,7 @@ void fragment()
 		ClipContents = false;
 		_material = new ShaderMaterial { Shader = SharedShader };
 		_material.SetShaderParameter("rect_size", new Vector2(300.0f, 422.0f));
+		_material.SetShaderParameter("card_origin", Vector2.Zero);
 		_overlayRect = new ColorRect
 		{
 			Color = new Color(1, 1, 1, 0),
@@ -1283,7 +1330,7 @@ uniform float motion_speed = 1.0;
 uniform float pattern_scale = 1.0;
 uniform float swirl_strength = 4.7;
 uniform float line_count = 6.0;
-uniform float line_sharpness = 0.46;
+uniform float line_sharpness = 0.10;
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -2049,6 +2096,7 @@ uniform float motion_speed = 0.5;
 uniform float time_offset = 0.0;
 uniform float pattern_scale = 1.0;
 uniform float bolt_width = 0.045;
+uniform float bolt_count = 1.0;
 uniform float glow = 1.4;
 uniform float brightness = 1.0;
 uniform float flicker = 0.55;
@@ -2115,31 +2163,367 @@ void fragment() {
 	float aspect = tex_size.x / max(tex_size.y, 1.0);
 	vec2 uv = (2.0 * UV - 1.0) * vec2(aspect, 1.0) * max(pattern_scale, 0.05);
 
-	float bend = 2.0 * fbm(uv + vec2(LOCAL_TIME, LOCAL_TIME * 0.37)) - 1.0;
-	uv.x += bend;
-	float dist = abs(uv.x);
-	float width = max(bolt_width, 0.001);
-	float core = 1.0 - smoothstep(0.0, width, dist);
-	float aura = exp(-dist * 10.0 / max(glow, 0.01));
-	float flicker_sample = mix(1.0, 0.25 + hash12(vec2(floor(LOCAL_TIME * 28.0), floor(LOCAL_TIME * 7.0))) * 0.95, clamp(flicker, 0.0, 1.0));
+	vec2 uv_base = uv;
+	vec3 col = vec3(0.0);
+	float mask = 0.0;
+	float count = clamp(floor(bolt_count + 0.5), 1.0, 8.0);
+	float spacing = mix(0.0, 0.62, clamp((count - 1.0) / 7.0, 0.0, 1.0));
+	float bolt_scale = mix(1.0, 0.58, clamp((count - 1.0) / 7.0, 0.0, 1.0));
 
-	vec3 col = effect_color * (core * 2.2 + aura * glow * 0.45) * brightness * flicker_sample;
+	for (int j = 0; j < 8; j++) {
+		float i = float(j);
+		if (i >= count) {
+			continue;
+		}
+
+		float phase = i * 17.31;
+		float lane = i - (count - 1.0) * 0.5;
+		vec2 bolt_uv = uv_base;
+		bolt_uv.x -= lane * spacing;
+
+		float bend = 2.0 * fbm(bolt_uv + vec2(LOCAL_TIME + phase, LOCAL_TIME * 0.37 - phase * 0.21)) - 1.0;
+		bolt_uv.x += bend;
+		float dist = abs(bolt_uv.x);
+		float width = max(bolt_width, 0.001);
+		float core = 1.0 - smoothstep(0.0, width, dist);
+		float aura = exp(-dist * 10.0 / max(glow, 0.01));
+		float flicker_sample = mix(1.0, 0.25 + hash12(vec2(floor((LOCAL_TIME + phase) * 28.0), floor((LOCAL_TIME + phase) * 7.0))) * 0.95, clamp(flicker, 0.0, 1.0));
+
+		col += effect_color * (core * 2.2 + aura * glow * 0.45) * brightness * flicker_sample * bolt_scale;
+		mask = max(mask, clamp(core + aura * 0.65, 0.0, 1.0));
+	}
+
 	vec3 hsv = rgb2hsv(max(col, vec3(0.0)));
 	hsv.x = fract(hsv.x + hue_shift);
 	hsv.y = clamp(hsv.y * color_saturation, 0.0, 1.0);
 	col = hsv2rgb(hsv);
 
-	float mask = clamp(core + aura * 0.65, 0.0, 1.0);
 	vec3 out_col = mix(base.rgb, clamp(base.rgb + col, vec3(0.0), vec3(1.0)), clamp(strength * mask, 0.0, 1.0));
+	COLOR = vec4(out_col, base.a);
+}";
+
+	private const string FlameShaderCode = @"shader_type canvas_item;
+render_mode blend_mix, unshaded;
+
+uniform float strength : hint_range(0.0, 1.0, 0.01) = 0.78;
+uniform vec4 cold_color : source_color = vec4(0.055, 0.006, 0.0, 1.0);
+uniform vec4 deep_red_color : source_color = vec4(0.55, 0.025, 0.0, 1.0);
+uniform vec4 orange_color : source_color = vec4(1.0, 0.25, 0.015, 1.0);
+uniform vec4 yellow_color : source_color = vec4(1.0, 0.68, 0.08, 1.0);
+uniform vec4 white_core_color : source_color = vec4(1.0, 0.92, 0.55, 1.0);
+uniform vec4 smoke_color : source_color = vec4(0.16, 0.14, 0.12, 1.0);
+
+uniform float flame_height : hint_range(0.5, 1.7, 0.01) = 1.08;
+uniform float flame_width : hint_range(0.15, 0.8, 0.01) = 0.44;
+uniform float flame_top_width : hint_range(0.01, 0.8, 0.01) = 0.035;
+uniform float flame_intensity : hint_range(0.1, 2.5, 0.01) = 0.82;
+uniform float core_heat : hint_range(0.0, 1.3, 0.01) = 0.38;
+uniform float turbulence : hint_range(0.0, 1.5, 0.01) = 0.48;
+uniform float noise_scale : hint_range(1.0, 14.0, 0.01) = 7.5;
+uniform float rise_speed : hint_range(0.1, 4.0, 0.01) = 1.45;
+uniform float time_offset : hint_range(0.0, 10.0, 0.01) = 0.0;
+uniform float flicker_strength : hint_range(0.0, 1.0, 0.01) = 0.32;
+uniform float edge_softness : hint_range(0.02, 0.5, 0.01) = 0.24;
+uniform float glow_strength : hint_range(0.0, 2.0, 0.01) = 0.58;
+uniform float ember_density : hint_range(0.0, 1.0, 0.01) = 0.14;
+uniform float smoke_amount : hint_range(0.0, 1.0, 0.01) = 0.08;
+uniform float wind : hint_range(-1.0, 1.0, 0.01) = 0.0;
+
+#define LOCAL_TIME (TIME + time_offset)
+
+float hash21(vec2 p) {
+	p = fract(p * vec2(123.34, 456.21));
+	p += dot(p, p + 45.32);
+	return fract(p.x * p.y);
+}
+
+vec2 grad2(vec2 p) {
+	float a = hash21(p) * 6.28318530718;
+	return vec2(cos(a), sin(a));
+}
+
+float noise21(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+
+	vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+
+	float a = dot(grad2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0));
+	float b = dot(grad2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+	float c = dot(grad2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+	float d = dot(grad2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+
+	return 0.5 + 0.5 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+	float v = 0.0;
+	float a = 0.5;
+
+	mat2 rot = mat2(
+		vec2(0.80, -0.60),
+		vec2(0.60, 0.80)
+	);
+
+	for (int i = 0; i < 6; i++) {
+		v += a * noise21(p);
+		p = rot * p * 2.05 + vec2(17.13, 9.27);
+		a *= 0.5;
+	}
+
+	return v;
+}
+
+float ridge(float x) {
+	return 1.0 - abs(x * 2.0 - 1.0);
+}
+
+vec3 fire_ramp(float t) {
+	t = clamp(t, 0.0, 1.0);
+
+	vec3 c = mix(cold_color.rgb, deep_red_color.rgb, smoothstep(0.00, 0.20, t));
+	c = mix(c, orange_color.rgb, smoothstep(0.18, 0.50, t));
+	c = mix(c, yellow_color.rgb, smoothstep(0.44, 0.78, t));
+	c = mix(c, white_core_color.rgb, smoothstep(0.78, 1.00, t));
+
+	return c;
+}
+
+void fragment() {
+	vec4 base = texture(TEXTURE, UV);
+	if (base.a <= 0.001) {
+		discard;
+	}
+
+	vec2 uv = UV;
+
+	// p.x = -1 left to 1 right
+	// p.y = 0 bottom to 1 top
+	vec2 p = vec2((uv.x - 0.5) * 2.0, 1.0 - uv.y);
+
+	float time = LOCAL_TIME * rise_speed;
+
+	float flicker = sin(LOCAL_TIME * 7.3) * 0.05;
+	flicker += sin(LOCAL_TIME * 13.9 + 1.7) * 0.035;
+	flicker += sin(LOCAL_TIME * 21.1 + 4.4) * 0.018;
+	flicker *= flicker_strength;
+
+	vec2 base_p = vec2(
+		p.x * noise_scale + wind * p.y * 2.0,
+		p.y * noise_scale - time * 1.55
+	);
+
+	float warp_a = fbm(base_p * 0.7 + vec2(0.0, -time * 0.25));
+	float warp_b = fbm(base_p * 0.9 + vec2(9.2, time * 0.18));
+
+	vec2 warped_p = base_p;
+	warped_p.x += (warp_a - 0.5) * turbulence * 2.2;
+	warped_p.y += (warp_b - 0.5) * turbulence * 1.2;
+
+	float n1 = fbm(warped_p);
+	float n2 = fbm(warped_p * 1.75 + vec2(6.4, -time * 0.65));
+	float n3 = fbm(warped_p * 3.4 + vec2(-3.8, time * 0.35));
+
+	float height_noise = (n2 - 0.5) * turbulence * 0.38 + flicker;
+
+	float bottom_fade = smoothstep(0.0, 0.035, p.y);
+	float top_fade = 1.0 - smoothstep(
+		flame_height + height_noise,
+		flame_height + 0.28 + height_noise,
+		p.y
+	);
+
+	float vertical_mask = bottom_fade * top_fade;
+
+	float taper = pow(clamp(p.y / max(flame_height, 0.001), 0.0, 1.0), 1.42);
+	float width = mix(flame_width, flame_top_width, taper);
+
+	width *= 1.0 + (n1 - 0.5) * turbulence * 0.34 + flicker * 0.7;
+
+	float sway = (n1 - 0.5) * turbulence * (0.35 + p.y * 0.9);
+	sway += wind * p.y * 0.45;
+
+	float x = p.x + sway;
+
+	float soft_body = 1.0 - smoothstep(width, width + edge_softness, abs(x));
+
+	float licking = ridge(n2);
+	licking = smoothstep(0.22, 0.95, licking + n3 * 0.25);
+
+	float broken_edge = smoothstep(0.12, 0.88, n1 + n3 * 0.18);
+	float body = soft_body * mix(0.72, 1.18, broken_edge) * vertical_mask;
+
+	float center = 1.0 - smoothstep(0.0, max(width * 0.72, 0.001), abs(x));
+	float core = pow(clamp(center, 0.0, 1.0), 1.85);
+	core *= smoothstep(0.02, 0.22, p.y);
+	core *= 1.0 - smoothstep(0.86, 1.28, p.y);
+
+	float alpha = body * flame_intensity;
+	alpha *= mix(0.75, 1.15, licking);
+	alpha = clamp(alpha, 0.0, 1.0);
+
+	float heat = 0.0;
+	heat += core * 0.58;
+	heat += (1.0 - p.y) * 0.30;
+	heat += n2 * 0.23;
+	heat += n3 * 0.12;
+	heat += core_heat * 0.24;
+	heat = clamp(heat, 0.0, 1.0);
+
+	vec3 fire_col = fire_ramp(heat);
+
+	float glow_width = width + 0.28 + glow_strength * 0.16;
+	float glow = 1.0 - smoothstep(width, glow_width, abs(x));
+	glow *= vertical_mask;
+	glow *= glow_strength;
+	glow *= 1.0 - smoothstep(flame_height + 0.15, flame_height + 0.55, p.y);
+
+	vec3 glow_col = mix(deep_red_color.rgb, orange_color.rgb, 0.55) * glow * 0.52;
+
+	float smoke_noise = fbm(vec2(
+		p.x * 2.2 + wind * 0.8,
+		p.y * 5.2 - time * 0.42
+	));
+
+	float smoke_mask = smoothstep(0.45, 1.0, p.y);
+	smoke_mask *= 1.0 - smoothstep(flame_height + 0.18, flame_height + 0.75, p.y);
+
+	float smoke_alpha = smoke_amount;
+	smoke_alpha *= smoke_mask;
+	smoke_alpha *= smoothstep(0.42, 0.90, smoke_noise);
+	smoke_alpha *= 1.0 - soft_body * 0.65;
+
+	vec2 ember_grid = vec2(
+		uv.x * 42.0 + wind * LOCAL_TIME * 2.0,
+		uv.y * 64.0 - LOCAL_TIME * rise_speed * 5.0
+	);
+
+	vec2 ember_cell = floor(ember_grid);
+	vec2 ember_local = fract(ember_grid) - 0.5;
+
+	float ember_seed = hash21(ember_cell);
+	float ember = smoothstep(0.998 - ember_density * 0.050, 1.0, ember_seed);
+	ember *= 1.0 - smoothstep(0.015, 0.075, length(ember_local));
+	ember *= smoothstep(0.10, 0.95, p.y);
+	ember *= 1.0 - soft_body * 0.55;
+
+	vec3 col = fire_col * alpha;
+	col += glow_col;
+	col = mix(col, smoke_color.rgb, smoke_alpha * 0.62);
+	col += yellow_color.rgb * ember * 1.35;
+
+	float out_alpha = alpha;
+	out_alpha += glow * 0.30;
+	out_alpha += smoke_alpha;
+	out_alpha += ember;
+	out_alpha = clamp(out_alpha, 0.0, 1.0);
+
+	float overlay_alpha = clamp(out_alpha * strength, 0.0, 1.0);
+	vec3 overlay_col = clamp(col, vec3(0.0), vec3(1.0));
+	vec3 out_col = mix(base.rgb, overlay_col, overlay_alpha * 0.72);
+	out_col = clamp(out_col + overlay_col * overlay_alpha * 0.35, vec3(0.0), vec3(1.0));
+
 	COLOR = vec4(out_col, base.a);
 }";
 
 	private static readonly Shader WhirlpoolShader = new() { Code = WhirlpoolShaderCode };
 	private static readonly Shader MiasmaShader = new() { Code = MiasmaShaderCode };
-	private static readonly Shader AuroraShader = new() { Code = AuroraShaderCode };
+	private const string AuroraShaderCodeFlat = @"shader_type canvas_item;
+
+uniform vec3 background_color : source_color = vec3(0.25, 0.0, 0.2);
+uniform float GWM = 2.05;
+uniform float TM = 0.25;
+uniform float strength : hint_range(0.0, 1.0) = 0.5;
+uniform float transparency : hint_range(0.0, 1.0) = 0.0;
+uniform float background_transparency : hint_range(0.0, 1.0) = 0.0;
+uniform float wave_count : hint_range(1.0, 8.0, 1.0) = 5.0;
+uniform float wave_distortion : hint_range(0.0, 3.0) = 1.0;
+uniform float brightness : hint_range(0.1, 4.0) = 1.0;
+uniform float motion_speed : hint_range(0.0, 5.0) = 1.0;
+uniform float time_offset : hint_range(0.0, 10.0) = 0.0;
+uniform float pattern_scale : hint_range(0.1, 4.0) = 1.0;
+
+#define LOCAL_TIME ((TIME * motion_speed) + time_offset)
+
+float hash(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(
+		mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
+		mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+		u.y
+	);
+}
+
+float getAmp(float frequency) {
+	float t = LOCAL_TIME;
+	float low = sin(frequency * 0.045 + t * 1.7) * 0.5 + 0.5;
+	float mid = sin(frequency * 0.013 - t * 0.9) * 0.5 + 0.5;
+	float grain = noise(vec2(frequency * 0.018, t * 0.45));
+	return clamp(low * 0.45 + mid * 0.25 + grain * 0.30, 0.0, 1.0);
+}
+
+float getWeight(float f) {
+	return (getAmp(f - 2.0) + getAmp(f - 1.0) +
+			getAmp(f + 2.0) + getAmp(f + 1.0) +
+			getAmp(f)) / 5.0;
+}
+
+void fragment() {
+	vec4 base = texture(TEXTURE, UV);
+	if (base.a <= 0.001) {
+		discard;
+	}
+
+	vec2 tex_size = 1.0 / max(TEXTURE_PIXEL_SIZE, vec2(0.0001));
+	float aspect = tex_size.x / max(tex_size.y, 1.0);
+	vec2 uvTrue = UV;
+	vec2 uv = (2.0 * uvTrue - 1.0) * max(pattern_scale, 0.05);
+	uv.x *= aspect;
+
+	vec3 color = vec3(0.0);
+	float strongest_wave = 0.0;
+
+	for (int j = 0; j < 8; j++) {
+		float i = float(j);
+		if (i >= wave_count) {
+			continue;
+		}
+
+		uv.y += 0.2 * wave_distortion * sin(uv.x + i / 7.0 - LOCAL_TIME * 0.6);
+		float column_amp = getAmp(uvTrue.x * 512.0 + i * 23.0);
+		float y = uv.y + getWeight(pow(i, 2.0) * 20.0) * (column_amp - 0.5) * wave_distortion;
+		float li = 0.4 + pow(1.6 * abs(mod(uvTrue.x + i / 1.1 + LOCAL_TIME, 2.0) - 1.0), 2.0);
+		float gw = abs(li / max(150.0 * abs(y), 0.002));
+		gw = min(gw, 2.0);
+
+		float ts = gw * (GWM + sin(LOCAL_TIME * TM));
+		color += vec3(ts);
+		strongest_wave = max(strongest_wave, ts);
+	}
+
+	float wave_opacity = 1.0 - clamp(transparency, 0.0, 1.0);
+	float background_opacity = 1.0 - clamp(background_transparency, 0.0, 1.0);
+	vec3 generated = background_color * background_opacity + color * brightness * wave_opacity;
+	generated = clamp(generated, vec3(0.0), vec3(1.0));
+
+	float wave_mask = clamp(strongest_wave * 0.65 * wave_opacity, 0.0, 1.0);
+	float layer_alpha = clamp(max(background_opacity * 0.5, wave_mask) * strength, 0.0, 1.0);
+	vec3 out_col = mix(base.rgb, generated, layer_alpha);
+
+	COLOR = vec4(clamp(out_col, vec3(0.0), vec3(1.0)), base.a);
+}";
+
+	private static readonly Shader AuroraShader = new() { Code = AuroraShaderCodeFlat };
 	private static readonly Shader ConstellationShader = new() { Code = ConstellationShaderCode };
 	private static readonly Shader RippleShader = new() { Code = RippleShaderCode };
 	private static readonly Shader LightningShader = new() { Code = LightningShaderCode };
+	private static readonly Shader FlameShader = new() { Code = FlameShaderCode };
 	private static readonly AccessTools.FieldRef<NCard, TextureRect> PortraitRef =
 		AccessTools.FieldRefAccess<NCard, TextureRect>("_portrait");
 	private static readonly AccessTools.FieldRef<NCard, TextureRect> AncientPortraitRef =
@@ -2172,6 +2556,7 @@ void fragment() {
 			CardEditorVisualFinish.Constellation => ConstellationShader,
 			CardEditorVisualFinish.DvdRipple => RippleShader,
 			CardEditorVisualFinish.Lightning => LightningShader,
+			CardEditorVisualFinish.Flame => FlameShader,
 			_ => null
 		};
 
@@ -2230,10 +2615,14 @@ void fragment() {
 		{
 			ApplyLightningParams(material, fullArt, fp);
 		}
+		else if (finish == CardEditorVisualFinish.Flame)
+		{
+			ApplyFlameParams(material, fullArt, fp);
+		}
 	}
 
 	private static bool IsManagedShader(Shader? shader)
-		=> shader == WhirlpoolShader || shader == MiasmaShader || shader == AuroraShader || shader == ConstellationShader || shader == RippleShader || shader == LightningShader;
+		=> shader == WhirlpoolShader || shader == MiasmaShader || shader == AuroraShader || shader == ConstellationShader || shader == RippleShader || shader == LightningShader || shader == FlameShader;
 
 	private static void ApplyWhirlpoolParams(ShaderMaterial material, bool fullArt, Dictionary<string, float>? fp)
 	{
@@ -2252,7 +2641,7 @@ void fragment() {
 		material.SetShaderParameter("pattern_scale", CardEditorTextureLoader.P(fp, "patternScale", 1.0f));
 		material.SetShaderParameter("swirl_strength", CardEditorTextureLoader.P(fp, "swirlStrength", 4.7f));
 		material.SetShaderParameter("line_count", CardEditorTextureLoader.P(fp, "lineCount", 6.0f));
-		material.SetShaderParameter("line_sharpness", CardEditorTextureLoader.P(fp, "lineSharpness", 0.46f));
+		material.SetShaderParameter("line_sharpness", CardEditorTextureLoader.P(fp, "lineSharpness", 0.10f));
 	}
 
 	private static void ApplyMiasmaParams(ShaderMaterial material, bool fullArt, Dictionary<string, float>? fp)
@@ -2275,38 +2664,21 @@ void fragment() {
 
 	private static void ApplyAuroraParams(ShaderMaterial material, bool fullArt, Dictionary<string, float>? fp)
 	{
-		material.SetShaderParameter("strength", CardEditorTextureLoader.P(fp, "strength", fullArt ? 0.68f : 0.62f));
-		material.SetShaderParameter("aurora_color", new Vector3(
-			CardEditorTextureLoader.P(fp, "auroraR", 0.84f),
-			CardEditorTextureLoader.P(fp, "auroraG", 0.84f),
-			CardEditorTextureLoader.P(fp, "auroraB", 0.90f)));
-		material.SetShaderParameter("background_color1", new Vector3(
-			CardEditorTextureLoader.P(fp, "background1R", 0.05f),
-			CardEditorTextureLoader.P(fp, "background1G", 0.10f),
-			CardEditorTextureLoader.P(fp, "background1B", 0.20f)));
-		material.SetShaderParameter("background_color2", new Vector3(
-			CardEditorTextureLoader.P(fp, "background2R", 0.10f),
-			CardEditorTextureLoader.P(fp, "background2G", 0.05f),
-			CardEditorTextureLoader.P(fp, "background2B", 0.20f)));
-		material.SetShaderParameter("aurora_intensity", CardEditorTextureLoader.P(fp, "auroraIntensity", 1.8f));
-		material.SetShaderParameter("star_brightness", CardEditorTextureLoader.P(fp, "starBrightness", 0.8f));
-		material.SetShaderParameter("star_density", CardEditorTextureLoader.P(fp, "starDensity", 1.0f));
+		material.SetShaderParameter("background_color", new Vector3(
+			CardEditorTextureLoader.P(fp, "backgroundColorR", CardEditorTextureLoader.P(fp, "backgroundColor1R", CardEditorTextureLoader.P(fp, "bgTopR", 0.25f))),
+			CardEditorTextureLoader.P(fp, "backgroundColorG", CardEditorTextureLoader.P(fp, "backgroundColor1G", CardEditorTextureLoader.P(fp, "bgTopG", 0.0f))),
+			CardEditorTextureLoader.P(fp, "backgroundColorB", CardEditorTextureLoader.P(fp, "backgroundColor1B", CardEditorTextureLoader.P(fp, "bgTopB", 0.2f)))));
+		material.SetShaderParameter("GWM", CardEditorTextureLoader.P(fp, "GWM", 2.05f));
+		material.SetShaderParameter("TM", CardEditorTextureLoader.P(fp, "TM", 0.25f));
+		material.SetShaderParameter("strength", CardEditorTextureLoader.P(fp, "strength", 0.5f));
+		material.SetShaderParameter("transparency", CardEditorTextureLoader.P(fp, "transparency", 0.0f));
+		material.SetShaderParameter("background_transparency", CardEditorTextureLoader.P(fp, "backgroundTransparency", 0.0f));
+		material.SetShaderParameter("wave_count", CardEditorTextureLoader.P(fp, "waveCount", 5.0f));
+		material.SetShaderParameter("wave_distortion", CardEditorTextureLoader.P(fp, "waveDistortion", 1.0f));
 		material.SetShaderParameter("brightness", CardEditorTextureLoader.P(fp, "brightness", 1.0f));
-		material.SetShaderParameter("pastel", CardEditorTextureLoader.P(fp, "pastel", 0.0f));
 		material.SetShaderParameter("motion_speed", CardEditorTextureLoader.P(fp, "speed", 1.0f));
 		material.SetShaderParameter("time_offset", CardEditorTextureLoader.P(fp, "timeOffset", 0.0f));
-		material.SetShaderParameter("hue_shift", CardEditorTextureLoader.P(fp, "hueShift", 0.0f));
-		material.SetShaderParameter("color_saturation", CardEditorTextureLoader.P(fp, "saturation", 1.0f));
 		material.SetShaderParameter("pattern_scale", CardEditorTextureLoader.P(fp, "patternScale", 1.0f));
-		material.SetShaderParameter("projection_bend", CardEditorTextureLoader.P(fp, "projectionBend", 0.4f));
-		material.SetShaderParameter("horizon", CardEditorTextureLoader.P(fp, "horizon", 0.0f));
-		material.SetShaderParameter("reflection_strength", CardEditorTextureLoader.P(fp, "reflectionStrength", 0.65f));
-		material.SetShaderParameter("rotation_strength", CardEditorTextureLoader.P(fp, "rotationStrength", 0.2f));
-		material.SetShaderParameter("color_tint", new Vector3(
-			CardEditorTextureLoader.P(fp, "tintR", 1.0f),
-			CardEditorTextureLoader.P(fp, "tintG", 1.0f),
-			CardEditorTextureLoader.P(fp, "tintB", 1.0f)));
-		material.SetShaderParameter("tint_strength", CardEditorTextureLoader.P(fp, "tintStrength", 0.0f));
 	}
 
 	private static void ApplyConstellationParams(ShaderMaterial material, bool fullArt, Dictionary<string, float>? fp)
@@ -2384,11 +2756,62 @@ void fragment() {
 		material.SetShaderParameter("time_offset", CardEditorTextureLoader.P(fp, "timeOffset", 0.0f));
 		material.SetShaderParameter("pattern_scale", CardEditorTextureLoader.P(fp, "patternScale", 1.0f));
 		material.SetShaderParameter("bolt_width", CardEditorTextureLoader.P(fp, "boltWidth", 0.045f));
+		material.SetShaderParameter("bolt_count", CardEditorTextureLoader.P(fp, "boltCount", 1.0f));
 		material.SetShaderParameter("glow", CardEditorTextureLoader.P(fp, "glow", 1.4f));
 		material.SetShaderParameter("brightness", CardEditorTextureLoader.P(fp, "brightness", 1.0f));
 		material.SetShaderParameter("flicker", CardEditorTextureLoader.P(fp, "flicker", 0.55f));
 		material.SetShaderParameter("color_saturation", CardEditorTextureLoader.P(fp, "saturation", 1.0f));
 		material.SetShaderParameter("hue_shift", CardEditorTextureLoader.P(fp, "hueShift", 0.0f));
+	}
+
+	private static void ApplyFlameParams(ShaderMaterial material, bool fullArt, Dictionary<string, float>? fp)
+	{
+		material.SetShaderParameter("strength", CardEditorTextureLoader.P(fp, "strength", fullArt ? 0.84f : 0.78f));
+		material.SetShaderParameter("cold_color", new Color(
+			CardEditorTextureLoader.P(fp, "coldR", 0.055f),
+			CardEditorTextureLoader.P(fp, "coldG", 0.006f),
+			CardEditorTextureLoader.P(fp, "coldB", 0.0f),
+			1.0f));
+		material.SetShaderParameter("deep_red_color", new Color(
+			CardEditorTextureLoader.P(fp, "deepRedR", 0.55f),
+			CardEditorTextureLoader.P(fp, "deepRedG", 0.025f),
+			CardEditorTextureLoader.P(fp, "deepRedB", 0.0f),
+			1.0f));
+		material.SetShaderParameter("orange_color", new Color(
+			CardEditorTextureLoader.P(fp, "orangeR", 1.0f),
+			CardEditorTextureLoader.P(fp, "orangeG", 0.25f),
+			CardEditorTextureLoader.P(fp, "orangeB", 0.015f),
+			1.0f));
+		material.SetShaderParameter("yellow_color", new Color(
+			CardEditorTextureLoader.P(fp, "yellowR", 1.0f),
+			CardEditorTextureLoader.P(fp, "yellowG", 0.68f),
+			CardEditorTextureLoader.P(fp, "yellowB", 0.08f),
+			1.0f));
+		material.SetShaderParameter("white_core_color", new Color(
+			CardEditorTextureLoader.P(fp, "whiteCoreR", 1.0f),
+			CardEditorTextureLoader.P(fp, "whiteCoreG", 0.92f),
+			CardEditorTextureLoader.P(fp, "whiteCoreB", 0.55f),
+			1.0f));
+		material.SetShaderParameter("smoke_color", new Color(
+			CardEditorTextureLoader.P(fp, "smokeR", 0.16f),
+			CardEditorTextureLoader.P(fp, "smokeG", 0.14f),
+			CardEditorTextureLoader.P(fp, "smokeB", 0.12f),
+			1.0f));
+		material.SetShaderParameter("flame_height", CardEditorTextureLoader.P(fp, "flameHeight", 1.08f));
+		material.SetShaderParameter("flame_width", CardEditorTextureLoader.P(fp, "flameWidth", 0.44f));
+		material.SetShaderParameter("flame_top_width", CardEditorTextureLoader.P(fp, "flameTopWidth", 0.035f));
+		material.SetShaderParameter("flame_intensity", CardEditorTextureLoader.P(fp, "flameIntensity", 0.82f));
+		material.SetShaderParameter("core_heat", CardEditorTextureLoader.P(fp, "coreHeat", 0.38f));
+		material.SetShaderParameter("turbulence", CardEditorTextureLoader.P(fp, "turbulence", 0.48f));
+		material.SetShaderParameter("noise_scale", CardEditorTextureLoader.P(fp, "noiseScale", 7.5f));
+		material.SetShaderParameter("rise_speed", CardEditorTextureLoader.P(fp, "speed", 1.45f));
+		material.SetShaderParameter("time_offset", CardEditorTextureLoader.P(fp, "timeOffset", 0.0f));
+		material.SetShaderParameter("flicker_strength", CardEditorTextureLoader.P(fp, "flickerStrength", 0.32f));
+		material.SetShaderParameter("edge_softness", CardEditorTextureLoader.P(fp, "edgeSoftness", 0.24f));
+		material.SetShaderParameter("glow_strength", CardEditorTextureLoader.P(fp, "glowStrength", 0.58f));
+		material.SetShaderParameter("ember_density", CardEditorTextureLoader.P(fp, "emberDensity", 0.14f));
+		material.SetShaderParameter("smoke_amount", CardEditorTextureLoader.P(fp, "smokeAmount", 0.08f));
+		material.SetShaderParameter("wind", CardEditorTextureLoader.P(fp, "wind", 0.0f));
 	}
 }
 
@@ -2550,6 +2973,751 @@ internal static class CardEditorBaseGameOverlayFinishController
 			overlayContainer.RemoveChild(child);
 			child.QueueFree();
 		}
+	}
+}
+
+internal sealed class CardEditorBorderFoilOverlay : Control
+{
+	private const string LightningCornerScenePath = "res://scenes/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_lightning_corner.tscn";
+	private const string ShaderCode = @"shader_type canvas_item;
+render_mode blend_premul_alpha;
+
+uniform vec2 rect_size = vec2(300.0, 422.0);
+uniform vec2 card_origin = vec2(0.0, 0.0);
+uniform float border_width_px = 12.0;
+uniform float border_inset_px = 0.0;
+uniform float corner_radius_px = 28.0;
+uniform float corner_softness_px = 1.5;
+uniform float opacity = 0.78;
+uniform float flow_speed = 1.0;
+uniform float pattern_scale = 1.0;
+uniform float glow_strength = 0.55;
+uniform float time_offset = 0.0;
+uniform float hue_shift = 0.0;
+uniform int border_style = 1;
+
+const float BORDER_TAU = 6.28318530718;
+varying vec2 local_px;
+
+void vertex()
+{
+	local_px = VERTEX;
+}
+
+float sd_round_rect(vec2 p, vec2 half_extents, float radius)
+{
+	vec2 q = abs(p) - half_extents + vec2(radius);
+	return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+float hash(vec2 p)
+{
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise(vec2 p)
+{
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	float a = hash(i);
+	float b = hash(i + vec2(1.0, 0.0));
+	float c = hash(i + vec2(0.0, 1.0));
+	float d = hash(i + vec2(1.0, 1.0));
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float wrapped_delta(float a, float b)
+{
+	return fract(a - b + 0.5) - 0.5;
+}
+
+float lightning_path(float s, float seed, float tick)
+{
+	float segments = 54.0;
+	float scaled = s * segments;
+	float segment = floor(scaled);
+	float next_segment = mod(segment + 1.0, segments);
+	float local = fract(scaled);
+	float y0 = hash(vec2(segment, seed + tick * 1.37));
+	float y1 = hash(vec2(next_segment, seed + tick * 1.37));
+	float line = mix(y0, y1, local);
+	float snap = mix(line, y0, 0.28 * (1.0 - smoothstep(0.10, 0.55, local)));
+	float jitter = noise(vec2(segment * 0.31 + seed, tick * 0.73)) - 0.5;
+	return clamp(0.16 + snap * 0.68 + jitter * 0.16, 0.07, 0.93);
+}
+
+float lightning_track(float flow, float ring_factor, float t, float offset, float seed)
+{
+	float tick = floor(t * 6.0);
+	float s = fract(flow + offset + t * 0.052);
+	float path = lightning_path(s, seed, tick);
+	float dist = abs(ring_factor - path);
+	float core = 1.0 - smoothstep(0.000, 0.038, dist);
+	float glow = 1.0 - smoothstep(0.018, 0.190, dist);
+	float segment = floor(s * 54.0);
+	float spark = 0.64 + 0.36 * hash(vec2(segment, seed + tick * 2.13));
+	float flicker = mix(0.42, 1.0, hash(vec2(segment + tick, seed * 0.19)));
+	float branch_seed = hash(vec2(segment, seed + 41.0 + tick));
+	float branch_gate = step(0.66, branch_seed) * smoothstep(0.08, 0.22, fract(s * 54.0)) * (1.0 - smoothstep(0.54, 0.92, fract(s * 54.0)));
+	float branch_target = clamp(path + sign(branch_seed - 0.5) * (0.18 + 0.18 * hash(vec2(segment, seed + 83.0))), 0.06, 0.94);
+	float branch_line = mix(path, branch_target, fract(s * 54.0));
+	float branch = (1.0 - smoothstep(0.0, 0.030, abs(ring_factor - branch_line))) * branch_gate;
+	return clamp((core * 1.45 + glow * 0.36 + branch * 0.82) * spark * flicker, 0.0, 1.0);
+}
+
+float lightning_bolt(float flow, float ring_factor, float t)
+{
+	float main = lightning_track(flow, ring_factor, t, 0.00, 11.7);
+	float echo = lightning_track(flow, ring_factor, t, 0.47, 29.3) * 0.64;
+	float corner_pulse = pow(sin((flow * 4.0 - t * 0.82) * BORDER_TAU) * 0.5 + 0.5, 10.0) * 0.28;
+	return clamp(max(main, echo) + corner_pulse, 0.0, 1.0);
+}
+
+vec3 hsv2rgb(vec3 c)
+{
+	vec4 k = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+	vec3 p = abs(fract(c.xxx + k.xyz) * 6.0 - k.www);
+	return c.z * mix(k.xxx, clamp(p - k.xxx, 0.0, 1.0), c.y);
+}
+
+vec3 rgb2hsv(vec3 c)
+{
+	vec4 k = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+	vec4 p = mix(vec4(c.bg, k.wz), vec4(c.gb, k.xy), step(c.b, c.g));
+	vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+	float d = q.x - min(q.w, q.y);
+	float e = 1.0e-10;
+	return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 apply_hue_shift(vec3 color)
+{
+	vec3 hsv = rgb2hsv(max(color, vec3(0.0)));
+	hsv.x = fract(hsv.x + hue_shift);
+	return hsv2rgb(hsv);
+}
+
+float border_flow(vec2 local, vec2 safe_size, float inset, float width, float radius)
+{
+	vec2 h = max(vec2(1.0), safe_size * 0.5 - vec2(inset + width * 0.5));
+	float r = clamp(radius - width * 0.5, 0.0, min(h.x, h.y) - 0.5);
+	float straight_w = max(1.0, (h.x - r) * 2.0);
+	float straight_h = max(1.0, (h.y - r) * 2.0);
+	float arc_len = r * BORDER_TAU * 0.25;
+	float perimeter = max(1.0, 2.0 * (straight_w + straight_h) + 4.0 * arc_len);
+	float left_x = -h.x + r;
+	float right_x = h.x - r;
+	float top_y = -h.y + r;
+	float bottom_y = h.y - r;
+	float ax = abs(local.x);
+	float ay = abs(local.y);
+	float dist = 0.0;
+
+	if (r > 0.5 && ax > right_x && ay > bottom_y)
+	{
+		float sx = local.x < 0.0 ? -1.0 : 1.0;
+		float sy = local.y < 0.0 ? -1.0 : 1.0;
+		vec2 center = vec2(sx * right_x, sy * bottom_y);
+		float a = atan(local.y - center.y, local.x - center.x);
+		if (sx > 0.0 && sy < 0.0)
+		{
+			float f = clamp((a + BORDER_TAU * 0.25) / (BORDER_TAU * 0.25), 0.0, 1.0);
+			dist = straight_w + f * arc_len;
+		}
+		else if (sx > 0.0 && sy > 0.0)
+		{
+			float f = clamp(a / (BORDER_TAU * 0.25), 0.0, 1.0);
+			dist = straight_w + arc_len + straight_h + f * arc_len;
+		}
+		else if (sx < 0.0 && sy > 0.0)
+		{
+			float f = clamp((a - BORDER_TAU * 0.25) / (BORDER_TAU * 0.25), 0.0, 1.0);
+			dist = straight_w + arc_len + straight_h + arc_len + straight_w + f * arc_len;
+		}
+		else
+		{
+			if (a < 0.0)
+			{
+				a += BORDER_TAU;
+			}
+			float f = clamp((a - BORDER_TAU * 0.5) / (BORDER_TAU * 0.25), 0.0, 1.0);
+			dist = straight_w + arc_len + straight_h + arc_len + straight_w + arc_len + straight_h + f * arc_len;
+		}
+	}
+	else if (local.y < 0.0 && ax <= right_x)
+	{
+		dist = clamp(local.x, left_x, right_x) - left_x;
+	}
+	else if (local.x >= 0.0 && ay <= bottom_y)
+	{
+		dist = straight_w + arc_len + (clamp(local.y, top_y, bottom_y) - top_y);
+	}
+	else if (local.y >= 0.0 && ax <= right_x)
+	{
+		dist = straight_w + arc_len + straight_h + arc_len + (right_x - clamp(local.x, left_x, right_x));
+	}
+	else
+	{
+		dist = straight_w + arc_len + straight_h + arc_len + straight_w + arc_len + (bottom_y - clamp(local.y, top_y, bottom_y));
+	}
+
+	return fract(dist / perimeter);
+}
+
+vec2 rot2(vec2 p, float a)
+{
+	float s = sin(a);
+	float c = cos(a);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+float object_wave(vec2 p)
+{
+	float v = 0.0;
+	v += sin(p.x * 1.43 + p.y * 0.76);
+	v += sin(p.x * -0.91 + p.y * 1.87 + 1.7) * 0.52;
+	v += sin(length(p * vec2(0.78, 1.24)) * 2.36 + p.x * 0.38) * 0.34;
+	return v / 2.08;
+}
+
+float object_noise(vec2 object_uv, float t, float scale)
+{
+	vec2 p = (object_uv - vec2(0.5)) * vec2(4.0, 5.4) * max(scale, 0.1);
+	vec2 p1 = p + vec2(0.0, -t * 0.42);
+	vec2 p2 = rot2(p, 0.645) + vec2(0.37, -t * 0.61);
+	vec2 p3 = rot2(p * 1.73, -0.918) + vec2(t * 0.16, -t * 0.31);
+	vec2 warp = vec2(
+		object_wave(p2 * 0.72 + vec2(2.1, -1.4)),
+		object_wave(p3 * 0.58 + vec2(-3.8, 4.2))
+	);
+	float v = 0.0;
+	v += object_wave(p1 + warp * 0.62) * 0.50;
+	v += object_wave(p2 - warp.yx * 0.48) * 0.31;
+	v += object_wave(p3 + warp * 0.35) * 0.19;
+	return clamp(v * 0.5 + 0.5, 0.0, 1.0);
+}
+
+float object_shine(vec2 object_uv, float t, float n, float scale)
+{
+	vec2 p = (object_uv - vec2(0.5)) * vec2(3.6, 4.8) * max(scale, 0.1);
+	float a = sin((rot2(p, 0.645).x * 1.35 + p.y * 0.42 - t * 0.72 + n * 0.38) * BORDER_TAU) * 0.5 + 0.5;
+	float b = sin((rot2(p * 1.51, -0.918).y * 0.92 + p.x * 0.31 - t * 0.47) * BORDER_TAU) * 0.5 + 0.5;
+	return pow(clamp(a * 0.62 + b * 0.38, 0.0, 1.0), 5.2);
+}
+
+vec2 border_space(vec2 uv, float aspect)
+{
+	return vec2(uv.x * aspect, uv.y);
+}
+
+float segment_distance(vec2 p, vec2 a, vec2 b)
+{
+	vec2 pa = p - a;
+	vec2 ba = b - a;
+	float h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.00001), 0.0, 1.0);
+	return length(pa - ba * h);
+}
+
+float bolt_segment(vec2 p, vec2 a, vec2 b, float core_width, float glow_width)
+{
+	float d = segment_distance(p, a, b);
+	float core = 1.0 - smoothstep(0.0, core_width, d);
+	float glow = 1.0 - smoothstep(core_width, glow_width, d);
+	return clamp(core * 1.65 + glow * 0.34, 0.0, 1.0);
+}
+
+float jagged_bolt(vec2 p, vec2 a, vec2 b, float id, float seed, float core_width, float glow_width, float jag_amount)
+{
+	vec2 dir = b - a;
+	vec2 dir_norm = normalize(dir);
+	vec2 normal = normalize(vec2(-dir.y, dir.x));
+	vec2 previous = a;
+	float bolt = 0.0;
+
+	for (int i = 1; i <= 8; i++)
+	{
+		float fi = float(i);
+		float f = fi / 8.0;
+		vec2 next = mix(a, b, f);
+		if (i < 8)
+		{
+			float jag = hash(vec2(id + fi * 7.13, seed + fi * 13.71)) - 0.5;
+			float shove = hash(vec2(seed + fi * 11.41, id + fi * 3.79)) - 0.5;
+			next += normal * jag * jag_amount * (0.92 + 0.24 * sin(fi * 2.1 + id));
+			next += dir_norm * shove * jag_amount * 0.36;
+		}
+		bolt = max(bolt, bolt_segment(p, previous, next, core_width, glow_width));
+
+		if (i > 1 && i < 8)
+		{
+			float fork_seed = hash(vec2(id + fi * 31.17, seed + fi * 5.91));
+			float fork_gate = step(0.45, fork_seed);
+			float side = fork_seed < 0.72 ? -1.0 : 1.0;
+			float fork_len = jag_amount * mix(0.72, 1.92, hash(vec2(seed + fi * 17.7, id + 4.2)));
+			vec2 fork_dir = normalize(normal * side + dir_norm * mix(-0.28, 0.42, hash(vec2(id + fi, seed + 8.0))));
+			vec2 fork_end = next + fork_dir * fork_len;
+			float fork = bolt_segment(p, next, fork_end, core_width * 0.62, glow_width * 0.62);
+			bolt = max(bolt, fork * fork_gate * 0.82);
+		}
+
+		float knot = exp(-length(p - next) / max(glow_width * 0.70, 0.001)) * 0.22;
+		bolt = max(bolt, knot);
+		previous = next;
+	}
+
+	return clamp(bolt, 0.0, 1.35);
+}
+
+float zap_envelope(float phase)
+{
+	return smoothstep(0.00, 0.08, phase) * (1.0 - smoothstep(0.50, 0.92, phase));
+}
+
+float edge_zap(vec2 p, vec2 a_uv, vec2 b_uv, float aspect, float t, float seed, float core_width, float glow_width, float jag_amount)
+{
+	float rate = 2.35;
+	float phase = fract(t * rate + seed);
+	float id = floor(t * rate + seed);
+	float gate = step(0.18, hash(vec2(id, seed * 9.17)));
+	vec2 a = border_space(a_uv, aspect);
+	vec2 b = border_space(b_uv, aspect);
+
+	float span = mix(0.42, 0.88, hash(vec2(seed + 71.0, id + 3.0)));
+	float start = hash(vec2(id + 13.0, seed + 29.0)) * (1.0 - span);
+	vec2 s = mix(a, b, start);
+	vec2 e = mix(a, b, start + span);
+	float bolt = jagged_bolt(p, s, e, id, seed, core_width, glow_width, jag_amount);
+
+	float head = exp(-length(p - e) / max(glow_width * 1.15, 0.001)) * 0.34;
+	float tail = exp(-length(p - s) / max(glow_width * 0.82, 0.001)) * 0.18;
+	return (bolt + head + tail) * zap_envelope(phase) * gate;
+}
+
+float corner_flash(vec2 p, vec2 corner_uv, float aspect, float t, float seed, float glow_width)
+{
+	float phase = fract(t * 2.1 + seed);
+	float id = floor(t * 2.1 + seed);
+	float gate = step(0.36, hash(vec2(id + 19.0, seed * 5.31)));
+	float d = length(p - border_space(corner_uv, aspect));
+	return exp(-d / max(glow_width * 1.35, 0.001)) * zap_envelope(phase) * gate;
+}
+
+float object_lightning(vec2 object_uv, float t, float n, float inner_factor, vec2 safe_size, float width, float inset)
+{
+	float aspect = safe_size.x / max(safe_size.y, 1.0);
+	vec2 p = border_space(object_uv, aspect);
+
+	float lane_x = clamp((inset + width * 0.65) / max(safe_size.x, 1.0), 0.045, 0.470);
+	float lane_y = clamp((inset + width * 0.65) / max(safe_size.y, 1.0), 0.035, 0.470);
+	float left_x = lane_x;
+	float right_x = 1.0 - lane_x;
+	float top_y = lane_y;
+	float bottom_y = 1.0 - lane_y;
+	float x_pad = min(0.10, max(0.018, lane_x * 0.30));
+	float y_pad = min(0.10, max(0.018, lane_y * 0.30));
+
+	float width_units = clamp(width / max(safe_size.y, 1.0), 0.012, 0.48);
+	float core_width = clamp(width_units * 0.16, 0.0055, 0.050);
+	float glow_width = clamp(width_units * 0.88, 0.034, 0.210);
+	float jag_amount = clamp(width_units * 1.55, 0.060, 0.280);
+
+	float top = edge_zap(p, vec2(left_x + x_pad, top_y), vec2(right_x - x_pad, top_y + lane_y * 0.05), aspect, t, 1.7, core_width, glow_width, jag_amount);
+	float right = edge_zap(p, vec2(right_x, top_y + y_pad), vec2(right_x - lane_x * 0.05, bottom_y - y_pad), aspect, t, 5.3, core_width, glow_width, jag_amount);
+	float bottom = edge_zap(p, vec2(right_x - x_pad, bottom_y), vec2(left_x + x_pad, bottom_y - lane_y * 0.05), aspect, t, 9.1, core_width, glow_width, jag_amount);
+	float left = edge_zap(p, vec2(left_x, bottom_y - y_pad), vec2(left_x + lane_x * 0.05, top_y + y_pad), aspect, t, 12.9, core_width, glow_width, jag_amount);
+
+	float diagonal_a = edge_zap(p, vec2(left_x + x_pad, top_y), vec2(left_x, top_y + y_pad * 3.4), aspect, t, 17.2, core_width * 0.82, glow_width * 0.82, jag_amount * 0.78) * 0.72;
+	float diagonal_b = edge_zap(p, vec2(right_x - x_pad, bottom_y), vec2(right_x, bottom_y - y_pad * 3.4), aspect, t, 22.4, core_width * 0.82, glow_width * 0.82, jag_amount * 0.78) * 0.72;
+
+	float corners = 0.0;
+	corners = max(corners, corner_flash(p, vec2(left_x, top_y), aspect, t, 2.6, glow_width));
+	corners = max(corners, corner_flash(p, vec2(right_x, top_y), aspect, t, 6.8, glow_width));
+	corners = max(corners, corner_flash(p, vec2(right_x, bottom_y), aspect, t, 10.4, glow_width));
+	corners = max(corners, corner_flash(p, vec2(left_x, bottom_y), aspect, t, 14.2, glow_width));
+
+	float bolt = max(max(top, right), max(bottom, left));
+	bolt = max(bolt, max(diagonal_a, diagonal_b));
+	bolt += corners * 0.58;
+
+	float ring = 0.72 + 0.28 * smoothstep(0.02, 0.55, inner_factor);
+	float flicker = 0.82 + 0.18 * sin(t * 24.0 + n * 8.0);
+	return clamp(bolt * ring * flicker, 0.0, 1.0);
+}
+
+vec3 style_color(float flow, float t, float n, float inner_factor, vec2 object_uv, vec2 object_p, vec2 safe_size, float width, float inset)
+{
+	if (border_style == 3)
+	{
+		vec3 storm = mix(vec3(0.005, 0.025, 0.16), vec3(0.03, 0.22, 0.72), smoothstep(0.10, 0.90, n));
+		float pulse = pow(sin((object_uv.x * 1.3 + object_uv.y * 1.9 - t * 0.34 + n * 0.38) * BORDER_TAU) * 0.5 + 0.5, 6.0);
+		return storm + vec3(0.03, 0.34, 0.86) * pulse * 0.22;
+	}
+	if (border_style == 4)
+	{
+		float lick = sin((object_uv.x * 3.2 + object_uv.y * 6.4 - t * 1.55 + n * 0.9) * BORDER_TAU) * 0.5 + 0.5;
+		float heat = clamp(n * 0.68 + lick * 0.30 + object_uv.y * 0.22 + inner_factor * 0.28, 0.0, 1.0);
+		vec3 red = vec3(0.58, 0.03, 0.0);
+		vec3 orange = vec3(1.0, 0.31, 0.02);
+		vec3 yellow = vec3(1.0, 0.78, 0.12);
+		return mix(mix(red, orange, smoothstep(0.18, 0.64, heat)), yellow, smoothstep(0.64, 1.0, heat));
+	}
+	if (border_style == 5)
+	{
+		float water = sin((object_uv.y * 7.6 + object_uv.x * 2.4 + n * 1.3 + t * 0.62) * BORDER_TAU) * 0.5 + 0.5;
+		return mix(vec3(0.04, 0.30, 0.58), vec3(0.32, 0.92, 1.0), water);
+	}
+	if (border_style == 6)
+	{
+		float star = pow(smoothstep(0.72, 1.0, n), 4.0);
+		return mix(vec3(0.06, 0.07, 0.22), vec3(0.96, 0.92, 0.72), star);
+	}
+	if (border_style == 7)
+	{
+		float ripple = sin((length(object_p * vec2(1.0, 1.35)) * 13.0 - t * 1.1 + n * 0.7) * BORDER_TAU) * 0.5 + 0.5;
+		return mix(vec3(0.18, 0.15, 0.70), vec3(0.90, 0.75, 1.0), ripple);
+	}
+	if (border_style == 8)
+	{
+		float coord = fract(object_uv.x * 0.72 + object_uv.y * 0.48 + n * 0.18 + t * 0.08);
+		float band = sin((object_uv.x * 2.3 - object_uv.y * 1.7 + t * 0.55 + n * 0.42) * BORDER_TAU) * 0.5 + 0.5;
+		return mix(vec3(0.65, 0.73, 1.0), hsv2rgb(vec3(coord, 0.62, 1.0)), band);
+	}
+	if (border_style == 2)
+	{
+		float fog = clamp(n * 1.18 + sin((object_uv.x * 1.8 + object_uv.y * 2.2 - t * 0.38) * BORDER_TAU) * 0.22, 0.0, 1.0);
+		return mix(vec3(0.09, 0.45, 0.18), vec3(0.78, 0.30, 0.96), fog);
+	}
+	float coord = fract(object_uv.x * 0.78 + object_uv.y * 0.42 + n * 0.24 + t * 0.08);
+	return hsv2rgb(vec3(coord, 0.76, 1.0));
+}
+
+void fragment()
+{
+	vec2 safe_size = max(rect_size, vec2(1.0));
+	float width = max(1.0, border_width_px);
+	float inset = max(0.0, border_inset_px);
+	float radius = max(0.0, corner_radius_px);
+	vec2 local = UV * safe_size - safe_size * 0.5;
+	float outer = sd_round_rect(local, safe_size * 0.5 - vec2(inset), radius);
+	float inner = sd_round_rect(local, safe_size * 0.5 - vec2(inset + width), max(0.0, radius - width));
+	float aa = max(corner_softness_px, max(fwidth(outer), fwidth(inner)) * 1.5);
+	float outer_mask = 1.0 - smoothstep(0.0, aa, outer);
+	float inner_mask = 1.0 - smoothstep(0.0, aa, inner);
+	float mask = clamp(outer_mask - inner_mask, 0.0, 1.0);
+	if (mask <= 0.001)
+	{
+		discard;
+	}
+
+	float inner_factor = clamp(inner / max(1.0, width), 0.0, 1.0);
+	float flow = border_flow(local, safe_size, inset, width, radius);
+	float t = TIME * flow_speed + time_offset;
+	float scale = max(0.1, pattern_scale);
+	vec2 object_uv = local_px / safe_size;
+	vec2 object_p = object_uv - vec2(0.5);
+	float n = object_noise(object_uv, t, scale);
+	float lightning = 0.0;
+	float shine = border_style == 3 ? pow(n, 3.0) * 0.42 : object_shine(object_uv, t, n, scale);
+	vec3 color = style_color(flow, t, n, inner_factor, object_uv, object_p, safe_size, width, inset);
+	if (border_style == 3)
+	{
+		color += vec3(0.20, 0.80, 1.0) * lightning * glow_strength * 1.15;
+		color += vec3(1.0, 0.96, 0.78) * pow(lightning, 2.4) * glow_strength * 1.35;
+		color *= 0.74 + glow_strength * 0.30 + lightning * 0.72;
+	}
+	else
+	{
+		color += vec3(1.0, 0.95, 0.80) * shine * glow_strength * 0.62;
+		color *= 0.72 + glow_strength * 0.34 + shine * 0.30;
+	}
+	color = apply_hue_shift(color);
+	float alpha = mask * opacity * (0.68 + n * 0.22 + shine * 0.18);
+	alpha = max(alpha, mask * opacity * lightning * 1.18);
+	alpha = clamp(alpha, 0.0, 0.97);
+	COLOR = vec4(color * alpha, alpha);
+}";
+
+	private static readonly Shader SharedShader = new Shader { Code = ShaderCode };
+	private static PackedScene? _lightningCornerScene;
+	private readonly ShaderMaterial _material;
+	private readonly ColorRect _overlayRect;
+	private readonly Node2D?[] _lightningCorners = new Node2D?[4];
+	private Vector2 _lastKnownRectSize = Vector2.Zero;
+	private float _lastBorderWidth = 12.0f;
+	private float _lastBorderInset = 0.0f;
+	private bool _lightningVfxVisible;
+
+	public CardEditorBorderFoilOverlay()
+	{
+		Name = "CardEditorBorderFoilOverlay";
+		MouseFilter = MouseFilterEnum.Ignore;
+		LayoutMode = 3;
+		ZIndex = 0;
+		ClipContents = false;
+		_material = new ShaderMaterial { Shader = SharedShader };
+		_material.SetShaderParameter("rect_size", new Vector2(300.0f, 422.0f));
+		_overlayRect = new ColorRect
+		{
+			Color = new Color(1, 1, 1, 0),
+			Material = _material,
+			MouseFilter = MouseFilterEnum.Ignore,
+			LayoutMode = 0,
+			OffsetLeft = -150.0f,
+			OffsetTop = -211.0f,
+			OffsetRight = 150.0f,
+			OffsetBottom = 211.0f
+		};
+		AddChild(_overlayRect);
+		SetProcess(true);
+		ApplyStyle(CardEditorVisualFinish.RainbowRareFoil, fullArt: false, null);
+	}
+
+	public override void _Ready()
+	{
+		base._Ready();
+		UpdateRectSize();
+		UpdateShaderOrigin();
+	}
+
+	public override void _Process(double delta)
+	{
+		base._Process(delta);
+		UpdateShaderOrigin();
+	}
+
+	public override void _Notification(int what)
+	{
+		base._Notification(what);
+		if (what == NotificationResized)
+		{
+			UpdateRectSize();
+		}
+	}
+
+	public void ApplyStyle(CardEditorVisualFinish finish, bool fullArt, Dictionary<string, float>? fp)
+	{
+		bool lightning = finish == CardEditorVisualFinish.Lightning;
+		_lastBorderWidth = CardEditorTextureLoader.P(fp, "borderWidth", lightning ? (fullArt ? 17.0f : 15.0f) : (fullArt ? 14.0f : 12.0f));
+		_lastBorderInset = CardEditorTextureLoader.P(fp, "borderInset", 0.0f);
+		_lightningVfxVisible = lightning;
+		_material.SetShaderParameter("border_style", ToStyleId(finish));
+		_material.SetShaderParameter("border_width_px", _lastBorderWidth);
+		_material.SetShaderParameter("border_inset_px", _lastBorderInset);
+		_material.SetShaderParameter("corner_radius_px", CardEditorTextureLoader.P(fp, "borderCornerRadius", 28.0f));
+		_material.SetShaderParameter("corner_softness_px", 1.5f);
+		_material.SetShaderParameter("opacity", CardEditorTextureLoader.P(fp, "borderOpacity", lightning ? 0.86f : (fullArt ? 0.76f : 0.70f)));
+		_material.SetShaderParameter("flow_speed", CardEditorTextureLoader.P(fp, "borderFlowSpeed", lightning ? 1.35f : 1.0f));
+		_material.SetShaderParameter("pattern_scale", CardEditorTextureLoader.P(fp, "borderPatternScale", lightning ? 0.78f : 1.0f));
+		_material.SetShaderParameter("glow_strength", CardEditorTextureLoader.P(fp, "borderGlow", lightning ? 1.10f : 0.55f));
+		_material.SetShaderParameter("time_offset", CardEditorTextureLoader.P(fp, "borderTimeOffset", 0.0f));
+		_material.SetShaderParameter("hue_shift", CardEditorTextureLoader.P(fp, "borderHueShift", 0.0f));
+		UpdateRectSize();
+		UpdateShaderOrigin();
+		UpdateLightningCornerVfx();
+	}
+
+	private static int ToStyleId(CardEditorVisualFinish finish) => finish switch
+	{
+		CardEditorVisualFinish.Miasma => 2,
+		CardEditorVisualFinish.Lightning => 3,
+		CardEditorVisualFinish.Flame => 4,
+		CardEditorVisualFinish.Whirlpool or CardEditorVisualFinish.PurpleWavesOcean => 5,
+		CardEditorVisualFinish.Constellation => 6,
+		CardEditorVisualFinish.DvdRipple => 7,
+		CardEditorVisualFinish.PrismaticBandGlare => 8,
+		_ => 1
+	};
+
+	private void UpdateRectSize()
+	{
+		Vector2 currentSize = Size;
+		if (currentSize.X <= 0.0f || currentSize.Y <= 0.0f)
+		{
+			currentSize = _overlayRect.Size;
+		}
+
+		if (currentSize == _lastKnownRectSize || currentSize.X <= 0.0f || currentSize.Y <= 0.0f)
+		{
+			return;
+		}
+
+		_lastKnownRectSize = currentSize;
+		_material.SetShaderParameter("rect_size", currentSize);
+		UpdateShaderOrigin();
+		UpdateLightningCornerVfx();
+	}
+
+	private void UpdateShaderOrigin()
+	{
+		if (!GodotObject.IsInstanceValid(_overlayRect))
+		{
+			return;
+		}
+
+		_material.SetShaderParameter("card_origin", _overlayRect.GetGlobalTransformWithCanvas().Origin);
+	}
+
+	private void EnsureLightningCornerVfx()
+	{
+		if (_lightningCorners[0] != null && GodotObject.IsInstanceValid(_lightningCorners[0]))
+		{
+			return;
+		}
+
+		_lightningCornerScene ??= GD.Load<PackedScene>(LightningCornerScenePath);
+		if (_lightningCornerScene == null)
+		{
+			return;
+		}
+
+		for (int i = 0; i < _lightningCorners.Length; i++)
+		{
+			Node2D corner = _lightningCornerScene.Instantiate<Node2D>(PackedScene.GenEditState.Disabled);
+				corner.Name = $"CardEditorLightningCorner_{i}";
+				corner.Visible = false;
+				corner.ZIndex = 2;
+				corner.Rotation = i switch
+				{
+					1 => Mathf.Pi * 0.5f,
+				2 => Mathf.Pi,
+				3 => Mathf.Pi * 1.5f,
+				_ => 0.0f
+			};
+			AddChild(corner);
+			_lightningCorners[i] = corner;
+		}
+	}
+
+	private void UpdateLightningCornerVfx()
+	{
+		if (!_lightningVfxVisible)
+		{
+			SetLightningCornerVfxVisible(false);
+			return;
+		}
+
+		EnsureLightningCornerVfx();
+		if (_lightningCorners[0] == null || !GodotObject.IsInstanceValid(_lightningCorners[0]))
+		{
+			return;
+		}
+
+		Vector2 size = _lastKnownRectSize;
+		if (size.X <= 0.0f || size.Y <= 0.0f)
+		{
+			size = new Vector2(300.0f, 422.0f);
+		}
+
+		float laneX = Mathf.Clamp(_lastBorderInset + _lastBorderWidth * 0.5f, 0.0f, Math.Max(0.0f, size.X * 0.5f - 1.0f));
+		float laneY = Mathf.Clamp(_lastBorderInset + _lastBorderWidth * 0.5f, 0.0f, Math.Max(0.0f, size.Y * 0.5f - 1.0f));
+		Vector2 topLeft = size * -0.5f;
+		Vector2[] positions =
+		[
+			topLeft + new Vector2(laneX, laneY),
+			topLeft + new Vector2(size.X - laneX, laneY),
+			topLeft + new Vector2(size.X - laneX, size.Y - laneY),
+			topLeft + new Vector2(laneX, size.Y - laneY)
+		];
+
+		float cardScale = Math.Max(0.1f, (size.X / 300.0f + size.Y / 422.0f) * 0.5f);
+		for (int i = 0; i < _lightningCorners.Length; i++)
+		{
+			Node2D? corner = _lightningCorners[i];
+			if (corner == null || !GodotObject.IsInstanceValid(corner))
+			{
+				continue;
+			}
+
+			corner.Position = positions[i];
+			corner.Scale = Vector2.One * cardScale;
+			corner.Visible = true;
+			corner.Set("emitting", true);
+		}
+	}
+
+	private void SetLightningCornerVfxVisible(bool visible)
+	{
+		for (int i = 0; i < _lightningCorners.Length; i++)
+		{
+			Node2D? corner = _lightningCorners[i];
+			if (corner == null || !GodotObject.IsInstanceValid(corner))
+			{
+				continue;
+			}
+
+			corner.Visible = visible;
+			corner.Set("emitting", visible);
+		}
+	}
+}
+
+internal static class CardEditorBorderFoilOverlayController
+{
+	public static void Sync(Node overlayContainer, CardEditorVisualFinish finish, bool fullArt, Dictionary<string, float>? fp)
+	{
+		if (overlayContainer == null || !GodotObject.IsInstanceValid(overlayContainer))
+		{
+			return;
+		}
+
+		CardEditorBorderFoilOverlay? overlay = FindOverlay(overlayContainer);
+		if (!IsSupportedBorderFinish(finish))
+		{
+			RemoveOverlay(overlayContainer, overlay);
+			return;
+		}
+
+		if (overlay == null)
+		{
+			overlay = new CardEditorBorderFoilOverlay();
+			overlayContainer.AddChild(overlay);
+		}
+
+		overlay.ApplyStyle(finish, fullArt, fp);
+		overlay.Show();
+	}
+
+	private static bool IsSupportedBorderFinish(CardEditorVisualFinish finish) => finish switch
+	{
+		CardEditorVisualFinish.RainbowRareFoil
+		or CardEditorVisualFinish.RainbowGlitterArt
+		or CardEditorVisualFinish.PrismaticBandGlare
+		or CardEditorVisualFinish.PurpleWavesOcean
+		or CardEditorVisualFinish.Whirlpool
+		or CardEditorVisualFinish.Miasma
+		or CardEditorVisualFinish.Constellation
+		or CardEditorVisualFinish.DvdRipple
+		or CardEditorVisualFinish.Lightning
+		or CardEditorVisualFinish.Flame => true,
+		_ => false
+	};
+
+	private static CardEditorBorderFoilOverlay? FindOverlay(Node overlayContainer)
+	{
+		for (int i = 0; i < overlayContainer.GetChildCount(); i++)
+		{
+			if (overlayContainer.GetChild(i) is CardEditorBorderFoilOverlay overlay)
+			{
+				return overlay;
+			}
+		}
+		return null;
+	}
+
+	private static void RemoveOverlay(Node overlayContainer, CardEditorBorderFoilOverlay? overlay)
+	{
+		if (overlay == null)
+		{
+			return;
+		}
+
+		if (overlay.GetParent() == overlayContainer)
+		{
+			overlayContainer.RemoveChild(overlay);
+		}
+
+		overlay.QueueFree();
 	}
 }
 
@@ -2722,6 +3890,8 @@ internal static class CardEditorCardFinishOverlayController
                 Dictionary<string, float>? finishParams = CardEditorCardFinishResolver.GetDesiredFinishParams(model);
                 string? customFinishId = CardEditorCardFinishResolver.GetDesiredCustomFinishId(model);
                 Dictionary<string, string>? customFinishParams = CardEditorCardFinishResolver.GetDesiredCustomFinishParams(model);
+                CardEditorVisualFinish borderFinish = CardEditorCardFinishResolver.GetDesiredBorderFinish(model);
+                Dictionary<string, float>? borderFinishParams = CardEditorCardFinishResolver.GetDesiredBorderFinishParams(model);
 				bool hasCustomFinish = !string.IsNullOrWhiteSpace(customFinishId) && CardEditorCustomFoilRegistry.TryGet(customFinishId, out _);
 				if (hasCustomFinish)
 				{
@@ -2739,6 +3909,7 @@ internal static class CardEditorCardFinishOverlayController
 				CardEditorProceduralArtFinishController.Sync(card, desiredFinish, fullArt, finishParams);
 				CardEditorBaseGameOverlayFinishController.Sync(card, desiredFinish);
 				CardEditorCustomShaderFoilController.Sync(card, hasCustomFinish ? customFinishId : null, fullArt, customFinishParams);
+                CardEditorBorderFoilOverlayController.Sync(overlayContainer, borderFinish, fullArt, borderFinishParams);
 
                 if (desiredFinish == CardEditorVisualFinish.None)
                 {

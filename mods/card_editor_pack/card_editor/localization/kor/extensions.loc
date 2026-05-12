@@ -1487,6 +1487,7 @@
   "CARD_EDITOR.field.hideCostOrb": "비용 오브",
   "CARD_EDITOR.field.hideNameBanner": "이름 배너",
   "CARD_EDITOR.field.hideNameText": "이름",
+  "CARD_EDITOR.field.hideAncientInnerBorder": "고대 내부 테두리",
   "CARD_EDITOR.field.hideTextBackground": "텍스트 배경",
   "CARD_EDITOR.field.hideTypeBadge": "유형 배지",
   "CARD_EDITOR.label.resource": "자원",

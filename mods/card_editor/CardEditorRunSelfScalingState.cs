@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Godot;
+using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -13,6 +14,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -21,11 +23,20 @@ internal static class CardEditorRunSelfScalingState
 	private const int CurrentVersion = 2;
 	private const int OverrideDtoVersion = 13;
 	private const string StorePath = "user://card_editor/run_self_scaling_state.json";
+	private const string SerializedMutationPropertyName = nameof(CardEditorCreatedCardBase.CardEditorSelfScalingDiff);
 	private static readonly TimeSpan MaxRunStateAge = TimeSpan.FromDays(14);
 	private static readonly ConditionalWeakTable<CardModel, AppliedMarker> _appliedMarkers = new ConditionalWeakTable<CardModel, AppliedMarker>();
+	private static readonly ConditionalWeakTable<CardModel, SerializedMutationPayload> _serializedMutationPayloads = new ConditionalWeakTable<CardModel, SerializedMutationPayload>();
+	private static int _restoreSuppressionDepth;
 
 	private static FileDto? _cache;
-	internal static bool IsRefreshingForRestore { get; private set; }
+	internal static bool IsRefreshingForRestore => _restoreSuppressionDepth > 0;
+
+	internal static IDisposable PushRestoreSuppression()
+	{
+		_restoreSuppressionDepth++;
+		return new RestoreSuppressionScope();
+	}
 
 	public static void RecordPersistentMutation(CardModel? card, CardEditorExtraEffects.SelfScalingMutationDiff diff)
 	{
@@ -33,46 +44,13 @@ internal static class CardEditorRunSelfScalingState
 		{
 			return;
 		}
-
-		IRunState? runState = TryGetRunState(card);
-		if (!TryBuildRunKey(runState, out string runKey))
+		if (card is CardEditorCreatedCardBase createdCard)
 		{
-			Log.Warn($"[CardEditor][RunSelfScaling] Could not persist mutation for {card.Id}: no active run key.");
+			RecordCreatedCardMutation(createdCard, diff);
 			return;
 		}
 
-		FileDto file = Load();
-		if (!file.Runs.TryGetValue(runKey, out RunDto? run))
-		{
-			run = new RunDto();
-			file.Runs[runKey] = run;
-		}
-		run.Cards ??= new Dictionary<string, CardEditorPresetStore.CardOverrideDto>(StringComparer.Ordinal);
-		run.Diffs ??= new Dictionary<string, SelfScalingDiffDto>(StringComparer.Ordinal);
-
-		if (!TryBuildCardInstanceKey(card, runState, out string cardKey))
-		{
-			Log.Warn($"[CardEditor][RunSelfScaling] Could not persist mutation for {card.Id}: no stable card instance key.");
-			return;
-		}
-
-		run.UpdatedAtUtc = DateTime.UtcNow;
-		CardEditorExtraEffects.SelfScalingMutationDiff combined = run.Diffs != null && run.Diffs.TryGetValue(cardKey, out SelfScalingDiffDto? existingDto) && existingDto != null
-			? existingDto.ToDiff()
-			: new CardEditorExtraEffects.SelfScalingMutationDiff();
-		CardEditorExtraEffects.AccumulateSelfScalingMutationDiff(combined, diff);
-		if (combined.IsEmpty)
-		{
-			run.Diffs.Remove(cardKey);
-		}
-		else
-		{
-			run.Diffs[cardKey] = SelfScalingDiffDto.FromDiff(combined);
-		}
-		run.Cards.Remove(cardKey);
-		PruneOldRuns(file);
-		Save(file);
-		SetAppliedMarker(card, BuildAppliedMarker(runKey, cardKey, run));
+		RecordSerializedCardMutation(card, diff);
 	}
 
 	public static void RestoreForCombat(CombatState? combatState)
@@ -105,67 +83,294 @@ internal static class CardEditorRunSelfScalingState
 		{
 			return false;
 		}
+		if (IsRefreshingForRestore)
+		{
+			return false;
+		}
+		if (card is CardEditorCreatedCardBase createdCard)
+		{
+			return TryRestoreCreatedCard(card, createdCard, cardAlreadyRebased);
+		}
 
-		runState ??= TryGetRunState(card);
-		if (!TryBuildRunKey(runState, out string runKey))
+		return TryRestoreSerializedCard(card, cardAlreadyRebased);
+	}
+
+	public static void WriteSavedMutationToSerializable(CardModel? card, SerializableCard? save)
+	{
+		if (card == null || save == null)
+		{
+			return;
+		}
+
+		string payload = card is CardEditorCreatedCardBase createdCard
+			? createdCard.CardEditorSelfScalingDiff ?? string.Empty
+			: GetSerializedMutationPayload(card);
+		WriteSerializedMutationPayload(save, payload);
+	}
+
+	public static void ReadSavedMutationFromSerializable(SerializableCard? save, CardModel? card)
+	{
+		if (save == null || card == null)
+		{
+			return;
+		}
+		if (!TryReadSerializedMutationPayload(save, out string payload))
+		{
+			return;
+		}
+
+		if (card is CardEditorCreatedCardBase createdCard)
+		{
+			createdCard.CardEditorSelfScalingDiff = payload;
+		}
+		else
+		{
+			SetSerializedMutationPayload(card, payload);
+		}
+
+		TryRestoreCard(card, cardAlreadyRebased: true);
+	}
+
+	private static void RecordSerializedCardMutation(CardModel card, CardEditorExtraEffects.SelfScalingMutationDiff diff)
+	{
+		if (card == null || diff == null || diff.IsEmpty)
+		{
+			return;
+		}
+
+		CardEditorExtraEffects.SelfScalingMutationDiff combined = TryReadStoredCardDiff(card, out CardEditorExtraEffects.SelfScalingMutationDiff existing, out _)
+			? existing
+			: new CardEditorExtraEffects.SelfScalingMutationDiff();
+		CardEditorExtraEffects.AccumulateSelfScalingMutationDiff(combined, diff);
+		string payload = combined.IsEmpty
+			? string.Empty
+			: JsonSerializer.Serialize(SelfScalingDiffDto.FromDiff(combined));
+		SetSerializedMutationPayload(card, payload);
+		SetAppliedMarker(card, BuildSavedCardMarker(payload));
+	}
+
+	private static void RecordCreatedCardMutation(CardEditorCreatedCardBase card, CardEditorExtraEffects.SelfScalingMutationDiff diff)
+	{
+		if (card == null || diff == null || diff.IsEmpty)
+		{
+			return;
+		}
+
+		CardEditorExtraEffects.SelfScalingMutationDiff combined = TryReadCreatedCardDiff(card, out CardEditorExtraEffects.SelfScalingMutationDiff existing, out _)
+			? existing
+			: new CardEditorExtraEffects.SelfScalingMutationDiff();
+		CardEditorExtraEffects.AccumulateSelfScalingMutationDiff(combined, diff);
+		card.CardEditorSelfScalingDiff = combined.IsEmpty
+			? string.Empty
+			: JsonSerializer.Serialize(SelfScalingDiffDto.FromDiff(combined));
+		SetAppliedMarker(card, BuildSavedCardMarker(card.CardEditorSelfScalingDiff));
+	}
+
+	private static bool TryRestoreCreatedCard(CardModel card, CardEditorCreatedCardBase createdCard, bool cardAlreadyRebased)
+	{
+		if (!TryReadCreatedCardDiff(createdCard, out CardEditorExtraEffects.SelfScalingMutationDiff diff, out string payload) || diff.IsEmpty)
 		{
 			return false;
 		}
 
-		FileDto file = Load();
-		if (!TryBuildCardInstanceKey(card, runState, out string cardKey))
+		string marker = BuildSavedCardMarker(payload);
+		if (IsAppliedMarkerCurrent(card, marker))
 		{
-			return false;
+			return true;
 		}
-
-		if (!file.Runs.TryGetValue(runKey, out RunDto? run) || run == null)
-		{
-			return false;
-		}
-		run.Cards ??= new Dictionary<string, CardEditorPresetStore.CardOverrideDto>(StringComparer.Ordinal);
-		run.Diffs ??= new Dictionary<string, SelfScalingDiffDto>(StringComparer.Ordinal);
 
 		try
 		{
-			bool alreadyRebased = cardAlreadyRebased;
-			if (!run.Diffs.TryGetValue(cardKey, out SelfScalingDiffDto? diffDto) || diffDto == null)
+			using (PushRestoreSuppression())
 			{
-				if (!TryMigrateLegacySnapshot(card, run, cardKey, cardAlreadyRebased, out diffDto) || diffDto == null)
+				if (!cardAlreadyRebased)
 				{
-					return false;
+					RebaseCardToCurrentDefinition(card);
 				}
-				alreadyRebased = true;
-				run.UpdatedAtUtc = DateTime.UtcNow;
-				PruneOldRuns(file);
-				Save(file);
-			}
 
-			CardEditorExtraEffects.SelfScalingMutationDiff diff = diffDto.ToDiff();
-			if (diff.IsEmpty)
+				bool applied = CardEditorExtraEffects.ApplyPersistentSelfScalingDiff(card, diff);
+				SetAppliedMarker(card, marker);
+				return applied;
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RunSelfScaling] Failed to restore saved card mutation for {card.Id}: {ex}");
+			return false;
+		}
+	}
+
+	private static bool TryRestoreSerializedCard(CardModel card, bool cardAlreadyRebased)
+	{
+		if (!TryReadStoredCardDiff(card, out CardEditorExtraEffects.SelfScalingMutationDiff diff, out string payload) || diff.IsEmpty)
+		{
+			return false;
+		}
+
+		string marker = BuildSavedCardMarker(payload);
+		if (IsAppliedMarkerCurrent(card, marker))
+		{
+			return true;
+		}
+
+		try
+		{
+			using (PushRestoreSuppression())
+			{
+				if (!cardAlreadyRebased)
+				{
+					RebaseCardToCurrentDefinition(card);
+				}
+
+				bool applied = CardEditorExtraEffects.ApplyPersistentSelfScalingDiff(card, diff);
+				SetAppliedMarker(card, marker);
+				return applied;
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RunSelfScaling] Failed to restore serialized card mutation for {card.Id}: {ex}");
+			return false;
+		}
+	}
+
+	private static bool TryReadCreatedCardDiff(
+		CardEditorCreatedCardBase card,
+		out CardEditorExtraEffects.SelfScalingMutationDiff diff,
+		out string payload)
+	{
+		diff = new CardEditorExtraEffects.SelfScalingMutationDiff();
+		payload = card?.CardEditorSelfScalingDiff ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(payload))
+		{
+			return false;
+		}
+
+		try
+		{
+			SelfScalingDiffDto? dto = JsonSerializer.Deserialize<SelfScalingDiffDto>(payload);
+			if (dto == null)
 			{
 				return false;
 			}
 
-			string marker = BuildAppliedMarker(runKey, cardKey, run);
-			if (IsAppliedMarkerCurrent(card, marker))
-			{
-				return true;
-			}
-
-			if (!alreadyRebased)
-			{
-				RebaseCardToCurrentDefinition(card);
-			}
-
-			bool applied = CardEditorExtraEffects.ApplyPersistentSelfScalingDiff(card, diff);
-			SetAppliedMarker(card, marker);
-			return applied;
+			diff = dto.ToDiff();
+			return !diff.IsEmpty;
 		}
 		catch (Exception ex)
 		{
-			Log.Warn($"[CardEditor][RunSelfScaling] Failed to restore {card.Id}: {ex}");
+			Log.Warn($"[CardEditor][RunSelfScaling] Ignoring invalid saved card mutation payload for {card?.Id?.ToString() ?? "unknown"}: {ex.Message}");
 			return false;
 		}
+	}
+
+	private static bool TryReadStoredCardDiff(
+		CardModel card,
+		out CardEditorExtraEffects.SelfScalingMutationDiff diff,
+		out string payload)
+	{
+		if (card is CardEditorCreatedCardBase createdCard)
+		{
+			return TryReadCreatedCardDiff(createdCard, out diff, out payload);
+		}
+
+		diff = new CardEditorExtraEffects.SelfScalingMutationDiff();
+		payload = GetSerializedMutationPayload(card);
+		if (string.IsNullOrWhiteSpace(payload))
+		{
+			return false;
+		}
+
+		try
+		{
+			SelfScalingDiffDto? dto = JsonSerializer.Deserialize<SelfScalingDiffDto>(payload);
+			if (dto == null)
+			{
+				return false;
+			}
+
+			diff = dto.ToDiff();
+			return !diff.IsEmpty;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RunSelfScaling] Ignoring invalid serialized card mutation payload for {card?.Id?.ToString() ?? "unknown"}: {ex.Message}");
+			return false;
+		}
+	}
+
+	private static string BuildSavedCardMarker(string payload)
+		=> "card-prop:" + (payload ?? string.Empty);
+
+	private static string GetSerializedMutationPayload(CardModel card)
+	{
+		return card != null && _serializedMutationPayloads.TryGetValue(card, out SerializedMutationPayload? payload)
+			? payload.Value ?? string.Empty
+			: string.Empty;
+	}
+
+	private static void SetSerializedMutationPayload(CardModel card, string? payload)
+	{
+		if (card == null)
+		{
+			return;
+		}
+		if (string.IsNullOrWhiteSpace(payload))
+		{
+			_serializedMutationPayloads.Remove(card);
+			return;
+		}
+
+		_serializedMutationPayloads.GetOrCreateValue(card).Value = payload;
+	}
+
+	private static bool TryReadSerializedMutationPayload(SerializableCard save, out string payload)
+	{
+		payload = string.Empty;
+		if (save?.Props?.strings == null)
+		{
+			return false;
+		}
+
+		foreach (SavedProperties.SavedProperty<string> item in save.Props.strings)
+		{
+			if (string.Equals(item.name, SerializedMutationPropertyName, StringComparison.Ordinal))
+			{
+				payload = item.value ?? string.Empty;
+				return !string.IsNullOrWhiteSpace(payload);
+			}
+		}
+
+		return false;
+	}
+
+	private static void WriteSerializedMutationPayload(SerializableCard save, string? payload)
+	{
+		if (save == null)
+		{
+			return;
+		}
+
+		List<SavedProperties.SavedProperty<string>>? strings = save.Props?.strings;
+		if (strings != null)
+		{
+			for (int i = strings.Count - 1; i >= 0; i--)
+			{
+				if (string.Equals(strings[i].name, SerializedMutationPropertyName, StringComparison.Ordinal))
+				{
+					strings.RemoveAt(i);
+				}
+			}
+		}
+
+		if (string.IsNullOrWhiteSpace(payload))
+		{
+			return;
+		}
+
+		save.Props ??= new SavedProperties();
+		save.Props.strings ??= new List<SavedProperties.SavedProperty<string>>();
+		save.Props.strings.Add(new SavedProperties.SavedProperty<string>(SerializedMutationPropertyName, payload));
 	}
 
 	private static bool TryMigrateLegacySnapshot(CardModel card, RunDto run, string cardKey, bool cardAlreadyRebased, out SelfScalingDiffDto? diffDto)
@@ -211,16 +416,10 @@ internal static class CardEditorRunSelfScalingState
 			return;
 		}
 
-		bool previous = IsRefreshingForRestore;
-		IsRefreshingForRestore = true;
-		try
+		using (PushRestoreSuppression())
 		{
 			CardEditorOverrides.SetInstanceOverride(card, null);
 			CardEditorOverrides.RefreshCardAfterUpgradeStateChanged(card);
-		}
-		finally
-		{
-			IsRefreshingForRestore = previous;
 		}
 	}
 
@@ -687,8 +886,47 @@ internal static class CardEditorRunSelfScalingState
 		public int? BaseValue { get; set; }
 	}
 
+	private sealed class SerializedMutationPayload
+	{
+		public string Value { get; set; } = string.Empty;
+	}
+
 	private sealed class AppliedMarker
 	{
 		public string Value { get; init; } = string.Empty;
+	}
+
+	private sealed class RestoreSuppressionScope : IDisposable
+	{
+		private bool _disposed;
+
+		public void Dispose()
+		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			_disposed = true;
+			_restoreSuppressionDepth = Math.Max(0, _restoreSuppressionDepth - 1);
+		}
+	}
+}
+
+[HarmonyPatch(typeof(CardModel), nameof(CardModel.ToSerializable))]
+internal static class CardModel_ToSerializable_CardEditorRunSelfScalingState_Patch
+{
+	private static void Postfix(CardModel __instance, SerializableCard __result)
+	{
+		CardEditorRunSelfScalingState.WriteSavedMutationToSerializable(__instance, __result);
+	}
+}
+
+[HarmonyPatch(typeof(CardModel), nameof(CardModel.FromSerializable))]
+internal static class CardModel_FromSerializable_CardEditorRunSelfScalingState_Patch
+{
+	private static void Postfix(SerializableCard save, CardModel __result)
+	{
+		CardEditorRunSelfScalingState.ReadSavedMutationFromSerializable(save, __result);
 	}
 }

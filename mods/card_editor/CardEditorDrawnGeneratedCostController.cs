@@ -525,9 +525,10 @@ internal static class CardEditorDrawnGeneratedCostController
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardChangedPiles))]
 internal static class Hook_AfterCardChangedPiles_DrawnCardsCostLess_Patch
 {
-	public static void Postfix(CombatState? combatState, CardModel card, PileType oldPile)
+	public static void Postfix(object? combatState, CardModel card, PileType oldPile)
 	{
-		if (combatState == null || card == null)
+		CombatState? concreteCombatState = combatState.GetConcreteCombatState();
+		if (concreteCombatState == null || card == null)
 		{
 			return;
 		}
@@ -536,19 +537,20 @@ internal static class Hook_AfterCardChangedPiles_DrawnCardsCostLess_Patch
 		{
 			return;
 		}
-		CardEditorDrawnGeneratedCostController.OnCardArrivedInHand(combatState, card, oldPile);
+		CardEditorDrawnGeneratedCostController.OnCardArrivedInHand(concreteCombatState, card, oldPile);
 	}
 }
 
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardGeneratedForCombat))]
 internal static class Hook_AfterCardGeneratedForCombat_GeneratedCardsCostLess_Patch
 {
-	public static void Postfix(CombatState combatState, CardModel card)
+	public static void Postfix(object? combatState, CardModel card)
 	{
-		if (combatState == null || card == null)
+		CombatState? concreteCombatState = combatState.GetConcreteCombatState();
+		if (concreteCombatState == null || card == null)
 		{
 			return;
 		}
-		CardEditorDrawnGeneratedCostController.OnCardGenerated(combatState, card);
+		CardEditorDrawnGeneratedCostController.OnCardGenerated(concreteCombatState, card);
 	}
 }

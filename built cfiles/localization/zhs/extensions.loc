@@ -1499,6 +1499,7 @@
   "CARD_EDITOR.field.hideCostOrb": "费用宝珠",
   "CARD_EDITOR.field.hideNameBanner": "横幅",
   "CARD_EDITOR.field.hideNameText": "名称",
+  "CARD_EDITOR.field.hideAncientInnerBorder": "远古内边框",
   "CARD_EDITOR.field.hideTextBackground": "文本底板",
   "CARD_EDITOR.field.hideTypeBadge": "类型徽记",
   "CARD_EDITOR.label.resource": "资源",

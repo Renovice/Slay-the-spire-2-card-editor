@@ -1,9 +1,6 @@
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\card_editor.deps.json
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\card_editor.dll
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\card_editor.pdb
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\0Harmony.dll
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\GodotSharp.dll
-C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\sts2.dll
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\Steamworks.NET.dll
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\System.IO.Hashing.dll
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\Sentry.dll

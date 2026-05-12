@@ -1,19 +1,9 @@
-# Shader Previews (Not Packed)
+# Shader Preview Sandbox
 
-These scenes are quick Godot previews for the shaders in `slay-the-spire-2/Holo cards codes/Shader list/*.txt`, rendered on an STS2-style card rect.
+This folder is a clean Godot preview surface for card-art shaders.
 
-## Open in Godot
+Open the existing `mods/card_editor_pack` Godot project and run:
 
-1. Open the project: `slay-the-spire-2/mods/card_editor_pack/project.godot`
-2. In the FileSystem dock, go to: `res://tools/shader_previews/`
-3. Open any of:
-   - `preview_purple_waves_ocean.tscn`
-   - `preview_whirlpool.tscn`
-   - `preview_miasma.tscn`
-   - `preview_aurora.tscn`
-   - `preview_constellation.tscn`
+`res://tools/shader_previews/preview_aurora_smooth_mist.tscn`
 
-## Notes
-
-- Card size is set to `320x446` via the `rect_size` shader parameter in each scene.
-- The preview files live under `res://tools/` so they are excluded by `pack_pck.gd` (only `mods/card_editor` + localization are packed).
+The scene uses `aurora_smooth_mist.gdshader`, which matches the Card Editor runtime Aurora finish defaults.

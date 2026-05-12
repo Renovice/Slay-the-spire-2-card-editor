@@ -97,7 +97,7 @@ internal static class CardEditorVanillaKeywordSupport
 	{
 		StringBuilder builder = new StringBuilder(description.Length + 32);
 		int index = 0;
-		int colorDepth = 0;
+		Stack<string> colorStack = new Stack<string>();
 		int imageDepth = 0;
 
 		while (index < description.Length)
@@ -105,27 +105,52 @@ internal static class CardEditorVanillaKeywordSupport
 			int tagStart = description.IndexOf('[', index);
 			if (tagStart < 0)
 			{
-				AppendFormattedPlainText(builder, description.Substring(index), colorDepth == 0 && imageDepth == 0, cache);
+				AppendFormattedPlainText(builder, description.Substring(index), colorStack.Count == 0 && imageDepth == 0, cache);
 				break;
 			}
 
 			if (tagStart > index)
 			{
-				AppendFormattedPlainText(builder, description.Substring(index, tagStart - index), colorDepth == 0 && imageDepth == 0, cache);
+				AppendFormattedPlainText(builder, description.Substring(index, tagStart - index), colorStack.Count == 0 && imageDepth == 0, cache);
 			}
 
 			int tagEnd = description.IndexOf(']', tagStart);
 			if (tagEnd < 0)
 			{
-				AppendFormattedPlainText(builder, description.Substring(tagStart), colorDepth == 0, cache);
+				AppendFormattedPlainText(builder, description.Substring(tagStart), colorStack.Count == 0 && imageDepth == 0, cache);
 				break;
 			}
 
 			string tag = description.Substring(tagStart, tagEnd - tagStart + 1);
+			if (TryGetOpeningColorTag(tag, out string openingColor))
+			{
+				builder.Append(tag);
+				colorStack.Push(openingColor);
+				UpdateImageDepth(tag, ref imageDepth);
+				index = tagEnd + 1;
+				continue;
+			}
+			if (TryGetClosingColorTag(tag, out string closingColor))
+			{
+				if (colorStack.Count > 0 && string.Equals(colorStack.Peek(), closingColor, StringComparison.OrdinalIgnoreCase))
+				{
+					builder.Append(tag);
+					colorStack.Pop();
+				}
+				index = tagEnd + 1;
+				continue;
+			}
+
 			builder.Append(tag);
 			UpdateImageDepth(tag, ref imageDepth);
-			UpdateColorDepth(tag, ref colorDepth);
 			index = tagEnd + 1;
+		}
+
+		while (colorStack.Count > 0)
+		{
+			builder.Append("[/");
+			builder.Append(colorStack.Pop());
+			builder.Append(']');
 		}
 
 		return builder.ToString();

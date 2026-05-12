@@ -90,10 +90,28 @@ internal static class CardEditorDescriptionNumberHighlighter
 	public static string BuildStableEffectAmountToken(string effectId)
 		=> "e:" + (effectId ?? string.Empty).Trim();
 
+	public static string BuildStableEffectAmountToken(string effectId, int numberIndex)
+	{
+		string baseToken = BuildStableEffectAmountToken(effectId);
+		return numberIndex <= 1
+			? baseToken
+			: baseToken + ":" + numberIndex.ToString(CultureInfo.InvariantCulture);
+	}
+
 	public static string NormalizeLiveNumberLineKey(string text)
 		=> NormalizeVisibleLineWithoutNumbers(text);
 
 	public static string BuildLiveNumberTokenTemplate(string referenceDescription, IReadOnlyDictionary<string, string>? liveTokenByLineKey = null)
+		=> BuildLiveNumberTokenTemplateCore(referenceDescription, NormalizeLiveTokenLineMap(liveTokenByLineKey));
+
+	public static string BuildLiveNumberTokenTemplateWithLineTokens(
+		string referenceDescription,
+		IReadOnlyDictionary<string, IReadOnlyList<string>>? liveTokensByLineKey = null)
+		=> BuildLiveNumberTokenTemplateCore(referenceDescription, liveTokensByLineKey);
+
+	private static string BuildLiveNumberTokenTemplateCore(
+		string referenceDescription,
+		IReadOnlyDictionary<string, IReadOnlyList<string>>? liveTokensByLineKey = null)
 	{
 		if (string.IsNullOrWhiteSpace(referenceDescription))
 		{
@@ -104,26 +122,33 @@ internal static class CardEditorDescriptionNumberHighlighter
 		int tokenIndex = 0;
 		int imageDepth = 0;
 		string[] lines = SplitDescriptionLines(referenceDescription);
-		if (liveTokenByLineKey != null && liveTokenByLineKey.Count > 0 && lines.Length > 0)
+		if (liveTokensByLineKey != null && liveTokensByLineKey.Count > 0 && lines.Length > 0)
 		{
 			bool replacedLine = false;
 			List<string> renderedLines = new List<string>(lines.Length);
 			foreach (string line in lines)
 			{
 				string key = NormalizeVisibleLineWithoutNumbers(line);
-				if (!string.IsNullOrWhiteSpace(key) && liveTokenByLineKey.TryGetValue(key, out string? stableToken))
+				IReadOnlyList<string>? stableTokens = null;
+				if (!string.IsNullOrWhiteSpace(key))
 				{
-					string converted = ReplaceVisibleNumbersWithTokens(
-						line,
-						_ => "{{" + stableToken + "}}",
-						out bool lineReplaced);
-					renderedLines.Add(converted);
-					replacedLine |= lineReplaced;
+					liveTokensByLineKey.TryGetValue(key, out stableTokens);
 				}
-				else
-				{
-					renderedLines.Add(line);
-				}
+
+				int lineTokenIndex = 0;
+				string converted = ReplaceVisibleNumbersAndLiveTokensWithTokens(
+					line,
+					_ =>
+					{
+						lineTokenIndex++;
+						tokenIndex++;
+						return TryGetStableLineToken(stableTokens, lineTokenIndex, out string stableToken)
+							? "{{" + stableToken + "}}"
+							: $"{{{{n{tokenIndex.ToString(CultureInfo.InvariantCulture)}}}}}";
+					},
+					out bool lineReplaced);
+				renderedLines.Add(converted);
+				replacedLine |= lineReplaced;
 			}
 
 			if (replacedLine)
@@ -166,17 +191,29 @@ internal static class CardEditorDescriptionNumberHighlighter
 		string customText,
 		string? referenceDescription,
 		IReadOnlyDictionary<string, string>? liveTokenByLineKey = null)
+		=> BuildLiveNumberTokenTemplateFromCustomTextCore(customText, referenceDescription, NormalizeLiveTokenLineMap(liveTokenByLineKey));
+
+	public static string BuildLiveNumberTokenTemplateFromCustomTextWithLineTokens(
+		string customText,
+		string? referenceDescription,
+		IReadOnlyDictionary<string, IReadOnlyList<string>>? liveTokensByLineKey = null)
+		=> BuildLiveNumberTokenTemplateFromCustomTextCore(customText, referenceDescription, liveTokensByLineKey);
+
+	private static string BuildLiveNumberTokenTemplateFromCustomTextCore(
+		string customText,
+		string? referenceDescription,
+		IReadOnlyDictionary<string, IReadOnlyList<string>>? liveTokensByLineKey = null)
 	{
 		if (string.IsNullOrWhiteSpace(customText))
 		{
 			return string.IsNullOrWhiteSpace(referenceDescription)
 				? customText
-				: BuildLiveNumberTokenTemplate(referenceDescription, liveTokenByLineKey);
+				: BuildLiveNumberTokenTemplateCore(referenceDescription, liveTokensByLineKey);
 		}
 
 		if (string.IsNullOrWhiteSpace(referenceDescription))
 		{
-			return BuildLiveNumberTokenTemplate(customText);
+			return BuildLiveNumberTokenTemplateCore(customText);
 		}
 
 		string[] customLines = SplitDescriptionLines(customText);
@@ -216,20 +253,21 @@ internal static class CardEditorDescriptionNumberHighlighter
 		{
 			string key = NormalizeVisibleLineWithoutNumbers(customLine);
 			if (!string.IsNullOrWhiteSpace(key)
-				&& liveTokenByLineKey != null
-				&& liveTokenByLineKey.TryGetValue(key, out string? stableToken))
+				&& liveTokensByLineKey != null
+				&& liveTokensByLineKey.TryGetValue(key, out IReadOnlyList<string>? stableTokens))
 			{
-				string converted = ReplaceVisibleNumbersWithTokens(
+				int stableLineTokenIndex = 0;
+				string converted = ReplaceVisibleNumbersAndLiveTokensWithTokens(
 					customLine,
-					_ => "{{" + stableToken + "}}",
-					out bool stableReplaced,
-					rawToken =>
+					_ =>
 					{
-						if (IsSemanticLiveNumberToken(rawToken))
-						{
-							globalTokenIndex++;
-						}
-					});
+						stableLineTokenIndex++;
+						globalTokenIndex++;
+						return TryGetStableLineToken(stableTokens, stableLineTokenIndex, out string stableToken)
+							? "{{" + stableToken + "}}"
+							: $"{{{{n{globalTokenIndex.ToString(CultureInfo.InvariantCulture)}}}}}";
+					},
+					out bool stableReplaced);
 				replacedAny |= stableReplaced;
 				renderedLines.Add(converted);
 				continue;
@@ -277,6 +315,41 @@ internal static class CardEditorDescriptionNumberHighlighter
 		}
 
 		return replacedAny ? string.Join('\n', renderedLines) : customText;
+	}
+
+	private static IReadOnlyDictionary<string, IReadOnlyList<string>>? NormalizeLiveTokenLineMap(IReadOnlyDictionary<string, string>? liveTokenByLineKey)
+	{
+		if (liveTokenByLineKey == null || liveTokenByLineKey.Count == 0)
+		{
+			return null;
+		}
+
+		Dictionary<string, IReadOnlyList<string>> normalized = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+		foreach (KeyValuePair<string, string> pair in liveTokenByLineKey)
+		{
+			string key = pair.Key;
+			string token = pair.Value;
+			if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(token))
+			{
+				continue;
+			}
+
+			normalized[key] = new[] { token.Trim() };
+		}
+
+		return normalized.Count == 0 ? null : normalized;
+	}
+
+	private static bool TryGetStableLineToken(IReadOnlyList<string>? stableTokens, int oneBasedIndex, out string stableToken)
+	{
+		stableToken = string.Empty;
+		if (stableTokens == null || oneBasedIndex <= 0 || oneBasedIndex > stableTokens.Count)
+		{
+			return false;
+		}
+
+		stableToken = stableTokens[oneBasedIndex - 1]?.Trim() ?? string.Empty;
+		return !string.IsNullOrWhiteSpace(stableToken);
 	}
 
 	private static List<RenderedNumberToken> BuildFallbackRenderedNumberTokens(IReadOnlyList<string>? fallbackNumberTokens)
@@ -384,6 +457,70 @@ internal static class CardEditorDescriptionNumberHighlighter
 				{
 					onExistingLiveToken?.Invoke(text.Substring(i + 2, tokenEnd - i - 2));
 					builder.Append(text.AsSpan(i, tokenEnd + 2 - i));
+					i = tokenEnd + 2;
+					continue;
+				}
+			}
+
+			if (TryReadTag(text, i, out string tag, out int tagEndExclusive))
+			{
+				builder.Append(tag);
+				UpdateTemplateTokenTagState(tag, ref imageDepth);
+				i = tagEndExclusive;
+				continue;
+			}
+
+			if (imageDepth == 0 && TryReadNumericToken(text, i, out int tokenEndExclusive))
+			{
+				tokenIndex++;
+				builder.Append(tokenFactory(tokenIndex));
+				replacedAny = true;
+				i = tokenEndExclusive;
+				continue;
+			}
+
+			builder.Append(text[i]);
+			i++;
+		}
+
+		return replacedAny ? builder.ToString() : text;
+	}
+
+	private static string ReplaceVisibleNumbersAndLiveTokensWithTokens(
+		string text,
+		Func<int, string> tokenFactory,
+		out bool replacedAny)
+	{
+		replacedAny = false;
+		if (string.IsNullOrEmpty(text))
+		{
+			return text;
+		}
+
+		StringBuilder builder = new StringBuilder(text.Length + 16);
+		int tokenIndex = 0;
+		int imageDepth = 0;
+
+		for (int i = 0; i < text.Length;)
+		{
+			if (i + 3 < text.Length && text[i] == '{' && text[i + 1] == '{')
+			{
+				int tokenEnd = text.IndexOf("}}", i + 2, StringComparison.Ordinal);
+				if (tokenEnd >= 0)
+				{
+					string rawToken = text.Substring(i + 2, tokenEnd - i - 2);
+					string original = text.Substring(i, tokenEnd + 2 - i);
+					if (imageDepth == 0 && IsSemanticLiveNumberToken(rawToken))
+					{
+						tokenIndex++;
+						string replacement = tokenFactory(tokenIndex);
+						builder.Append(replacement);
+						replacedAny |= !string.Equals(original, replacement, StringComparison.Ordinal);
+						i = tokenEnd + 2;
+						continue;
+					}
+
+					builder.Append(original);
 					i = tokenEnd + 2;
 					continue;
 				}
@@ -903,6 +1040,19 @@ internal static class CardEditorDescriptionNumberHighlighter
 				}
 			}
 
+			if (removeNumbers
+				&& i + 3 < line.Length
+				&& line[i] == '{'
+				&& line[i + 1] == '{')
+			{
+				int tokenEnd = line.IndexOf("}}", i + 2, StringComparison.Ordinal);
+				if (tokenEnd >= 0 && IsSemanticLiveNumberToken(line.Substring(i + 2, tokenEnd - i - 2)))
+				{
+					i = tokenEnd + 2;
+					continue;
+				}
+			}
+
 			if (removeNumbers && TryReadNumericToken(line, i, out int tokenEndExclusive))
 			{
 				i = tokenEndExclusive;
@@ -1035,7 +1185,7 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return false;
 		}
 
-		if (start > 0 && char.IsLetter(text[start - 1]))
+		if (start > 0 && IsAsciiIdentifierBoundary(text[start - 1]))
 		{
 			return false;
 		}
@@ -1069,12 +1219,19 @@ internal static class CardEditorDescriptionNumberHighlighter
 		}
 
 		endExclusive = cursor;
-		if (cursor < text.Length && char.IsLetter(text[cursor]))
+		if (cursor < text.Length && IsAsciiIdentifierBoundary(text[cursor]))
 		{
 			return false;
 		}
 
 		return true;
+	}
+
+	private static bool IsAsciiIdentifierBoundary(char value)
+	{
+		return value == '_'
+			|| (value >= 'A' && value <= 'Z')
+			|| (value >= 'a' && value <= 'z');
 	}
 
 	private static int GetUpgradeHighlightComparison(string? baseToken, string upgradedToken)

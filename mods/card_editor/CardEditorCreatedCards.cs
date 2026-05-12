@@ -6,14 +6,28 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Monsters;
+using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
 public abstract class CardEditorCreatedCardBase : CardModel, KnowledgeDemon.IChoosable
 {
+	private string _cardEditorSelfScalingDiff = string.Empty;
+
 	protected CardEditorCreatedCardBase()
 		: base(1, CardType.Attack, CardRarity.Common, TargetType.AnyEnemy, shouldShowInCardLibrary: false)
 	{
+	}
+
+	[SavedProperty]
+	public string CardEditorSelfScalingDiff
+	{
+		get => _cardEditorSelfScalingDiff;
+		set
+		{
+			AssertMutable();
+			_cardEditorSelfScalingDiff = value ?? string.Empty;
+		}
 	}
 
 	public override CardPoolModel Pool => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)

@@ -405,7 +405,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 
 		if (modifyDamageHookType.HasFlag(ModifyDamageHookType.Additive))
 		{
-			foreach (AbstractModel item in runState.IterateHookListeners(combatState))
+			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
 				decimal delta = item.ModifyDamageAdditive(target, num, props, dealer, cardSource);
 				num += delta;
@@ -418,7 +418,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 
 		if (modifyDamageHookType.HasFlag(ModifyDamageHookType.Multiplicative))
 		{
-			foreach (AbstractModel item in runState.IterateHookListeners(combatState))
+			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
 				decimal mult = item.ModifyDamageMultiplicative(target, num, props, dealer, cardSource);
 				if (ignoreEnemyReductions && ShouldSkipTargetOwnedReduction(item, target, mult))
@@ -436,7 +436,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		if (!ignoreCaps)
 		{
 			decimal cap = decimal.MaxValue;
-			foreach (AbstractModel item in runState.IterateHookListeners(combatState))
+			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
 				decimal candidate = item.ModifyDamageCap(target, props, dealer, cardSource);
 				bool skipAsEnemyReduction = ignoreEnemyReductions && ShouldSkipTargetOwnedCap(item, target, candidate);
@@ -496,7 +496,7 @@ internal static class Hook_ModifyHpLostAfterOsty_IgnoreNegation_Patch
 		// Skipping the Late phase avoids negation without consuming the negating power.
 		decimal num = amount;
 		List<AbstractModel> list = new List<AbstractModel>();
-		foreach (AbstractModel item in runState.IterateHookListeners(combatState))
+		foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 		{
 			decimal before = num;
 			num = item.ModifyHpLostAfterOsty(target, num, props, dealer, cardSource);

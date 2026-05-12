@@ -26,6 +26,8 @@ public sealed class CardOverride
 	public Dictionary<string, float>? FinishParams { get; set; } // Cosmetic only (render-time).
 	public string? CustomFinishId { get; set; } // Cosmetic only (runtime-loaded shader).
 	public Dictionary<string, string>? CustomFinishParams { get; set; } // Cosmetic only (runtime-loaded shader).
+	public CardEditorVisualFinish? BorderFinish { get; set; } // Cosmetic only (render-time border overlay).
+	public Dictionary<string, float>? BorderFinishParams { get; set; } // Cosmetic only (render-time border overlay).
 	public float? PortraitOffsetX { get; set; } // Cosmetic only (render-time).
 	public float? PortraitOffsetY { get; set; } // Cosmetic only (render-time).
 	public float? PortraitZoom { get; set; } // Cosmetic only (render-time). 1 = vanilla scale.
@@ -73,6 +75,7 @@ public sealed class CardOverride
 	public bool? HideCosmeticTypeBadge { get; set; }
 	public bool? HideCosmeticTextBackground { get; set; }
 	public bool? HideCosmeticBodyText { get; set; }
+	public bool? HideCosmeticAncientInnerBorder { get; set; }
 	public CardUpgradeOverride? Upgrade { get; set; }
 
 	public bool IsEmpty()
@@ -91,6 +94,8 @@ public sealed class CardOverride
 			&& (FinishParams == null || FinishParams.Count == 0)
 			&& string.IsNullOrWhiteSpace(CustomFinishId)
 			&& (CustomFinishParams == null || CustomFinishParams.Count == 0)
+			&& BorderFinish == null
+			&& (BorderFinishParams == null || BorderFinishParams.Count == 0)
 			&& PortraitOffsetX == null
 			&& PortraitOffsetY == null
 			&& PortraitZoom == null
@@ -136,6 +141,7 @@ public sealed class CardOverride
 			&& HideCosmeticTypeBadge == null
 			&& HideCosmeticTextBackground == null
 			&& HideCosmeticBodyText == null
+			&& HideCosmeticAncientInnerBorder == null
 			&& (Upgrade == null || Upgrade.IsEmpty());
 	}
 }
@@ -153,6 +159,7 @@ public enum CardEditorVisualFinish
 	Constellation = 10,
 	DvdRipple = 11,
 	Lightning = 12,
+	Flame = 13,
 	BaseGameInfection = 100,
 	BaseGameGalvanized = 101,
 	BaseGameBound = 102,
@@ -482,6 +489,8 @@ public static class CardEditorOverrides
 			FinishParams = source.FinishParams != null ? new Dictionary<string, float>(source.FinishParams) : null,
 			CustomFinishId = source.CustomFinishId,
 			CustomFinishParams = source.CustomFinishParams != null ? new Dictionary<string, string>(source.CustomFinishParams, StringComparer.Ordinal) : null,
+			BorderFinish = source.BorderFinish,
+			BorderFinishParams = source.BorderFinishParams != null ? new Dictionary<string, float>(source.BorderFinishParams) : null,
 			PortraitOffsetX = source.PortraitOffsetX,
 			PortraitOffsetY = source.PortraitOffsetY,
 			PortraitZoom = source.PortraitZoom,
@@ -530,6 +539,7 @@ public static class CardEditorOverrides
 			HideCosmeticTypeBadge = source.HideCosmeticTypeBadge,
 			HideCosmeticTextBackground = source.HideCosmeticTextBackground,
 			HideCosmeticBodyText = source.HideCosmeticBodyText,
+			HideCosmeticAncientInnerBorder = source.HideCosmeticAncientInnerBorder,
 			ExtraEffects = source.ExtraEffects != null
 				? source.ExtraEffects.Select(e => e != null
 					? CardEditorExtraEffects.CloneEffect(e)

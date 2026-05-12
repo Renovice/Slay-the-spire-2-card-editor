@@ -138,6 +138,7 @@ field.hideCostNumber
 field.hideCostOrb
 field.hideNameBanner
 field.hideNameText
+field.hideAncientInnerBorder
 field.hideTextBackground
 field.hideTypeBadge
 field.rarity
@@ -585,6 +586,7 @@ value.none
 		WarmEnum<CardKeyword>(keyword => _ = CardEditorExtraEffects.GrantedKeywordLabel(keyword), keyword => keyword != CardKeyword.None);
 		WarmEnum<CardExtraEffectTiming>(timing => _ = CardEditorExtraEffects.TimingLabel(timing));
 		WarmEnum<CardExtraEffectEnemyStatus>(status => _ = CardEditorExtraEffects.EnemyStatusLabel(status));
+		WarmEnum<CardExtraEffectEnemyStatus>(status => _ = CardEditorExtraEffects.EnemyStatusDescription(status));
 		WarmEnum<CardExtraEffectMultiplierStat>(stat => _ = CardEditorExtraEffects.MultiplierStatLabel(stat));
 		WarmEnum<CardExtraEffectEnemyIntent>(intent => _ = CardEditorExtraEffects.EnemyIntentLabel(intent));
 		WarmEnum<CardExtraEffectTransformMode>(mode => _ = CardEditorExtraEffects.TransformModeLabel(mode));

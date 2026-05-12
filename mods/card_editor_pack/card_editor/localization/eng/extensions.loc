@@ -1515,6 +1515,7 @@
   "CARD_EDITOR.field.hideCostOrb": "Cost Orb",
   "CARD_EDITOR.field.hideNameBanner": "Banner",
   "CARD_EDITOR.field.hideNameText": "Name",
+  "CARD_EDITOR.field.hideAncientInnerBorder": "Inner Border",
   "CARD_EDITOR.field.hideTextBackground": "Text BG",
   "CARD_EDITOR.field.hideTypeBadge": "Type",
   "CARD_EDITOR.label.resource": "Resource",

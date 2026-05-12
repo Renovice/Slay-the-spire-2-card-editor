@@ -27,7 +27,7 @@ internal static class CardEditorPowerCmdCompat
 			{
 				ParameterInfo[] parameters = method.GetParameters();
 				int offset = HasChoiceContextPrefix(parameters) ? 1 : 0;
-				if (parameters.Length < offset + 5)
+				if (!HasArityWithOptionalSilent(parameters, offset, requiredAfterOffset: 4))
 				{
 					return false;
 				}
@@ -38,8 +38,7 @@ internal static class CardEditorPowerCmdCompat
 				return isEnumerable == enumerableTargets
 					&& parameters[offset + 1].ParameterType == typeof(decimal)
 					&& parameters[offset + 2].ParameterType == typeof(Creature)
-					&& parameters[offset + 3].ParameterType == typeof(CardModel)
-					&& parameters[offset + 4].ParameterType == typeof(bool);
+					&& parameters[offset + 3].ParameterType == typeof(CardModel);
 			});
 	}
 
@@ -52,13 +51,12 @@ internal static class CardEditorPowerCmdCompat
 			{
 				ParameterInfo[] parameters = method.GetParameters();
 				int offset = HasChoiceContextPrefix(parameters) ? 1 : 0;
-				return parameters.Length >= offset + 6
+				return HasArityWithOptionalSilent(parameters, offset, requiredAfterOffset: 5)
 					&& parameters[offset].ParameterType == typeof(PowerModel)
 					&& parameters[offset + 1].ParameterType == typeof(Creature)
 					&& parameters[offset + 2].ParameterType == typeof(decimal)
 					&& parameters[offset + 3].ParameterType == typeof(Creature)
-					&& parameters[offset + 4].ParameterType == typeof(CardModel)
-					&& parameters[offset + 5].ParameterType == typeof(bool);
+					&& parameters[offset + 4].ParameterType == typeof(CardModel);
 			});
 	}
 
@@ -71,13 +69,24 @@ internal static class CardEditorPowerCmdCompat
 			{
 				ParameterInfo[] parameters = method.GetParameters();
 				int offset = HasChoiceContextPrefix(parameters) ? 1 : 0;
-				return parameters.Length >= offset + 5
+				return HasArityWithOptionalSilent(parameters, offset, requiredAfterOffset: 4)
 					&& parameters[offset].ParameterType == typeof(PowerModel)
 					&& parameters[offset + 1].ParameterType == typeof(decimal)
 					&& parameters[offset + 2].ParameterType == typeof(Creature)
-					&& parameters[offset + 3].ParameterType == typeof(CardModel)
-					&& parameters[offset + 4].ParameterType == typeof(bool);
+					&& parameters[offset + 3].ParameterType == typeof(CardModel);
 			});
+	}
+
+	private static bool HasArityWithOptionalSilent(ParameterInfo[] parameters, int offset, int requiredAfterOffset)
+	{
+		int requiredLength = offset + requiredAfterOffset;
+		if (parameters.Length == requiredLength)
+		{
+			return true;
+		}
+
+		return parameters.Length == requiredLength + 1
+			&& parameters[requiredLength].ParameterType == typeof(bool);
 	}
 
 	private static bool HasChoiceContextPrefix(ParameterInfo[] parameters)
@@ -87,9 +96,14 @@ internal static class CardEditorPowerCmdCompat
 
 	private static object?[] BuildArguments(MethodInfo method, params object?[] args)
 	{
-		return HasChoiceContextPrefix(method.GetParameters())
-			? new object?[] { FallbackContext() }.Concat(args).ToArray()
-			: args;
+		ParameterInfo[] parameters = method.GetParameters();
+		bool hasChoiceContextPrefix = HasChoiceContextPrefix(parameters);
+		int acceptedArgumentCount = Math.Min(args.Length, parameters.Length - (hasChoiceContextPrefix ? 1 : 0));
+		IEnumerable<object?> acceptedArguments = args.Take(acceptedArgumentCount);
+
+		return hasChoiceContextPrefix
+			? new object?[] { FallbackContext() }.Concat(acceptedArguments).ToArray()
+			: acceptedArguments.ToArray();
 	}
 
 	private static T InvokeTask<T>(MethodInfo? method, params object?[] args)

@@ -1,10 +1,16 @@
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Runs;
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace SlayTheSpire2Mod.CardEditor;
@@ -12,6 +18,9 @@ namespace SlayTheSpire2Mod.CardEditor;
 internal static class CardEditorCombatStateCompat
 {
 	private static readonly ConcurrentDictionary<Type, PropertyInfo?> CombatStatePropertyCache = new();
+	private static readonly ConcurrentDictionary<Type, MethodInfo?> IterateHookListenersCache = new();
+	private static readonly Lazy<ConstructorInfo?> HookChoiceSourceCtor = new(FindHookChoiceSourceCtor);
+	private static readonly Lazy<ConstructorInfo?> HookChoicePlayerCtor = new(FindHookChoicePlayerCtor);
 
 	internal static CombatState? AsCombatState(this object? state)
 	{
@@ -50,6 +59,74 @@ internal static class CardEditorCombatStateCompat
 		{
 			return null;
 		}
+	}
+
+	internal static HookPlayerChoiceContext CreateHookPlayerChoiceContext(AbstractModel source, ulong netId, CombatState combatState, GameActionType gameActionType)
+	{
+		if (source == null)
+		{
+			throw new ArgumentNullException(nameof(source));
+		}
+		if (combatState == null)
+		{
+			throw new ArgumentNullException(nameof(combatState));
+		}
+
+		ConstructorInfo? ctor = HookChoiceSourceCtor.Value;
+		if (ctor != null)
+		{
+			return (HookPlayerChoiceContext)ctor.Invoke(new object[] { source, netId, combatState, gameActionType });
+		}
+
+		Player? owner = TryResolveChoiceOwner(source, combatState);
+		if (owner != null)
+		{
+			return CreateHookPlayerChoiceContext(owner, netId, gameActionType);
+		}
+
+		throw new MissingMethodException(typeof(HookPlayerChoiceContext).FullName, ".ctor(AbstractModel, ulong, CombatState, GameActionType)");
+	}
+
+	internal static HookPlayerChoiceContext CreateHookPlayerChoiceContext(Player owner, ulong netId, GameActionType gameActionType)
+	{
+		if (owner == null)
+		{
+			throw new ArgumentNullException(nameof(owner));
+		}
+
+		ConstructorInfo? ctor = HookChoicePlayerCtor.Value;
+		if (ctor == null)
+		{
+			throw new MissingMethodException(typeof(HookPlayerChoiceContext).FullName, ".ctor(Player, ulong, GameActionType)");
+		}
+
+		return (HookPlayerChoiceContext)ctor.Invoke(new object[] { owner, netId, gameActionType });
+	}
+
+	internal static IEnumerable<AbstractModel> IterateHookListenersCompat(this IRunState? runState, CombatState? combatState)
+	{
+		if (runState == null)
+		{
+			return Array.Empty<AbstractModel>();
+		}
+
+		MethodInfo? method = IterateHookListenersCache.GetOrAdd(runState.GetType(), FindIterateHookListeners);
+		if (method == null)
+		{
+			return Array.Empty<AbstractModel>();
+		}
+
+		object? result = method.Invoke(runState, new object?[] { combatState });
+		if (result is IEnumerable<AbstractModel> typed)
+		{
+			return typed.ToList();
+		}
+		if (result is IEnumerable enumerable)
+		{
+			return enumerable.OfType<AbstractModel>().ToList();
+		}
+
+		return Array.Empty<AbstractModel>();
 	}
 
 	internal static bool IsMutableSafe(this AbstractModel? model)
@@ -162,6 +239,76 @@ internal static class CardEditorCombatStateCompat
 				source.GetType(),
 				static type => type.GetProperty("CombatState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
 			return property?.GetValue(source) as CombatState;
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static ConstructorInfo? FindHookChoiceSourceCtor()
+	{
+		return typeof(HookPlayerChoiceContext)
+			.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+			.FirstOrDefault(ctor =>
+			{
+				ParameterInfo[] parameters = ctor.GetParameters();
+				return parameters.Length == 4
+					&& typeof(AbstractModel).IsAssignableFrom(parameters[0].ParameterType)
+					&& parameters[1].ParameterType == typeof(ulong)
+					&& parameters[2].ParameterType.IsAssignableFrom(typeof(CombatState))
+					&& parameters[3].ParameterType == typeof(GameActionType);
+			});
+	}
+
+	private static ConstructorInfo? FindHookChoicePlayerCtor()
+	{
+		return typeof(HookPlayerChoiceContext)
+			.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+			.FirstOrDefault(ctor =>
+			{
+				ParameterInfo[] parameters = ctor.GetParameters();
+				return parameters.Length == 3
+					&& typeof(Player).IsAssignableFrom(parameters[0].ParameterType)
+					&& parameters[1].ParameterType == typeof(ulong)
+					&& parameters[2].ParameterType == typeof(GameActionType);
+			});
+	}
+
+	private static MethodInfo? FindIterateHookListeners(Type runStateType)
+	{
+		static bool Matches(MethodInfo method)
+		{
+			if (method.Name != "IterateHookListeners")
+			{
+				return false;
+			}
+
+			ParameterInfo[] parameters = method.GetParameters();
+			return parameters.Length == 1
+				&& parameters[0].ParameterType.IsAssignableFrom(typeof(CombatState));
+		}
+
+		return runStateType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault(Matches)
+			?? typeof(IRunState).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).FirstOrDefault(Matches)
+			?? runStateType.GetInterfaces().SelectMany(type => type.GetMethods()).FirstOrDefault(Matches);
+	}
+
+	private static Player? TryResolveChoiceOwner(AbstractModel source, CombatState combatState)
+	{
+		try
+		{
+			return source switch
+			{
+				CardModel card => card.Owner,
+				RelicModel relic => relic.Owner,
+				PotionModel potion => potion.Owner,
+				AfflictionModel affliction => affliction.Card?.Owner,
+				EnchantmentModel enchantment => enchantment.Card?.Owner,
+				PowerModel power when power.TryGetOwner()?.Player != null => power.TryGetOwner()?.Player,
+				PowerModel => combatState.Players.FirstOrDefault(),
+				_ => null
+			};
 		}
 		catch
 		{

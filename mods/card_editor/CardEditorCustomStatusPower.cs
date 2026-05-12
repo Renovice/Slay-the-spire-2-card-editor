@@ -31,6 +31,8 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 	private string _customStatusId = string.Empty;
 	private string _customStatusName = "Custom Status";
 	private string? _customStatusDescription;
+	private ModelId? _sourceCardId;
+	private IReadOnlyList<CardExtraEffect> _behaviorEffects = Array.Empty<CardExtraEffect>();
 	private PowerType _customStatusType = PowerType.Buff;
 	private CardExtraEffectStatusIconMode _iconMode = CardExtraEffectStatusIconMode.Auto;
 	private string? _iconPowerId;
@@ -78,6 +80,14 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 		return Task.CompletedTask;
 	}
 
+	protected override void DeepCloneFields()
+	{
+		base.DeepCloneFields();
+		_behaviorEffects = _behaviorEffects
+			.Select(CardEditorExtraEffects.CloneEffect)
+			.ToList();
+	}
+
 	internal void SyncDefinition(CardEditorCustomStatusDefinition definition)
 	{
 		ApplyDefinition(definition);
@@ -99,6 +109,12 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 		if (!string.IsNullOrWhiteSpace(_customStatusDescription))
 		{
 			return _customStatusDescription.Trim();
+		}
+
+		string? generated = BuildGeneratedTooltipBody();
+		if (!string.IsNullOrWhiteSpace(generated))
+		{
+			return generated.Trim();
 		}
 
 		return _customStatusName;
@@ -131,11 +147,78 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 		_customStatusId = definition.Id ?? string.Empty;
 		_customStatusName = string.IsNullOrWhiteSpace(definition.Name) ? "Custom Status" : definition.Name.Trim();
 		_customStatusDescription = string.IsNullOrWhiteSpace(definition.Description) ? null : definition.Description.Trim();
+		_sourceCardId = definition.SourceCardId;
+		_behaviorEffects = definition.BehaviorEffects
+			.Where(effect => effect != null)
+			.Select(CardEditorExtraEffects.CloneEffect)
+			.ToList();
 		_customStatusType = definition.Type;
 		_iconMode = definition.IconMode;
 		_iconPowerId = string.IsNullOrWhiteSpace(definition.IconPowerId) ? null : definition.IconPowerId.Trim();
 		_customPackedIconPath = string.IsNullOrWhiteSpace(definition.CustomPackedIconPath) ? null : definition.CustomPackedIconPath.Trim();
 		_customBigIconPath = string.IsNullOrWhiteSpace(definition.CustomBigIconPath) ? null : definition.CustomBigIconPath.Trim();
+	}
+
+	private string? BuildGeneratedTooltipBody()
+	{
+		if (_behaviorEffects == null || _behaviorEffects.Count == 0)
+		{
+			return null;
+		}
+
+		CardModel? sourceCard = BuildTooltipSourceCard(_sourceCardId);
+		List<string> lines = new();
+		foreach (CardExtraEffect effect in _behaviorEffects)
+		{
+			string? line = null;
+			if (sourceCard != null)
+			{
+				try
+				{
+					line = CardEditorExtraEffects.FormatSingleEffectLine(sourceCard, effect);
+				}
+				catch
+				{
+					line = null;
+				}
+			}
+			if (string.IsNullOrWhiteSpace(line))
+			{
+				CardExtraEffectDefinition? definition = CardEditorExtraEffects.Definitions.FirstOrDefault(def => def.Kind == effect.Kind);
+				line = definition != null
+					? CardEditorExtraEffects.DefinitionDisplayLabel(definition)
+					: effect.Kind.ToString();
+				if (effect.Amount > 0)
+				{
+					line = $"{line}: {effect.Amount}";
+				}
+			}
+
+			if (!string.IsNullOrWhiteSpace(line))
+			{
+				lines.Add(line.Trim());
+			}
+		}
+
+		return lines.Count == 0 ? null : string.Join("\n", lines);
+	}
+
+	private static CardModel? BuildTooltipSourceCard(ModelId? sourceCardId)
+	{
+		if (sourceCardId == null || sourceCardId == ModelId.none)
+		{
+			return null;
+		}
+
+		try
+		{
+			CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(sourceCardId);
+			return canonical == null ? null : CardEditorOverrides.BuildPreview(canonical);
+		}
+		catch
+		{
+			return null;
+		}
 	}
 
 	private Texture2D? ResolveCustomIcon(bool bigIcon)

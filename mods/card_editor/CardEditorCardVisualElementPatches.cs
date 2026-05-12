@@ -23,6 +23,7 @@ internal static class CardEditorCardVisualElementController
 		public bool? EnergyLabelVisible { get; set; }
 		public bool? UnplayableEnergyIconVisible { get; set; }
 		public bool? AncientTextBgVisible { get; set; }
+		public bool? AncientBorderGlassOverlayVisible { get; set; }
 		public bool IsCaptured { get; set; }
 	}
 
@@ -37,6 +38,7 @@ internal static class CardEditorCardVisualElementController
 	private static readonly FieldInfo _energyLabelField = AccessTools.Field(typeof(NCard), "_energyLabel")!;
 	private static readonly FieldInfo _unplayableEnergyIconField = AccessTools.Field(typeof(NCard), "_unplayableEnergyIcon")!;
 	private static readonly FieldInfo _ancientTextBgField = AccessTools.Field(typeof(NCard), "_ancientTextBg")!;
+	private static readonly FieldInfo _ancientBorderGlassOverlayField = AccessTools.Field(typeof(NCard), "_ancientBorderGlassOverlay")!;
 
 	internal static void Sync(NCard? cardNode)
 	{
@@ -76,18 +78,25 @@ internal static class CardEditorCardVisualElementController
 		ApplyVisibility(cardNode, _typePlaqueField, overrideData.HideCosmeticTypeBadge == true, snapshot.TypePlaqueVisible);
 		ApplyVisibility(cardNode, _typeLabelField, overrideData.HideCosmeticTypeBadge == true, snapshot.TypeLabelVisible);
 		ApplyVisibility(cardNode, _ancientTextBgField, overrideData.HideCosmeticTextBackground == true, snapshot.AncientTextBgVisible);
+		ApplyVisibility(cardNode, _ancientBorderGlassOverlayField, overrideData.HideCosmeticAncientInnerBorder == true, snapshot.AncientBorderGlassOverlayVisible);
 		ApplyVisibility(cardNode, _descriptionLabelField, overrideData.HideCosmeticBodyText == true, snapshot.DescriptionVisible);
 	}
 
 	private static bool HasAnyVisualHideFlags(CardOverride? overrideData)
 	{
-		return overrideData?.HideCosmeticCostOrb == true
+		if (overrideData == null)
+		{
+			return false;
+		}
+
+		return overrideData.HideCosmeticCostOrb == true
 			|| overrideData.HideCosmeticCostNumber == true
 			|| overrideData.HideCosmeticNameBanner == true
 			|| overrideData.HideCosmeticNameText == true
 			|| overrideData.HideCosmeticTypeBadge == true
 			|| overrideData.HideCosmeticTextBackground == true
-			|| overrideData.HideCosmeticBodyText == true;
+			|| overrideData.HideCosmeticBodyText == true
+			|| overrideData.HideCosmeticAncientInnerBorder == true;
 	}
 
 	private static void ResetSnapshot(VisibilitySnapshot snapshot, object trackedModel)
@@ -103,6 +112,7 @@ internal static class CardEditorCardVisualElementController
 		snapshot.EnergyLabelVisible = null;
 		snapshot.UnplayableEnergyIconVisible = null;
 		snapshot.AncientTextBgVisible = null;
+		snapshot.AncientBorderGlassOverlayVisible = null;
 		snapshot.IsCaptured = false;
 	}
 
@@ -123,6 +133,7 @@ internal static class CardEditorCardVisualElementController
 		snapshot.EnergyLabelVisible = GetVisible(cardNode, _energyLabelField);
 		snapshot.UnplayableEnergyIconVisible = GetVisible(cardNode, _unplayableEnergyIconField);
 		snapshot.AncientTextBgVisible = GetVisible(cardNode, _ancientTextBgField);
+		snapshot.AncientBorderGlassOverlayVisible = GetVisible(cardNode, _ancientBorderGlassOverlayField);
 		NormalizeCostSnapshot(cardNode, snapshot);
 		NormalizeTypeSnapshot(cardNode, snapshot);
 		snapshot.IsCaptured = true;
@@ -171,17 +182,18 @@ internal static class CardEditorCardVisualElementController
 		SetVisible(cardNode, _energyLabelField, snapshot.EnergyLabelVisible);
 		SetVisible(cardNode, _unplayableEnergyIconField, snapshot.UnplayableEnergyIconVisible);
 		SetVisible(cardNode, _ancientTextBgField, snapshot.AncientTextBgVisible);
+		SetVisible(cardNode, _ancientBorderGlassOverlayField, snapshot.AncientBorderGlassOverlayVisible);
 		snapshot.IsCaptured = false;
 	}
 
-	private static void ApplyVisibility(NCard cardNode, FieldInfo field, bool hidden, bool? fallbackVisible)
+	private static void ApplyVisibility(NCard cardNode, FieldInfo? field, bool hidden, bool? fallbackVisible)
 	{
 		SetVisible(cardNode, field, hidden ? false : fallbackVisible);
 	}
 
-	private static bool? GetVisible(NCard cardNode, FieldInfo field)
+	private static bool? GetVisible(NCard cardNode, FieldInfo? field)
 	{
-		if (field.GetValue(cardNode) is CanvasItem item && GodotObject.IsInstanceValid(item))
+		if (field?.GetValue(cardNode) is CanvasItem item && GodotObject.IsInstanceValid(item))
 		{
 			return item.Visible;
 		}
@@ -189,9 +201,9 @@ internal static class CardEditorCardVisualElementController
 		return null;
 	}
 
-	private static void SetVisible(NCard cardNode, FieldInfo field, bool? visible)
+	private static void SetVisible(NCard cardNode, FieldInfo? field, bool? visible)
 	{
-		if (visible.HasValue && field.GetValue(cardNode) is CanvasItem item && GodotObject.IsInstanceValid(item))
+		if (visible.HasValue && field?.GetValue(cardNode) is CanvasItem item && GodotObject.IsInstanceValid(item))
 		{
 			item.Visible = visible.Value;
 		}

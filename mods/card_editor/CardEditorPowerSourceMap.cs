@@ -23,6 +23,20 @@ internal static class CardEditorPowerSourceMap
 		_sources.Add(power, new SourceInfo { SourceCard = sourceCard });
 	}
 
+	public static void RegisterIfMissing(PowerModel power, CardModel sourceCard)
+	{
+		if (power == null || sourceCard == null)
+		{
+			return;
+		}
+		if (_sources.TryGetValue(power, out _))
+		{
+			return;
+		}
+
+		_sources.Add(power, new SourceInfo { SourceCard = sourceCard });
+	}
+
 	public static CardModel? TryGetSourceCard(PowerModel power)
 	{
 		if (power == null)
@@ -33,4 +47,3 @@ internal static class CardEditorPowerSourceMap
 		return _sources.TryGetValue(power, out SourceInfo? info) ? info.SourceCard : null;
 	}
 }
-

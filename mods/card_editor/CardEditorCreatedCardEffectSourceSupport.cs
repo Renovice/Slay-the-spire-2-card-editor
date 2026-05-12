@@ -104,10 +104,6 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			}
 
 			int desiredUpgradeLevel = card.GetSafeCurrentUpgradeLevel();
-			if (isUpgradePreview)
-			{
-				desiredUpgradeLevel = Math.Max(desiredUpgradeLevel, 1);
-			}
 
 			string idsKey = $"{(isUpgradePreview ? 1 : 0)}|{desiredUpgradeLevel}|{string.Join(";", effectSourceIds)}";
 
@@ -609,10 +605,6 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 
 		int desiredUpgradeLevel = createdCard.GetSafeCurrentUpgradeLevel();
-		if (isUpgradePreview)
-		{
-			desiredUpgradeLevel = Math.Max(desiredUpgradeLevel, 1);
-		}
 
 		CardOverride? overrideData = null;
 		if (CardEditorUiState.TryGetDraftOverride(createdCard.Id, out CardOverride draftOverride))
@@ -630,6 +622,15 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		{
 			ApplyBaseNumericOverrides(effectSourceCard, overrideData);
 		}
+
+		CardOverride? runtimeOverride = BuildEffectSourceRuntimeOverride(effectSourceCard, overrideData);
+		if (overrideData?.EndlessUpgrades == true)
+		{
+			runtimeOverride ??= new CardOverride();
+			runtimeOverride.EndlessUpgrades = true;
+		}
+
+		CardEditorOverrides.SetInstanceOverride(effectSourceCard, runtimeOverride);
 
 		if (desiredUpgradeLevel > 0)
 		{
@@ -650,7 +651,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			&& overrideData?.Upgrade != null
 			&& !overrideData.Upgrade.IsEmpty();
 
-		CardEditorOverrides.SetInstanceOverride(effectSourceCard, BuildEffectSourceRuntimeOverride(effectSourceCard, overrideData));
+		CardEditorOverrides.SetInstanceOverride(effectSourceCard, runtimeOverride);
 
 		try
 		{
@@ -879,7 +880,46 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			merged.TemporaryFocusTurns = createdCardOverride.TemporaryFocusTurns;
 		}
 
+		ApplyRuntimeUpgradeNumericOverrides(merged, createdCardOverride.Upgrade);
+
 		return merged.IsEmpty() ? null : merged;
+	}
+
+	private static void ApplyRuntimeUpgradeNumericOverrides(CardOverride runtimeOverride, CardUpgradeOverride? createdUpgrade)
+	{
+		if (runtimeOverride == null || createdUpgrade == null || createdUpgrade.IsEmpty())
+		{
+			return;
+		}
+
+		CardUpgradeOverride upgrade = runtimeOverride.Upgrade ??= new CardUpgradeOverride();
+		if (createdUpgrade.EnergyCostDelta.HasValue)
+		{
+			upgrade.EnergyCostDelta = createdUpgrade.EnergyCostDelta;
+		}
+		if (createdUpgrade.StarCostDelta.HasValue)
+		{
+			upgrade.StarCostDelta = createdUpgrade.StarCostDelta;
+		}
+		if (createdUpgrade.ReplayCountDelta.HasValue)
+		{
+			upgrade.ReplayCountDelta = createdUpgrade.ReplayCountDelta;
+		}
+		if (createdUpgrade.DynamicVarDeltas != null && createdUpgrade.DynamicVarDeltas.Count > 0)
+		{
+			upgrade.DynamicVarDeltas ??= new Dictionary<string, decimal>(StringComparer.Ordinal);
+			foreach ((string key, decimal value) in createdUpgrade.DynamicVarDeltas)
+			{
+				upgrade.DynamicVarDeltas[key] = value;
+			}
+		}
+		if (createdUpgrade.EnchantmentId != null || createdUpgrade.AfflictionId != null)
+		{
+			upgrade.EnchantmentId = createdUpgrade.EnchantmentId;
+			upgrade.EnchantmentAmount = createdUpgrade.EnchantmentAmount;
+			upgrade.AfflictionId = createdUpgrade.AfflictionId;
+			upgrade.AfflictionAmount = createdUpgrade.AfflictionAmount;
+		}
 	}
 
 	private sealed class NumericSnapshot

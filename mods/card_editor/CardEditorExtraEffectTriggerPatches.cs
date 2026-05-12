@@ -254,7 +254,7 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 
 		try
 		{
-			Creature? attackTarget = CardEditorExtraEffects.FlattenDamageResults(command.Results).FirstOrDefault()?.Receiver;
+			Creature? attackTarget = CardEditorExtraEffects.FlattenDamageResults(command.GetResultsCompat()).FirstOrDefault()?.Receiver;
 			foreach (Player player in combatState.Players)
 			{
 				if (player == null)
@@ -859,9 +859,10 @@ internal static class Hook_AfterOrbChanneled_CardEditorExtraEffects_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterFlush))]
 internal static class Hook_AfterFlush_RetainedCards_CardEditorExtraEffects_Patch
 {
-	public static void Postfix(ICombatState combatState, Player player, IReadOnlyCollection<CardModel> retainedCards, ref Task __result)
+	public static void Postfix(object? combatState, Player player, IReadOnlyCollection<CardModel> retainedCards, ref Task __result)
 	{
-		if (__result == null || combatState is not CombatState concreteCombatState || player == null || retainedCards == null || retainedCards.Count == 0)
+		CombatState? concreteCombatState = combatState.GetConcreteCombatState();
+		if (__result == null || concreteCombatState == null || player == null || retainedCards == null || retainedCards.Count == 0)
 		{
 			return;
 		}
