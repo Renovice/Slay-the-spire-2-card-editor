@@ -1,0 +1,74 @@
+[gd_scene load_steps=3 format=3 uid="uid://gwxgbrmclybt"]
+
+[ext_resource type="Shader" uid="uid://1pjb1klhb2f7" path="res://tools/shader_previews/aurora_smooth_mist.gdshader" id="1_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_aurora"]
+shader = ExtResource("1_shader")
+shader_parameter/cold_color = Color(0.08, 0.004, 0, 1)
+shader_parameter/deep_red_color = Color(0.55, 0.025, 0, 1)
+shader_parameter/orange_color = Color(1, 0.32, 0.02, 1)
+shader_parameter/yellow_color = Color(1, 0.76, 0.12, 1)
+shader_parameter/white_core_color = Color(1, 0.96, 0.76, 1)
+shader_parameter/smoke_color = Color(0.18, 0.16, 0.14, 1)
+shader_parameter/flame_height = 1.05
+shader_parameter/flame_width = 0.42
+shader_parameter/flame_intensity = 1.35
+shader_parameter/core_heat = 0.82
+shader_parameter/turbulence = 0.62
+shader_parameter/noise_scale = 4.4
+shader_parameter/rise_speed = 1.25
+shader_parameter/flicker_strength = 0.38
+shader_parameter/edge_softness = 0.12
+shader_parameter/glow_strength = 0.86
+shader_parameter/ember_density = 0.36
+shader_parameter/smoke_amount = 0.18
+shader_parameter/wind = 0.0
+
+[node name="AuroraSmoothMistPreview" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Background" type="ColorRect" parent="."]
+texture_filter = 2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 79.0
+offset_top = -26.0
+offset_right = 79.0
+offset_bottom = -26.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.09, 0.09, 0.11, 1)
+
+[node name="CardShell" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -160.0
+offset_top = -223.0
+offset_right = 160.0
+offset_bottom = 223.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.015, 0.025, 0.045, 1)
+
+[node name="Aurora" type="ColorRect" parent="CardShell"]
+texture_filter = 2
+material = SubResource("ShaderMaterial_aurora")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -1.0
+offset_right = 1.0
+grow_horizontal = 2
+grow_vertical = 2

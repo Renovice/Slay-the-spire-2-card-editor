@@ -24,6 +24,17 @@ internal static class CardEditorTemporarySelfScalingController
 	private sealed class CombatSchedule
 	{
 		public Dictionary<CardModel, CardState> States { get; } = new Dictionary<CardModel, CardState>();
+		public Dictionary<CardModel, List<CardEditorExtraEffects.SelfScalingMutationDiff>> DeferredPermanentRuntimeMutations { get; } =
+			new Dictionary<CardModel, List<CardEditorExtraEffects.SelfScalingMutationDiff>>(ReferenceEqualityComparer<CardModel>.Instance);
+	}
+
+	private sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class
+	{
+		public static readonly ReferenceEqualityComparer<T> Instance = new ReferenceEqualityComparer<T>();
+
+		public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+
+		public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
 	}
 
 	private static readonly ConditionalWeakTable<CombatState, CombatSchedule> _schedules = new ConditionalWeakTable<CombatState, CombatSchedule>();
@@ -67,6 +78,26 @@ internal static class CardEditorTemporarySelfScalingController
 		});
 	}
 
+	public static void DeferPermanentRuntimeMutation(
+		CombatState combatState,
+		CardModel card,
+		CardEditorExtraEffects.SelfScalingMutationDiff diff)
+	{
+		if (combatState == null || card == null || !card.IsMutable || diff == null || diff.IsEmpty)
+		{
+			return;
+		}
+
+		CombatSchedule schedule = _schedules.GetOrCreateValue(combatState);
+		if (!schedule.DeferredPermanentRuntimeMutations.TryGetValue(card, out List<CardEditorExtraEffects.SelfScalingMutationDiff>? diffs))
+		{
+			diffs = new List<CardEditorExtraEffects.SelfScalingMutationDiff>();
+			schedule.DeferredPermanentRuntimeMutations[card] = diffs;
+		}
+
+		diffs.Add(diff);
+	}
+
 	public static void OnAfterCardPlayed(CombatState combatState, CardModel card)
 	{
 		if (combatState == null || card == null)
@@ -79,8 +110,15 @@ internal static class CardEditorTemporarySelfScalingController
 		}
 
 		CardModel key = ResolveScheduleKey(card);
+		ApplyDeferredPermanentRuntimeMutations(schedule, card);
+		if (!ReferenceEquals(key, card))
+		{
+			ApplyDeferredPermanentRuntimeMutations(schedule, key);
+		}
+
 		if (!schedule.States.TryGetValue(key, out CardState? state) || state.Grants.Count == 0)
 		{
+			CleanupEmptySchedule(combatState, schedule);
 			return;
 		}
 
@@ -103,6 +141,35 @@ internal static class CardEditorTemporarySelfScalingController
 		}
 
 		FinalizeStateChange(combatState, schedule, key, state, changed);
+	}
+
+	private static void ApplyDeferredPermanentRuntimeMutations(CombatSchedule schedule, CardModel card)
+	{
+		if (schedule == null
+			|| card == null
+			|| !schedule.DeferredPermanentRuntimeMutations.TryGetValue(card, out List<CardEditorExtraEffects.SelfScalingMutationDiff>? diffs)
+			|| diffs.Count == 0)
+		{
+			return;
+		}
+
+		schedule.DeferredPermanentRuntimeMutations.Remove(card);
+		foreach (CardEditorExtraEffects.SelfScalingMutationDiff diff in diffs)
+		{
+			if (diff == null || diff.IsEmpty)
+			{
+				continue;
+			}
+
+			try
+			{
+				CardEditorExtraEffects.ApplyPersistentSelfScalingRuntimeDiff(card, diff);
+			}
+			catch
+			{
+				// ignored
+			}
+		}
 	}
 
 	public static void OnAfterPlayerTurnEnd(CombatState combatState)
@@ -215,7 +282,7 @@ internal static class CardEditorTemporarySelfScalingController
 				schedule.States.Remove(card);
 			}
 		}
-		if (schedule.States.Count == 0)
+		if (schedule.States.Count == 0 && schedule.DeferredPermanentRuntimeMutations.Count == 0)
 		{
 			_schedules.Remove(combatState);
 		}

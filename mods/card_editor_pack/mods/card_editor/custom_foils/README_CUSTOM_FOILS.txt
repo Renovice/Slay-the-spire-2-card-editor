@@ -17,12 +17,12 @@ Drop user foils into:
 Each foil should normally have:
 
   my_foil.gdshader
-  my_foil.json        optional manifest, same base filename
+  my_foil.foil        optional JSON manifest, same base filename
 
 Example:
 
   custom_foils/starfield.gdshader
-  custom_foils/starfield.json
+  custom_foils/starfield.foil
 
 The finish dropdown should display that as:
 
@@ -95,10 +95,14 @@ Texture uniforms are supported when the manifest marks the knob as "texture".
 Texture paths must stay inside custom_foils/ or a subfolder such as
 custom_foils/assets/.
 
-JSON manifest
+Foil manifest
 -------------
-The JSON file is optional. If absent, the loader can inspect shader uniforms and
-auto-create basic controls.
+The .foil file is optional and contains JSON. If absent, the loader can inspect
+shader uniforms and auto-create basic controls.
+
+Do not use a .json extension inside the game mods folder. The base game scans
+mod subfolders for JSON mod manifests before Card Editor loads, so custom foil
+manifests use .foil to avoid noisy manifest errors.
 
 Use a manifest when you want a clean display name, better knob labels, default
 values, min/max ranges, or hidden/internal uniforms.
@@ -204,4 +208,4 @@ Template files
 Use these as starting points:
 
   template_card_foil.gdshader
-  template_card_foil.json
+  template_card_foil.foil

@@ -159,7 +159,7 @@ internal sealed class CardEditorCountdownEffectPower : PowerModel
 		{
 			HookPlayerChoiceContext choiceContext = Owner?.Player != null
 				? new HookPlayerChoiceContext(Owner.Player, netId.Value, GameActionType.Combat)
-				: new HookPlayerChoiceContext(this, netId.Value, combatState, GameActionType.Combat);
+				: CardEditorCombatStateCompat.CreateHookPlayerChoiceContext(this, netId.Value, combatState, GameActionType.Combat);
 			Task task = TickOrFire(choiceContext);
 			bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
 			if (!completed && choiceContext.GameAction != null)
@@ -182,7 +182,8 @@ internal sealed class CardEditorCountdownEffectPower : PowerModel
 
 	private async Task TickOrFire(PlayerChoiceContext choiceContext)
 	{
-		if (_payload == null || Owner?.CombatState is not CombatState combatState)
+		CombatState? combatState = this.GetConcreteCombatState();
+		if (_payload == null || combatState == null)
 		{
 			await PowerCmd.Remove(this);
 			return;

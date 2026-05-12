@@ -185,7 +185,7 @@ internal static class CardEditorCustomFoilRegistry
 			List<CardEditorCustomFoilDefinition> definitions = new();
 			HashSet<string> manifestShaderPaths = new(StringComparer.OrdinalIgnoreCase);
 
-			foreach (string manifestPath in SafeEnumerateFiles(root, "*.json"))
+			foreach (string manifestPath in SafeEnumerateFiles(root, "*.foil").Concat(SafeEnumerateFiles(root, "*.json")))
 			{
 				if (TryLoadManifest(root, manifestPath, out CardEditorCustomFoilDefinition? def) && def != null)
 				{

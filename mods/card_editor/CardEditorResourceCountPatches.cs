@@ -41,7 +41,7 @@ internal static class Hook_AfterBlockGained_CardEditorResourceCount_Patch
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentBlockApplied(delta);
 				CardEditorExtraEffects.RecordResourceCount(combatState, creature, CardExtraEffectCountEvent.BlockGained, delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.BlockGained, triggeringCard: cardSource, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, creature, CardExtraEffectCountEvent.BlockGained, triggeringCard: cardSource, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.BlockGained, delta, combatState);
 			}
 		}
@@ -74,7 +74,7 @@ internal static class Hook_AfterEnergySpent_CardEditorPowerCountEvent_Patch
 			int delta = Math.Max(0, amount);
 			if (delta > 0)
 			{
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.EnergyUsed, triggeringCard: triggeringCard, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, creature, CardExtraEffectCountEvent.EnergyUsed, triggeringCard: triggeringCard, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.EnergyUsed, delta, combatState);
 			}
 		}
@@ -95,10 +95,10 @@ internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, dealer, results);
+		__result = TrackAfter(__result, choiceContext, combatState, dealer, results);
 	}
 
-	private static async Task TrackAfter(Task original, CombatState combatState, Creature dealer, DamageResult results)
+	private static async Task TrackAfter(Task original, PlayerChoiceContext choiceContext, CombatState combatState, Creature dealer, DamageResult results)
 	{
 		await original;
 		try
@@ -107,7 +107,7 @@ internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 			if (delta > 0)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentDamageApplied(delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, dealer, CardExtraEffectCountEvent.DamageDealt, amount: delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(combatState, choiceContext, dealer, CardExtraEffectCountEvent.DamageDealt, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(dealer, CardExtraEffectCountEvent.DamageDealt, delta, combatState);
 			}
 		}
@@ -128,10 +128,10 @@ internal static class Hook_AfterDamageReceived_CardEditorPowerCountEvent_Patch
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, target, result);
+		__result = TrackAfter(__result, choiceContext, combatState, target, result);
 	}
 
-	private static async Task TrackAfter(Task original, CombatState combatState, Creature target, DamageResult result)
+	private static async Task TrackAfter(Task original, PlayerChoiceContext choiceContext, CombatState combatState, Creature target, DamageResult result)
 	{
 		await original;
 		try
@@ -139,7 +139,7 @@ internal static class Hook_AfterDamageReceived_CardEditorPowerCountEvent_Patch
 			int delta = Math.Max(0, result?.UnblockedDamage ?? 0);
 			if (delta > 0)
 			{
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, target, CardExtraEffectCountEvent.DamageTaken, amount: delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(combatState, choiceContext, target, CardExtraEffectCountEvent.DamageTaken, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(target, CardExtraEffectCountEvent.DamageTaken, delta, combatState);
 			}
 		}
@@ -160,10 +160,10 @@ internal static class Hook_AfterSummon_CardEditorPowerCountEvent_Patch
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, summoner.Creature, amount);
+		__result = TrackAfter(__result, choiceContext, combatState, summoner.Creature, amount);
 	}
 
-	private static async Task TrackAfter(Task original, CombatState combatState, Creature creature, decimal amount)
+	private static async Task TrackAfter(Task original, PlayerChoiceContext choiceContext, CombatState combatState, Creature creature, decimal amount)
 	{
 		await original;
 		try
@@ -172,7 +172,7 @@ internal static class Hook_AfterSummon_CardEditorPowerCountEvent_Patch
 			if (delta > 0)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentSummonApplied(delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.Summoned, amount: delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(combatState, choiceContext, creature, CardExtraEffectCountEvent.Summoned, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.Summoned, delta, combatState);
 			}
 		}
@@ -217,7 +217,7 @@ internal static class PlayerCmd_GainEnergy_CardEditorResourceCount_Patch
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentEnergyApplied(delta, gain);
 				CardEditorExtraEffects.RecordResourceCount(state, actor, countEvent, delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(state, actor, countEvent, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(state, actor, countEvent, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(actor, countEvent, delta, state);
 			}
 		}
@@ -262,7 +262,7 @@ internal static class PlayerCmd_LoseEnergy_CardEditorResourceCount_Patch
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentEnergyApplied(delta, gain);
 				CardEditorExtraEffects.RecordResourceCount(state, actor, countEvent, delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(state, actor, countEvent, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(state, actor, countEvent, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(actor, countEvent, delta, state);
 			}
 		}
@@ -417,7 +417,7 @@ internal static class CreatureCmd_Heal_CardEditorResourceCount_Patch
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentHealingApplied(delta);
 				CardEditorExtraEffects.RecordResourceCount(combatState, creature, CardExtraEffectCountEvent.HealingReceived, delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, creature, CardExtraEffectCountEvent.HealingReceived, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, creature, CardExtraEffectCountEvent.HealingReceived, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.HealingReceived, delta, combatState);
 			}
 		}
@@ -461,13 +461,13 @@ internal static class Hook_AfterPowerAmountChanged_CardEditorPowerCountEvent_Pat
 			if (amount > 0m)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentPowerAmountChanged(power, delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, owner, CardExtraEffectCountEvent.StatusGained, triggeringPower: power, triggeringCard: cardSource, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, owner, CardExtraEffectCountEvent.StatusGained, triggeringPower: power, triggeringCard: cardSource, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(owner, CardExtraEffectCountEvent.StatusGained, delta, combatState, power);
 			}
 			else if (amount < 0m)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentPowerAmountChanged(power, delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, owner, CardExtraEffectCountEvent.StatusLost, triggeringPower: power, triggeringCard: cardSource, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, owner, CardExtraEffectCountEvent.StatusLost, triggeringPower: power, triggeringCard: cardSource, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(owner, CardExtraEffectCountEvent.StatusLost, delta, combatState, power);
 			}
 		}
@@ -504,7 +504,7 @@ internal static class PlayerCmd_GainStars_CardEditorPowerCountEvent_Patch
 			if (combatState != null && delta > 0)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentStarsApplied(delta, gain: true);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, actor, countEvent, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, actor, countEvent, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(actor, countEvent, delta, combatState);
 			}
 		}
@@ -541,7 +541,7 @@ internal static class PlayerCmd_LoseStars_CardEditorPowerCountEvent_Patch
 			if (combatState != null && delta > 0)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentStarsApplied(delta, gain: false);
-				await CardEditorExtraEffects.TriggerPowerCountEventAsync(combatState, actor, countEvent, amount: delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, actor, countEvent, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(actor, countEvent, delta, combatState);
 			}
 		}
@@ -627,14 +627,14 @@ internal static class PlayerCmd_LoseGold_CardEditorQuestCount_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterPotionUsed))]
 internal static class Hook_AfterPotionUsed_CardEditorQuestCount_Patch
 {
-	public static void Postfix(IRunState runState, ICombatState? combatState, PotionModel potion, Creature? target, ref Task __result)
+	public static void Postfix(IRunState runState, object? combatState, PotionModel potion, Creature? target, ref Task __result)
 	{
 		if (__result == null || potion?.Owner == null)
 		{
 			return;
 		}
 
-		__result = TrackAfter(__result, potion.Owner, combatState as CombatState);
+		__result = TrackAfter(__result, potion.Owner, combatState.GetConcreteCombatState());
 	}
 
 	private static async Task TrackAfter(Task original, Player owner, CombatState? combatState)
@@ -693,14 +693,14 @@ internal static class Hook_AfterRoomEntered_CardEditorQuestCount_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterCombatVictory))]
 internal static class Hook_AfterCombatVictory_CardEditorQuestCount_Patch
 {
-	public static void Postfix(IRunState runState, ICombatState? combatState, CombatRoom room, ref Task __result)
+	public static void Postfix(IRunState runState, object? combatState, CombatRoom room, ref Task __result)
 	{
 		if (__result == null || runState == null)
 		{
 			return;
 		}
 
-		__result = TrackAfter(__result, runState, combatState as CombatState);
+		__result = TrackAfter(__result, runState, combatState.GetConcreteCombatState());
 	}
 
 	private static async Task TrackAfter(Task original, IRunState runState, CombatState? combatState)
@@ -720,14 +720,14 @@ internal static class Hook_AfterCombatVictory_CardEditorQuestCount_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterDeath))]
 internal static class Hook_AfterDeath_CardEditorQuestCount_Patch
 {
-	public static void Postfix(IRunState runState, ICombatState? combatState, Creature creature, bool wasRemovalPrevented, float deathAnimLength, ref Task __result)
+	public static void Postfix(IRunState runState, object? combatState, Creature creature, bool wasRemovalPrevented, float deathAnimLength, ref Task __result)
 	{
 		if (__result == null || runState == null || creature == null || wasRemovalPrevented || !creature.IsEnemy)
 		{
 			return;
 		}
 
-		__result = TrackAfter(__result, runState, combatState as CombatState);
+		__result = TrackAfter(__result, runState, combatState.GetConcreteCombatState());
 	}
 
 	private static async Task TrackAfter(Task original, IRunState runState, CombatState? combatState)

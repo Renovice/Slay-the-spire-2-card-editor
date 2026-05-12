@@ -96,6 +96,7 @@ public static class CardEditorExternalLocalization
 		MergeTableFromExisting(searchDirs, "cards.loc", "cards", "CARD_EDITOR_");
 		CardEditorBuiltTinkerCard.EnsureLocalization();
 		MergeTableFromExisting(searchDirs, "extensions.loc", "extensions", "CARD_EDITOR.");
+		MergeTableFromExisting(searchDirs, "powers.loc", "powers", "CARD_EDITOR_");
 		MergeTableFromExisting(searchDirs, "settings_ui.loc", "settings_ui", requiredKeyPrefix: null);
 
 		// Runtime tweaks for vanilla strings we want to parameterize (no external files needed).

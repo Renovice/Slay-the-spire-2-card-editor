@@ -47,6 +47,8 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 	public bool FullArt { get; set; }
 	public string? Finish { get; set; }
 	public Dictionary<string, decimal>? FinishParams { get; set; }
+	public string? BorderFinish { get; set; }
+	public Dictionary<string, decimal>? BorderFinishParams { get; set; }
 	public List<string>? EffectSourceCardIds { get; set; }
 	public string? EffectSourcePlacement { get; set; }
 	public string? PortraitSourceCardId { get; set; }
@@ -72,6 +74,10 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 			Finish = definition.Finish.ToString(),
 			FinishParams = definition.FinishParams != null && definition.FinishParams.Count > 0
 				? definition.FinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value, StringComparer.Ordinal)
+				: null,
+			BorderFinish = definition.BorderFinish != CardEditorVisualFinish.None ? definition.BorderFinish.ToString() : null,
+			BorderFinishParams = definition.BorderFinishParams != null && definition.BorderFinishParams.Count > 0
+				? definition.BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value, StringComparer.Ordinal)
 				: null,
 			EffectSourceCardIds = definition.EffectSourceCardIds?
 				.Select(id => id?.ToString())
@@ -130,6 +136,17 @@ internal sealed class CardEditorMultiplayerCreatedCardDto
 		if (FinishParams != null && FinishParams.Count > 0)
 		{
 			definition.FinishParams = FinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value, StringComparer.Ordinal);
+		}
+
+		if (!string.IsNullOrWhiteSpace(BorderFinish)
+			&& Enum.TryParse(BorderFinish, ignoreCase: true, out CardEditorVisualFinish parsedBorderFinish))
+		{
+			definition.BorderFinish = parsedBorderFinish;
+		}
+
+		if (BorderFinishParams != null && BorderFinishParams.Count > 0)
+		{
+			definition.BorderFinishParams = BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value, StringComparer.Ordinal);
 		}
 
 		if (EffectSourceCardIds != null)

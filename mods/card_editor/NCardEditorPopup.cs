@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Entities.UI;
@@ -229,6 +230,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private KeywordTickbox? _cosmeticHideTypeBadgeTickbox;
 	private KeywordTickbox? _cosmeticHideTextBackgroundTickbox;
 	private KeywordTickbox? _cosmeticHideBodyTextTickbox;
+	private KeywordTickbox? _cosmeticHideAncientInnerBorderTickbox;
 
 	private KeywordTickbox? _createdEnabledTickbox;
 	private LineEdit? _createdTitleField;
@@ -274,6 +276,13 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private Button? _createdCustomFinishEditorButton;
 	private VBoxContainer? _createdCustomFinishEditorContainer;
 	private Dictionary<string, string> _createdCustomFinishParams = new(StringComparer.Ordinal);
+	private OptionButton? _createdBorderFinishSelect;
+	private readonly List<CardEditorVisualFinish> _createdBorderFinishOptions = new();
+	private Button? _createdBorderFinishEditorButton;
+	private VBoxContainer? _createdBorderFinishEditorContainer;
+	private Dictionary<string, float> _createdBorderFinishParams = new();
+	private readonly Dictionary<string, HSlider> _createdBorderFinishSliders = new();
+	private readonly Dictionary<string, Label> _createdBorderFinishValueLabels = new();
 	private KeywordTickbox? _createdCustomTextTickbox;
 	private TextEdit? _createdCustomTextField;
 	private Button? _createdCustomTextLinkNumbersButton;
@@ -304,6 +313,13 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private Button? _vanillaCustomFinishEditorButton;
 	private VBoxContainer? _vanillaCustomFinishEditorContainer;
 	private Dictionary<string, string> _vanillaCustomFinishParams = new(StringComparer.Ordinal);
+	private OptionButton? _vanillaBorderFinishSelect;
+	private readonly List<CardEditorVisualFinish> _vanillaBorderFinishOptions = new();
+	private Button? _vanillaBorderFinishEditorButton;
+	private VBoxContainer? _vanillaBorderFinishEditorContainer;
+	private Dictionary<string, float> _vanillaBorderFinishParams = new();
+	private readonly Dictionary<string, HSlider> _vanillaBorderFinishSliders = new();
+	private readonly Dictionary<string, Label> _vanillaBorderFinishValueLabels = new();
 	private OptionButton? _vanillaPoolSelect;
 	private readonly List<string?> _vanillaPoolOptions = new();
 	private OptionButton? _vanillaRaritySelect;
@@ -329,6 +345,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private readonly List<ModelId?> _powerIds = new();
 	private readonly List<string?> _powerIdTexts = new();
 	private readonly List<string> _powerLabels = new();
+	private readonly List<string> _powerDescriptions = new();
 	private int _powerSelectRevision = -1;
 	private readonly List<int> _questActIndices = new();
 	private readonly List<string?> _questEventIdTexts = new();
@@ -1940,6 +1957,22 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			_vanillaCustomFinishEditorContainer.Visible = false;
 			BuildCustomFinishEditorControls(_vanillaCustomFinishEditorContainer, _vanillaCustomFinishParams, customFinishId, QueuePreviewUpdate);
 		}
+
+		CardEditorVisualFinish borderFinish = existing?.BorderFinish ?? CardEditorVisualFinish.None;
+		SelectOptionByValue(_vanillaBorderFinishSelect, _vanillaBorderFinishOptions, borderFinish);
+		bool hasBorderSliders = GetBorderFinishSliderDefs(borderFinish).Length > 0;
+		if (_vanillaBorderFinishEditorButton != null && GodotObject.IsInstanceValid(_vanillaBorderFinishEditorButton))
+		{
+			_vanillaBorderFinishEditorButton.Visible = hasBorderSliders;
+		}
+		if (_vanillaBorderFinishEditorContainer != null && GodotObject.IsInstanceValid(_vanillaBorderFinishEditorContainer))
+		{
+			_vanillaBorderFinishEditorContainer.Visible = false;
+			_vanillaBorderFinishParams = existing?.BorderFinishParams != null
+				? new Dictionary<string, float>(existing.BorderFinishParams)
+				: new Dictionary<string, float>();
+			BuildFinishEditorSliders(_vanillaBorderFinishEditorContainer, _vanillaBorderFinishSliders, _vanillaBorderFinishValueLabels, _vanillaBorderFinishParams, GetBorderFinishSliderDefs(borderFinish), QueuePreviewUpdate);
+		}
 	}
 
 	private void BindVanillaModifiedBaseTextControls(CardOverride? existing)
@@ -2115,6 +2148,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		SetTickboxSilent(_cosmeticHideTypeBadgeTickbox, existing?.HideCosmeticTypeBadge == true);
 		SetTickboxSilent(_cosmeticHideTextBackgroundTickbox, existing?.HideCosmeticTextBackground == true);
 		SetTickboxSilent(_cosmeticHideBodyTextTickbox, existing?.HideCosmeticBodyText == true);
+		SetTickboxSilent(_cosmeticHideAncientInnerBorderTickbox, existing?.HideCosmeticAncientInnerBorder == true);
 	}
 
 	private void BindCreatedArtControls(CardEditorCreatedCardDefinition def)
@@ -2161,6 +2195,22 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			_createdCustomFinishEditorContainer.Visible = false;
 			BuildCustomFinishEditorControls(_createdCustomFinishEditorContainer, _createdCustomFinishParams, def.CustomFinishId, OnCreatedCardMetaChanged);
+		}
+
+		CardEditorVisualFinish borderFinish = def.BorderFinish;
+		SelectOptionByValue(_createdBorderFinishSelect, _createdBorderFinishOptions, borderFinish);
+		bool hasBorderSliders = GetBorderFinishSliderDefs(borderFinish).Length > 0;
+		if (_createdBorderFinishEditorButton != null && GodotObject.IsInstanceValid(_createdBorderFinishEditorButton))
+		{
+			_createdBorderFinishEditorButton.Visible = hasBorderSliders;
+		}
+		if (_createdBorderFinishEditorContainer != null && GodotObject.IsInstanceValid(_createdBorderFinishEditorContainer))
+		{
+			_createdBorderFinishEditorContainer.Visible = false;
+			_createdBorderFinishParams = def.BorderFinishParams != null
+				? new Dictionary<string, float>(def.BorderFinishParams)
+				: new Dictionary<string, float>();
+			BuildFinishEditorSliders(_createdBorderFinishEditorContainer, _createdBorderFinishSliders, _createdBorderFinishValueLabels, _createdBorderFinishParams, GetBorderFinishSliderDefs(borderFinish), OnCreatedCardMetaChanged);
 		}
 	}
 
@@ -2839,6 +2889,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_createdFinishValueLabels.Clear();
 		_createdCustomFinishOptions.Clear();
 		_createdCustomFinishParams.Clear();
+		_createdBorderFinishOptions.Clear();
+		_createdBorderFinishParams.Clear();
+		_createdBorderFinishSliders.Clear();
+		_createdBorderFinishValueLabels.Clear();
 		_createdRewardBucketOptions.Clear();
 		_createdRewardInjectionModeOptions.Clear();
 		_createdRewardPoolChecks.Clear();
@@ -2859,6 +2913,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_vanillaFinishValueLabels.Clear();
 		_vanillaCustomFinishOptions.Clear();
 		_vanillaCustomFinishParams.Clear();
+		_vanillaBorderFinishOptions.Clear();
+		_vanillaBorderFinishParams.Clear();
+		_vanillaBorderFinishSliders.Clear();
+		_vanillaBorderFinishValueLabels.Clear();
 		_enchantmentIds.Clear();
 		_afflictionIds.Clear();
 		_powerIds.Clear();
@@ -3295,13 +3353,23 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			CardModel model = _previewCard;
 			_cardPreviewNode.Model = null;
 			_cardPreviewNode.Model = model;
-			_cardPreviewNode.UpdateVisuals(PileType.None, GetEditorPreviewMode());
+			UpdateCardPreviewVisuals();
 			QueuePreviewLayout();
 		}
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] ForcePreviewReload failed: {ex}");
 		}
+	}
+
+	private void UpdateCardPreviewVisuals()
+	{
+		if (_cardPreviewNode == null || !GodotObject.IsInstanceValid(_cardPreviewNode))
+		{
+			return;
+		}
+
+		_cardPreviewNode.UpdateVisuals(PileType.None, GetEditorPreviewMode());
 	}
 
 	private void QueuePreviewLayout()
@@ -4175,7 +4243,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		rightColumn.AddChild(CreateCosmeticToggleRow(
 			(CardEditorLoc.T("field.hideTypeBadge", "Type"), existing?.HideCosmeticTypeBadge == true, tickbox => _cosmeticHideTypeBadgeTickbox = tickbox),
 			(CardEditorLoc.T("field.hideTextBackground", "Text BG"), existing?.HideCosmeticTextBackground == true, tickbox => _cosmeticHideTextBackgroundTickbox = tickbox),
-			(CardEditorLoc.T("field.hideBodyText", "Text"), existing?.HideCosmeticBodyText == true, tickbox => _cosmeticHideBodyTextTickbox = tickbox)));
+			(CardEditorLoc.T("field.hideBodyText", "Text"), existing?.HideCosmeticBodyText == true, tickbox => _cosmeticHideBodyTextTickbox = tickbox),
+			(CardEditorLoc.T("field.hideAncientInnerBorder", "Inner Border"), existing?.HideCosmeticAncientInnerBorder == true, tickbox => _cosmeticHideAncientInnerBorderTickbox = tickbox)));
 
 		UpdateAttachEnabled();
 	}
@@ -4664,6 +4733,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public OptionButton SpecificCardUpgradeSelect { get; init; } = null!;
 		public KeywordTickbox SpecificCardFullTextTickbox { get; init; } = null!;
 		public OptionButton ChooseOneExecutionSelect { get; init; } = null!;
+		public Control ChooseOneGateRow { get; init; } = null!;
+		public OptionButton ChooseOneResolveModeSelect { get; init; } = null!;
+		public OptionButton ChooseOneResolveCountSelect { get; init; } = null!;
+		public OptionButton ChooseOneChoiceRuleSelect { get; init; } = null!;
 		public Control ChooseOneOption1Row { get; init; } = null!;
 		public OptionButton ChooseOneOption1ModeSelect { get; init; } = null!;
 		public OptionButton ChooseOneOption1UpgradeSelect { get; init; } = null!;
@@ -6921,6 +6994,27 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			: CardExtraEffectChooseOneExecutionMode.BorrowEffectsOnly;
 	}
 
+	private static CardExtraEffectChooseOneResolveMode GetSelectedChooseOneResolveMode(ExtraEffectRow row)
+	{
+		int selectedId = GetSelectedItemId(row?.ChooseOneResolveModeSelect, (int)CardExtraEffectChooseOneResolveMode.PlayerChoice);
+		return Enum.IsDefined(typeof(CardExtraEffectChooseOneResolveMode), selectedId)
+			? (CardExtraEffectChooseOneResolveMode)selectedId
+			: CardExtraEffectChooseOneResolveMode.PlayerChoice;
+	}
+
+	private static CardExtraEffectChooseOneChoiceRule GetSelectedChooseOneChoiceRule(ExtraEffectRow row)
+	{
+		int selectedId = GetSelectedItemId(row?.ChooseOneChoiceRuleSelect, (int)CardExtraEffectChooseOneChoiceRule.Exactly);
+		return Enum.IsDefined(typeof(CardExtraEffectChooseOneChoiceRule), selectedId)
+			? (CardExtraEffectChooseOneChoiceRule)selectedId
+			: CardExtraEffectChooseOneChoiceRule.Exactly;
+	}
+
+	private static int GetSelectedChooseOneResolveCount(ExtraEffectRow row)
+	{
+		return Math.Clamp(GetSelectedItemId(row?.ChooseOneResolveCountSelect, 1), 1, 3);
+	}
+
 	private static CardExtraEffectConsumedCardValueSource GetSelectedConsumedCardValueSource(ExtraEffectRow row)
 	{
 		int selectedId = GetSelectedItemId(row?.ConsumedCardValueSourceSelect, (int)CardExtraEffectConsumedCardValueSource.Damage);
@@ -7352,6 +7446,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		if (control == row.PowerConditionRow) return "PowerCondition";
 		if (control == row.PowerHostRow) return "PowerHost";
 		if (control == row.PowerTargetingRow) return "PowerTargeting";
+		if (control == row.AutoPlayLoopRow) return "UseLimit";
 		if (control == row.PlayPreventionOptionsRow) return "PlayRule";
 		if (control == row.GlowColorRow) return "GlowColor";
 		if (control == row.QuestRow) return "Quest";
@@ -7489,6 +7584,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		foreach (Control child in advancedPropertyGrid.GetChildren().OfType<Control>())
 		{
 			CompactEffectFormRow(child);
+		}
+		if (row.AutoPlayLoopRow is VBoxContainer autoPlayLoopContainer
+			&& GodotObject.IsInstanceValid(autoPlayLoopContainer))
+		{
+			foreach (Control child in autoPlayLoopContainer.GetChildren().OfType<Control>())
+			{
+				CompactEffectFormRow(child);
+			}
 		}
 		if (row.PowerConditionRow is VBoxContainer powerConditionContainer
 			&& GodotObject.IsInstanceValid(powerConditionContainer))
@@ -7932,10 +8035,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		AddFinishOption(select, options, CardEditorVisualFinish.PurpleWavesOcean, CardEditorLoc.T("finish.purpleWavesOcean", "Ocean Waves"));
 		AddFinishOption(select, options, CardEditorVisualFinish.Whirlpool, CardEditorLoc.T("finish.whirlpool", "Whirlpool"));
 		AddFinishOption(select, options, CardEditorVisualFinish.Miasma, CardEditorLoc.T("finish.miasma", "Miasma"));
-		AddFinishOption(select, options, CardEditorVisualFinish.Aurora, CardEditorLoc.T("finish.aurora", "Aurora"));
+		if (selectedFinish == CardEditorVisualFinish.Aurora)
+		{
+			AddFinishOption(select, options, CardEditorVisualFinish.Aurora, CardEditorLoc.T("finish.auroraLegacy", "Aurora (Legacy)"));
+		}
 		AddFinishOption(select, options, CardEditorVisualFinish.Constellation, CardEditorLoc.T("finish.constellation", "Constellation"));
 		AddFinishOption(select, options, CardEditorVisualFinish.DvdRipple, CardEditorLoc.T("finish.ripple", "Ripple"));
 		AddFinishOption(select, options, CardEditorVisualFinish.Lightning, CardEditorLoc.T("finish.lightning", "Lightning"));
+		AddFinishOption(select, options, CardEditorVisualFinish.Flame, CardEditorLoc.T("finish.flame", "Flame"));
 		AddFinishOption(select, options, CardEditorVisualFinish.BaseGameInfection, CardEditorLoc.T("finish.baseGameInfection", "Base Game: Infection Worms"));
 		AddFinishOption(select, options, CardEditorVisualFinish.BaseGameGalvanized, CardEditorLoc.T("finish.baseGameGalvanized", "Base Game: Galvanized"));
 		AddFinishOption(select, options, CardEditorVisualFinish.BaseGameBound, CardEditorLoc.T("finish.baseGameBound", "Base Game: Bound"));
@@ -7943,6 +8050,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		AddFinishOption(select, options, CardEditorVisualFinish.BaseGameHexed, CardEditorLoc.T("finish.baseGameHexed", "Base Game: Hexed"));
 		AddFinishOption(select, options, CardEditorVisualFinish.BaseGameRinging, CardEditorLoc.T("finish.baseGameRinging", "Base Game: Ringing"));
 		AddFinishOption(select, options, CardEditorVisualFinish.BaseGameSmog, CardEditorLoc.T("finish.baseGameSmog", "Base Game: Smog"));
+
+		CardEditorVisualFinish desired = selectedFinish ?? CardEditorVisualFinish.None;
+		int selectedIndex = options.IndexOf(desired);
+		select.Selected = selectedIndex >= 0 ? selectedIndex : 0;
+		select.ItemSelected += _ => onChanged();
+	}
+
+	private void PopulateBorderFinishDropdown(OptionButton select, List<CardEditorVisualFinish> options, CardEditorVisualFinish? selectedFinish, Action onChanged)
+	{
+		select.Clear();
+		options.Clear();
+
+		AddFinishOption(select, options, CardEditorVisualFinish.None, CardEditorLoc.T("finish.none", "None"));
+		AddFinishOption(select, options, CardEditorVisualFinish.RainbowRareFoil, CardEditorLoc.T("finish.borderRainbow", "Rainbow Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.PrismaticBandGlare, CardEditorLoc.T("finish.borderPrismatic", "Prismatic Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.PurpleWavesOcean, CardEditorLoc.T("finish.borderOcean", "Ocean Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.Whirlpool, CardEditorLoc.T("finish.borderWhirlpool", "Whirlpool Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.Miasma, CardEditorLoc.T("finish.borderMiasma", "Miasma Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.Constellation, CardEditorLoc.T("finish.borderConstellation", "Constellation Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.DvdRipple, CardEditorLoc.T("finish.borderRipple", "Ripple Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.Lightning, CardEditorLoc.T("finish.borderLightning", "Lightning Border"));
+		AddFinishOption(select, options, CardEditorVisualFinish.Flame, CardEditorLoc.T("finish.borderFlame", "Flame Border"));
 
 		CardEditorVisualFinish desired = selectedFinish ?? CardEditorVisualFinish.None;
 		int selectedIndex = options.IndexOf(desired);
@@ -7975,6 +8104,30 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			&& _vanillaFinishSelect.Selected < _vanillaFinishOptions.Count)
 		{
 			return _vanillaFinishOptions[_vanillaFinishSelect.Selected];
+		}
+
+		return CardEditorVisualFinish.None;
+	}
+
+	private CardEditorVisualFinish GetSelectedCreatedBorderFinish()
+	{
+		if (_createdBorderFinishSelect != null
+			&& _createdBorderFinishSelect.Selected >= 0
+			&& _createdBorderFinishSelect.Selected < _createdBorderFinishOptions.Count)
+		{
+			return _createdBorderFinishOptions[_createdBorderFinishSelect.Selected];
+		}
+
+		return CardEditorVisualFinish.None;
+	}
+
+	private CardEditorVisualFinish GetSelectedVanillaBorderFinish()
+	{
+		if (_vanillaBorderFinishSelect != null
+			&& _vanillaBorderFinishSelect.Selected >= 0
+			&& _vanillaBorderFinishSelect.Selected < _vanillaBorderFinishOptions.Count)
+		{
+			return _vanillaBorderFinishOptions[_vanillaBorderFinishSelect.Selected];
 		}
 
 		return CardEditorVisualFinish.None;
@@ -8254,7 +8407,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			new("patternScale", "Zoom", 0.10f, 4f, 0.01f, 1.0f),
 			new("swirlStrength", "Swirl", 0f, 15f, 0.01f, 4.7f),
 			new("lineCount", "Lines", 1f, 30f, 0.01f, 6.0f),
-			new("lineSharpness", "Line Sharpness", 0f, 1f, 0.01f, 0.46f),
+			new("lineSharpness", "Line Sharpness", 0f, 1f, 0.01f, 0.10f),
 			new("speed", "Speed", 0f, 3f, 0.01f, 1.0f),
 			new("timeOffset", "Freeze Frame", 0f, 10f, 0.01f, 0f),
 			new("hueShift", "Hue Shift", 0f, 1f, 0.01f, 0f),
@@ -8281,34 +8434,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		},
 		CardEditorVisualFinish.Aurora => new FinishSliderDef[]
 		{
-			new("strength", "Blend", 0f, 1f, 0.01f, 0.62f),
-			new("auroraIntensity", "Aurora Intensity", 0f, 5f, 0.01f, 1.8f),
-			new("starBrightness", "Stars", 0f, 1f, 0.01f, 0.8f),
-			new("starDensity", "Star Density", 0f, 3f, 0.01f, 1.0f),
-			new("brightness", "Brightness", 0.5f, 2f, 0.01f, 1.0f),
-			new("pastel", "Pastel", 0f, 1f, 0.01f, 0.0f),
-			new("saturation", "Saturation", 0f, 1f, 0.01f, 1.0f),
+			new("strength", "Blend", 0f, 1f, 0.01f, 0.5f),
+			new("GWM", "Wave Glow", 0f, 5f, 0.01f, 2.05f),
+			new("TM", "Pulse Speed", 0f, 2f, 0.01f, 0.25f),
+			new("waveCount", "Waves", 1f, 8f, 1f, 5f),
+			new("waveDistortion", "Wave Distortion", 0f, 3f, 0.01f, 1.0f),
+			new("brightness", "Brightness", 0.1f, 4f, 0.01f, 1.0f),
+			new("transparency", "Aurora Transparency", 0f, 1f, 0.01f, 0f),
+			new("backgroundTransparency", "Background Transparency", 0f, 1f, 0.01f, 0f),
 			new("patternScale", "Zoom", 0.10f, 4f, 0.01f, 1.0f),
-			new("projectionBend", "Projection Bend", 0f, 1f, 0.01f, 0.40f),
-			new("horizon", "Horizon", -1f, 1f, 0.01f, 0f),
-			new("reflectionStrength", "Reflection", 0f, 1f, 0.01f, 0.65f),
-			new("rotationStrength", "Drift", 0f, 1f, 0.01f, 0.2f),
-			new("speed", "Speed", 0f, 3f, 0.01f, 1.0f),
+			new("speed", "Speed", 0f, 5f, 0.01f, 1.0f),
 			new("timeOffset", "Freeze Frame", 0f, 10f, 0.01f, 0f),
-			new("hueShift", "Hue Shift", 0f, 1f, 0.01f, 0f),
-			new("auroraR", "Aurora R", 0f, 1f, 0.01f, 0.84f),
-			new("auroraG", "Aurora G", 0f, 1f, 0.01f, 0.84f),
-			new("auroraB", "Aurora B", 0f, 1f, 0.01f, 0.90f),
-			new("background1R", "Back 1 R", 0f, 1f, 0.01f, 0.05f),
-			new("background1G", "Back 1 G", 0f, 1f, 0.01f, 0.10f),
-			new("background1B", "Back 1 B", 0f, 1f, 0.01f, 0.20f),
-			new("background2R", "Back 2 R", 0f, 1f, 0.01f, 0.10f),
-			new("background2G", "Back 2 G", 0f, 1f, 0.01f, 0.05f),
-			new("background2B", "Back 2 B", 0f, 1f, 0.01f, 0.20f),
-			new("tintR", "Tint R", 0f, 1f, 0.01f, 1.0f),
-			new("tintG", "Tint G", 0f, 1f, 0.01f, 1.0f),
-			new("tintB", "Tint B", 0f, 1f, 0.01f, 1.0f),
-			new("tintStrength", "Tint Strength", 0f, 1f, 0.01f, 0f),
+			new("backgroundColorR", "Background R", 0f, 1f, 0.01f, 0.25f),
+			new("backgroundColorG", "Background G", 0f, 1f, 0.01f, 0.0f),
+			new("backgroundColorB", "Background B", 0f, 1f, 0.01f, 0.20f),
 		},
 		CardEditorVisualFinish.Constellation => new FinishSliderDef[]
 		{
@@ -8368,6 +8507,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardEditorVisualFinish.Lightning => new FinishSliderDef[]
 		{
 			new("strength", "Blend", 0f, 1f, 0.01f, 0.68f),
+			new("boltCount", "Bolts", 1f, 8f, 1f, 1f),
 			new("boltWidth", "Bolt Width", 0.002f, 0.25f, 0.001f, 0.045f),
 			new("glow", "Glow", 0f, 5f, 0.01f, 1.4f),
 			new("brightness", "Brightness", 0.1f, 4f, 0.01f, 1.0f),
@@ -8385,8 +8525,67 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			new("lightningG", "Color G", 0f, 1f, 0.01f, 0.3f),
 			new("lightningB", "Color B", 0f, 1f, 0.01f, 0.8f),
 		},
+		CardEditorVisualFinish.Flame => new FinishSliderDef[]
+		{
+			new("strength", "Blend", 0f, 1f, 0.01f, 0.78f),
+			new("flameHeight", "Flame Height", 0.5f, 1.7f, 0.01f, 1.08f),
+			new("flameWidth", "Flame Width", 0.15f, 0.8f, 0.01f, 0.44f),
+			new("flameTopWidth", "Flame Top Width", 0.01f, 0.8f, 0.01f, 0.035f),
+			new("flameIntensity", "Flame Intensity", 0.1f, 2.5f, 0.01f, 0.82f),
+			new("coreHeat", "Core Heat", 0f, 1.3f, 0.01f, 0.38f),
+			new("turbulence", "Turbulence", 0f, 1.5f, 0.01f, 0.48f),
+			new("noiseScale", "Noise Scale", 1f, 14f, 0.01f, 7.5f),
+			new("speed", "Rise Speed", 0.1f, 4f, 0.01f, 1.45f),
+			new("timeOffset", "Freeze Frame", 0f, 10f, 0.01f, 0f),
+			new("flickerStrength", "Flicker", 0f, 1f, 0.01f, 0.32f),
+			new("edgeSoftness", "Edge Softness", 0.02f, 0.5f, 0.01f, 0.24f),
+			new("glowStrength", "Glow", 0f, 2f, 0.01f, 0.58f),
+			new("emberDensity", "Embers", 0f, 1f, 0.01f, 0.14f),
+			new("smokeAmount", "Smoke", 0f, 1f, 0.01f, 0.08f),
+			new("wind", "Wind", -1f, 1f, 0.01f, 0f),
+			new("coldR", "Cold R", 0f, 1f, 0.01f, 0.055f),
+			new("coldG", "Cold G", 0f, 1f, 0.01f, 0.006f),
+			new("coldB", "Cold B", 0f, 1f, 0.01f, 0.0f),
+			new("deepRedR", "Deep Red R", 0f, 1f, 0.01f, 0.55f),
+			new("deepRedG", "Deep Red G", 0f, 1f, 0.01f, 0.025f),
+			new("deepRedB", "Deep Red B", 0f, 1f, 0.01f, 0.0f),
+			new("orangeR", "Orange R", 0f, 1f, 0.01f, 1.0f),
+			new("orangeG", "Orange G", 0f, 1f, 0.01f, 0.25f),
+			new("orangeB", "Orange B", 0f, 1f, 0.01f, 0.015f),
+			new("yellowR", "Yellow R", 0f, 1f, 0.01f, 1.0f),
+			new("yellowG", "Yellow G", 0f, 1f, 0.01f, 0.68f),
+			new("yellowB", "Yellow B", 0f, 1f, 0.01f, 0.08f),
+			new("whiteCoreR", "White Core R", 0f, 1f, 0.01f, 1.0f),
+			new("whiteCoreG", "White Core G", 0f, 1f, 0.01f, 0.92f),
+			new("whiteCoreB", "White Core B", 0f, 1f, 0.01f, 0.55f),
+			new("smokeR", "Smoke R", 0f, 1f, 0.01f, 0.16f),
+			new("smokeG", "Smoke G", 0f, 1f, 0.01f, 0.14f),
+			new("smokeB", "Smoke B", 0f, 1f, 0.01f, 0.12f),
+		},
 		_ => Array.Empty<FinishSliderDef>()
 	};
+
+	private static FinishSliderDef[] GetBorderFinishSliderDefs(CardEditorVisualFinish finish)
+	{
+		if (finish == CardEditorVisualFinish.None)
+		{
+			return Array.Empty<FinishSliderDef>();
+		}
+
+		bool lightning = finish == CardEditorVisualFinish.Lightning;
+		return new FinishSliderDef[]
+		{
+			new("borderWidth", "Border Width", 1f, 200f, 1f, lightning ? 15f : 12f),
+			new("borderInset", "Border Inset", 0f, 32f, 1f, 0f),
+			new("borderOpacity", "Border Opacity", 0f, 1f, 0.01f, lightning ? 0.86f : 0.70f),
+			new("borderCornerRadius", "Corner Radius", 0f, 80f, 1f, 28f),
+			new("borderFlowSpeed", "Flow Speed", 0f, 5f, 0.01f, lightning ? 1.35f : 1f),
+			new("borderPatternScale", "Pattern Scale", 0.10f, 6f, 0.01f, lightning ? 0.78f : 1f),
+			new("borderGlow", "Glow", 0f, 2f, 0.01f, lightning ? 1.10f : 0.55f),
+			new("borderHueShift", "Hue Shift", 0f, 1f, 0.01f, 0f),
+			new("borderTimeOffset", "Freeze Frame", 0f, 10f, 0.01f, 0f),
+		};
+	}
 
 	private void BuildFinishEditorSliders(
 		VBoxContainer container,
@@ -8394,6 +8593,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		Dictionary<string, Label> valueLabels,
 		Dictionary<string, float> finishParams,
 		CardEditorVisualFinish finish,
+		Action onChanged)
+		=> BuildFinishEditorSliders(container, sliders, valueLabels, finishParams, GetFinishSliderDefs(finish), onChanged);
+
+	private void BuildFinishEditorSliders(
+		VBoxContainer container,
+		Dictionary<string, HSlider> sliders,
+		Dictionary<string, Label> valueLabels,
+		Dictionary<string, float> finishParams,
+		FinishSliderDef[] defs,
 		Action onChanged)
 	{
 		foreach (Node child in container.GetChildren())
@@ -8403,7 +8611,6 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		sliders.Clear();
 		valueLabels.Clear();
 
-		FinishSliderDef[] defs = GetFinishSliderDefs(finish);
 		if (defs.Length == 0)
 		{
 			Label noParams = new Label { Text = CardEditorLoc.T("finishEditor.noParams", "No editable parameters for this finish.") };
@@ -8520,6 +8727,36 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				_vanillaFinishParams.Clear();
 				BuildFinishEditorSliders(_vanillaFinishEditorContainer, _vanillaFinishSliders, _vanillaFinishValueLabels, _vanillaFinishParams, finish, QueuePreviewUpdate);
 			}
+		}
+		QueuePreviewUpdate();
+	}
+
+	private void OnCreatedBorderFinishChanged()
+	{
+		CardEditorVisualFinish finish = GetSelectedCreatedBorderFinish();
+		bool hasSliders = GetBorderFinishSliderDefs(finish).Length > 0;
+		if (_createdBorderFinishEditorButton != null)
+			_createdBorderFinishEditorButton.Visible = hasSliders;
+		if (_createdBorderFinishEditorContainer != null)
+		{
+			_createdBorderFinishEditorContainer.Visible = false;
+			_createdBorderFinishParams.Clear();
+			BuildFinishEditorSliders(_createdBorderFinishEditorContainer, _createdBorderFinishSliders, _createdBorderFinishValueLabels, _createdBorderFinishParams, GetBorderFinishSliderDefs(finish), OnCreatedCardMetaChanged);
+		}
+		OnCreatedCardMetaChanged();
+	}
+
+	private void OnVanillaBorderFinishChanged()
+	{
+		CardEditorVisualFinish finish = GetSelectedVanillaBorderFinish();
+		bool hasSliders = GetBorderFinishSliderDefs(finish).Length > 0;
+		if (_vanillaBorderFinishEditorButton != null)
+			_vanillaBorderFinishEditorButton.Visible = hasSliders;
+		if (_vanillaBorderFinishEditorContainer != null)
+		{
+			_vanillaBorderFinishEditorContainer.Visible = false;
+			_vanillaBorderFinishParams.Clear();
+			BuildFinishEditorSliders(_vanillaBorderFinishEditorContainer, _vanillaBorderFinishSliders, _vanillaBorderFinishValueLabels, _vanillaBorderFinishParams, GetBorderFinishSliderDefs(finish), QueuePreviewUpdate);
 		}
 		QueuePreviewUpdate();
 	}
@@ -9191,6 +9428,38 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			: CardEditorCustomFoilRegistry.BuildDefaultParamValues(existingCustomFinishId);
 		BuildCustomFinishEditorControls(_vanillaCustomFinishEditorContainer, _vanillaCustomFinishParams, existingCustomFinishId, QueuePreviewUpdate);
 
+		rightColumn.AddChild(CreateBoundedDropdownRow(CardEditorLoc.T("field.borderFoil", "Border Foil"), _cosmeticDropdownWidth, out OptionButton borderFinishSelect));
+		_vanillaBorderFinishSelect = borderFinishSelect;
+		CardEditorVisualFinish existingBorderFinish = existing?.BorderFinish ?? CardEditorVisualFinish.None;
+		PopulateBorderFinishDropdown(borderFinishSelect, _vanillaBorderFinishOptions, existingBorderFinish, OnVanillaBorderFinishChanged);
+
+		_vanillaBorderFinishEditorButton = new Button
+		{
+			Text = CardEditorLoc.T("finishEditor.editBorderButton", "Edit Border Foil Settings"),
+			CustomMinimumSize = new Vector2(_cosmeticDropdownWidth, _fieldMinSize.Y)
+		};
+		StyleInput(_vanillaBorderFinishEditorButton);
+		_vanillaBorderFinishEditorButton.Visible = GetBorderFinishSliderDefs(existingBorderFinish).Length > 0;
+		_vanillaBorderFinishEditorButton.Pressed += () =>
+		{
+			if (_vanillaBorderFinishEditorContainer != null)
+				_vanillaBorderFinishEditorContainer.Visible = !_vanillaBorderFinishEditorContainer.Visible;
+		};
+		rightColumn.AddChild(CreateFieldAlignedRow(_vanillaBorderFinishEditorButton, _cosmeticDropdownWidth));
+
+		_vanillaBorderFinishEditorContainer = new VBoxContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			CustomMinimumSize = new Vector2(_cosmeticDropdownWidth, 0),
+			Visible = false
+		};
+		_vanillaBorderFinishEditorContainer.AddThemeConstantOverride("separation", 4);
+		rightColumn.AddChild(CreateFieldAlignedRow(_vanillaBorderFinishEditorContainer, _cosmeticDropdownWidth));
+		_vanillaBorderFinishParams = existing?.BorderFinishParams != null
+			? new Dictionary<string, float>(existing.BorderFinishParams)
+			: new Dictionary<string, float>();
+		BuildFinishEditorSliders(_vanillaBorderFinishEditorContainer, _vanillaBorderFinishSliders, _vanillaBorderFinishValueLabels, _vanillaBorderFinishParams, GetBorderFinishSliderDefs(existingBorderFinish), QueuePreviewUpdate);
+
 		if (!_isBatchEdit)
 		{
 			bool hasModifiedBaseText = existing?.ModifiedBaseTextEnabled == true;
@@ -9286,11 +9555,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void OnVanillaModifiedBaseTextLinkNumbersPressed()
 	{
-		LinkTextFieldToLiveNumbers(_vanillaModifiedBaseTextField, BuildVanillaModifiedBaseTextReferenceFromUi(), QueuePreviewUpdate, BuildDisplayNumberLiveTokenLineMap());
+		LinkTextFieldToLiveNumbers(_vanillaModifiedBaseTextField, BuildVanillaModifiedBaseTextReferenceFromUi(), QueuePreviewUpdate, BuildEffectLiveTokenLineMap());
 	}
 
 	private string BuildVanillaModifiedBaseTextSeedFromUi()
-		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(BuildVanillaModifiedBaseTextReferenceFromUi());
+		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplateWithLineTokens(BuildVanillaModifiedBaseTextReferenceFromUi(), BuildEffectLiveTokenLineMap());
 
 	private string BuildVanillaModifiedBaseTextReferenceFromUi()
 	{
@@ -9651,6 +9920,38 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			? new Dictionary<string, string>(def.CustomFinishParams, StringComparer.Ordinal)
 			: CardEditorCustomFoilRegistry.BuildDefaultParamValues(def.CustomFinishId);
 		BuildCustomFinishEditorControls(_createdCustomFinishEditorContainer, _createdCustomFinishParams, def.CustomFinishId, OnCreatedCardMetaChanged);
+
+		rightColumn.AddChild(CreateBoundedDropdownRow(CardEditorLoc.T("field.borderFoil", "Border Foil"), _cosmeticDropdownWidth, out OptionButton borderFinishSelect));
+		_createdBorderFinishSelect = borderFinishSelect;
+		CardEditorVisualFinish existingCreatedBorderFinish = def.BorderFinish;
+		PopulateBorderFinishDropdown(borderFinishSelect, _createdBorderFinishOptions, existingCreatedBorderFinish, OnCreatedBorderFinishChanged);
+
+		_createdBorderFinishEditorButton = new Button
+		{
+			Text = CardEditorLoc.T("finishEditor.editBorderButton", "Edit Border Foil Settings"),
+			CustomMinimumSize = new Vector2(_cosmeticDropdownWidth, _fieldMinSize.Y)
+		};
+		StyleInput(_createdBorderFinishEditorButton);
+		_createdBorderFinishEditorButton.Visible = GetBorderFinishSliderDefs(existingCreatedBorderFinish).Length > 0;
+		_createdBorderFinishEditorButton.Pressed += () =>
+		{
+			if (_createdBorderFinishEditorContainer != null)
+				_createdBorderFinishEditorContainer.Visible = !_createdBorderFinishEditorContainer.Visible;
+		};
+		rightColumn.AddChild(CreateFieldAlignedRow(_createdBorderFinishEditorButton, _cosmeticDropdownWidth));
+
+		_createdBorderFinishEditorContainer = new VBoxContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			CustomMinimumSize = new Vector2(_cosmeticDropdownWidth, 0),
+			Visible = false
+		};
+		_createdBorderFinishEditorContainer.AddThemeConstantOverride("separation", 4);
+		rightColumn.AddChild(CreateFieldAlignedRow(_createdBorderFinishEditorContainer, _cosmeticDropdownWidth));
+		_createdBorderFinishParams = def.BorderFinishParams != null
+			? new Dictionary<string, float>(def.BorderFinishParams)
+			: new Dictionary<string, float>();
+		BuildFinishEditorSliders(_createdBorderFinishEditorContainer, _createdBorderFinishSliders, _createdBorderFinishValueLabels, _createdBorderFinishParams, GetBorderFinishSliderDefs(existingCreatedBorderFinish), OnCreatedCardMetaChanged);
 
 		cosmeticsMs = (long)(Time.GetTicksMsec() - cosmeticsStartMs);
 		ulong customTextStartMs = Time.GetTicksMsec();
@@ -10069,7 +10370,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	}
 
 	private string BuildCreatedCustomTextSeedFromPreview(bool isUpgradePreview)
-		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(BuildCreatedCustomTextReferenceFromPreview(isUpgradePreview));
+		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplateWithLineTokens(BuildCreatedCustomTextReferenceFromPreview(isUpgradePreview), BuildEffectLiveTokenLineMap());
 
 	private string BuildCreatedCustomTextReferenceFromPreview(bool isUpgradePreview)
 	{
@@ -10089,8 +10390,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				TryUpgradeForPreview(preview);
 			}
-			CardEditorCreatedCardEffectSourceSupport.EnsureEffectSourceDynamicVars(preview, isUpgradePreview);
 
+			CardEditorCreatedCardEffectSourceSupport.EnsureEffectSourceDynamicVars(preview, isUpgradePreview);
 			return CreatedCardTextBuilder.BuildAutoGeneratedDescription(preview, preview.GetSafeCurrentTarget(), isUpgradePreview);
 		}
 		catch
@@ -10112,7 +10413,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void OnCreatedCustomTextLinkNumbersPressed()
 	{
-		LinkTextFieldToLiveNumbers(_createdCustomTextField, BuildCreatedCustomTextReferenceFromPreview(isUpgradePreview: false), OnCreatedCardMetaChanged, BuildDisplayNumberLiveTokenLineMap());
+		LinkTextFieldToLiveNumbers(_createdCustomTextField, BuildCreatedCustomTextReferenceFromPreview(isUpgradePreview: false), OnCreatedCardMetaChanged, BuildEffectLiveTokenLineMap());
 	}
 
 	private void OnCreatedCustomTextUpgradedLinkNumbersPressed()
@@ -10121,7 +10422,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			CardEditorCreatedCardsStore.SetDraftCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, _createdCustomTextUpgradedTickbox?.IsTicked ?? false);
 			QueuePreviewUpdate();
-		}, BuildDisplayNumberLiveTokenLineMap());
+		}, BuildEffectLiveTokenLineMap());
 	}
 
 	private void BuildVanillaUpgradeTextUi(VBoxContainer rightColumn, CardUpgradeOverride? storedUpgrade)
@@ -10187,7 +10488,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	}
 
 	private string BuildVanillaModifiedBaseTextUpgradedSeedFromUi()
-		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(BuildVanillaModifiedBaseTextUpgradedReferenceFromUi());
+		=> CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplateWithLineTokens(BuildVanillaModifiedBaseTextUpgradedReferenceFromUi(), BuildEffectLiveTokenLineMap());
 
 	private string BuildVanillaModifiedBaseTextUpgradedReferenceFromUi()
 	{
@@ -10215,47 +10516,129 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void OnVanillaModifiedBaseTextUpgradedLinkNumbersPressed()
 	{
-		LinkTextFieldToLiveNumbers(_vanillaModifiedBaseTextUpgradedField, BuildVanillaModifiedBaseTextUpgradedReferenceFromUi(), QueuePreviewUpdate, BuildDisplayNumberLiveTokenLineMap());
+		LinkTextFieldToLiveNumbers(_vanillaModifiedBaseTextUpgradedField, BuildVanillaModifiedBaseTextUpgradedReferenceFromUi(), QueuePreviewUpdate, BuildEffectLiveTokenLineMap());
 	}
 
-	private Dictionary<string, string> BuildDisplayNumberLiveTokenLineMap()
+	private Dictionary<string, IReadOnlyList<string>> BuildEffectLiveTokenLineMap()
 	{
-		Dictionary<string, string> tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-		foreach (ExtraEffectRow row in _extraEffectRows)
+		Dictionary<string, IReadOnlyList<string>> tokens = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+		bool hadDraft = CardEditorUiState.TryGetDraftOverride(_cardId, out CardOverride previousDraft);
+		CardOverride? previousDraftClone = hadDraft
+			? CardEditorOverrides.Clone(previousDraft)
+			: null;
+
+		try
 		{
-			if (row == null
-				|| string.IsNullOrWhiteSpace(row.StableEffectId)
-				|| GetCurrentResolvedExtraEffectKind(row) != CardExtraEffectKind.DisplayNumber)
+			CardModel canonical = ModelDb.GetById<CardModel>(_cardId);
+			CardModel preview;
+			if (_isUpgradeEditor)
 			{
-				continue;
+				UpgradeBaseline baseline = GetUpgradeBaseline();
+				CardUpgradeOverride draftUpgrade = BuildUpgradeOverrideFromUiDeltas(baseline);
+				CardOverride draftForDescription = GetEffectivePopupOverride() != null
+					? CardEditorOverrides.Clone(GetEffectivePopupOverride()!)
+					: new CardOverride();
+				draftForDescription.Upgrade = draftUpgrade.IsEmpty() ? null : draftUpgrade;
+
+				preview = CardEditorOverrides.BuildPreview(canonical);
+				bool prevSuppress = CardEditorOverrides.SuppressUpgradeOverrides;
+				try
+				{
+					CardEditorOverrides.SuppressUpgradeOverrides = true;
+					TryUpgradeForPreview(preview);
+				}
+				finally
+				{
+					CardEditorOverrides.SuppressUpgradeOverrides = prevSuppress;
+				}
+
+				ApplyUpgradeOverridePreview(preview, draftUpgrade, baseline);
+				CardEditorUiState.SetDraftOverride(_cardId, draftForDescription);
+			}
+			else
+			{
+				CardOverride draft = BuildOverrideFromUi();
+				CardUpgradeOverride? existingUpgrade = GetPreservedBaseEditorUpgradeOverride();
+				if (existingUpgrade != null && !existingUpgrade.IsEmpty())
+				{
+					draft.Upgrade = existingUpgrade;
+				}
+
+				preview = CardEditorOverrides.BuildPreview(canonical);
+				CardEditorUiState.SetDraftOverride(_cardId, draft);
+				if (_isCreatedCard)
+				{
+					CardEditorCreatedCardEffectSourceSupport.EnsureEffectSourceDynamicVars(preview, isUpgradePreview: false);
+				}
+				CardEditorOverrides.ApplyOverrideToCard(preview, draft);
 			}
 
-			CardExtraEffect effect = new CardExtraEffect
+			var target = preview.GetSafeCurrentTarget();
+			IReadOnlyList<CardExtraEffect> effects;
+			if (_isUpgradeEditor)
 			{
-				Kind = CardExtraEffectKind.DisplayNumber,
-				EffectId = row.StableEffectId,
-				Amount = ParseIntOrDefault(row.AmountField?.Text, 1),
-				CustomPowerName = row.PowerCustomNameField != null
-					&& GodotObject.IsInstanceValid(row.PowerCustomNameField)
-					&& !string.IsNullOrWhiteSpace(row.PowerCustomNameField.Text)
-						? row.PowerCustomNameField.Text.Trim()
-						: null
-			};
-			string lineKey = CardEditorDescriptionNumberHighlighter.NormalizeLiveNumberLineKey(CardEditorExtraEffects.FormatDisplayNumberLine(effect));
-			if (!string.IsNullOrWhiteSpace(lineKey))
+				effects = CardEditorExtraEffects.GetEffectsForDescription(preview, isUpgradePreview: true).ToList();
+			}
+			else
 			{
-				tokens[lineKey] = CardEditorDescriptionNumberHighlighter.BuildStableEffectAmountToken(row.StableEffectId);
+				effects = CardEditorExtraEffects.GetEffectsForDescription(preview, isUpgradePreview: false);
+			}
+
+			foreach (CardExtraEffect effect in effects)
+			{
+				AddEffectLiveTokenLine(tokens, preview, effect, target);
+			}
+		}
+		catch
+		{
+		}
+		finally
+		{
+			if (hadDraft && previousDraftClone != null)
+			{
+				CardEditorUiState.SetDraftOverride(_cardId, previousDraftClone);
+			}
+			else
+			{
+				CardEditorUiState.ClearDraftOverride(_cardId);
 			}
 		}
 
 		return tokens;
 	}
 
+	private void AddEffectLiveTokenLine(
+		Dictionary<string, IReadOnlyList<string>> tokens,
+		CardModel preview,
+		CardExtraEffect? effect,
+		Creature? target)
+	{
+		if (tokens == null || preview == null || effect == null || string.IsNullOrWhiteSpace(effect.EffectId))
+		{
+			return;
+		}
+
+		IReadOnlyList<string> effectTokens = CardEditorExtraEffects.GetStableLiveNumberTokenIdsForEffect(effect);
+		if (effectTokens.Count == 0)
+		{
+			return;
+		}
+
+		string? line = CardEditorExtraEffects.FormatSingleEffectLine(preview, effect, target, _isUpgradeEditor);
+		string lineKey = CardEditorDescriptionNumberHighlighter.NormalizeLiveNumberLineKey(line ?? string.Empty);
+		if (string.IsNullOrWhiteSpace(lineKey) || tokens.ContainsKey(lineKey))
+		{
+			return;
+		}
+
+		tokens[lineKey] = effectTokens;
+	}
+
 	private static void LinkTextFieldToLiveNumbers(
 		TextEdit? field,
 		string referenceDescription,
 		Action onChanged,
-		IReadOnlyDictionary<string, string>? liveTokenByLineKey = null)
+		IReadOnlyDictionary<string, IReadOnlyList<string>>? liveTokensByLineKey = null)
 	{
 		if (field == null || !GodotObject.IsInstanceValid(field))
 		{
@@ -10264,8 +10647,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		string current = field.Text ?? string.Empty;
 		string converted = string.IsNullOrWhiteSpace(current)
-			? CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplate(referenceDescription, liveTokenByLineKey)
-			: CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplateFromCustomText(current, referenceDescription, liveTokenByLineKey);
+			? CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplateWithLineTokens(referenceDescription, liveTokensByLineKey)
+			: CardEditorDescriptionNumberHighlighter.BuildLiveNumberTokenTemplateFromCustomTextWithLineTokens(current, referenceDescription, liveTokensByLineKey);
 		if (string.Equals(current, converted, StringComparison.Ordinal))
 		{
 			return;
@@ -10692,8 +11075,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		Dictionary<string, float>? fp = string.IsNullOrWhiteSpace(customFinishId) && _createdFinishParams.Count > 0 ? new Dictionary<string, float>(_createdFinishParams) : null;
 		Dictionary<string, string>? customFp = CardEditorCustomFoilRegistry.NormalizeParamValues(customFinishId, _createdCustomFinishParams);
+		CardEditorVisualFinish borderFinish = GetSelectedCreatedBorderFinish();
+		Dictionary<string, float>? borderFp = borderFinish != CardEditorVisualFinish.None && _createdBorderFinishParams.Count > 0
+			? new Dictionary<string, float>(_createdBorderFinishParams)
+			: null;
 
-		CardEditorCreatedCardsStore.SetDraftMeta(_cardId, enabled, title, pool, poolTitle, rarity, type, target, effectSourceIds, placement, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp, _createdCustomRewardPoolsTickbox?.IsTicked ?? false, GetSelectedCreatedRewardPoolIds(), GetSelectedRewardBucket(), GetSelectedRewardInjectionMode(), customFinishId, customFp);
+		CardEditorCreatedCardsStore.SetDraftMeta(_cardId, enabled, title, pool, poolTitle, rarity, type, target, effectSourceIds, placement, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp, _createdCustomRewardPoolsTickbox?.IsTicked ?? false, GetSelectedCreatedRewardPoolIds(), GetSelectedRewardBucket(), GetSelectedRewardInjectionMode(), customFinishId, customFp, borderFinish, borderFp);
 		if (_cardNameLabel != null && GodotObject.IsInstanceValid(_cardNameLabel))
 		{
 			_cardNameLabel.Text = CardEditorCreatedCardsStore.GetTitleForCard(_cardId);
@@ -16637,6 +17024,58 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		SetEffectFormRowLabelTooltip(chooseOneExecutionRow, chooseOneExecutionSelect.TooltipText);
 		chooseOneExecutionRow.Visible = false;
 
+		OptionButton chooseOneResolveModeSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(_effectFormColumnWidths[0], _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(chooseOneResolveModeSelect);
+		ConstrainOptionButtonPopup(chooseOneResolveModeSelect);
+		chooseOneResolveModeSelect.TooltipText = CardEditorLoc.T("tooltip.chooseOne.resolveMode", "Choose whether the player picks options, options are picked randomly, or every configured option resolves.");
+		foreach (CardExtraEffectChooseOneResolveMode mode in Enum.GetValues<CardExtraEffectChooseOneResolveMode>())
+		{
+			chooseOneResolveModeSelect.AddItem(CardEditorExtraEffects.ChooseOneResolveModeLabel(mode), (int)mode);
+		}
+		SelectOptionButtonById(chooseOneResolveModeSelect, (int)(effect?.ChooseOneResolveMode ?? CardExtraEffectChooseOneResolveMode.PlayerChoice));
+
+		OptionButton chooseOneResolveCountSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(_effectFormColumnWidths[1], _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(chooseOneResolveCountSelect);
+		ConstrainOptionButtonPopup(chooseOneResolveCountSelect);
+		chooseOneResolveCountSelect.TooltipText = CardEditorLoc.T("tooltip.chooseOne.resolveCount", "How many of the three option slots should resolve. Ignored when Resolve Mode is All.");
+		chooseOneResolveCountSelect.AddItem("1", 1);
+		chooseOneResolveCountSelect.AddItem("2", 2);
+		chooseOneResolveCountSelect.AddItem("3", 3);
+		SelectOptionButtonById(chooseOneResolveCountSelect, Math.Clamp(effect?.ChooseOneResolveCount ?? 1, 1, 3));
+
+		OptionButton chooseOneChoiceRuleSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(_effectFormColumnWidths[2], _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(chooseOneChoiceRuleSelect);
+		ConstrainOptionButtonPopup(chooseOneChoiceRuleSelect);
+		chooseOneChoiceRuleSelect.TooltipText = CardEditorLoc.T("tooltip.chooseOne.choiceRule", "Exactly requires the chosen count. Up To lets the player stop early.");
+		foreach (CardExtraEffectChooseOneChoiceRule rule in Enum.GetValues<CardExtraEffectChooseOneChoiceRule>())
+		{
+			chooseOneChoiceRuleSelect.AddItem(CardEditorExtraEffects.ChooseOneChoiceRuleLabel(rule), (int)rule);
+		}
+		SelectOptionButtonById(chooseOneChoiceRuleSelect, (int)(effect?.ChooseOneChoiceRule ?? CardExtraEffectChooseOneChoiceRule.Exactly));
+		chooseOneResolveModeSelect.ItemSelected += _ => QueuePreviewUpdate();
+		chooseOneResolveCountSelect.ItemSelected += _ => QueuePreviewUpdate();
+		chooseOneChoiceRuleSelect.ItemSelected += _ => QueuePreviewUpdate();
+
+		HBoxContainer chooseOneGateRow = CreateEffectFormRow(
+			CardEditorLoc.T("chooseOne.optionGate", "Option Gate"),
+			chooseOneResolveModeSelect,
+			chooseOneResolveCountSelect,
+			chooseOneChoiceRuleSelect);
+		SetEffectFormRowLabelTooltip(chooseOneGateRow, chooseOneResolveModeSelect.TooltipText);
+		chooseOneGateRow.Visible = false;
+
 		CardExtraEffectChooseOneOption chooseOneOption1State = CardEditorExtraEffects.NormalizeChooseOneOption(effect?.ChooseOneOption1, effect?.SpecificCardId);
 		CardExtraEffectChooseOneOption chooseOneOption2State = CardEditorExtraEffects.NormalizeChooseOneOption(effect?.ChooseOneOption2, effect?.SpecificCardId2);
 		CardExtraEffectChooseOneOption chooseOneOption3State = CardEditorExtraEffects.NormalizeChooseOneOption(effect?.ChooseOneOption3, effect?.SpecificCardId3);
@@ -16960,7 +17399,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		conditionalBonusEnemyStatusSelect.TooltipText = CardEditorLoc.T("tooltip.conditionalBonusEnemyStatus", "Enemy status to check for the conditional bonus.");
 		foreach (CardExtraEffectEnemyStatus status in Enum.GetValues<CardExtraEffectEnemyStatus>())
 		{
-			conditionalBonusEnemyStatusSelect.AddItem(CardEditorExtraEffects.EnemyStatusLabel(status));
+			AddEnemyStatusOption(conditionalBonusEnemyStatusSelect, status);
 		}
 		int conditionalBonusEnemyStatusIndex = effect != null ? (int)effect.ConditionalBonusEnemyStatus : (int)CardExtraEffectEnemyStatus.Weak;
 		if (conditionalBonusEnemyStatusIndex < 0 || conditionalBonusEnemyStatusIndex >= Enum.GetValues<CardExtraEffectEnemyStatus>().Length)
@@ -17131,7 +17570,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		branchEnemyStatusSelect.TooltipText = CardEditorLoc.T("tooltip.branchEnemyStatus", "Enemy status to check for the conditional branch.");
 		foreach (CardExtraEffectEnemyStatus status in Enum.GetValues<CardExtraEffectEnemyStatus>())
 		{
-			branchEnemyStatusSelect.AddItem(CardEditorExtraEffects.EnemyStatusLabel(status));
+			AddEnemyStatusOption(branchEnemyStatusSelect, status);
 		}
 		int branchEnemyStatusIndex = effect != null ? (int)effect.BranchEnemyStatus : (int)CardExtraEffectEnemyStatus.Weak;
 		if (branchEnemyStatusIndex < 0 || branchEnemyStatusIndex >= Enum.GetValues<CardExtraEffectEnemyStatus>().Length)
@@ -17867,7 +18306,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		ConstrainOptionButtonPopup(branchCountEnemyStatusSelect);
 		foreach (CardExtraEffectEnemyStatus status in Enum.GetValues<CardExtraEffectEnemyStatus>())
 		{
-			branchCountEnemyStatusSelect.AddItem(CardEditorExtraEffects.EnemyStatusLabel(status));
+			AddEnemyStatusOption(branchCountEnemyStatusSelect, status);
 		}
 		int branchCountEnemyStatusIndex = effect != null ? (int)effect.BranchCountEnemyStatus : (int)CardExtraEffectEnemyStatus.AnyPowerStatus;
 		if (branchCountEnemyStatusIndex < 0 || branchCountEnemyStatusIndex >= Enum.GetValues<CardExtraEffectEnemyStatus>().Length)
@@ -18639,7 +19078,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		countEnemyStatusSelect.TooltipText = CardEditorLoc.T("tooltip.countEnemyStatus", "Choose which status or power this count event should track. When it matches the effect you're editing, this selector will auto-fill for you.");
 		foreach (CardExtraEffectEnemyStatus status in Enum.GetValues<CardExtraEffectEnemyStatus>())
 		{
-			countEnemyStatusSelect.AddItem(CardEditorExtraEffects.EnemyStatusLabel(status));
+			AddEnemyStatusOption(countEnemyStatusSelect, status);
 		}
 		int countEnemyStatusIndex = effect != null ? (int)effect.CountEnemyStatus : (int)CardExtraEffectEnemyStatus.AnyPowerStatus;
 		if (countEnemyStatusIndex < 0 || countEnemyStatusIndex >= Enum.GetValues<CardExtraEffectEnemyStatus>().Length)
@@ -18844,7 +19283,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		powerCountEnemyStatusSelect.TooltipText = CardEditorLoc.T("tooltip.powerCountEnemyStatus", "Power trigger: only trigger when this gained or lost power/status matches.");
 		foreach (CardExtraEffectEnemyStatus status in Enum.GetValues<CardExtraEffectEnemyStatus>())
 		{
-			powerCountEnemyStatusSelect.AddItem(CardEditorExtraEffects.EnemyStatusLabel(status));
+			AddEnemyStatusOption(powerCountEnemyStatusSelect, status);
 		}
 		int powerCountEnemyStatusIndex = effect != null ? (int)effect.PowerTriggerEnemyStatus : (int)CardExtraEffectEnemyStatus.AnyPowerStatus;
 		if (powerCountEnemyStatusIndex < 0 || powerCountEnemyStatusIndex >= Enum.GetValues<CardExtraEffectEnemyStatus>().Length)
@@ -19132,13 +19571,25 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		autoPlayLoopLimitSpin.TooltipText = autoPlayLoopLimitField.TooltipText;
 		Control autoPlayLoopLimitControl = CreateEffectCompactValueSpinPair(autoPlayLoopLimitField, autoPlayLoopLimitSpin);
 		autoPlayLoopLimitControl.TooltipText = autoPlayLoopLimitField.TooltipText;
-		HBoxContainer autoPlayLoopRow = CreateEffectFormRow(
+		HBoxContainer autoPlayLimitRow = CreateEffectFormRow(
 			CardEditorLoc.T("row.autoPlayLoopLimit", "Use Limit"),
 			useLimitWindowSelect,
 			autoPlayLoopScopeSelect,
-			autoPlaySelfTriggerTickbox,
 			autoPlayLoopLimitControl);
-		SetEffectFormRowLabelTooltip(autoPlayLoopRow, autoPlayLoopLimitField.TooltipText);
+		SetEffectFormRowLabelTooltip(autoPlayLimitRow, autoPlayLoopLimitField.TooltipText);
+
+		HBoxContainer autoPlaySelfTriggerRow = CreateEffectFormRow(
+			CardEditorLoc.T("row.autoPlaySelfTrigger", "Self Trigger"),
+			CreateCompactTickboxCell(CardEditorLoc.T("label.allowSelfTrigger", "Allow Self Trigger"), autoPlaySelfTriggerTickbox));
+		SetEffectFormRowLabelTooltip(autoPlaySelfTriggerRow, autoPlaySelfTriggerTickbox.TooltipText);
+
+		VBoxContainer autoPlayLoopRow = new VBoxContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+		};
+		autoPlayLoopRow.AddThemeConstantOverride("separation", 8);
+		autoPlayLoopRow.AddChild(autoPlayLimitRow);
+		autoPlayLoopRow.AddChild(autoPlaySelfTriggerRow);
 		autoPlayLoopRow.Visible = false;
 
 		OptionButton powerStackModeSelect = new OptionButton
@@ -19759,6 +20210,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			SpecificCardUpgradeSelect = specificCardUpgradeSelect,
 			SpecificCardFullTextTickbox = specificCardFullTextTickbox,
 			ChooseOneExecutionSelect = chooseOneExecutionSelect,
+			ChooseOneGateRow = chooseOneGateRow,
+			ChooseOneResolveModeSelect = chooseOneResolveModeSelect,
+			ChooseOneResolveCountSelect = chooseOneResolveCountSelect,
+			ChooseOneChoiceRuleSelect = chooseOneChoiceRuleSelect,
 			ChooseOneOption1Row = chooseOneOption1Row,
 			ChooseOneOption1ModeSelect = chooseOneOption1ModeSelect,
 			ChooseOneOption1UpgradeSelect = chooseOneOption1UpgradeSelect,
@@ -20866,6 +21321,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		wrapper.AddChild(statefulTransformRow);
 		wrapper.AddChild(specificCardRow);
 		wrapper.AddChild(chooseOneExecutionRow);
+		wrapper.AddChild(chooseOneGateRow);
 		wrapper.AddChild(chooseOneOption1Row);
 		wrapper.AddChild(chooseOneOption2Row);
 		wrapper.AddChild(chooseOneOption3Row);
@@ -23631,6 +24087,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		DisableOptionButton(row.ChooseOneOption2ModeSelect);
 		DisableOptionButton(row.ChooseOneOption3ModeSelect);
 		DisableOptionButton(row.ChooseOneExecutionSelect);
+		DisableOptionButton(row.ChooseOneResolveModeSelect);
+		DisableOptionButton(row.ChooseOneResolveCountSelect);
+		DisableOptionButton(row.ChooseOneChoiceRuleSelect);
 		DisableOptionButton(row.ChooseOneOption1UpgradeSelect);
 		DisableOptionButton(row.ChooseOneOption2UpgradeSelect);
 		DisableOptionButton(row.ChooseOneOption3UpgradeSelect);
@@ -24264,7 +24723,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (row.AutoPlayLoopRow != null && GodotObject.IsInstanceValid(row.AutoPlayLoopRow))
 		{
-			bool showAutoPlayLoopControls = kind == CardExtraEffectKind.EffectLimit;
+			bool showAutoPlayLoopControls = CardEditorExtraEffects.SupportsAutoPlayLoopControls(kind);
 			bool showAutoPlaySelfTrigger = showAutoPlayLoopControls;
 			row.AutoPlayLoopRow.Visible = showAutoPlayLoopControls;
 			if (row.AutoPlaySelfTriggerTickbox != null && GodotObject.IsInstanceValid(row.AutoPlaySelfTriggerTickbox))
@@ -24411,6 +24870,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				chooseOneExecutionRow.Visible = isChooseOneEffectSource;
 			}
 			row.ChooseOneExecutionSelect.Visible = isChooseOneEffectSource;
+		}
+		if (row.ChooseOneGateRow != null && GodotObject.IsInstanceValid(row.ChooseOneGateRow))
+		{
+			row.ChooseOneGateRow.Visible = isChooseOneEffectSource;
 		}
 		if (row.ChooseOneOption2Row != null && GodotObject.IsInstanceValid(row.ChooseOneOption2Row))
 		{
@@ -24797,7 +25260,6 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			row.OrbFollowUpSelect.Visible = isOrbAction && GetSelectedOrbAction(row) == CardExtraEffectOrbAction.Evoke;
 		}
 		bool allowTiming = kind != CardExtraEffectKind.RunEffectSourceCard
-			&& kind != CardExtraEffectKind.ChooseOneEffectSource
 			&& kind != CardExtraEffectKind.ShuffleDrawPile
 			&& kind != CardExtraEffectKind.ResultPileOverride
 			&& !isCreatedCardModifier
@@ -29225,6 +29687,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		_powerIds.Clear();
 		_powerIdTexts.Clear();
 		_powerLabels.Clear();
+		_powerDescriptions.Clear();
 		AddPowerSelectOption(ModelId.none, null);
 		try
 		{
@@ -29346,12 +29809,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	private void EnsurePowerLabelsLoaded()
 	{
 		EnsurePowerIdsLoaded();
-		if (_powerLabels.Count == _powerIdTexts.Count)
+		if (_powerLabels.Count == _powerIdTexts.Count && _powerDescriptions.Count == _powerIdTexts.Count)
 		{
 			return;
 		}
 
 		_powerLabels.Clear();
+		_powerDescriptions.Clear();
 		string noneLabel = CardEditorLoc.T("value.none", "None");
 		for (int i = 0; i < _powerIdTexts.Count; i++)
 		{
@@ -29361,23 +29825,27 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				if (CardEditorCustomStatusRegistry.TryDecodeId(powerIdText, out string customStatusName))
 				{
-					_powerLabels.Add(CardEditorLoc.F(
+					string customLabel = CardEditorLoc.F(
 						"ui.customStatusOption",
 						"Custom: {Name}",
-						("Name", customStatusName)));
+						("Name", customStatusName));
+					_powerLabels.Add(customLabel);
+					_powerDescriptions.Add(BuildCustomStatusSelectDescription(powerIdText, customStatusName));
 				}
 				else
 				{
 					_powerLabels.Add(noneLabel);
+					_powerDescriptions.Add(CardEditorLoc.T("tooltip.powerSelectNone", "Do not require or use a specific power/status."));
 				}
 				continue;
 			}
 
 			string label = powerId.ToString();
+			PowerModel? resolvedPower = null;
 			try
 			{
-				PowerModel? power = ModelDb.GetByIdOrNull<PowerModel>(powerId);
-				string? title = power?.Title?.GetFormattedText();
+				resolvedPower = ModelDb.GetByIdOrNull<PowerModel>(powerId);
+				string? title = resolvedPower?.Title?.GetFormattedText();
 				if (!string.IsNullOrWhiteSpace(title))
 				{
 					label = title;
@@ -29388,6 +29856,130 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 
 			_powerLabels.Add(label);
+			_powerDescriptions.Add(BuildPowerSelectDescription(powerId, powerIdText, label, resolvedPower));
+		}
+	}
+
+	private string BuildCustomStatusSelectDescription(string? powerIdText, string customStatusName)
+	{
+		try
+		{
+			CardEditorCustomStatusDefinition definition = CardEditorCustomStatusRegistry.Resolve(powerIdText);
+			if (!string.IsNullOrWhiteSpace(definition.Description))
+			{
+				return definition.Description.Trim();
+			}
+
+			List<string> lines = FormatCustomStatusBehaviorLines(definition.SourceCardId, definition.BehaviorEffects);
+			if (lines.Count > 0)
+			{
+				return string.Join("\n", lines);
+			}
+		}
+		catch
+		{
+		}
+
+		return CardEditorLoc.F(
+			"tooltip.customStatusNoDescription",
+			"{Name}: custom status. Add a description in the Status Editor for a richer tooltip.",
+			("Name", string.IsNullOrWhiteSpace(customStatusName) ? "Custom Status" : customStatusName.Trim()));
+	}
+
+	private string BuildPowerSelectDescription(ModelId? powerId, string? powerIdText, string label, PowerModel? resolvedPower)
+	{
+		if (resolvedPower != null)
+		{
+			foreach (CardExtraEffectEnemyStatus status in Enum.GetValues<CardExtraEffectEnemyStatus>())
+			{
+				if (status is CardExtraEffectEnemyStatus.AnyPowerStatus or CardExtraEffectEnemyStatus.Buff or CardExtraEffectEnemyStatus.Debuff)
+				{
+					continue;
+				}
+
+				try
+				{
+					if (CardEditorExtraEffects.PowerMatchesStatus(resolvedPower, status))
+					{
+						return CardEditorExtraEffects.EnemyStatusDescription(status);
+					}
+				}
+				catch
+				{
+				}
+			}
+		}
+
+		string idText = !string.IsNullOrWhiteSpace(powerIdText) ? powerIdText!.Trim() : powerId?.ToString() ?? string.Empty;
+		return string.IsNullOrWhiteSpace(idText)
+			? CardEditorLoc.F("tooltip.powerSelectFallback", "{Name}: base-game power/status.", ("Name", label))
+			: CardEditorLoc.F("tooltip.powerSelectFallbackWithId", "{Name}: base-game power/status.\nID: {Id}", ("Name", label), ("Id", idText));
+	}
+
+	private List<string> FormatCustomStatusBehaviorLines(ModelId? sourceCardId, IReadOnlyList<CardExtraEffect>? effects)
+	{
+		List<string> lines = new();
+		if (effects == null || effects.Count == 0)
+		{
+			return lines;
+		}
+
+		CardModel? sourceCard = BuildCustomStatusDescriptionSourceCard(sourceCardId);
+		foreach (CardExtraEffect? effect in effects)
+		{
+			if (effect == null)
+			{
+				continue;
+			}
+
+			string? formatted = null;
+			if (sourceCard != null)
+			{
+				try
+				{
+					formatted = CardEditorExtraEffects.FormatSingleEffectLine(sourceCard, effect, isUpgradePreview: _isUpgradeEditor);
+				}
+				catch
+				{
+					formatted = null;
+				}
+			}
+			if (string.IsNullOrWhiteSpace(formatted))
+			{
+				CardExtraEffectDefinition? definition = CardEditorExtraEffects.Definitions.FirstOrDefault(def => def.Kind == effect.Kind);
+				formatted = definition != null
+					? CardEditorExtraEffects.DefinitionDisplayLabel(definition)
+					: effect.Kind.ToString();
+				if (effect.Amount > 0)
+				{
+					formatted = $"{formatted}: {effect.Amount}";
+				}
+			}
+
+			if (!string.IsNullOrWhiteSpace(formatted))
+			{
+				lines.Add(formatted.Trim());
+			}
+		}
+
+		return lines;
+	}
+
+	private static CardModel? BuildCustomStatusDescriptionSourceCard(ModelId? sourceCardId)
+	{
+		if (sourceCardId == null || sourceCardId == ModelId.none)
+		{
+			return null;
+		}
+
+		try
+		{
+			CardModel? canonical = ModelDb.GetByIdOrNull<CardModel>(sourceCardId);
+			return canonical == null ? null : CardEditorOverrides.BuildPreview(canonical);
+		}
+		catch
+		{
+			return null;
 		}
 	}
 
@@ -29524,14 +30116,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		EnsurePowerLabelsLoaded();
 
 		select.Clear();
-		foreach (string label in _powerLabels)
+		for (int i = 0; i < _powerLabels.Count; i++)
 		{
-			select.AddItem(label);
+			select.AddItem(_powerLabels[i]);
+			if (i < _powerDescriptions.Count && !string.IsNullOrWhiteSpace(_powerDescriptions[i]))
+			{
+				select.SetItemTooltip(select.ItemCount - 1, _powerDescriptions[i]);
+			}
 		}
 
 		select.SetMeta("card_editor_power_select_items_loaded", true);
 		select.SetMeta("card_editor_power_select_revision", _powerSelectRevision);
 		SelectExtraEffectPowerId(select, selectedIdText);
+	}
+
+	private static void AddEnemyStatusOption(OptionButton select, CardExtraEffectEnemyStatus status)
+	{
+		select.AddItem(CardEditorExtraEffects.EnemyStatusLabel(status));
+		string description = CardEditorExtraEffects.EnemyStatusDescription(status);
+		if (!string.IsNullOrWhiteSpace(description))
+		{
+			select.SetItemTooltip(select.ItemCount - 1, description);
+		}
 	}
 
 	private void PopulateQuestActSelect(OptionButton select, int selectedActIndex)
@@ -29892,7 +30498,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 			_previewCard = upgradedPreview;
 			_cardPreviewNode.Model = upgradedPreview;
-			_cardPreviewNode.UpdateVisuals(PileType.None, GetEditorPreviewMode());
+			UpdateCardPreviewVisuals();
 			QueuePreviewLayout();
 			if (_cardNameLabel != null && GodotObject.IsInstanceValid(_cardNameLabel))
 			{
@@ -29918,7 +30524,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardEditorOverrides.ApplyOverrideToCard(preview, draft);
 		_previewCard = preview;
 		_cardPreviewNode.Model = preview;
-		_cardPreviewNode.UpdateVisuals(PileType.None, GetEditorPreviewMode());
+		UpdateCardPreviewVisuals();
 		QueuePreviewLayout();
 		if (_cardNameLabel != null && GodotObject.IsInstanceValid(_cardNameLabel))
 		{
@@ -30515,6 +31121,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				if (customFp != null && customFp.Count > 0)
 				{
 					overrideData.CustomFinishParams = customFp;
+				}
+			}
+
+			CardEditorVisualFinish borderFinish = GetSelectedVanillaBorderFinish();
+			if (borderFinish != CardEditorVisualFinish.None)
+			{
+				overrideData.BorderFinish = borderFinish;
+				if (_vanillaBorderFinishParams.Count > 0)
+				{
+					overrideData.BorderFinishParams = new Dictionary<string, float>(_vanillaBorderFinishParams);
 				}
 			}
 		}
@@ -31387,7 +32003,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					}
 				}
 				int? historyScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, displayedBaseAmount, amount);
-				bool savesUseLimit = resolvedKind == CardExtraEffectKind.EffectLimit;
+				bool savesUseLimit = CardEditorExtraEffects.SupportsAutoPlayLoopControls(resolvedKind);
 				bool usesGeneratedUpgradeMode = resolvedKind is CardExtraEffectKind.AddRandomCardToHand
 					or CardExtraEffectKind.ChooseOneOfThreeCardsToHand
 					or CardExtraEffectKind.PlayRandomGeneratedCard
@@ -31472,6 +32088,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					ChooseOneExecutionMode = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
 						? GetSelectedChooseOneExecutionMode(row)
 						: CardExtraEffectChooseOneExecutionMode.BorrowEffectsOnly,
+					ChooseOneResolveMode = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
+						? GetSelectedChooseOneResolveMode(row)
+						: CardExtraEffectChooseOneResolveMode.PlayerChoice,
+					ChooseOneChoiceRule = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
+						? GetSelectedChooseOneChoiceRule(row)
+						: CardExtraEffectChooseOneChoiceRule.Exactly,
+					ChooseOneResolveCount = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
+						? GetSelectedChooseOneResolveCount(row)
+						: 1,
 					ConsumedCardAction = resolvedKind == CardExtraEffectKind.ConsumeCardValue ? GetSelectedConsumedCardAction(row) : CardExtraEffectConsumedCardAction.Exhaust,
 					ConsumedCardValueSource = resolvedKind == CardExtraEffectKind.ConsumeCardValue ? GetSelectedConsumedCardValueSource(row) : CardExtraEffectConsumedCardValueSource.Damage,
 					CreatedCardsCostDuration = createdCardsCostDuration,
@@ -31924,6 +32549,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (_cosmeticHideBodyTextTickbox?.IsTicked == true)
 			{
 				overrideData.HideCosmeticBodyText = true;
+			}
+			if (_cosmeticHideAncientInnerBorderTickbox?.IsTicked == true)
+			{
+				overrideData.HideCosmeticAncientInnerBorder = true;
 			}
 		}
 
@@ -32813,7 +33442,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					}
 				}
 				int? historyScalingBaseAmount = GetSelectedHistoryScalingBaseAmount(row, displayedBaseAmount, savedAmount);
-				bool savesUseLimit = resolvedKind == CardExtraEffectKind.EffectLimit;
+				bool savesUseLimit = CardEditorExtraEffects.SupportsAutoPlayLoopControls(resolvedKind);
 				bool usesGeneratedUpgradeMode = resolvedKind is CardExtraEffectKind.AddRandomCardToHand
 					or CardExtraEffectKind.ChooseOneOfThreeCardsToHand
 					or CardExtraEffectKind.PlayRandomGeneratedCard
@@ -32901,6 +33530,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					ChooseOneExecutionMode = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
 						? GetSelectedChooseOneExecutionMode(row)
 						: CardExtraEffectChooseOneExecutionMode.BorrowEffectsOnly,
+					ChooseOneResolveMode = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
+						? GetSelectedChooseOneResolveMode(row)
+						: CardExtraEffectChooseOneResolveMode.PlayerChoice,
+					ChooseOneChoiceRule = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
+						? GetSelectedChooseOneChoiceRule(row)
+						: CardExtraEffectChooseOneChoiceRule.Exactly,
+					ChooseOneResolveCount = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
+						? GetSelectedChooseOneResolveCount(row)
+						: 1,
 					ConsumedCardAction = resolvedKind == CardExtraEffectKind.ConsumeCardValue ? GetSelectedConsumedCardAction(row) : CardExtraEffectConsumedCardAction.Exhaust,
 					ConsumedCardValueSource = resolvedKind == CardExtraEffectKind.ConsumeCardValue ? GetSelectedConsumedCardValueSource(row) : CardExtraEffectConsumedCardValueSource.Damage,
 					CreatedCardsCostDuration = createdCardsCostDuration,
@@ -37330,8 +37968,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		Dictionary<string, float>? fp = string.IsNullOrWhiteSpace(customFinishId) && _createdFinishParams.Count > 0 ? new Dictionary<string, float>(_createdFinishParams) : null;
 		Dictionary<string, string>? customFp = CardEditorCustomFoilRegistry.NormalizeParamValues(customFinishId, _createdCustomFinishParams);
+		CardEditorVisualFinish borderFinish = GetSelectedCreatedBorderFinish();
+		Dictionary<string, float>? borderFp = borderFinish != CardEditorVisualFinish.None && _createdBorderFinishParams.Count > 0
+			? new Dictionary<string, float>(_createdBorderFinishParams)
+			: null;
 
-		CardEditorCreatedCardsStore.SetMeta(_cardId, title, pool, poolTitle, rarity, type, targetType, effectSourceIds, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp, _createdCustomRewardPoolsTickbox?.IsTicked ?? false, GetSelectedCreatedRewardPoolIds(), GetSelectedRewardBucket(), GetSelectedRewardInjectionMode(), customFinishId, customFp);
+		CardEditorCreatedCardsStore.SetMeta(_cardId, title, pool, poolTitle, rarity, type, targetType, effectSourceIds, portraitSourceId, customPortraitFile, fullArt, finish, customText, customTextEnabled, fp, _createdCustomRewardPoolsTickbox?.IsTicked ?? false, GetSelectedCreatedRewardPoolIds(), GetSelectedRewardBucket(), GetSelectedRewardInjectionMode(), customFinishId, customFp, borderFinish, borderFp);
 		CardEditorCreatedCardsStore.SetEnabled(_cardId, enabled);
 	}
 

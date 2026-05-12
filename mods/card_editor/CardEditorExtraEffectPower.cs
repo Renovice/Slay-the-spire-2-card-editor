@@ -168,6 +168,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			});
 		}
 
+		CoalesceMergeEntries();
 		await SyncVisibleMirrorPowers();
 	}
 
@@ -273,12 +274,40 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			return false;
 		}
 
-		return stored.AutoPlayLoopScope switch
+		return true;
+	}
+
+	private void CoalesceMergeEntries()
+	{
+		for (int i = 0; i < Entries.Count; i++)
 		{
-			CardExtraEffectAutoPlayLoopScope.ThisCard => ReferenceEquals(entry.SourceCard, sourceCard),
-			CardExtraEffectAutoPlayLoopScope.AllCopies => string.Equals(GetCardIdText(entry.SourceCard), GetCardIdText(sourceCard), StringComparison.Ordinal),
-			_ => true
-		};
+			PowerEffectEntry target = Entries[i];
+			if (target == null
+				|| IsCustomStatusBehaviorEntry(target)
+				|| target.SourceCard == null
+				|| target.Effect == null
+				|| target.Effect.PowerStackMode != CardExtraEffectPowerStackMode.Merge)
+			{
+				continue;
+			}
+
+			for (int j = i + 1; j < Entries.Count; j++)
+			{
+				PowerEffectEntry candidate = Entries[j];
+				if (candidate == null
+					|| IsCustomStatusBehaviorEntry(candidate)
+					|| candidate.SourceCard == null
+					|| candidate.Effect == null
+					|| !CanMergeIntoEntry(target, candidate.SourceCard, candidate.Effect, candidate.SelectedCardsByEffectId))
+				{
+					continue;
+				}
+
+				MergeIntoEntry(target, candidate.Effect);
+				Entries.RemoveAt(j);
+				j--;
+			}
+		}
 	}
 
 	private static bool HasSelectedCardSnapshots(IReadOnlyDictionary<string, List<CardModel>>? selectedCardsByEffectId)
@@ -453,6 +482,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
+			CoalesceMergeEntries();
 			Creature? owner = Owner;
 			if (owner == null)
 			{
@@ -811,7 +841,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				return Task.CompletedTask;
 			}
 
-			CombatState? combatState = CombatState.AsCombatState();
+			CombatState? combatState = this.GetConcreteCombatState();
 			Creature? owner = Owner;
 			if (combatState == null || owner == null)
 			{
@@ -840,7 +870,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
-			CombatState? combatState = CombatState.AsCombatState();
+			CombatState? combatState = this.GetConcreteCombatState();
 			if (combatState == null || choiceContext == null)
 			{
 				return;
@@ -957,7 +987,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
-			CombatState? combatState = CombatState.AsCombatState();
+			CombatState? combatState = this.GetConcreteCombatState();
 			if (combatState == null || choiceContext == null)
 			{
 				return;
@@ -1071,7 +1101,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
-			CombatState? combatState = CombatState.AsCombatState();
+			CombatState? combatState = this.GetConcreteCombatState();
 			if (combatState == null || choiceContext == null)
 			{
 				return;
@@ -1200,7 +1230,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 	{
 		try
 		{
-			CombatState? combatState = CombatState.AsCombatState();
+			CombatState? combatState = this.GetConcreteCombatState();
 			if (combatState == null || command == null)
 			{
 				return;
@@ -1220,7 +1250,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 			if (choiceContext != null)
 			{
-				Creature? attackTarget = CardEditorExtraEffects.FlattenDamageResults(command.Results).FirstOrDefault()?.Receiver;
+				Creature? attackTarget = CardEditorExtraEffects.FlattenDamageResults(command.GetResultsCompat()).FirstOrDefault()?.Receiver;
 				await RunLifecycleTrigger(
 					choiceContext,
 					CardExtraEffectTrigger.AfterAttack,
@@ -1369,7 +1399,7 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 {
 	try
 	{
-		CombatState? combatState = CombatState.AsCombatState();
+		CombatState? combatState = this.GetConcreteCombatState();
 		if (combatState == null)
 		{
 			return;
@@ -1485,7 +1515,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 {
 	try
 	{
-		CombatState? combatState = CombatState.AsCombatState();
+		CombatState? combatState = this.GetConcreteCombatState();
 		if (combatState == null)
 		{
 			return;
@@ -1556,7 +1586,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 	{
 		try
 		{
-			CombatState? combatState = CombatState.AsCombatState();
+			CombatState? combatState = this.GetConcreteCombatState();
 			if (combatState == null || choiceContext == null)
 			{
 				return;

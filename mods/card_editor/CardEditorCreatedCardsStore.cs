@@ -64,6 +64,8 @@ internal sealed class CardEditorCreatedCardDefinition
 	public Dictionary<string, float>? FinishParams { get; set; }
 	public string? CustomFinishId { get; set; }
 	public Dictionary<string, string>? CustomFinishParams { get; set; }
+	public CardEditorVisualFinish BorderFinish { get; set; }
+	public Dictionary<string, float>? BorderFinishParams { get; set; }
 	public List<ModelId> EffectSourceCardIds { get; set; } = new();
 	public CardEditorEffectSourcePlacement EffectSourcePlacement { get; set; } = CardEditorEffectSourcePlacement.BeforeCustomEffects;
 	public ModelId? PortraitSourceCardId { get; set; }
@@ -97,7 +99,7 @@ internal static class CardEditorCreatedCardsStore
 	public static int Revision { get; private set; }
 	internal static bool PersistenceSuspended { get; set; }
 
-	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null, bool customRewardPoolsEnabled = false, List<string>? customRewardPoolIds = null, CardEditorRewardPoolBucket rewardPoolBucket = CardEditorRewardPoolBucket.SameAsCard, CardEditorRewardPoolInjectionMode rewardPoolInjectionMode = CardEditorRewardPoolInjectionMode.AddToPool, string? customFinishId = null, Dictionary<string, string>? customFinishParams = null)
+	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null, bool customRewardPoolsEnabled = false, List<string>? customRewardPoolIds = null, CardEditorRewardPoolBucket rewardPoolBucket = CardEditorRewardPoolBucket.SameAsCard, CardEditorRewardPoolInjectionMode rewardPoolInjectionMode = CardEditorRewardPoolInjectionMode.AddToPool, string? customFinishId = null, Dictionary<string, string>? customFinishParams = null, CardEditorVisualFinish borderFinish = CardEditorVisualFinish.None, Dictionary<string, float>? borderFinishParams = null)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? persistent))
@@ -121,6 +123,8 @@ internal static class CardEditorCreatedCardsStore
 				FinishParams = persistent.FinishParams != null ? new Dictionary<string, float>(persistent.FinishParams) : null,
 				CustomFinishId = persistent.CustomFinishId,
 				CustomFinishParams = persistent.CustomFinishParams != null ? new Dictionary<string, string>(persistent.CustomFinishParams, StringComparer.Ordinal) : null,
+				BorderFinish = persistent.BorderFinish,
+				BorderFinishParams = persistent.BorderFinishParams != null ? new Dictionary<string, float>(persistent.BorderFinishParams) : null,
 				EffectSourceCardIds = new List<ModelId>(persistent.EffectSourceCardIds),
 				EffectSourcePlacement = persistent.EffectSourcePlacement,
 				PortraitSourceCardId = persistent.PortraitSourceCardId,
@@ -160,6 +164,8 @@ internal static class CardEditorCreatedCardsStore
 		draft.CustomFinishParams = customFinishParams != null && customFinishParams.Count > 0
 			? new Dictionary<string, string>(customFinishParams, StringComparer.Ordinal)
 			: null;
+		draft.BorderFinish = borderFinish;
+		draft.BorderFinishParams = borderFinishParams != null ? new Dictionary<string, float>(borderFinishParams) : null;
 		draft.CustomTextEnabled = customTextEnabled;
 		draft.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
 		draft.CustomRewardPoolsEnabled = customRewardPoolsEnabled;
@@ -391,6 +397,18 @@ internal static class CardEditorCreatedCardsStore
 		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.CustomFinishParams : null;
 	}
 
+	public static CardEditorVisualFinish GetBorderFinish(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.BorderFinish : CardEditorVisualFinish.None;
+	}
+
+	public static Dictionary<string, float>? GetBorderFinishParams(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) ? def.BorderFinishParams : null;
+	}
+
 	public static string? GetCustomPortraitFile(ModelId cardId)
 	{
 		EnsureLoaded();
@@ -520,7 +538,7 @@ internal static class CardEditorCreatedCardsStore
 		Save();
 	}
 
-	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null, bool customRewardPoolsEnabled = false, List<string>? customRewardPoolIds = null, CardEditorRewardPoolBucket rewardPoolBucket = CardEditorRewardPoolBucket.SameAsCard, CardEditorRewardPoolInjectionMode rewardPoolInjectionMode = CardEditorRewardPoolInjectionMode.AddToPool, string? customFinishId = null, Dictionary<string, string>? customFinishParams = null)
+	public static void SetMeta(ModelId cardId, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null, bool customRewardPoolsEnabled = false, List<string>? customRewardPoolIds = null, CardEditorRewardPoolBucket rewardPoolBucket = CardEditorRewardPoolBucket.SameAsCard, CardEditorRewardPoolInjectionMode rewardPoolInjectionMode = CardEditorRewardPoolInjectionMode.AddToPool, string? customFinishId = null, Dictionary<string, string>? customFinishParams = null, CardEditorVisualFinish borderFinish = CardEditorVisualFinish.None, Dictionary<string, float>? borderFinishParams = null)
 	{
 		EnsureLoaded();
 		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? def))
@@ -548,6 +566,8 @@ internal static class CardEditorCreatedCardsStore
 		def.CustomFinishParams = customFinishParams != null && customFinishParams.Count > 0
 			? new Dictionary<string, string>(customFinishParams, StringComparer.Ordinal)
 			: null;
+		def.BorderFinish = borderFinish;
+		def.BorderFinishParams = borderFinishParams != null ? new Dictionary<string, float>(borderFinishParams) : null;
 		def.CustomTextEnabled = customTextEnabled;
 		def.CustomText = customText == null ? null : (string.IsNullOrWhiteSpace(customText) ? string.Empty : customText);
 		def.CustomRewardPoolsEnabled = customRewardPoolsEnabled;
@@ -654,11 +674,13 @@ internal static class CardEditorCreatedCardsStore
 				Type = persistent.Type,
 				TargetType = persistent.TargetType,
 				FullArt = persistent.FullArt,
-				Finish = persistent.Finish,
-				FinishParams = persistent.FinishParams != null ? new Dictionary<string, float>(persistent.FinishParams) : null,
-				CustomFinishId = persistent.CustomFinishId,
-				CustomFinishParams = persistent.CustomFinishParams != null ? new Dictionary<string, string>(persistent.CustomFinishParams, StringComparer.Ordinal) : null,
-				EffectSourceCardIds = new List<ModelId>(persistent.EffectSourceCardIds),
+			Finish = persistent.Finish,
+			FinishParams = persistent.FinishParams != null ? new Dictionary<string, float>(persistent.FinishParams) : null,
+			CustomFinishId = persistent.CustomFinishId,
+			CustomFinishParams = persistent.CustomFinishParams != null ? new Dictionary<string, string>(persistent.CustomFinishParams, StringComparer.Ordinal) : null,
+			BorderFinish = persistent.BorderFinish,
+			BorderFinishParams = persistent.BorderFinishParams != null ? new Dictionary<string, float>(persistent.BorderFinishParams) : null,
+			EffectSourceCardIds = new List<ModelId>(persistent.EffectSourceCardIds),
 				EffectSourcePlacement = persistent.EffectSourcePlacement,
 				PortraitSourceCardId = persistent.PortraitSourceCardId,
 				CustomPortraitFile = persistent.CustomPortraitFile,
@@ -1200,6 +1222,8 @@ internal static class CardEditorCreatedCardsStore
 			FinishParams = source.FinishParams != null ? new Dictionary<string, float>(source.FinishParams) : null,
 			CustomFinishId = source.CustomFinishId,
 			CustomFinishParams = source.CustomFinishParams != null ? new Dictionary<string, string>(source.CustomFinishParams, StringComparer.Ordinal) : null,
+			BorderFinish = source.BorderFinish,
+			BorderFinishParams = source.BorderFinishParams != null ? new Dictionary<string, float>(source.BorderFinishParams) : null,
 			EffectSourceCardIds = new List<ModelId>(source.EffectSourceCardIds),
 			EffectSourcePlacement = source.EffectSourcePlacement,
 			PortraitSourceCardId = source.PortraitSourceCardId,
@@ -1230,6 +1254,8 @@ internal static class CardEditorCreatedCardsStore
 		public Dictionary<string, decimal>? FinishParams { get; set; }
 		public string? CustomFinishId { get; set; }
 		public Dictionary<string, string>? CustomFinishParams { get; set; }
+		public string? BorderFinish { get; set; }
+		public Dictionary<string, decimal>? BorderFinishParams { get; set; }
 		public string? EffectSourceCardId { get; set; }
 		public List<string>? EffectSourceCardIds { get; set; }
 		public string? EffectSourcePlacement { get; set; }
@@ -1264,6 +1290,10 @@ internal static class CardEditorCreatedCardsStore
 				CustomFinishId = def.CustomFinishId,
 				CustomFinishParams = def.CustomFinishParams != null && def.CustomFinishParams.Count > 0
 					? new Dictionary<string, string>(def.CustomFinishParams, StringComparer.Ordinal)
+					: null,
+				BorderFinish = def.BorderFinish != CardEditorVisualFinish.None ? def.BorderFinish.ToString() : null,
+				BorderFinishParams = def.BorderFinishParams != null && def.BorderFinishParams.Count > 0
+					? def.BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value)
 					: null,
 				EffectSourceCardIds = def.EffectSourceCardIds?.Select(id => id.ToString()).Where(s => !string.IsNullOrWhiteSpace(s)).ToList(),
 				EffectSourcePlacement = def.EffectSourcePlacement.ToString(),
@@ -1326,6 +1356,17 @@ internal static class CardEditorCreatedCardsStore
 			if (CustomFinishParams != null && CustomFinishParams.Count > 0)
 			{
 				def.CustomFinishParams = new Dictionary<string, string>(CustomFinishParams, StringComparer.Ordinal);
+			}
+
+			if (!string.IsNullOrWhiteSpace(BorderFinish)
+				&& Enum.TryParse(BorderFinish, ignoreCase: true, out CardEditorVisualFinish parsedBorderFinish))
+			{
+				def.BorderFinish = parsedBorderFinish;
+			}
+
+			if (BorderFinishParams != null && BorderFinishParams.Count > 0)
+			{
+				def.BorderFinishParams = BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value);
 			}
 
 			if (!string.IsNullOrWhiteSpace(Type)

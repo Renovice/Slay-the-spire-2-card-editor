@@ -506,6 +506,8 @@ internal static class CardEditorCreatorPresetStore
 		public bool FullArt { get; set; }
 		public string? Finish { get; set; }
 		public Dictionary<string, decimal>? FinishParams { get; set; }
+		public string? BorderFinish { get; set; }
+		public Dictionary<string, decimal>? BorderFinishParams { get; set; }
 		public string? EffectSourceCardId { get; set; }
 		public List<string>? EffectSourceCardIds { get; set; }
 		public string? EffectSourcePlacement { get; set; }
@@ -532,6 +534,10 @@ internal static class CardEditorCreatorPresetStore
 				Finish = def.Finish.ToString(),
 				FinishParams = def.FinishParams != null && def.FinishParams.Count > 0
 					? def.FinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value)
+					: null,
+				BorderFinish = def.BorderFinish != CardEditorVisualFinish.None ? def.BorderFinish.ToString() : null,
+				BorderFinishParams = def.BorderFinishParams != null && def.BorderFinishParams.Count > 0
+					? def.BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value)
 					: null,
 				EffectSourceCardIds = def.EffectSourceCardIds != null && def.EffectSourceCardIds.Count > 0
 					? def.EffectSourceCardIds.Select(id => id.ToString()).Where(s => !string.IsNullOrWhiteSpace(s)).ToList()
@@ -585,6 +591,16 @@ internal static class CardEditorCreatorPresetStore
 			if (FinishParams != null && FinishParams.Count > 0)
 			{
 				def.FinishParams = FinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value);
+			}
+
+			if (Enum.TryParse(BorderFinish ?? string.Empty, ignoreCase: true, out CardEditorVisualFinish borderFinish))
+			{
+				def.BorderFinish = borderFinish;
+			}
+
+			if (BorderFinishParams != null && BorderFinishParams.Count > 0)
+			{
+				def.BorderFinishParams = BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value);
 			}
 
 			if (EffectSourceCardIds != null && EffectSourceCardIds.Count > 0)

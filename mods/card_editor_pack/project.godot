@@ -11,6 +11,7 @@ config_version=5
 [application]
 
 config/name="card_editor_pack"
+run/main_scene="res://tools/shader_previews/preview_aurora_smooth_mist.tscn"
 config/features=PackedStringArray("4.5")
 
 [dotnet]

@@ -779,6 +779,8 @@ internal static class CardEditorPresetStore
 		public Dictionary<string, decimal>? FinishParams { get; set; }
 		public string? CustomFinishId { get; set; }
 		public Dictionary<string, string>? CustomFinishParams { get; set; }
+		public string? BorderFinish { get; set; }
+		public Dictionary<string, decimal>? BorderFinishParams { get; set; }
 		public decimal? PortraitOffsetX { get; set; }
 		public decimal? PortraitOffsetY { get; set; }
 		public decimal? PortraitZoom { get; set; }
@@ -823,6 +825,7 @@ internal static class CardEditorPresetStore
 		public bool? HideCosmeticTypeBadge { get; set; }
 		public bool? HideCosmeticTextBackground { get; set; }
 		public bool? HideCosmeticBodyText { get; set; }
+		public bool? HideCosmeticAncientInnerBorder { get; set; }
 		public List<CardExtraEffectDto?>? ExtraEffects { get; set; }
 		public CardUpgradeOverrideDto? Upgrade { get; set; }
 		public CardOverrideDto? Upgraded { get; set; } // legacy (v2)
@@ -848,6 +851,10 @@ internal static class CardEditorPresetStore
 				CustomFinishId = source.CustomFinishId,
 				CustomFinishParams = source.CustomFinishParams != null && source.CustomFinishParams.Count > 0
 					? new Dictionary<string, string>(source.CustomFinishParams, StringComparer.Ordinal)
+					: null,
+				BorderFinish = source.BorderFinish?.ToString(),
+				BorderFinishParams = source.BorderFinishParams != null && source.BorderFinishParams.Count > 0
+					? source.BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value)
 					: null,
 				PortraitOffsetX = source.PortraitOffsetX.HasValue ? (decimal)source.PortraitOffsetX.Value : null,
 				PortraitOffsetY = source.PortraitOffsetY.HasValue ? (decimal)source.PortraitOffsetY.Value : null,
@@ -897,6 +904,7 @@ internal static class CardEditorPresetStore
 				HideCosmeticTypeBadge = source.HideCosmeticTypeBadge,
 				HideCosmeticTextBackground = source.HideCosmeticTextBackground,
 				HideCosmeticBodyText = source.HideCosmeticBodyText,
+				HideCosmeticAncientInnerBorder = source.HideCosmeticAncientInnerBorder,
 				ExtraEffects = source.ExtraEffects != null
 					? source.ExtraEffects.Select(e => e != null ? CardExtraEffectDto.FromEffect(e) : null).ToList()
 					: null,
@@ -976,7 +984,8 @@ internal static class CardEditorPresetStore
 				HideCosmeticNameText = HideCosmeticNameText,
 				HideCosmeticTypeBadge = HideCosmeticTypeBadge,
 				HideCosmeticTextBackground = HideCosmeticTextBackground,
-				HideCosmeticBodyText = HideCosmeticBodyText
+				HideCosmeticBodyText = HideCosmeticBodyText,
+				HideCosmeticAncientInnerBorder = HideCosmeticAncientInnerBorder
 			};
 
 			if (!string.IsNullOrWhiteSpace(Finish)
@@ -989,6 +998,18 @@ internal static class CardEditorPresetStore
 			if (FinishParams != null && FinishParams.Count > 0)
 			{
 				result.FinishParams = FinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value);
+			}
+
+			if (!string.IsNullOrWhiteSpace(BorderFinish)
+				&& Enum.TryParse(BorderFinish, ignoreCase: true, out CardEditorVisualFinish parsedBorderFinish)
+				&& parsedBorderFinish != CardEditorVisualFinish.None)
+			{
+				result.BorderFinish = parsedBorderFinish;
+			}
+
+			if (BorderFinishParams != null && BorderFinishParams.Count > 0)
+			{
+				result.BorderFinishParams = BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value);
 			}
 
 			if (!string.IsNullOrWhiteSpace(PoolTitle))
@@ -1527,6 +1548,10 @@ internal static class CardEditorPresetStore
 		public bool ShowReferencedCardText { get; set; }
 		public string? SpecificCardId2 { get; set; }
 		public string? SpecificCardId3 { get; set; }
+		public string? ChooseOneExecutionMode { get; set; }
+		public string? ChooseOneResolveMode { get; set; }
+		public string? ChooseOneChoiceRule { get; set; }
+		public int ChooseOneResolveCount { get; set; } = 1;
 		public ChooseOneOptionDto? ChooseOneOption1 { get; set; }
 		public ChooseOneOptionDto? ChooseOneOption2 { get; set; }
 		public ChooseOneOptionDto? ChooseOneOption3 { get; set; }
@@ -1844,6 +1869,10 @@ internal static class CardEditorPresetStore
 				ShowReferencedCardText = effect.CardReferenceDisplayMode == CardExtraEffectCardReferenceDisplayMode.FullText,
 				SpecificCardId2 = effect.SpecificCardId2,
 				SpecificCardId3 = effect.SpecificCardId3,
+				ChooseOneExecutionMode = effect.ChooseOneExecutionMode.ToString(),
+				ChooseOneResolveMode = effect.ChooseOneResolveMode.ToString(),
+				ChooseOneChoiceRule = effect.ChooseOneChoiceRule.ToString(),
+				ChooseOneResolveCount = Math.Clamp(effect.ChooseOneResolveCount <= 0 ? 1 : effect.ChooseOneResolveCount, 1, 3),
 				ChooseOneOption1 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption1),
 				ChooseOneOption2 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption2),
 				ChooseOneOption3 = ChooseOneOptionDto.FromOption(effect.ChooseOneOption3),
@@ -2560,6 +2589,25 @@ internal static class CardEditorPresetStore
 			{
 				effect.SpecificCardId3 = SpecificCardId3.Trim();
 			}
+			effect.ChooseOneExecutionMode = CardExtraEffectChooseOneExecutionMode.BorrowEffectsOnly;
+			if (!string.IsNullOrWhiteSpace(ChooseOneExecutionMode)
+				&& Enum.TryParse(ChooseOneExecutionMode, out CardExtraEffectChooseOneExecutionMode parsedChooseOneExecutionMode))
+			{
+				effect.ChooseOneExecutionMode = parsedChooseOneExecutionMode;
+			}
+			effect.ChooseOneResolveMode = CardExtraEffectChooseOneResolveMode.PlayerChoice;
+			if (!string.IsNullOrWhiteSpace(ChooseOneResolveMode)
+				&& Enum.TryParse(ChooseOneResolveMode, out CardExtraEffectChooseOneResolveMode parsedChooseOneResolveMode))
+			{
+				effect.ChooseOneResolveMode = parsedChooseOneResolveMode;
+			}
+			effect.ChooseOneChoiceRule = CardExtraEffectChooseOneChoiceRule.Exactly;
+			if (!string.IsNullOrWhiteSpace(ChooseOneChoiceRule)
+				&& Enum.TryParse(ChooseOneChoiceRule, out CardExtraEffectChooseOneChoiceRule parsedChooseOneChoiceRule))
+			{
+				effect.ChooseOneChoiceRule = parsedChooseOneChoiceRule;
+			}
+			effect.ChooseOneResolveCount = Math.Clamp(ChooseOneResolveCount <= 0 ? 1 : ChooseOneResolveCount, 1, 3);
 			if (ChooseOneOption1 != null)
 			{
 				effect.ChooseOneOption1 = ChooseOneOption1.ToOption();

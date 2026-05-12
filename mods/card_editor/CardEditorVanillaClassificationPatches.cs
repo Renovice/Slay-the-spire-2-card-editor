@@ -20,7 +20,7 @@ internal static class CardModel_get_Pool_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
 			&& !string.IsNullOrWhiteSpace(overrideData.PoolTitle))
 		{
 			string desired = overrideData.PoolTitle.Trim();
@@ -51,7 +51,7 @@ internal static class CardModel_get_VisualCardPool_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
 			&& !string.IsNullOrWhiteSpace(overrideData.PoolTitle))
 		{
 			string desired = overrideData.PoolTitle.Trim();
@@ -82,7 +82,7 @@ internal static class CardModel_get_Rarity_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (CardEditorOverrides.TryGetEffectiveOverride(__instance.Id, out CardOverride overrideData))
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData))
 		{
 			if (CardEditorFullArtRenderContext.IsActive && overrideData.FullArt == true)
 			{
@@ -114,7 +114,7 @@ internal static class CardModel_get_Type_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData)
+		if (CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
 			&& overrideData.CardType is CardType type
 			&& type != CardType.None)
 		{
@@ -140,7 +140,7 @@ internal static class CardModel_get_TargetType_VanillaOverride_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.TryGet(__instance.Id, out CardOverride overrideData))
+		if (!CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData))
 		{
 			overrideData = null!;
 		}
