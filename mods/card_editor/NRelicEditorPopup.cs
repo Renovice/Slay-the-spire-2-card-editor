@@ -1,25 +1,62 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Godot;
+using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
 public partial class NRelicEditorPopup : Control
 {
 	private const string PopupName = "CardEditorRelicEditorPopup";
+	private static readonly Vector2 PanelSize = new(980f, 660f);
+	private static readonly Vector2 NumericFieldMinSize = new(150f, 44f);
+	private static readonly Vector2 SpinButtonMinSize = new(34f, 20f);
+	private static readonly Vector2 SpinContainerMinSize = new(34f, 44f);
+	private static readonly string HeaderFontPath = "res://themes/kreon_bold_glyph_space_one.tres";
+	private static readonly string BodyFontPath = "res://themes/kreon_regular_glyph_space_one.tres";
+	private const string TickboxScenePath = "res://scenes/ui/tickbox.tscn";
+	private const double HoldInitialDelaySeconds = 0.35;
+	private const double HoldRepeatSlowSeconds = 0.12;
+	private const double HoldRepeatFastSeconds = 0.04;
+	private const double HoldAccelerationSeconds = 2.0;
 
-	private readonly Dictionary<string, SpinBox> _numberFields = new(StringComparer.Ordinal);
-	private readonly Dictionary<string, CheckBox> _poolFields = new(StringComparer.Ordinal);
+	private static Font? _headerFont;
+	private static Font? _bodyFont;
+	private static PackedScene? _tickboxScene;
+	private static StyleBoxFlat? _inputNormalStyleBox;
+	private static StyleBoxFlat? _inputHoverStyleBox;
+	private static StyleBoxFlat? _inputFocusStyleBox;
+	private static StyleBoxFlat? _inputDisabledStyleBox;
+	private static StyleBoxFlat? _spinButtonNormalStyleBox;
+	private static StyleBoxFlat? _spinButtonHoverStyleBox;
+	private static StyleBoxFlat? _spinButtonPressedStyleBox;
+	private static StyleBoxFlat? _spinButtonDisabledStyleBox;
+
+	private readonly Dictionary<string, NMegaLineEdit> _numberFields = new(StringComparer.Ordinal);
+	private readonly Dictionary<LineEdit, RelicSpinButtons> _spinButtons = new();
+	private readonly Dictionary<string, RelicEditorTickbox> _poolFields = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, RelicEditorTickbox> _fixedSourceFields = new(StringComparer.Ordinal);
 
 	private ModelId _relicId = ModelId.none;
+	private ColorRect? _backstop;
+	private Control? _center;
+	private PanelContainer? _panel;
 	private TextureRect? _icon;
 	private Label? _titleLabel;
 	private Label? _descriptionLabel;
+	private RelicEditorTickbox? _customTextTickbox;
+	private TextEdit? _customTextField;
+	private Control? _defaultFocus;
+	private HoldSpinState? _holdSpinState;
 	private bool _built;
 
 	public static void Open(RelicModel relic)
@@ -35,23 +72,45 @@ public partial class NRelicEditorPopup : Control
 			_relicId = relic.Id
 		};
 
-		Node? host = GetPopupHost();
+		NModalContainer? modalHost = NModalContainer.Instance;
+		if (modalHost != null && GodotObject.IsInstanceValid(modalHost) && modalHost.OpenModal is NRelicEditorPopup)
+		{
+			Log.Warn($"[CardEditor][RelicEditor] Clearing stale relic modal before opening relic={relic.Id}");
+			modalHost.Clear();
+		}
+
+		Node? host = GetFallbackPopupHost();
 		if (host != null && GodotObject.IsInstanceValid(host))
 		{
-			foreach (NRelicEditorPopup popup in host.GetChildren().OfType<NRelicEditorPopup>().ToArray())
+			try
 			{
-				popup.QueueFree();
+				foreach (NRelicEditorPopup popup in host.GetChildren().OfType<NRelicEditorPopup>().ToArray())
+				{
+					popup.QueueFree();
+				}
+				host.AddChild(editor);
+				host.MoveChild(editor, host.GetChildCount() - 1);
+				editor.Build();
+				editor.ForceLayoutRefreshNow();
+				Callable.From(editor.ForceLayoutRefreshNow).CallDeferred();
+				Log.Info($"[CardEditor][RelicEditor] Popup added relic={relic.Id} host={host.Name} inTree={editor.IsInsideTree()} " +
+					$"visible={editor.Visible} children={editor.GetChildCount()} size={editor.Size}");
 			}
-			host.AddChild(editor);
-			host.MoveChild(editor, host.GetChildCount() - 1);
-			Log.Info($"[CardEditor][RelicEditor] Popup added relic={relic.Id} host={host.Name}");
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor][RelicEditor] Failed opening relic popup relic={relic.Id}: {ex}");
+				if (GodotObject.IsInstanceValid(editor))
+				{
+					editor.QueueFree();
+				}
+			}
 			return;
 		}
 
 		Log.Warn($"[CardEditor][RelicEditor] Could not find a valid host for relic editor popup relic={relic.Id}");
 	}
 
-	private static Node? GetPopupHost()
+	private static Node? GetFallbackPopupHost()
 	{
 		NGame? game = NGame.Instance;
 		if (game == null || !GodotObject.IsInstanceValid(game))
@@ -59,19 +118,66 @@ public partial class NRelicEditorPopup : Control
 			return null;
 		}
 
+		return game;
+	}
+
+	internal static void CloseAnyOpen()
+	{
 		try
 		{
-			return game.GetNodeOrNull<Control>("%InspectionContainer") ?? game;
+			if (NModalContainer.Instance != null
+				&& GodotObject.IsInstanceValid(NModalContainer.Instance)
+				&& NModalContainer.Instance.OpenModal is NRelicEditorPopup)
+			{
+				NModalContainer.Instance.Clear();
+			}
+
+			Node? host = GetFallbackPopupHost();
+			if (host == null || !GodotObject.IsInstanceValid(host))
+			{
+				return;
+			}
+
+			foreach (NRelicEditorPopup popup in host.GetChildren().OfType<NRelicEditorPopup>().ToArray())
+			{
+				popup.QueueFree();
+			}
 		}
-		catch
+		catch (Exception ex)
 		{
-			return game;
+			Log.Warn($"[CardEditor][RelicEditor] Failed closing existing relic editor popup: {ex}");
 		}
 	}
 
 	public override void _Ready()
 	{
+		Log.Info($"[CardEditor][RelicEditor] Popup ready relic={_relicId} parent={GetParent()?.Name}");
 		Build();
+		ForceLayoutRefreshNow();
+	}
+
+	public override void _EnterTree()
+	{
+		Log.Info($"[CardEditor][RelicEditor] Popup enter-tree relic={_relicId} parent={GetParent()?.Name}");
+	}
+
+	public override void _Process(double delta)
+	{
+		if (_holdSpinState == null)
+		{
+			SetProcess(false);
+			return;
+		}
+
+		_holdSpinState.HeldSeconds += delta;
+		_holdSpinState.RepeatCountdownSeconds -= delta;
+		if (_holdSpinState.RepeatCountdownSeconds > 0)
+		{
+			return;
+		}
+
+		SpinStepOnce(_holdSpinState.Target, _holdSpinState.Direction);
+		_holdSpinState.RepeatCountdownSeconds = GetHoldRepeatInterval(_holdSpinState.HeldSeconds);
 	}
 
 	private void Build()
@@ -82,40 +188,49 @@ public partial class NRelicEditorPopup : Control
 		}
 		_built = true;
 
+		Name = PopupName;
+		Visible = true;
+		TopLevel = false;
 		SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+		Position = Vector2.Zero;
+		Size = GetViewportRect().Size;
+		SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		SizeFlagsVertical = SizeFlags.ExpandFill;
 		MouseFilter = MouseFilterEnum.Stop;
-		ZIndex = 2000;
+		MouseDefaultCursorShape = CursorShape.Arrow;
+		ZIndex = 1000;
 		ZAsRelative = false;
 
 		ColorRect dim = new()
 		{
 			Color = new Color(0f, 0f, 0f, 0.66f),
 			MouseFilter = MouseFilterEnum.Stop,
-			ZIndex = 0,
-			ZAsRelative = false
+			ZIndex = 0
 		};
 		dim.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 		AddChild(dim);
+		_backstop = dim;
 
 		CenterContainer center = new()
 		{
 			MouseFilter = MouseFilterEnum.Ignore,
-			ZIndex = 10,
-			ZAsRelative = false
+			ZIndex = 2
 		};
 		center.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 		AddChild(center);
+		_center = center;
 
-		Vector2 panelSize = new(980f, 660f);
 		PanelContainer panel = new()
 		{
-			CustomMinimumSize = panelSize,
-			Size = panelSize,
+			CustomMinimumSize = PanelSize,
+			Size = PanelSize,
 			SizeFlagsHorizontal = SizeFlags.ShrinkCenter,
 			SizeFlagsVertical = SizeFlags.ShrinkCenter
 		};
 		panel.AddThemeStyleboxOverride("panel", CreatePanelStyle());
+		panel.ZIndex = 3;
 		center.AddChild(panel);
+		_panel = panel;
 
 		VBoxContainer root = new()
 		{
@@ -124,7 +239,7 @@ public partial class NRelicEditorPopup : Control
 		root.AddThemeConstantOverride("separation", 14);
 		panel.AddChild(root);
 
-		Label heading = CreateHeading("Relic Editor", 34);
+		Label heading = CreateHeading("Relic Editor", 46);
 		root.AddChild(heading);
 
 		HBoxContainer body = new();
@@ -181,6 +296,7 @@ public partial class NRelicEditorPopup : Control
 		scroll.AddChild(settings);
 
 		AddNumberSection(settings);
+		AddTextSection(settings);
 		AddPoolSection(settings);
 
 		HBoxContainer buttons = new()
@@ -201,13 +317,91 @@ public partial class NRelicEditorPopup : Control
 		Button apply = CreateButton("Apply");
 		apply.Pressed += ApplyAndClose;
 		buttons.AddChild(apply);
+		_defaultFocus = apply;
 
 		RefreshPreviewFromUi();
+		ForceLayoutRefreshNow();
+		Callable.From(ForceLayoutRefreshNow).CallDeferred();
+	}
+
+	private void LogLayout()
+	{
+		try
+		{
+			Control? center = _center;
+			PanelContainer? panel = _panel;
+			Log.Info($"[CardEditor][RelicEditor] Popup layout relic={_relicId} popupVisible={Visible} popupSize={Size} " +
+				$"centerVisible={center?.Visible} centerSize={center?.Size} panelVisible={panel?.Visible} panelPosition={panel?.Position} panelSize={panel?.Size} " +
+				$"parent={GetParent()?.Name} children={GetChildCount()}");
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RelicEditor] Failed logging popup layout: {ex}");
+		}
+	}
+
+	public void ForceLayoutRefreshNow()
+	{
+		if (!GodotObject.IsInstanceValid(this))
+		{
+			return;
+		}
+
+		Vector2 availableSize = GetViewportRect().Size;
+		if (availableSize.X <= 0f || availableSize.Y <= 0f)
+		{
+			availableSize = new Vector2(1920f, 1080f);
+		}
+
+		SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+		OffsetLeft = 0f;
+		OffsetTop = 0f;
+		OffsetRight = 0f;
+		OffsetBottom = 0f;
+		Position = Vector2.Zero;
+		Size = availableSize;
+
+		if (_backstop != null && GodotObject.IsInstanceValid(_backstop))
+		{
+			_backstop.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+			_backstop.Position = Vector2.Zero;
+			_backstop.Size = availableSize;
+		}
+
+		if (_center != null && GodotObject.IsInstanceValid(_center))
+		{
+			_center.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+			_center.Position = Vector2.Zero;
+			_center.Size = availableSize;
+		}
+
+		if (_panel != null && GodotObject.IsInstanceValid(_panel))
+		{
+			Vector2 clampedSize = new(
+				Mathf.Min(PanelSize.X, availableSize.X - 80f),
+				Mathf.Min(PanelSize.Y, availableSize.Y - 80f));
+			clampedSize.X = Mathf.Max(640f, clampedSize.X);
+			clampedSize.Y = Mathf.Max(480f, clampedSize.Y);
+			_panel.AnchorLeft = 0f;
+			_panel.AnchorTop = 0f;
+			_panel.AnchorRight = 0f;
+			_panel.AnchorBottom = 0f;
+			_panel.OffsetLeft = 0f;
+			_panel.OffsetTop = 0f;
+			_panel.OffsetRight = 0f;
+			_panel.OffsetBottom = 0f;
+			_panel.Size = clampedSize;
+			_panel.Position = new Vector2(
+				Mathf.Round((availableSize.X - clampedSize.X) * 0.5f),
+				Mathf.Round((availableSize.Y - clampedSize.Y) * 0.5f));
+		}
+
+		LogLayout();
 	}
 
 	private void AddNumberSection(VBoxContainer parent)
 	{
-		parent.AddChild(CreateHeading("Vanilla Numbers", 25));
+		parent.AddChild(CreateHeading("Vanilla Numbers", 30));
 
 		RelicModel? preview = BuildCurrentPreview();
 		if (preview == null || preview.DynamicVars.Count == 0)
@@ -231,18 +425,19 @@ public partial class NRelicEditorPopup : Control
 			label.CustomMinimumSize = new Vector2(220f, 0f);
 			row.AddChild(label);
 
-			SpinBox field = new()
+			NMegaLineEdit field = new()
 			{
-				MinValue = -999999d,
-				MaxValue = 999999d,
-				Step = 1d,
-				Value = (double)dynamicVar.BaseValue,
-				CustomMinimumSize = new Vector2(150f, 44f),
-				AllowGreater = true,
-				AllowLesser = true
+				Text = FormatDecimal(dynamicVar.BaseValue),
+				CustomMinimumSize = NumericFieldMinSize,
+				SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
+				FocusMode = FocusModeEnum.All,
+				MouseFilter = MouseFilterEnum.Stop,
+				Alignment = HorizontalAlignment.Center
 			};
-			field.ValueChanged += _ => RefreshPreviewFromUi();
+			StyleInput(field);
+			field.TextChanged += _ => RefreshPreviewFromUi();
 			row.AddChild(field);
+			row.AddChild(CreateSpinButtons(field, step: 1m, minValue: -999999m, maxValue: 999999m));
 			_numberFields[key] = field;
 		}
 
@@ -252,9 +447,49 @@ public partial class NRelicEditorPopup : Control
 		}
 	}
 
+	private void AddTextSection(VBoxContainer parent)
+	{
+		parent.AddChild(CreateHeading("Text", 30));
+
+		RelicModel? canonical = GetCanonicalRelic();
+		RelicOverride? existing = canonical != null ? CardEditorRelicOverrides.Get(canonical.Id) : null;
+		bool hasCustomText = existing?.CustomDescriptionEnabled == true;
+
+		HBoxContainer customTextRow = CreateTickboxRow("Custom Text", hasCustomText, out RelicEditorTickbox customTextTickbox);
+		customTextTickbox.Toggled += () =>
+		{
+			if (_customTextField != null && GodotObject.IsInstanceValid(_customTextField))
+			{
+				if (customTextTickbox.IsTicked && string.IsNullOrEmpty(_customTextField.Text))
+				{
+					_customTextField.Text = BuildCurrentPreview()?.DynamicDescription.GetFormattedText() ?? string.Empty;
+				}
+				_customTextField.Visible = customTextTickbox.IsTicked;
+			}
+			RefreshPreviewFromUi();
+		};
+		parent.AddChild(customTextRow);
+		_customTextTickbox = customTextTickbox;
+
+		_customTextField = new TextEdit
+		{
+			Text = hasCustomText ? (existing?.CustomDescription ?? string.Empty) : string.Empty,
+			CustomMinimumSize = new Vector2(0f, 110f),
+			SizeFlagsHorizontal = SizeFlags.ExpandFill,
+			WrapMode = TextEdit.LineWrappingMode.Boundary,
+			Visible = hasCustomText
+		};
+		StyleInput(_customTextField);
+		_customTextField.TextChanged += RefreshPreviewFromUi;
+		parent.AddChild(_customTextField);
+	}
+
 	private void AddPoolSection(VBoxContainer parent)
 	{
-		parent.AddChild(CreateHeading("Drop Pools", 25));
+		parent.AddChild(CreateHeading("Reward Pools", 30));
+		Label help = CreateMutedLabel("These checkboxes affect random relic reward pools. Fixed event and Ancient relic grants are separate event option sources, listed below.");
+		help.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+		parent.AddChild(help);
 
 		RelicModel? canonical = GetCanonicalRelic();
 		if (canonical == null)
@@ -275,15 +510,70 @@ public partial class NRelicEditorPopup : Control
 		foreach (RelicPoolModel pool in CardEditorRelicOverrides.EditablePools())
 		{
 			string key = CardEditorRelicOverrides.GetPoolKey(pool);
-			CheckBox check = new()
-			{
-				Text = CardEditorRelicOverrides.GetPoolLabel(pool),
-				ButtonPressed = selected.Contains(key),
-				CustomMinimumSize = new Vector2(240f, 38f)
-			};
-			check.Toggled += _ => RefreshPreviewFromUi();
+			RelicEditorTickbox check = CreateStandaloneTickbox(CardEditorRelicOverrides.GetPoolLabel(pool), selected.Contains(key), RefreshPreviewFromUi);
+			check.CustomMinimumSize = new Vector2(240f, 38f);
+			check.TooltipText = CardEditorRelicOverrides.GetPoolDescription(pool);
+			check.Label.TooltipText = check.TooltipText;
 			grid.AddChild(check);
 			_poolFields[key] = check;
+		}
+
+		AddFixedSourceSection(parent, canonical);
+	}
+
+	private void AddFixedSourceSection(VBoxContainer parent, RelicModel canonical)
+	{
+		parent.AddChild(CreateHeading("Fixed/Event Sources", 24));
+		Label help = CreateMutedLabel("Ancient sources are real editable event-option tables. Other fixed event sources are listed for visibility because many of them run custom event scripts.");
+		help.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+		parent.AddChild(help);
+
+		HashSet<string> selected = CardEditorRelicOverrides.GetEffectiveFixedSourceKeys(canonical);
+		List<RelicSourceSummary> allSources = CardEditorRelicOverrides.EditableFixedSources();
+		List<RelicSourceSummary> editableSources = allSources.Where(source => source.Editable).ToList();
+		if (editableSources.Count > 0)
+		{
+			GridContainer grid = new()
+			{
+				Columns = 2,
+				SizeFlagsHorizontal = SizeFlags.ExpandFill
+			};
+			grid.AddThemeConstantOverride("h_separation", 28);
+			grid.AddThemeConstantOverride("v_separation", 8);
+			parent.AddChild(grid);
+
+			foreach (RelicSourceSummary source in editableSources)
+			{
+				RelicEditorTickbox check = CreateStandaloneTickbox(source.Label, selected.Contains(source.Key), RefreshPreviewFromUi);
+				check.CustomMinimumSize = new Vector2(240f, 38f);
+				check.TooltipText = source.Description;
+				check.Label.TooltipText = source.Description;
+				grid.AddChild(check);
+				_fixedSourceFields[source.Key] = check;
+			}
+		}
+
+		List<RelicSourceSummary> readOnlySources = CardEditorRelicOverrides.GetFixedRelicSourceSummaries(canonical)
+			.Where(source => !source.Editable)
+			.ToList();
+		if (readOnlySources.Count > 0)
+		{
+			parent.AddChild(CreateMutedLabel("Other fixed sources detected:"));
+			VBoxContainer list = new();
+			list.AddThemeConstantOverride("separation", 4);
+			parent.AddChild(list);
+
+			foreach (RelicSourceSummary source in readOnlySources)
+			{
+				Label label = CreateBodyLabel(source.Label);
+				label.TooltipText = source.Description;
+				label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+				list.AddChild(label);
+			}
+		}
+		else if (editableSources.Count == 0)
+		{
+			parent.AddChild(CreateMutedLabel("No fixed event or Ancient source found for this relic."));
 		}
 	}
 
@@ -310,11 +600,11 @@ public partial class NRelicEditorPopup : Control
 			return preview;
 		}
 
-		foreach ((string key, SpinBox field) in _numberFields)
+		foreach ((string key, NMegaLineEdit field) in _numberFields)
 		{
 			if (preview.DynamicVars.TryGetValue(key, out DynamicVar? dynamicVar))
 			{
-				dynamicVar.BaseValue = (decimal)field.Value;
+				dynamicVar.BaseValue = ParseDecimalOrFallback(field.Text, dynamicVar.BaseValue);
 			}
 		}
 		return preview;
@@ -336,7 +626,7 @@ public partial class NRelicEditorPopup : Control
 			}
 			if (_titleLabel != null)
 			{
-				_titleLabel.Text = preview.Title.GetFormattedText();
+				_titleLabel.Text = FormatRelicTextForPreview(preview.Title.GetFormattedText());
 			}
 			if (_descriptionLabel != null)
 			{
@@ -346,7 +636,19 @@ public partial class NRelicEditorPopup : Control
 					.Where(pool => pool != null)
 					.Select(pool => CardEditorRelicOverrides.GetPoolLabel(pool!))
 					.DefaultIfEmpty("No pool"));
-				_descriptionLabel.Text = $"{rarity}\n{pools}\n\n{preview.DynamicDescription.GetFormattedText()}";
+				string rawDescription = preview.DynamicDescription.GetFormattedText() ?? string.Empty;
+				bool customTextEnabled = _customTextTickbox?.IsTicked ?? false;
+				string displayDescription = customTextEnabled && _customTextField != null && GodotObject.IsInstanceValid(_customTextField)
+					? _customTextField.Text ?? string.Empty
+					: rawDescription;
+				_descriptionLabel.Text = $"{rarity}\n{pools}\n\n{FormatRelicTextForPreview(displayDescription)}";
+				if (_customTextField != null
+					&& GodotObject.IsInstanceValid(_customTextField)
+					&& !customTextEnabled
+					&& !_customTextField.HasFocus())
+				{
+					_customTextField.Text = rawDescription;
+				}
 			}
 		}
 		catch (Exception ex)
@@ -357,24 +659,38 @@ public partial class NRelicEditorPopup : Control
 
 	private void ApplyAndClose()
 	{
+		if (!CardEditorMultiplayerSync.CanEditSharedState())
+		{
+			Log.Info("[CardEditor][MultiplayerSync] Blocked relic editor apply because shared-state editing is host-controlled.");
+			return;
+		}
+
+		if (ApplyCurrentRelicEditsToStore())
+		{
+			CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
+		}
+		Close();
+	}
+
+	private bool ApplyCurrentRelicEditsToStore()
+	{
 		RelicModel? canonical = GetCanonicalRelic();
 		if (canonical == null)
 		{
-			Close();
-			return;
+			return false;
 		}
 
 		RelicOverride overrideData = new();
 
 		Dictionary<string, decimal> numbers = new(StringComparer.Ordinal);
-		foreach ((string key, SpinBox field) in _numberFields)
+		foreach ((string key, NMegaLineEdit field) in _numberFields)
 		{
 			if (!canonical.DynamicVars.TryGetValue(key, out DynamicVar? vanillaVar))
 			{
 				continue;
 			}
 
-			decimal value = (decimal)field.Value;
+			decimal value = ParseDecimalOrFallback(field.Text, vanillaVar.BaseValue);
 			if (value != vanillaVar.BaseValue)
 			{
 				numbers[key] = value;
@@ -385,6 +701,12 @@ public partial class NRelicEditorPopup : Control
 			overrideData.DynamicVarBaseValues = numbers;
 		}
 
+		if (_customTextTickbox?.IsTicked == true)
+		{
+			overrideData.CustomDescriptionEnabled = true;
+			overrideData.CustomDescription = _customTextField?.Text ?? string.Empty;
+		}
+
 		HashSet<string> selectedPools = GetSelectedPoolKeys(canonical);
 		HashSet<string> vanillaPools = CardEditorRelicOverrides.GetVanillaPoolKeys(canonical);
 		if (!selectedPools.SetEquals(vanillaPools))
@@ -392,22 +714,42 @@ public partial class NRelicEditorPopup : Control
 			overrideData.PoolKeys = selectedPools;
 		}
 
+		HashSet<string> selectedFixedSources = GetSelectedFixedSourceKeys(canonical);
+		HashSet<string> vanillaFixedSources = CardEditorRelicOverrides.GetVanillaFixedSourceKeys(canonical);
+		if (!selectedFixedSources.SetEquals(vanillaFixedSources))
+		{
+			overrideData.FixedSourceKeys = selectedFixedSources;
+		}
+
 		CardEditorRelicOverrides.SetAndSave(canonical.Id, overrideData);
-		Close();
+		return true;
 	}
 
 	private void ResetRelicAndClose()
 	{
+		if (!CardEditorMultiplayerSync.CanEditSharedState())
+		{
+			Log.Info("[CardEditor][MultiplayerSync] Blocked relic editor reset because shared-state editing is host-controlled.");
+			return;
+		}
+
 		RelicModel? canonical = GetCanonicalRelic();
 		if (canonical != null)
 		{
 			CardEditorRelicOverrides.SetAndSave(canonical.Id, null);
+			CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		}
 		Close();
 	}
 
 	private void Close()
 	{
+		if (NModalContainer.Instance != null && GetParent() == NModalContainer.Instance)
+		{
+			NModalContainer.Instance.Clear();
+			return;
+		}
+
 		QueueFree();
 	}
 
@@ -419,19 +761,45 @@ public partial class NRelicEditorPopup : Control
 		}
 
 		return _poolFields
-			.Where(kvp => kvp.Value.ButtonPressed)
+			.Where(kvp => kvp.Value.IsTicked)
 			.Select(kvp => kvp.Key)
 			.ToHashSet(StringComparer.Ordinal);
+	}
+
+	private HashSet<string> GetSelectedFixedSourceKeys(RelicModel relic)
+	{
+		if (_fixedSourceFields.Count == 0)
+		{
+			return CardEditorRelicOverrides.GetEffectiveFixedSourceKeys(relic);
+		}
+
+		HashSet<string> selected = _fixedSourceFields
+			.Where(kvp => kvp.Value.IsTicked)
+			.Select(kvp => kvp.Key)
+			.ToHashSet(StringComparer.Ordinal);
+
+		foreach (RelicSourceSummary source in CardEditorRelicOverrides.GetFixedRelicSourceSummaries(relic).Where(source => !source.Editable))
+		{
+			selected.Add(source.Key);
+		}
+		return selected;
 	}
 
 	private static Label CreateHeading(string text, int size)
 	{
 		Label label = new()
 		{
-			Text = text,
-			Modulate = new Color(1f, 0.84f, 0.28f, 1f)
+			Text = text
 		};
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, HeaderFontPath);
+		if (_headerFont != null)
+		{
+			label.AddThemeFontOverride("font", _headerFont);
+		}
 		label.AddThemeFontSizeOverride("font_size", size);
+		label.AddThemeColorOverride("font_color", size >= 34 ? StsColors.gold : StsColors.cream);
+		label.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
+		label.AddThemeConstantOverride("outline_size", size >= 34 ? 16 : 12);
 		return label;
 	}
 
@@ -439,17 +807,30 @@ public partial class NRelicEditorPopup : Control
 	{
 		Label label = new()
 		{
-			Text = text,
-			Modulate = Colors.White
+			Text = text
 		};
-		label.AddThemeFontSizeOverride("font_size", 20);
+		StyleBodyLabel(label);
 		return label;
+	}
+
+	private static void StyleBodyLabel(Control control)
+	{
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, BodyFontPath);
+		if (_bodyFont != null)
+		{
+			control.AddThemeFontOverride("font", _bodyFont);
+		}
+		control.AddThemeFontSizeOverride("font_size", 20);
+		control.AddThemeColorOverride("font_color", StsColors.cream);
+		control.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
+		control.AddThemeConstantOverride("outline_size", 10);
 	}
 
 	private static Label CreateMutedLabel(string text)
 	{
 		Label label = CreateBodyLabel(text);
-		label.Modulate = new Color(0.75f, 0.75f, 0.75f, 1f);
+		label.AddThemeColorOverride("font_color", StsColors.gray);
+		label.AddThemeConstantOverride("outline_size", 8);
 		return label;
 	}
 
@@ -460,8 +841,353 @@ public partial class NRelicEditorPopup : Control
 			Text = text,
 			CustomMinimumSize = new Vector2(150f, 48f)
 		};
-		button.AddThemeFontSizeOverride("font_size", 20);
+		StyleInput(button);
 		return button;
+	}
+
+	private static string FormatRelicTextForPreview(string? formattedText)
+	{
+		if (string.IsNullOrWhiteSpace(formattedText))
+		{
+			return string.Empty;
+		}
+
+		string text = formattedText.Replace("\r", string.Empty);
+		text = Regex.Replace(
+			text,
+			@"\[(?:img|image)(?:[^\]]*)\](?<path>.*?)\[/\s*(?:img|image)\]",
+			match => " " + ResolveInlineImageDisplay(match.Groups["path"].Value) + " ",
+			RegexOptions.IgnoreCase | RegexOptions.Singleline);
+		text = Regex.Replace(
+			text,
+			@"\[(?:img|image)[^\]]*(?<path>res://[^\]\s]+)[^\]]*\]",
+			match => " " + ResolveInlineImageDisplay(match.Groups["path"].Value) + " ",
+			RegexOptions.IgnoreCase);
+		text = Regex.Replace(
+			text,
+			@"res://images/packed/sprite_fonts/[A-Za-z0-9_\-/]+\.png",
+			match => " " + ResolveInlineImageDisplay(match.Value) + " ",
+			RegexOptions.IgnoreCase);
+		text = Regex.Replace(text, @"<[^>]+>", string.Empty);
+		text = CardEditorCustomKeywordLibrary.StripMarkupForDisplay(text);
+		text = Regex.Replace(text, @"[ \t]+\n", "\n");
+		text = Regex.Replace(text, @"\n{3,}", "\n\n");
+		text = Regex.Replace(text, @"[ \t]{2,}", " ");
+		text = Regex.Replace(text, @"\s+([.,;:!?])", "$1");
+		return text.Trim();
+	}
+
+	private static string ResolveInlineImageDisplay(string imageText)
+	{
+		string lower = (imageText ?? string.Empty).Trim().ToLowerInvariant();
+		if (lower.Contains("star_icon"))
+		{
+			return "\u2726";
+		}
+		if (lower.Contains("energy"))
+		{
+			return "\u25CF";
+		}
+		if (lower.Contains("block"))
+		{
+			return "\u25A3";
+		}
+		return "\u25C6";
+	}
+
+	private Control CreateSpinButtons(LineEdit field, decimal step, decimal? minValue, decimal? maxValue)
+	{
+		VBoxContainer container = new()
+		{
+			CustomMinimumSize = SpinContainerMinSize,
+			SizeFlagsHorizontal = SizeFlags.ShrinkCenter,
+			SizeFlagsVertical = SizeFlags.ShrinkCenter
+		};
+		container.AddThemeConstantOverride("separation", 2);
+
+		Button up = CreateSpinButton("\u25B2");
+		Button down = CreateSpinButton("\u25BC");
+		container.AddChild(up);
+		container.AddChild(down);
+
+		RelicSpinButtons spin = new()
+		{
+			Field = field,
+			Container = container,
+			Up = up,
+			Down = down,
+			Step = step,
+			MinValue = minValue,
+			MaxValue = maxValue
+		};
+		_spinButtons[field] = spin;
+
+		up.Connect(BaseButton.SignalName.ButtonDown, Callable.From(() => StartSpinHold(spin, +1)));
+		down.Connect(BaseButton.SignalName.ButtonDown, Callable.From(() => StartSpinHold(spin, -1)));
+		up.Connect(BaseButton.SignalName.ButtonUp, Callable.From(StopSpinHold));
+		down.Connect(BaseButton.SignalName.ButtonUp, Callable.From(StopSpinHold));
+
+		return container;
+	}
+
+	private static Button CreateSpinButton(string glyph)
+	{
+		Button button = new()
+		{
+			Text = glyph,
+			Flat = true,
+			FocusMode = FocusModeEnum.None,
+			CustomMinimumSize = SpinButtonMinSize,
+			MouseFilter = MouseFilterEnum.Stop,
+			Alignment = HorizontalAlignment.Center,
+			SizeFlagsHorizontal = SizeFlags.ShrinkCenter
+		};
+		CardEditorGodotResourceCache.TryLoad(ref _headerFont, HeaderFontPath);
+		if (_headerFont != null)
+		{
+			button.AddThemeFontOverride("font", _headerFont);
+		}
+		button.AddThemeFontSizeOverride("font_size", 18);
+		button.AddThemeColorOverride("font_color", StsColors.gold);
+		button.AddThemeColorOverride("font_outline_color", StsColors.transparentBlack);
+		button.AddThemeConstantOverride("outline_size", 10);
+		button.AddThemeStyleboxOverride("normal", GetSpinButtonNormalStyleBox());
+		button.AddThemeStyleboxOverride("hover", GetSpinButtonHoverStyleBox());
+		button.AddThemeStyleboxOverride("pressed", GetSpinButtonPressedStyleBox());
+		button.AddThemeStyleboxOverride("disabled", GetSpinButtonDisabledStyleBox());
+		return button;
+	}
+
+	private void StartSpinHold(RelicSpinButtons target, int direction)
+	{
+		if (direction == 0)
+		{
+			return;
+		}
+
+		Button activeButton = direction > 0 ? target.Up : target.Down;
+		if (!GodotObject.IsInstanceValid(activeButton) || activeButton.Disabled)
+		{
+			return;
+		}
+
+		SpinStepOnce(target, direction);
+		_holdSpinState = new HoldSpinState
+		{
+			Target = target,
+			Direction = direction,
+			HeldSeconds = 0,
+			RepeatCountdownSeconds = HoldInitialDelaySeconds
+		};
+		SetProcess(true);
+	}
+
+	private void StopSpinHold()
+	{
+		if (_holdSpinState == null)
+		{
+			return;
+		}
+
+		_holdSpinState = null;
+		SetProcess(false);
+	}
+
+	private static double GetHoldRepeatInterval(double heldSeconds)
+	{
+		double t = Math.Clamp((heldSeconds - HoldInitialDelaySeconds) / HoldAccelerationSeconds, 0.0, 1.0);
+		return HoldRepeatSlowSeconds + (HoldRepeatFastSeconds - HoldRepeatSlowSeconds) * t;
+	}
+
+	private void SpinStepOnce(RelicSpinButtons target, int direction)
+	{
+		if (direction == 0)
+		{
+			return;
+		}
+
+		LineEdit field = target.Field;
+		if (!GodotObject.IsInstanceValid(field) || field.IsQueuedForDeletion() || !field.Editable)
+		{
+			return;
+		}
+
+		decimal current = ParseDecimalOrFallback(field.Text, 0m);
+		decimal next = Clamp(current + target.Step * direction, target.MinValue, target.MaxValue);
+		field.Text = FormatDecimal(next);
+		RefreshPreviewFromUi();
+	}
+
+	private static decimal ParseDecimalOrFallback(string? text, decimal fallback)
+	{
+		return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal parsed)
+			? parsed
+			: fallback;
+	}
+
+	private static decimal Clamp(decimal value, decimal? minValue, decimal? maxValue)
+	{
+		if (minValue.HasValue && value < minValue.Value)
+		{
+			return minValue.Value;
+		}
+		if (maxValue.HasValue && value > maxValue.Value)
+		{
+			return maxValue.Value;
+		}
+		return value;
+	}
+
+	private static string FormatDecimal(decimal value)
+	{
+		return decimal.Truncate(value) == value
+			? decimal.ToInt32(value).ToString(CultureInfo.InvariantCulture)
+			: value.ToString(CultureInfo.InvariantCulture);
+	}
+
+	private static HBoxContainer CreateTickboxRow(string labelText, bool initialValue, out RelicEditorTickbox tickbox, Action? onToggled = null)
+	{
+		HBoxContainer row = new();
+		row.AddThemeConstantOverride("separation", 10);
+		tickbox = CreateStandaloneTickbox(labelText, initialValue, onToggled);
+		row.AddChild(tickbox);
+		return row;
+	}
+
+	private static RelicEditorTickbox CreateStandaloneTickbox(string labelText, bool initialValue, Action? onToggled = null)
+	{
+		Label label = CreateBodyLabel(labelText);
+		Control tickboxVisuals = InstantiateTickboxVisuals();
+		RelicEditorTickbox tickbox = new(tickboxVisuals, label, initialValue);
+		if (onToggled != null)
+		{
+			tickbox.Toggled += onToggled;
+		}
+		return tickbox;
+	}
+
+	private static PackedScene GetTickboxScene()
+	{
+		CardEditorGodotResourceCache.Load(ref _tickboxScene, TickboxScenePath);
+		return _tickboxScene!;
+	}
+
+	private static Control InstantiateTickboxVisuals()
+	{
+		return GetTickboxScene().Instantiate<Control>(PackedScene.GenEditState.Disabled);
+	}
+
+	private static StyleBoxFlat CreateInputStyleBox(Color bgColor, Color borderColor, int borderWidth = 1)
+	{
+		return new StyleBoxFlat
+		{
+			BgColor = bgColor,
+			BorderColor = borderColor,
+			BorderWidthLeft = borderWidth,
+			BorderWidthTop = borderWidth,
+			BorderWidthRight = borderWidth,
+			BorderWidthBottom = borderWidth,
+			CornerRadiusTopLeft = 5,
+			CornerRadiusTopRight = 5,
+			CornerRadiusBottomLeft = 5,
+			CornerRadiusBottomRight = 5,
+			ContentMarginLeft = 8,
+			ContentMarginRight = 8,
+			ContentMarginTop = 4,
+			ContentMarginBottom = 4
+		};
+	}
+
+	private static StyleBoxFlat GetInputNormalStyleBox()
+	{
+		return _inputNormalStyleBox ??= CreateInputStyleBox(
+			new Color(0.055f, 0.065f, 0.075f, 0.95f),
+			new Color(0.20f, 0.23f, 0.26f, 1f));
+	}
+
+	private static StyleBoxFlat GetInputHoverStyleBox()
+	{
+		return _inputHoverStyleBox ??= CreateInputStyleBox(
+			new Color(0.075f, 0.09f, 0.105f, 0.98f),
+			new Color(0.34f, 0.38f, 0.42f, 1f));
+	}
+
+	private static StyleBoxFlat GetInputFocusStyleBox()
+	{
+		return _inputFocusStyleBox ??= CreateInputStyleBox(
+			new Color(0.065f, 0.08f, 0.095f, 1f),
+			StsColors.gold,
+			2);
+	}
+
+	private static StyleBoxFlat GetInputDisabledStyleBox()
+	{
+		return _inputDisabledStyleBox ??= CreateInputStyleBox(
+			new Color(0.035f, 0.035f, 0.04f, 0.72f),
+			new Color(0.12f, 0.13f, 0.14f, 1f));
+	}
+
+	private static StyleBoxFlat CreateFlatFillStyleBox(Color bgColor)
+	{
+		return new StyleBoxFlat
+		{
+			BgColor = bgColor
+		};
+	}
+
+	private static StyleBoxFlat GetSpinButtonNormalStyleBox()
+	{
+		return _spinButtonNormalStyleBox ??= CreateFlatFillStyleBox(new Color(0f, 0f, 0f, 0f));
+	}
+
+	private static StyleBoxFlat GetSpinButtonHoverStyleBox()
+	{
+		return _spinButtonHoverStyleBox ??= CreateFlatFillStyleBox(new Color(1f, 1f, 1f, 0.06f));
+	}
+
+	private static StyleBoxFlat GetSpinButtonPressedStyleBox()
+	{
+		return _spinButtonPressedStyleBox ??= CreateFlatFillStyleBox(new Color(1f, 1f, 1f, 0.10f));
+	}
+
+	private static StyleBoxFlat GetSpinButtonDisabledStyleBox()
+	{
+		return _spinButtonDisabledStyleBox ??= CreateFlatFillStyleBox(new Color(0f, 0f, 0f, 0f));
+	}
+
+	private static void StyleInput(Control control)
+	{
+		CardEditorGodotResourceCache.TryLoad(ref _bodyFont, BodyFontPath);
+		if (_bodyFont != null)
+		{
+			control.AddThemeFontOverride("font", _bodyFont);
+		}
+		control.AddThemeFontSizeOverride("font_size", 20);
+		control.AddThemeColorOverride("font_color", StsColors.cream);
+		control.AddThemeColorOverride("font_hover_color", Colors.White);
+		control.AddThemeColorOverride("font_pressed_color", StsColors.gold);
+		control.AddThemeColorOverride("font_focus_color", Colors.White);
+		control.AddThemeColorOverride("font_disabled_color", StsColors.gray);
+		control.AddThemeConstantOverride("outline_size", 0);
+		if (control is OptionButton optionButton)
+		{
+			optionButton.ClipText = true;
+		}
+		else if (control is Button button)
+		{
+			button.ClipText = false;
+		}
+		if (control is Button || control is LineEdit || control is TextEdit)
+		{
+			StyleBoxFlat focus = GetInputFocusStyleBox();
+			StyleBoxFlat disabled = GetInputDisabledStyleBox();
+			control.AddThemeStyleboxOverride("normal", GetInputNormalStyleBox());
+			control.AddThemeStyleboxOverride("hover", GetInputHoverStyleBox());
+			control.AddThemeStyleboxOverride("pressed", focus);
+			control.AddThemeStyleboxOverride("focus", focus);
+			control.AddThemeStyleboxOverride("disabled", disabled);
+			control.AddThemeStyleboxOverride("read_only", disabled);
+		}
 	}
 
 	private static StyleBoxFlat CreatePanelStyle()
@@ -494,5 +1220,86 @@ public partial class NRelicEditorPopup : Control
 		style.SetBorderWidthAll(1);
 		style.SetCornerRadiusAll(6);
 		return style;
+	}
+
+	private sealed class RelicSpinButtons
+	{
+		public LineEdit Field { get; init; } = null!;
+		public VBoxContainer Container { get; init; } = null!;
+		public Button Up { get; init; } = null!;
+		public Button Down { get; init; } = null!;
+		public decimal Step { get; init; } = 1m;
+		public decimal? MinValue { get; init; }
+		public decimal? MaxValue { get; init; }
+	}
+
+	private sealed class HoldSpinState
+	{
+		public RelicSpinButtons Target { get; init; } = null!;
+		public int Direction { get; init; }
+		public double HeldSeconds { get; set; }
+		public double RepeatCountdownSeconds { get; set; }
+	}
+
+	private sealed class RelicEditorTickbox : HBoxContainer
+	{
+		private readonly Control _tickedImage;
+		private readonly Control _notTickedImage;
+
+		public bool IsTicked { get; private set; }
+		public Label Label { get; }
+
+		public event Action? Toggled;
+
+		public RelicEditorTickbox(Control tickboxVisuals, Label label, bool initialTicked)
+		{
+			Label = label;
+			MouseFilter = MouseFilterEnum.Stop;
+			FocusMode = FocusModeEnum.None;
+			SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+			AddThemeConstantOverride("separation", 6);
+
+			tickboxVisuals.MouseFilter = MouseFilterEnum.Ignore;
+			tickboxVisuals.CustomMinimumSize = new Vector2(48f, 48f);
+			tickboxVisuals.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+			tickboxVisuals.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+			tickboxVisuals.Scale = Vector2.One * 0.66f;
+			tickboxVisuals.PivotOffset = new Vector2(24f, 24f);
+
+			label.MouseFilter = MouseFilterEnum.Ignore;
+			label.VerticalAlignment = VerticalAlignment.Center;
+			label.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+
+			AddChild(tickboxVisuals);
+			AddChild(label);
+
+			_tickedImage = tickboxVisuals.GetNode<Control>("Ticked");
+			_notTickedImage = tickboxVisuals.GetNode<Control>("NotTicked");
+			SetTicked(initialTicked, notify: false);
+
+			GuiInput += OnGuiInput;
+		}
+
+		private void OnGuiInput(InputEvent inputEvent)
+		{
+			if (inputEvent is InputEventMouseButton mouseButton
+				&& mouseButton.ButtonIndex == MouseButton.Left
+				&& mouseButton.Pressed)
+			{
+				SetTicked(!IsTicked, notify: true);
+				AcceptEvent();
+			}
+		}
+
+		private void SetTicked(bool value, bool notify)
+		{
+			IsTicked = value;
+			_tickedImage.Visible = value;
+			_notTickedImage.Visible = !value;
+			if (notify)
+			{
+				Toggled?.Invoke();
+			}
+		}
 	}
 }

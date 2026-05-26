@@ -45,7 +45,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private static PackedScene? _tickboxScene;
 	private static Texture2D? _popupShellTexture;
 
-	private NCardLibrary _library = null!;
+	private NCardLibrary? _library;
 	private OptionButton _presetSelect = null!;
 	private LineEdit _presetNameField = null!;
 	private PresetVanillaTickbox _startupCheckbox = null!;
@@ -85,6 +85,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private Button _toggleButton = null!;
 	private bool _isCollapsed;
 	private bool _isCreatorMode;
+	private bool _isRelicHost;
 	private float _scrollbarAlignOffsetX;
 	private int _alignRetriesRemaining = 12;
 	private bool _isDirectManipulating;
@@ -98,6 +99,16 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		NCardEditorPresetPanel panel = new NCardEditorPresetPanel();
 		panel.Initialize(library);
 		panel.SetCreatorMode(creatorMode);
+		panel.BuildUi();
+		panel.RefreshPresetList();
+		return panel;
+	}
+
+	public static NCardEditorPresetPanel CreateForRelicEditor(Control host)
+	{
+		NCardEditorPresetPanel panel = new NCardEditorPresetPanel();
+		panel.InitializeRelicHost(host);
+		panel.SetCreatorMode(false);
 		panel.BuildUi();
 		panel.RefreshPresetList();
 		return panel;
@@ -168,7 +179,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		{
 			ApplyLayoutTuning();
 			RefreshAlignmentToScrollbar();
-			CardEditorPresetPanelTunerHooks.RefreshFor(_library);
+			if (_library != null)
+			{
+				CardEditorPresetPanelTunerHooks.RefreshFor(_library);
+			}
 		}).CallDeferred();
 	}
 
@@ -185,7 +199,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_isDirectManipulating = true;
 		_dragStartMousePosition = mouseButton.Position;
 		_dragSnapshot = PresetPanelTuningSnapshot.Capture();
-		CardEditorPresetPanelTunerHooks.RefreshFor(_library, $"Active={GetTuningTargetName(target)} Mode={(_isResizeManipulation ? "Resize" : "Move")}");
+		if (_library != null)
+		{
+			CardEditorPresetPanelTunerHooks.RefreshFor(_library, $"Active={GetTuningTargetName(target)} Mode={(_isResizeManipulation ? "Resize" : "Move")}");
+		}
 	}
 
 	private void UpdateDirectManipulation(Vector2 mousePosition)
@@ -367,7 +384,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		}
 
 		ApplyLayoutTuning();
-		CardEditorPresetPanelTunerHooks.RefreshFor(_library, $"Active={GetTuningTargetName(_dragTarget)} Mode={(_isResizeManipulation ? "Resize" : "Move")}");
+		if (_library != null)
+		{
+			CardEditorPresetPanelTunerHooks.RefreshFor(_library, $"Active={GetTuningTargetName(_dragTarget)} Mode={(_isResizeManipulation ? "Resize" : "Move")}");
+		}
 	}
 
 	private void EndDirectManipulation()
@@ -375,7 +395,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_isDirectManipulating = false;
 		_isResizeManipulation = false;
 		_dragTarget = PresetPanelTuningTarget.None;
-		CardEditorPresetPanelTunerHooks.RefreshFor(_library, "Active=None");
+		if (_library != null)
+		{
+			CardEditorPresetPanelTunerHooks.RefreshFor(_library, "Active=None");
+		}
 	}
 
 	private PresetPanelTuningTarget HitTestTuningTarget(Vector2 mousePosition)
@@ -454,6 +477,19 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private void Initialize(NCardLibrary library)
 	{
 		_library = library;
+		_isRelicHost = false;
+		InitializeCommon();
+	}
+
+	private void InitializeRelicHost(Control host)
+	{
+		_library = null;
+		_isRelicHost = true;
+		InitializeCommon();
+	}
+
+	private void InitializeCommon()
+	{
 		Name = "CardEditorPresetPanel";
 		ZIndex = 60;
 		MouseFilter = MouseFilterEnum.Stop;
@@ -934,9 +970,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_isCreatorMode = creatorMode;
 		if (_titleLabel != null && GodotObject.IsInstanceValid(_titleLabel))
 		{
-			_titleLabel.Text = creatorMode
-				? CardEditorLoc.T("button.presetCreator", "Preset Creator")
-				: CardEditorLoc.T("button.presetEditor", "Preset Editor");
+			_titleLabel.Text = CardEditorLoc.T("button.presetEditor", "Preset Editor");
 		}
 
 		if (IsNodeReady())
@@ -979,9 +1013,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_presetSelect.Clear();
 		_presetSelect.AddItem(CardEditorLoc.T("presets.select", "Select preset…"));
 
-		List<string> presets = _isCreatorMode
-			? CardEditorCreatorPresetStore.ListPresetNames()
-			: CardEditorPresetStore.ListPresetNames();
+		List<string> presets = CardEditorPresetStore.ListPresetNames();
 		foreach (string name in presets)
 		{
 			_presetSelect.AddItem(name);
@@ -997,9 +1029,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		}
 		else
 		{
-			string? startup = _isCreatorMode
-				? CardEditorCreatorPresetStore.GetStartupPresetName()
-				: CardEditorPresetStore.GetStartupPresetName();
+			string? startup = CardEditorPresetStore.GetStartupPresetName();
 
 			if (!string.IsNullOrWhiteSpace(startup))
 			{
@@ -1024,9 +1054,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		if (_presetNameField != null && GodotObject.IsInstanceValid(_presetNameField) && string.IsNullOrWhiteSpace(_presetNameField.Text))
 		{
-			string? startup = _isCreatorMode
-				? CardEditorCreatorPresetStore.GetStartupPresetName()
-				: CardEditorPresetStore.GetStartupPresetName();
+			string? startup = CardEditorPresetStore.GetStartupPresetName();
 			if (!string.IsNullOrWhiteSpace(startup))
 			{
 				_presetNameField.Text = startup;
@@ -1053,23 +1081,14 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 
-		if (_isCreatorMode)
-		{
-			Dictionary<ModelId, CardEditorCreatedCardDefinition> snapshot = CardEditorCreatedCardsStore.ExportSnapshot();
-			bool ok = CardEditorCreatorPresetStore.TrySavePreset(name, snapshot);
-			Log.Info(ok
-				? $"[CardEditor] Saved creator preset '{name}' ({snapshot.Count.ToString(CultureInfo.InvariantCulture)} cards)"
-				: $"[CardEditor] Failed saving creator preset '{name}'");
-		}
-		else
-		{
-			Dictionary<ModelId, CardOverride> snapshot = CardEditorOverrides.ExportSnapshot();
-			Dictionary<ModelId, List<ModelId>> baseDeckSnapshot = CardEditorBaseDeckStore.ExportSnapshot();
-			bool ok = CardEditorPresetStore.TrySavePreset(name, snapshot, baseDeckSnapshot);
-			Log.Info(ok
-				? $"[CardEditor] Saved preset '{name}' ({snapshot.Count.ToString(CultureInfo.InvariantCulture)} cards, {baseDeckSnapshot.Count.ToString(CultureInfo.InvariantCulture)} base decks)"
-				: $"[CardEditor] Failed saving preset '{name}'");
-		}
+		Dictionary<ModelId, CardOverride> snapshot = CardEditorOverrides.ExportSnapshot();
+		Dictionary<ModelId, List<ModelId>> baseDeckSnapshot = CardEditorBaseDeckStore.ExportSnapshot();
+		Dictionary<ModelId, CardEditorCreatedCardDefinition> createdSnapshot = CardEditorCreatedCardsStore.ExportSnapshot();
+		int relicOverrideCount = CardEditorRelicOverrides.AllOverrides.Count;
+		bool ok = CardEditorPresetStore.TrySavePreset(name, snapshot, baseDeckSnapshot);
+		Log.Info(ok
+			? $"[CardEditor] Saved preset '{name}' ({snapshot.Count.ToString(CultureInfo.InvariantCulture)} card overrides, {createdSnapshot.Count.ToString(CultureInfo.InvariantCulture)} creator cards, {baseDeckSnapshot.Count.ToString(CultureInfo.InvariantCulture)} base decks, {relicOverrideCount.ToString(CultureInfo.InvariantCulture)} relics)"
+			: $"[CardEditor] Failed saving preset '{name}'");
 
 		RefreshPresetList();
 		SelectPresetByName(name);
@@ -1090,44 +1109,29 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 
-		if (_isCreatorMode)
+		HashSet<ModelId> previousIds = CardEditorOverrides.AllOverrides.Keys.ToHashSet();
+		if (!CardEditorPresetStore.TryLoadUnifiedPreset(name, out CardEditorPresetStore.UnifiedPresetSnapshot loaded))
 		{
-			if (!CardEditorCreatorPresetStore.TryLoadPreset(name, out Dictionary<ModelId, CardEditorCreatedCardDefinition> loaded))
-			{
-				Log.Info($"[CardEditor] Failed loading creator preset '{name}'");
-				return;
-			}
-
-			CardEditorCreatedCardsStore.ImportSnapshot(loaded);
-			CardEditorUiState.RefreshLibrary(_library);
-			Log.Info($"[CardEditor] Loaded creator preset '{name}' ({loaded.Count.ToString(CultureInfo.InvariantCulture)} cards)");
-			CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
+			Log.Info($"[CardEditor] Failed loading preset '{name}'");
+			return;
 		}
-		else
+
+		CardEditorPresetStore.ApplyUnifiedSnapshot(loaded);
+		CardEditorBaseDeckUiState.ClearTransientState();
+		CardEditorBaseDeckUiState.EnsureValidCharacter();
+
+		HashSet<ModelId> idsToReset = previousIds;
+		idsToReset.ExceptWith(CardEditorOverrides.AllOverrides.Keys);
+		CardEditorOverrides.ResetExistingCardsForIds(idsToReset);
+		CardEditorOverrides.ApplyAllToExistingCards();
+
+		if (_library != null)
 		{
-			HashSet<ModelId> previousIds = CardEditorOverrides.AllOverrides.Keys.ToHashSet();
-			if (!CardEditorPresetStore.TryLoadPreset(name, out Dictionary<ModelId, CardOverride> loaded, out Dictionary<ModelId, List<ModelId>> loadedBaseDecks))
-			{
-				Log.Info($"[CardEditor] Failed loading preset '{name}'");
-				return;
-			}
-
-			CardEditorOverrides.ReplaceAll(loaded);
-			CardEditorBaseDeckStore.ImportSnapshot(loadedBaseDecks);
-			CardEditorBaseDeckUiState.ClearTransientState();
-			CardEditorBaseDeckUiState.EnsureValidCharacter();
-
-			HashSet<ModelId> loadedIds = loaded.Keys.ToHashSet();
-			HashSet<ModelId> idsToReset = previousIds;
-			idsToReset.ExceptWith(loadedIds);
-			CardEditorOverrides.ResetExistingCardsForIds(idsToReset);
-			CardEditorOverrides.ApplyAllToExistingCards();
-
 			CardEditorUiState.RefreshLibrary(_library);
-			CardEditorBaseDeckUiState.RefreshAll();
-			Log.Info($"[CardEditor] Loaded preset '{name}' ({loaded.Count.ToString(CultureInfo.InvariantCulture)} cards, {loadedBaseDecks.Count.ToString(CultureInfo.InvariantCulture)} base decks)");
-			CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 		}
+		CardEditorBaseDeckUiState.RefreshAll();
+		Log.Info($"[CardEditor] Loaded preset '{name}' ({loaded.Overrides.Count.ToString(CultureInfo.InvariantCulture)} card overrides, {loaded.CreatedCards.Count.ToString(CultureInfo.InvariantCulture)} creator cards, {loaded.BaseDecks.Count.ToString(CultureInfo.InvariantCulture)} base decks, {loaded.RelicOverrides.Count.ToString(CultureInfo.InvariantCulture)} relics)");
+		CardEditorMultiplayerSync.NotifySharedStateMutatedLocally();
 	}
 
 	private async void OnDeletePressed()
@@ -1150,9 +1154,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 
-		bool ok = _isCreatorMode
-			? CardEditorCreatorPresetStore.TryDeletePreset(name)
-			: CardEditorPresetStore.TryDeletePreset(name);
+		bool ok = CardEditorPresetStore.TryDeletePreset(name);
 		Log.Info(ok
 			? $"[CardEditor] Deleted preset '{name}'"
 			: $"[CardEditor] Failed deleting preset '{name}'");
@@ -1176,10 +1178,19 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 
-		if (_isCreatorMode)
+		if (_isRelicHost)
+		{
+			CardEditorRelicOverrides.ReplaceAll(new Dictionary<ModelId, RelicOverride>());
+			CardEditorRelicOverrideStore.Save();
+			Log.Info("[CardEditor] Reverted relic overrides to vanilla");
+		}
+		else if (_isCreatorMode)
 		{
 			CardEditorCreatedCardsStore.ResetAllToDefaults();
-			CardEditorUiState.RefreshLibrary(_library);
+			if (_library != null)
+			{
+				CardEditorUiState.RefreshLibrary(_library);
+			}
 			Log.Info("[CardEditor] Reverted creator cards to defaults");
 		}
 		else
@@ -1189,7 +1200,10 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			CardEditorBaseDeckStore.ClearAllOverrides();
 			CardEditorBaseDeckUiState.ClearTransientState();
 			CardEditorOverrides.ResetExistingCardsForIds(idsToReset);
-			CardEditorUiState.RefreshLibrary(_library);
+			if (_library != null)
+			{
+				CardEditorUiState.RefreshLibrary(_library);
+			}
 			CardEditorBaseDeckUiState.RefreshAll();
 			Log.Info("[CardEditor] Reverted to vanilla (overrides cleared)");
 		}
@@ -1210,9 +1224,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			hasSelection,
 			hasSelection ? string.Empty : CardEditorLoc.T("tooltip.selectPresetFirst", "Select a preset first."));
 
-		string? startup = _isCreatorMode
-			? CardEditorCreatorPresetStore.GetStartupPresetName()
-			: CardEditorPresetStore.GetStartupPresetName();
+		string? startup = CardEditorPresetStore.GetStartupPresetName();
 
 		bool isStartup = !string.IsNullOrWhiteSpace(selected)
 			&& !string.IsNullOrWhiteSpace(startup)
@@ -1224,7 +1236,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private void OnSortByCharacterToggled(bool enabled)
 	{
 		CardEditorCreatorPresetStore.SetSortByCharacter(enabled);
-		if (_isCreatorMode)
+		if (_isCreatorMode && _library != null)
 		{
 			CardEditorUiState.RefreshLibrary(_library);
 		}
@@ -1251,20 +1263,19 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 
-		if (_isCreatorMode)
-		{
-			CardEditorCreatorPresetStore.SetStartupPresetName(enabled ? selected : null);
-		}
-		else
-		{
-			CardEditorPresetStore.SetStartupPresetName(enabled ? selected : null);
-		}
+		CardEditorPresetStore.SetStartupPresetName(enabled ? selected : null);
 	}
 
 	private void RefreshAlignmentToScrollbar()
 	{
 		try
 		{
+			if (_library == null)
+			{
+				ApplyOffsetsForState();
+				return;
+			}
+
 			NCardLibraryGrid? grid = _library?.GetNodeOrNull<NCardLibraryGrid>("%CardGrid");
 			Control? scrollbar = grid?.GetNodeOrNull<Control>("Scrollbar");
 			if (scrollbar == null)

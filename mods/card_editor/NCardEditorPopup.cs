@@ -123,6 +123,11 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private static void PopupLagLog(string message)
 	{
+		if (!CardEditorMod.IsVerboseEditorLogging)
+		{
+			return;
+		}
+
 		int sequence = System.Threading.Interlocked.Increment(ref _popupLagLogSequence);
 		Log.Info($"[CardEditor][PopupLag] #{sequence} t={Time.GetTicksMsec()} {message}");
 	}
@@ -1728,7 +1733,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private void BindVanillaBaseControlsForCurrentCard()
 	{
-		CardOverride? existing = CardEditorOverrides.Get(_cardId);
+		CardOverride? existing = GetEffectivePopupOverride();
 
 		SetTickboxSilent(_vanillaEnabledTickbox, existing?.Enabled != false);
 		SetLineEditText(_vanillaTitleField, existing?.TitleOverride ?? GetCanonicalVanillaTitle(_cardId));
@@ -5811,9 +5816,105 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		float y = openDown ? anchorRect.End.Y : anchorRect.Position.Y - contentSize.Y;
 		y = Mathf.Clamp(y, inner.Position.Y, inner.End.Y - contentSize.Y);
 
-		Vector2I pos = new Vector2I((int)MathF.Round(x), (int)MathF.Round(y));
+		Vector2 popupOffset = GetPopupScreenOffset(anchor, popup);
+		Vector2I pos = new Vector2I((int)MathF.Round(x + popupOffset.X), (int)MathF.Round(y + popupOffset.Y));
+		pos = ClampPopupPositionToScreen(anchor, popup, pos, contentSize);
 		popup.Position = pos;
 		popup.Size = contentSize;
+	}
+
+	private static Vector2 GetPopupScreenOffset(Control anchor, PopupMenu popup)
+	{
+		if (anchor == null || popup == null)
+		{
+			return Vector2.Zero;
+		}
+
+		try
+		{
+			if (popup.IsEmbedded())
+			{
+				return Vector2.Zero;
+			}
+		}
+		catch
+		{
+			return Vector2.Zero;
+		}
+
+		try
+		{
+			Window? window = anchor.GetWindow();
+			if (window == null || !GodotObject.IsInstanceValid(window))
+			{
+				return Vector2.Zero;
+			}
+
+			Vector2I windowPosition = window.Position;
+			try
+			{
+				int screen = window.CurrentScreen;
+				Rect2I screenRect = DisplayServer.ScreenGetUsableRect(screen);
+				if (screenRect.Size.X > 0
+					&& screenRect.Size.Y > 0
+					&& !screenRect.HasPoint(windowPosition))
+				{
+					windowPosition = screenRect.Position;
+				}
+			}
+			catch
+			{
+			}
+
+			return new Vector2(windowPosition.X, windowPosition.Y);
+		}
+		catch
+		{
+			return Vector2.Zero;
+		}
+	}
+
+	private static Vector2I ClampPopupPositionToScreen(Control anchor, PopupMenu popup, Vector2I position, Vector2I size)
+	{
+		if (anchor == null || popup == null)
+		{
+			return position;
+		}
+
+		try
+		{
+			if (popup.IsEmbedded())
+			{
+				return position;
+			}
+		}
+		catch
+		{
+			return position;
+		}
+
+		try
+		{
+			Window? window = anchor.GetWindow();
+			int screen = window != null && GodotObject.IsInstanceValid(window)
+				? window.CurrentScreen
+				: DisplayServer.WindowGetCurrentScreen();
+			Rect2I screenRect = DisplayServer.ScreenGetUsableRect(screen);
+			if (screenRect.Size.X <= 0 || screenRect.Size.Y <= 0)
+			{
+				return position;
+			}
+
+			int maxX = screenRect.Position.X + Math.Max(0, screenRect.Size.X - Math.Max(1, size.X));
+			int maxY = screenRect.Position.Y + Math.Max(0, screenRect.Size.Y - Math.Max(1, size.Y));
+			int x = Math.Clamp(position.X, screenRect.Position.X, maxX);
+			int y = Math.Clamp(position.Y, screenRect.Position.Y, maxY);
+			return new Vector2I(x, y);
+		}
+		catch
+		{
+			return position;
+		}
 	}
 
 	private (Control? Bounds, bool PreferAvailableRoom) GetPopupBounds(Control anchor)
@@ -6655,6 +6756,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			CardExtraEffectCountEvent.InPile => CardEditorLoc.T(
 				"tooltip.countEvent.inPile",
 				"Cards in Pile / Hand. Counts matching cards currently in the selected pile. Use Hand for \"holding X cards\", Deck for your master deck, or All Piles for all combat piles."),
+			CardExtraEffectCountEvent.StatusGained => CardEditorLoc.T(
+				"tooltip.countEvent.statusGained",
+				"Power/status gained. For persistent effects, set Trigger From to Any Enemy or Anyone to watch enemies too; Trigger Target is the creature that gained the status."),
+			CardExtraEffectCountEvent.StatusLost => CardEditorLoc.T(
+				"tooltip.countEvent.statusLost",
+				"Power/status lost. For persistent effects, set Trigger From to Any Enemy or Anyone to watch enemies too; Trigger Target is the creature that lost the status."),
 			CardExtraEffectCountEvent.EffectResult => CardEditorLoc.T(
 				"tooltip.countEvent.effectResult",
 				"Actual result from an effect row. Use this for loops and conditions based on kills, damage dealt, overkill, blocked damage, or application count."),
@@ -9217,7 +9324,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
-		CardOverride? existing = CardEditorOverrides.Get(_cardId);
+		CardOverride? existing = GetEffectivePopupOverride();
 
 		Label header = new Label { Text = CardEditorLoc.T("section.editor", "Editor") };
 		StyleSectionLabel(header);
@@ -12424,11 +12531,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		_cardSmithRows.Clear();
 
-		CardOverride? stored = CardEditorOverrides.Get(_cardId);
-		List<CardExtraEffect>? storedEffects = stored?.ExtraEffects;
-		if (storedEffects != null && storedEffects.Count > 0)
+		CardOverride? existing = GetEffectivePopupOverride();
+		List<CardExtraEffect>? existingEffects = existing?.ExtraEffects;
+		if (existingEffects != null && existingEffects.Count > 0)
 		{
-			foreach (CardExtraEffect effect in storedEffects)
+			foreach (CardExtraEffect effect in existingEffects)
 			{
 				if (effect != null
 					&& effect.ScaleMode == CardExtraEffectScaleMode.PerHistoryCount
@@ -12464,6 +12571,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				and not CardExtraEffectKind.ConditionalGlow
 				and not CardExtraEffectKind.CardsInPileUpgradedAura
 				&& !CardEditorExtraEffects.IsLegacyOrbSlotKind(d.Kind))
+			.OrderBy(CardEditorExtraEffects.DefinitionDisplayLabel, StringComparer.CurrentCultureIgnoreCase)
+			.ThenBy(d => d.Kind.ToString(), StringComparer.Ordinal)
 			.ToList();
 
 		VBoxContainer wrapper = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -14008,7 +14117,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(kindSelect);
 		ConstrainOptionButtonPopup(kindSelect);
 
-		List<int> kindDefinitionIndices = new List<int>();
+		List<(int DefinitionIndex, string Label)> kindOptions = new List<(int DefinitionIndex, string Label)>();
 		for (int definitionIndex = 0; definitionIndex < CardEditorExtraEffects.Definitions.Count; definitionIndex++)
 		{
 			CardExtraEffectDefinition def = CardEditorExtraEffects.Definitions[definitionIndex];
@@ -14030,10 +14139,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				continue;
 			}
 
-			kindDefinitionIndices.Add(definitionIndex);
 			string label = TryGetUnifiedEffectGroup(def.Kind, out UnifiedEffectGroup group)
 				? GetUnifiedEffectGroupLabel(group)
 				: CardEditorExtraEffects.DefinitionDisplayLabel(def);
+			kindOptions.Add((definitionIndex, label));
+		}
+
+		kindOptions.Sort((left, right) =>
+		{
+			int labelCompare = StringComparer.CurrentCultureIgnoreCase.Compare(left.Label, right.Label);
+			if (labelCompare != 0)
+			{
+				return labelCompare;
+			}
+			CardExtraEffectKind leftKind = CardEditorExtraEffects.Definitions[left.DefinitionIndex].Kind;
+			CardExtraEffectKind rightKind = CardEditorExtraEffects.Definitions[right.DefinitionIndex].Kind;
+			return StringComparer.Ordinal.Compare(leftKind.ToString(), rightKind.ToString());
+		});
+
+		List<int> kindDefinitionIndices = new List<int>(kindOptions.Count);
+		foreach ((int definitionIndex, string label) in kindOptions)
+		{
+			kindDefinitionIndices.Add(definitionIndex);
 			kindSelect.AddItem(label);
 		}
 
@@ -15402,6 +15529,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.anyEnemy", "Any Enemy"), (int)CardExtraEffectPowerTriggerFrom.AnyEnemy);
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.anyAlly", "Any Ally"), (int)CardExtraEffectPowerTriggerFrom.AnyAlly);
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.anyone", "Anyone"), (int)CardExtraEffectPowerTriggerFrom.Anyone);
+		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.markedTarget", "Marked Target"), (int)CardExtraEffectPowerTriggerFrom.MarkedTarget);
 		powerTriggerFromSelect.Select((int)CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect));
 		powerTriggerFromSelect.ItemSelected += _ => QueuePreviewUpdate();
 
@@ -17379,15 +17507,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		ConstrainOptionButtonPopup(conditionalBonusConditionTypeSelect);
 		conditionalBonusConditionTypeSelect.TooltipText = CardEditorLoc.T(
 			"tooltip.conditionalBonusConditionType",
-			"Choose whether this bonus uses a direct target/self check, or the main history/count logic from this effect.");
+			"Choose whether this bonus uses a direct target/self check, trigger attack result, or the main history/count logic from this effect.");
 		conditionalBonusConditionTypeSelect.AddItem(CardEditorExtraEffects.BranchConditionTypeLabel(CardExtraEffectBranchConditionType.TargetCheck));
 		conditionalBonusConditionTypeSelect.AddItem(CardEditorExtraEffects.BranchConditionTypeLabel(CardExtraEffectBranchConditionType.HistoryCount));
+		conditionalBonusConditionTypeSelect.AddItem(CardEditorExtraEffects.BranchConditionTypeLabel(CardExtraEffectBranchConditionType.AttackResult));
 		CardExtraEffectBranchConditionType initialConditionalBonusConditionType = effect != null && effect.ConditionalBonusConditionType != CardExtraEffectBranchConditionType.None
 			? effect.ConditionalBonusConditionType
 			: effect != null && effect.ConditionalBonusCondition != CardExtraEffectConditionalBonusCondition.None
 				? CardExtraEffectBranchConditionType.TargetCheck
 				: CardExtraEffectBranchConditionType.TargetCheck;
-		conditionalBonusConditionTypeSelect.Select(initialConditionalBonusConditionType == CardExtraEffectBranchConditionType.HistoryCount ? 1 : 0);
+		conditionalBonusConditionTypeSelect.Select(initialConditionalBonusConditionType switch
+		{
+			CardExtraEffectBranchConditionType.HistoryCount => 1,
+			CardExtraEffectBranchConditionType.AttackResult => 2,
+			_ => 0
+		});
 
 		OptionButton conditionalBonusEnemyStatusSelect = new OptionButton
 		{
@@ -17514,7 +17648,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		StyleInput(branchConditionTypeSelect);
 		ConstrainOptionButtonPopup(branchConditionTypeSelect);
-		branchConditionTypeSelect.TooltipText = CardEditorLoc.T("tooltip.branchConditionType", "Choose whether this branch uses a target check, history/count condition, or Fatal killing-blow condition.");
+		branchConditionTypeSelect.TooltipText = CardEditorLoc.T("tooltip.branchConditionType", "Choose whether this branch uses a target check, attack-result check, history/count condition, or Fatal killing-blow condition.");
 		foreach (CardExtraEffectBranchConditionType type in Enum.GetValues<CardExtraEffectBranchConditionType>())
 		{
 			if (type == CardExtraEffectBranchConditionType.None)
@@ -22052,6 +22186,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CardExtraEffectCardSelectionMode.Choose,
 			CardExtraEffectCardSelectionMode.Random,
 			CardExtraEffectCardSelectionMode.RandomOffer,
+			CardExtraEffectCardSelectionMode.TopOffer,
 			CardExtraEffectCardSelectionMode.All,
 			CardExtraEffectCardSelectionMode.UpTo,
 			CardExtraEffectCardSelectionMode.SelectedByEffect
@@ -24352,6 +24487,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool isModifyActivePower = kind == CardExtraEffectKind.ModifyActivePower;
 		bool isEnchantCard = kind == CardExtraEffectKind.EnchantCard;
 		bool isApplyPower = kind == CardExtraEffectKind.ApplyPower;
+		bool isRemovePower = kind == CardExtraEffectKind.RemovePower;
 		bool isDiscardCards = kind == CardExtraEffectKind.DiscardCards;
 		bool isExhaustCards = kind == CardExtraEffectKind.ExhaustCards;
 		bool isDrawCards = baseKind == CardExtraEffectKind.DrawCards;
@@ -24902,6 +25038,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CardExtraEffectConditionalBonusCondition cond = GetSelectedConditionalBonusCondition(row);
 			bool usesTargetCheck = conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck;
 			bool usesHistoryCount = conditionalBonusConditionType == CardExtraEffectBranchConditionType.HistoryCount;
+			bool usesAttackResult = conditionalBonusConditionType == CardExtraEffectBranchConditionType.AttackResult;
 			bool needsStatus = usesTargetCheck && (cond is CardExtraEffectConditionalBonusCondition.TargetHasStatus
 				or CardExtraEffectConditionalBonusCondition.SelfHasStatus
 				or CardExtraEffectConditionalBonusCondition.TargetLacksStatus
@@ -24916,7 +25053,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 			if (row.ConditionalBonusConditionSelect != null && GodotObject.IsInstanceValid(row.ConditionalBonusConditionSelect))
 			{
-				row.ConditionalBonusConditionSelect.Visible = showRow && usesTargetCheck;
+				row.ConditionalBonusConditionSelect.Visible = showRow && (usesTargetCheck || usesAttackResult);
 			}
 			if (row.ConditionalBonusEnemyStatusSelect != null && GodotObject.IsInstanceValid(row.ConditionalBonusEnemyStatusSelect))
 			{
@@ -25046,7 +25183,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		row.EnchantmentRow.Visible = isEnchantCard;
 		if (row.PowerRow != null && GodotObject.IsInstanceValid(row.PowerRow))
 		{
-			row.PowerRow.Visible = isApplyPower || isGainStatusEqualToStatus;
+			row.PowerRow.Visible = isApplyPower || isRemovePower || isGainStatusEqualToStatus;
 		}
 		if (row.StatusToStatusModeRow != null && GodotObject.IsInstanceValid(row.StatusToStatusModeRow))
 		{
@@ -25424,7 +25561,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				&& row.MoveSelectionModeSelect != null
 				&& GodotObject.IsInstanceValid(row.MoveSelectionModeSelect)
 				&& row.MoveSelectionModeSelect.Visible
-				&& GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose) == CardExtraEffectCardSelectionMode.RandomOffer;
+				&& GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose) is CardExtraEffectCardSelectionMode.RandomOffer
+					or CardExtraEffectCardSelectionMode.TopOffer;
 			bool grantSelectionControlsEnabledForOffer = selfScalingUsesRecipientSelection
 				|| isGrantExtraEffect
 				|| (row.GrantTickbox != null
@@ -25435,7 +25573,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				&& row.GrantModeSelect != null
 				&& GodotObject.IsInstanceValid(row.GrantModeSelect)
 				&& row.GrantModeSelect.Visible
-				&& GetSelectedCardSelectionMode(row.GrantModeSelect, CardExtraEffectCardSelectionMode.Choose) == CardExtraEffectCardSelectionMode.RandomOffer;
+				&& GetSelectedCardSelectionMode(row.GrantModeSelect, CardExtraEffectCardSelectionMode.Choose) is CardExtraEffectCardSelectionMode.RandomOffer
+					or CardExtraEffectCardSelectionMode.TopOffer;
 			bool showRandomOfferCount = moveUsesRandomOffer || grantUsesRandomOffer;
 			row.RandomOfferCountRow.Visible = showRandomOfferCount;
 			if (row.RandomOfferCountField != null && GodotObject.IsInstanceValid(row.RandomOfferCountField))
@@ -26235,6 +26374,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			: CardExtraEffectBranchConditionType.None;
 		bool useTargetCheck = showBranchRows && branchConditionType == CardExtraEffectBranchConditionType.TargetCheck;
 		bool useHistoryCount = showBranchRows && branchConditionType == CardExtraEffectBranchConditionType.HistoryCount;
+		bool useAttackResult = showBranchRows && branchConditionType == CardExtraEffectBranchConditionType.AttackResult;
 
 		if (row.BranchConditionTypeRow != null && GodotObject.IsInstanceValid(row.BranchConditionTypeRow))
 		{
@@ -26246,7 +26386,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (row.BranchConditionRow != null && GodotObject.IsInstanceValid(row.BranchConditionRow))
 		{
-			row.BranchConditionRow.Visible = useTargetCheck;
+			row.BranchConditionRow.Visible = useTargetCheck || useAttackResult;
 			CardExtraEffectConditionalBonusCondition branchCondition = GetSelectedBranchCondition(row);
 			bool needsBranchStatus = branchCondition is CardExtraEffectConditionalBonusCondition.TargetHasStatus
 				or CardExtraEffectConditionalBonusCondition.SelfHasStatus
@@ -28293,6 +28433,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return selected switch
 		{
 			1 => CardExtraEffectBranchConditionType.HistoryCount,
+			2 => CardExtraEffectBranchConditionType.AttackResult,
 			_ => CardExtraEffectBranchConditionType.TargetCheck
 		};
 	}
@@ -31760,15 +31901,29 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					? GetSelectedConditionalBonusConditionType(row)
 					: CardExtraEffectBranchConditionType.None;
 				CardExtraEffectConditionalBonusCondition conditionalBonusCondition = allowConditionalBonus
-					&& conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& (conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+						|| conditionalBonusConditionType == CardExtraEffectBranchConditionType.AttackResult)
 					? GetSelectedConditionalBonusCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				int conditionalBonusAmount = allowConditionalBonus && row.ConditionalBonusAmountField != null && GodotObject.IsInstanceValid(row.ConditionalBonusAmountField)
 					? ParseIntOrDefault(row.ConditionalBonusAmountField.Text, 0)
 					: 0;
-				if (conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+				if ((conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+						|| conditionalBonusConditionType == CardExtraEffectBranchConditionType.AttackResult)
 					&& conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
 				{
+					conditionalBonusAmount = 0;
+				}
+				if (conditionalBonusConditionType == CardExtraEffectBranchConditionType.AttackResult
+					&& !CardEditorExtraEffects.IsTriggerAttackResultCondition(conditionalBonusCondition))
+				{
+					conditionalBonusCondition = CardExtraEffectConditionalBonusCondition.None;
+					conditionalBonusAmount = 0;
+				}
+				if (conditionalBonusConditionType == CardExtraEffectBranchConditionType.AttackResult
+					&& !CardEditorExtraEffects.IsTriggerAttackResultCondition(conditionalBonusCondition))
+				{
+					conditionalBonusCondition = CardExtraEffectConditionalBonusCondition.None;
 					conditionalBonusAmount = 0;
 				}
 				CardExtraEffectEnemyStatus conditionalBonusEnemyStatus = conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
@@ -31801,7 +31956,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				CardExtraEffectBranchConditionType branchConditionType = allowBranch
 					? GetSelectedBranchConditionType(row)
 					: CardExtraEffectBranchConditionType.None;
-				CardExtraEffectConditionalBonusCondition branchCondition = allowBranch && branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
+				CardExtraEffectConditionalBonusCondition branchCondition = allowBranch
+					&& (branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
+						|| branchConditionType == CardExtraEffectBranchConditionType.AttackResult)
 					? GetSelectedBranchCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				CardExtraEffectEnemyStatus branchEnemyStatus = branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
@@ -31932,6 +32089,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CardExtraEffectBranchConditionType.TargetCheck => branchCondition != CardExtraEffectConditionalBonusCondition.None,
 					CardExtraEffectBranchConditionType.HistoryCount => true,
 					CardExtraEffectBranchConditionType.Fatal => true,
+					CardExtraEffectBranchConditionType.AttackResult => CardEditorExtraEffects.IsTriggerAttackResultCondition(branchCondition),
 					_ => false
 				};
 				bool branchIsConditionOnly = isConditionOnlyBehavior || resolvedKind == CardExtraEffectKind.StatefulTransform;
@@ -32200,7 +32358,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					EnchantmentId = enchantmentId,
 					EnchantmentDuration = enchantmentDuration,
 					EnchantmentTurns = enchantmentTurns,
-					PowerId = (resolvedKind is CardExtraEffectKind.ApplyPower or CardExtraEffectKind.GainStatusEqualToStatus)
+					PowerId = (resolvedKind is CardExtraEffectKind.ApplyPower or CardExtraEffectKind.RemovePower or CardExtraEffectKind.GainStatusEqualToStatus)
 						? GetSelectedExtraEffectPowerId(row.PowerSelect)
 						: (resolvedKind == CardExtraEffectKind.DoesNotConsumeVigor
 							&& row.ResourceConsumptionModeSelect != null
@@ -33184,13 +33342,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					? GetSelectedConditionalBonusConditionType(row)
 					: CardExtraEffectBranchConditionType.None;
 				CardExtraEffectConditionalBonusCondition conditionalBonusCondition = allowConditionalBonus
-					&& conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+					&& (conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+						|| conditionalBonusConditionType == CardExtraEffectBranchConditionType.AttackResult)
 					? GetSelectedConditionalBonusCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				int conditionalBonusAmount = allowConditionalBonus && row.ConditionalBonusAmountField != null && GodotObject.IsInstanceValid(row.ConditionalBonusAmountField)
 					? ParseIntOrDefault(row.ConditionalBonusAmountField.Text, 0)
 					: 0;
-				if (conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+				if ((conditionalBonusConditionType == CardExtraEffectBranchConditionType.TargetCheck
+						|| conditionalBonusConditionType == CardExtraEffectBranchConditionType.AttackResult)
 					&& conditionalBonusCondition == CardExtraEffectConditionalBonusCondition.None)
 				{
 					conditionalBonusAmount = 0;
@@ -33225,7 +33385,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				CardExtraEffectBranchConditionType branchConditionType = allowBranch
 					? GetSelectedBranchConditionType(row)
 					: CardExtraEffectBranchConditionType.None;
-				CardExtraEffectConditionalBonusCondition branchCondition = allowBranch && branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
+				CardExtraEffectConditionalBonusCondition branchCondition = allowBranch
+					&& (branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
+						|| branchConditionType == CardExtraEffectBranchConditionType.AttackResult)
 					? GetSelectedBranchCondition(row)
 					: CardExtraEffectConditionalBonusCondition.None;
 				CardExtraEffectEnemyStatus branchEnemyStatus = branchConditionType == CardExtraEffectBranchConditionType.TargetCheck
@@ -33356,6 +33518,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CardExtraEffectBranchConditionType.TargetCheck => branchCondition != CardExtraEffectConditionalBonusCondition.None,
 					CardExtraEffectBranchConditionType.HistoryCount => true,
 					CardExtraEffectBranchConditionType.Fatal => true,
+					CardExtraEffectBranchConditionType.AttackResult => CardEditorExtraEffects.IsTriggerAttackResultCondition(branchCondition),
 					_ => false
 				};
 				bool branchIsConditionOnly = isConditionOnlyBehavior || resolvedKind == CardExtraEffectKind.StatefulTransform;
@@ -33648,7 +33811,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					EnchantmentId = enchantmentId,
 					EnchantmentDuration = enchantmentDuration,
 					EnchantmentTurns = enchantmentTurns,
-					PowerId = (resolvedKind is CardExtraEffectKind.ApplyPower or CardExtraEffectKind.GainStatusEqualToStatus)
+					PowerId = (resolvedKind is CardExtraEffectKind.ApplyPower or CardExtraEffectKind.RemovePower or CardExtraEffectKind.GainStatusEqualToStatus)
 						? GetSelectedExtraEffectPowerId(row.PowerSelect)
 						: (resolvedKind == CardExtraEffectKind.DoesNotConsumeVigor
 							&& row.ResourceConsumptionModeSelect != null

@@ -307,12 +307,13 @@ internal static class CardEditorQuestEffects
 			CardEditorRunCardCounterState.Clear(combatState, questCard, BuildQuestCounterKey(questEffect), QuestCountersArePersistent);
 			int completionCount = CardEditorRunCardCounterState.Add(combatState, questCard, BuildQuestCompletionCounterKey(questEffect), 1, QuestCountersArePersistent);
 			bool finalCompletion = IsFinalQuestCompletion(questEffect, completionCount);
+			int rewardValue = await ExecuteQuestRewards(owner, rewardEffects, combatState, questCard, questEffect);
 			if (finalCompletion)
 			{
 				PlayerCmd.CompleteQuest(questCard);
-				await TryRemoveCompletedQuestCards(owner, questCard);
+				await TryRemoveCompletedQuestDeckCards(owner, questCard);
 			}
-			return await ExecuteQuestRewards(owner, rewardEffects, combatState, questCard);
+			return rewardValue;
 		}
 		catch (Exception ex)
 		{
@@ -328,7 +329,7 @@ internal static class CardEditorQuestEffects
 		}
 	}
 
-	private static async Task TryRemoveCompletedQuestCards(Player owner, CardModel questCard)
+	private static async Task TryRemoveCompletedQuestDeckCards(Player owner, CardModel questCard)
 	{
 		try
 		{
@@ -342,14 +343,6 @@ internal static class CardEditorQuestEffects
 					await CardPileCmd.RemoveFromDeck(deckCard);
 				}
 			}
-
-			List<CardModel> combatCards = owner?.PlayerCombatState?.AllCards?
-				.Where(card => IsSameRuntimeQuestCard(card, questCard))
-				.ToList() ?? new List<CardModel>();
-			if (combatCards.Count > 0)
-			{
-				await CardPileCmd.RemoveFromCombat(combatCards, skipVisuals: true);
-			}
 		}
 		catch (Exception ex)
 		{
@@ -357,7 +350,7 @@ internal static class CardEditorQuestEffects
 		}
 	}
 
-	private static async Task<int> ExecuteQuestRewards(Player owner, IReadOnlyList<CardExtraEffect> rewardEffects, CombatState? combatState, CardModel questCard)
+	private static async Task<int> ExecuteQuestRewards(Player owner, IReadOnlyList<CardExtraEffect> rewardEffects, CombatState? combatState, CardModel questCard, CardExtraEffect questEffect)
 	{
 		if (owner == null || rewardEffects == null || rewardEffects.Count == 0)
 		{
@@ -375,51 +368,33 @@ internal static class CardEditorQuestEffects
 				continue;
 			}
 
+			if (inCombat)
+			{
+				await ExecuteQuestRewardInCombat(owner, combatState!, questCard, questEffect, rewardEffect);
+				if (rewardEffect.Kind == CardExtraEffectKind.GainGold)
+				{
+					visibleGold += amount;
+				}
+				continue;
+			}
+
 			switch (rewardEffect.Kind)
 			{
 				case CardExtraEffectKind.GainGold:
-					if (inCombat)
-					{
-						await PlayerCmd.GainGold(amount, owner);
-					}
-					else
-					{
-						outOfCombatRewards.Add(new GoldReward(amount, owner));
-					}
+					outOfCombatRewards.Add(new GoldReward(amount, owner));
 					visibleGold += amount;
 					break;
 				case CardExtraEffectKind.LoseGold:
 					await PlayerCmd.LoseGold(amount, owner);
 					break;
 				case CardExtraEffectKind.CreateRandomPotion:
-					if (inCombat)
-					{
-						await CardEditorExtraEffects.CreatePotions(owner, rewardEffect, amount);
-					}
-					else
-					{
-						AddPotionRewards(owner, rewardEffect, amount, outOfCombatRewards);
-					}
+					AddPotionRewards(owner, rewardEffect, amount, outOfCombatRewards);
 					break;
 				case CardExtraEffectKind.AddCardReward:
-					if (inCombat)
-					{
-						CardEditorExtraEffects.AddCombatCardReward(owner, rewardEffect, amount);
-					}
-					else
-					{
-						AddCardReward(owner, rewardEffect, amount, outOfCombatRewards);
-					}
+					AddCardReward(owner, rewardEffect, amount, outOfCombatRewards);
 					break;
 				case CardExtraEffectKind.AddRelicReward:
-					if (inCombat)
-					{
-						CardEditorExtraEffects.AddCombatRelicReward(owner, amount);
-					}
-					else
-					{
-						AddRelicRewards(owner, amount, outOfCombatRewards);
-					}
+					AddRelicRewards(owner, amount, outOfCombatRewards);
 					break;
 				case CardExtraEffectKind.Heal:
 					if (owner.Creature != null)
@@ -454,6 +429,44 @@ internal static class CardEditorQuestEffects
 		}
 
 		return visibleGold;
+	}
+
+	private static async Task ExecuteQuestRewardInCombat(Player owner, CombatState combatState, CardModel questCard, CardExtraEffect questEffect, CardExtraEffect rewardEffect)
+	{
+		if (owner == null || combatState == null || questCard == null || rewardEffect == null)
+		{
+			return;
+		}
+
+		if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayEffect(combatState, owner, questCard, questEffect, out IDisposable rewardScope))
+		{
+			return;
+		}
+
+		using (rewardScope)
+		{
+			CardPlay syntheticPlay = new CardPlay
+			{
+				Card = questCard,
+				Target = null,
+				ResultPile = questCard.Pile?.Type ?? PileType.None,
+				Resources = new ResourceInfo
+				{
+					EnergySpent = 0,
+					EnergyValue = 0,
+					StarsSpent = 0,
+					StarValue = 0
+				},
+				IsAutoPlay = true,
+				PlayIndex = 0,
+				PlayCount = 1
+			};
+
+			if (!CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(questCard, rewardEffect))
+			{
+				await CardEditorExtraEffects.ExecuteEffect(combatState, new BlockingPlayerChoiceContext(), syntheticPlay, rewardEffect);
+			}
+		}
 	}
 
 	private static void AddPotionRewards(Player owner, CardExtraEffect effect, int amount, List<Reward> rewards)

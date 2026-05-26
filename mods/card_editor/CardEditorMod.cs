@@ -63,7 +63,7 @@ public static class CardEditorMod
 
 	public static void Init()
 	{
-		Log.Info("[CardEditor] Build tag: border lightning vanilla flipbook lane 2026-05-11");
+		Log.Info("[CardEditor] Build tag: relic preset button polish + gif art 2026-05-26");
 		CardEditorExternalLocalization.Init();
 		CardEditorCreatedCardsStore.EnsureLoaded();
 		CardEditorDefinitionStore.EnsureLoaded();
@@ -159,11 +159,15 @@ public static class CardEditorMod
 				typeof(Hook_ModifyDamageInternal_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
 				label: "Hook.ModifyDamageInternal");
 
-			EnsurePatched(
-				harmony,
-				typeof(Hook).GetMethod(nameof(Hook.ModifyHpLostAfterOsty), BindingFlags.Static | BindingFlags.Public)!,
-				typeof(Hook_ModifyHpLostAfterOsty_IgnoreNegation_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
-				label: "Hook.ModifyHpLostAfterOsty");
+			MethodInfo? modifyHpLostAfterOsty = AccessTools.Method(typeof(Hook), "ModifyHpLostAfterOsty");
+			if (modifyHpLostAfterOsty != null)
+			{
+				EnsurePatched(
+					harmony,
+					modifyHpLostAfterOsty,
+					typeof(Hook_ModifyHpLostAfterOsty_IgnoreNegation_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+					label: "Hook.ModifyHpLostAfterOsty");
+			}
 
 			EnsurePatched(
 				harmony,
@@ -171,11 +175,15 @@ public static class CardEditorMod
 				typeof(IntangiblePower_ModifyHpLostAfterOsty_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
 				label: "IntangiblePower.ModifyHpLostAfterOsty");
 
-			EnsurePatched(
-				harmony,
-				typeof(SlipperyPower).GetMethod(nameof(SlipperyPower.ModifyDamageCap), BindingFlags.Instance | BindingFlags.Public)!,
-				typeof(SlipperyPower_ModifyDamageCap_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
-				label: "SlipperyPower.ModifyDamageCap");
+			MethodInfo? slipperyDamageCap = typeof(SlipperyPower).GetMethod(nameof(SlipperyPower.ModifyDamageCap), BindingFlags.Instance | BindingFlags.Public);
+			if (slipperyDamageCap?.DeclaringType == typeof(SlipperyPower))
+			{
+				EnsurePatched(
+					harmony,
+					slipperyDamageCap,
+					typeof(SlipperyPower_ModifyDamageCap_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+					label: "SlipperyPower.ModifyDamageCap");
+			}
 
 			EnsurePatched(
 				harmony,
@@ -191,7 +199,7 @@ public static class CardEditorMod
 		}
 		catch (Exception ex)
 		{
-			Log.Error($"[CardEditor][IgnoreDamageDebug] Failed ensuring ignore-damage patches: {ex}");
+			Log.Warn($"[CardEditor][IgnoreDamageDebug] Failed ensuring ignore-damage patches: {ex}");
 		}
 	}
 
@@ -203,20 +211,36 @@ public static class CardEditorMod
 			return;
 		}
 
-		Patches? infoBefore = Harmony.GetPatchInfo(target);
-		bool alreadyPatched = infoBefore?.Owners.Contains(HarmonyId) == true;
-		if (!alreadyPatched)
+		if (target is MethodInfo methodInfo
+			&& methodInfo.DeclaringType != null
+			&& methodInfo.ReflectedType != null
+			&& methodInfo.DeclaringType != methodInfo.ReflectedType)
 		{
-			harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+			Log.Warn($"[CardEditor][IgnoreDamageDebug] Skipping inherited patch target for {label}; declared on {methodInfo.DeclaringType.FullName}.");
+			return;
 		}
 
-		Patches? infoAfter = Harmony.GetPatchInfo(target);
-		string owners = infoAfter == null || infoAfter.Owners.Count == 0
-			? "<none>"
-			: string.Join(", ", infoAfter.Owners.Distinct());
-		if (CardEditorIgnoreEffectHelpers.VerboseDebugEnabled)
+		try
 		{
-			Log.Info($"[CardEditor][IgnoreDamageDebug] EnsurePatched {label} alreadyPatched={alreadyPatched} owners={owners}");
+			Patches? infoBefore = Harmony.GetPatchInfo(target);
+			bool alreadyPatched = infoBefore?.Owners.Contains(HarmonyId) == true;
+			if (!alreadyPatched)
+			{
+				harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+			}
+
+			Patches? infoAfter = Harmony.GetPatchInfo(target);
+			string owners = infoAfter == null || infoAfter.Owners.Count == 0
+				? "<none>"
+				: string.Join(", ", infoAfter.Owners.Distinct());
+			if (CardEditorIgnoreEffectHelpers.VerboseDebugEnabled)
+			{
+				Log.Info($"[CardEditor][IgnoreDamageDebug] EnsurePatched {label} alreadyPatched={alreadyPatched} owners={owners}");
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][IgnoreDamageDebug] Skipping incompatible explicit patch {label}: {ex.Message}");
 		}
 	}
 
@@ -422,16 +446,19 @@ public static class CardModel_UpgradeInternal_Patch
 		}
 		if (CardEditorOverrides.SuppressAllOverrides || CardEditorOverrides.SuppressUpgradeOverrides)
 		{
+			CardEditorOverrides.ReapplyRuntimeModifiers(__instance);
 			return;
 		}
 		if (__state.PreUpgradeLevel < 0)
 		{
+			CardEditorOverrides.ReapplyRuntimeModifiers(__instance);
 			return;
 		}
 		if (!CardEditorOverrides.TryGetEffectiveOverride(__instance, out CardOverride overrideData)
 			|| overrideData.Upgrade == null
 			|| overrideData.Upgrade.IsEmpty())
 		{
+			CardEditorOverrides.ReapplyRuntimeModifiers(__instance);
 			return;
 		}
 		CardEditorUpgradeDeltaDebugLog.LogCardState("UpgradeInternal.Postfix.overrideFound", __instance, overrideData);
@@ -443,6 +470,7 @@ public static class CardModel_UpgradeInternal_Patch
 			&& __instance.CurrentUpgradeLevel == __state.PreUpgradeLevel + 1;
 		if (!isFirstUpgrade && !isRepeatedEndlessUpgrade)
 		{
+			CardEditorOverrides.ReapplyRuntimeModifiers(__instance);
 			return;
 		}
 
@@ -457,6 +485,7 @@ public static class CardModel_UpgradeInternal_Patch
 			catch
 			{
 			}
+			CardEditorOverrides.ReapplyRuntimeModifiers(__instance);
 			return;
 		}
 
@@ -470,6 +499,7 @@ public static class CardModel_UpgradeInternal_Patch
 		catch
 		{
 		}
+		CardEditorOverrides.ReapplyRuntimeModifiers(__instance);
 	}
 
 	private static void ApplyNumericUpgradeAdjustments(CardModel card, CardUpgradeOverride upgrade, UpgradeSnapshot snapshot)
@@ -1780,15 +1810,16 @@ public static class MainMenu_Ready_Patch
 			return;
 		}
 		_startupPresetsApplied = true;
+		bool unifiedStartupLoaded = false;
 
 		try
 		{
-			if (CardEditorPresetStore.TryLoadStartupPreset(out string editorPresetName, out Dictionary<ModelId, CardOverride> overrides, out Dictionary<ModelId, List<ModelId>> baseDecks))
+			if (CardEditorPresetStore.TryLoadStartupUnifiedPreset(out string editorPresetName, out CardEditorPresetStore.UnifiedPresetSnapshot snapshot))
 			{
-				CardEditorOverrides.ReplaceAll(overrides);
-				CardEditorBaseDeckStore.ImportSnapshot(baseDecks);
+				CardEditorPresetStore.ApplyUnifiedSnapshot(snapshot);
 				CardEditorBaseDeckUiState.EnsureValidCharacter();
-				CardEditorMod.VerboseLog($"[CardEditor] Auto-loaded preset at startup: '{editorPresetName}' ({overrides.Count} cards, {baseDecks.Count} base decks)");
+				unifiedStartupLoaded = true;
+				CardEditorMod.VerboseLog($"[CardEditor] Auto-loaded preset at startup: '{editorPresetName}' ({snapshot.Overrides.Count} card overrides, {snapshot.CreatedCards.Count} creator cards, {snapshot.BaseDecks.Count} base decks, {snapshot.RelicOverrides.Count} relics)");
 			}
 		}
 		catch (Exception ex)
@@ -1798,7 +1829,7 @@ public static class MainMenu_Ready_Patch
 
 		try
 		{
-			if (CardEditorCreatorPresetStore.TryLoadStartupPreset(out string creatorPresetName, out Dictionary<ModelId, CardEditorCreatedCardDefinition> defs))
+			if (!unifiedStartupLoaded && CardEditorCreatorPresetStore.TryLoadStartupPreset(out string creatorPresetName, out Dictionary<ModelId, CardEditorCreatedCardDefinition> defs))
 			{
 				CardEditorCreatedCardsStore.ImportSnapshot(defs);
 				CardEditorMod.VerboseLog($"[CardEditor] Auto-loaded creator preset at startup: '{creatorPresetName}' ({defs.Count} cards)");
@@ -2098,7 +2129,7 @@ public static class CardLibrary_ShowCardDetail_Patch
 
 			CardModel canonical = ModelDb.GetById<CardModel>(cardId);
 			CardModel preview = CardEditorOverrides.BuildPreview(canonical);
-			Log.Info($"[CardEditor][PopupLag] OpenFromLibrary start card={cardId} t={Time.GetTicksMsec()}");
+			CardEditorMod.VerboseLog($"[CardEditor][PopupLag] OpenFromLibrary start card={cardId} t={Time.GetTicksMsec()}");
 			NCardEditorPopup popup = NCardEditorPopup.GetOrCreatePersistentPopup(preview, onApplied);
 
 			CardEditorMod.VerboseLog("[CardEditor] Opening persistent popup from cache host");
@@ -2115,7 +2146,7 @@ public static class CardLibrary_ShowCardDetail_Patch
 			Callable.From(CardEditorBaseDeckBookmarkHooks.RefreshLastLibrary).CallDeferred();
 
 			ulong openElapsedMs = Time.GetTicksMsec() - openStartMs;
-			Log.Info($"[CardEditor][PopupLag] OpenFromLibrary end card={cardId} elapsedMs={openElapsedMs} popupParent={(popup.GetParent() != null)}");
+			CardEditorMod.VerboseLog($"[CardEditor][PopupLag] OpenFromLibrary end card={cardId} elapsedMs={openElapsedMs} popupParent={(popup.GetParent() != null)}");
 			CardEditorMod.VerboseLog($"[CardEditor][Perf] OpenEditorPopup card={cardId} elapsedMs={openElapsedMs}");
 		}
 		catch (Exception ex)
@@ -3149,6 +3180,10 @@ public static class Hook_AfterTurnEnd_Patch
 				CardEditorDrawnGeneratedCostController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorUpgradeAuraController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryUpgradeController.OnAfterPlayerTurnEnd(combatState);
+				foreach (Player player in combatState.Players)
+				{
+					CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForPlayer(combatState, player);
+				}
 				await CardEditorExtraEffects.RunStatefulTransformsAfterPlayerTurnEnd(combatState);
 			}
 		}

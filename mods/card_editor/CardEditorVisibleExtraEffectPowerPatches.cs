@@ -69,7 +69,7 @@ internal static class CardEditorVisibleExtraEffectPowerPatches
 			CreateRuntimeHoverTip(title, body, ResolveIcon(mirror, bigIcon: false))
 		};
 		tips.AddRange(CardEditorVanillaKeywordSupport.InferHoverTips(body));
-		return IHoverTip.RemoveDupes(tips).ToList();
+		return CardEditorVanillaKeywordSupport.RemoveDuplicateHoverTips(tips);
 	}
 
 	private static string GetTooltipTitle(CardEditorVisibleExtraEffectPower mirror)

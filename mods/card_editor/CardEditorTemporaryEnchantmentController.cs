@@ -1,4 +1,5 @@
 using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Combat;
@@ -434,7 +435,10 @@ internal static class CardEditorTemporaryEnchantmentController
 
 			if (card.Enchantment != null && card.Enchantment.GetType() == enchantment.GetType())
 			{
-				CardCmd.Enchant(enchantment, card, snapshot.Amount);
+				card.Enchantment.Amount = Math.Max(1, snapshot.Amount);
+				card.Enchantment.ModifyCard();
+				card.FinalizeUpgradeInternal();
+				card.InvokeEnergyCostChanged();
 			}
 			else if (enchantment.CanEnchant(card))
 			{

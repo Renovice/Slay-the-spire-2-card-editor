@@ -32,7 +32,11 @@ internal sealed class CardEditorMultiplayerStateDto
 	public CardEditorMultiplayerAuthorityMode AuthorityMode { get; set; } = CardEditorMultiplayerAuthorityMode.HostOnly;
 	public Dictionary<string, CardEditorPresetStore.CardOverrideDto> Overrides { get; set; } = new(StringComparer.Ordinal);
 	public Dictionary<string, List<string>> BaseDecks { get; set; } = new(StringComparer.Ordinal);
-	public Dictionary<string, CardEditorMultiplayerCreatedCardDto> CreatedCards { get; set; } = new(StringComparer.Ordinal);
+	public int CreatedCardSlotCount { get; set; }
+	public Dictionary<string, CardEditorCreatedCardsStore.CreatedCardDto> CreatedCards { get; set; } = new(StringComparer.Ordinal);
+	public List<CardEditorPresetStore.CustomKeywordDefinitionDto> KeywordDefinitions { get; set; } = new();
+	public List<CardEditorPresetStore.CustomStatusDefinitionDto> StatusDefinitions { get; set; } = new();
+	public Dictionary<string, CardEditorRelicOverrideStore.RelicOverrideDto> RelicOverrides { get; set; } = new(StringComparer.Ordinal);
 }
 
 internal sealed class CardEditorMultiplayerCreatedCardDto
@@ -283,6 +287,9 @@ internal sealed class CardEditorMultiplayerLocalBackup
 	public required Dictionary<ModelId, CardOverride> Overrides { get; init; }
 	public required Dictionary<ModelId, List<ModelId>> BaseDecks { get; init; }
 	public required Dictionary<ModelId, CardEditorCreatedCardDefinition> CreatedCards { get; init; }
+	public required List<CardEditorCustomKeywordDefinition> KeywordDefinitions { get; init; }
+	public required List<CardEditorCustomStatusDefinition> StatusDefinitions { get; init; }
+	public required Dictionary<ModelId, RelicOverride> RelicOverrides { get; init; }
 }
 
 internal partial class CardEditorMultiplayerSyncRunner : Node
@@ -348,6 +355,8 @@ internal static class CardEditorMultiplayerSync
 	private static int _lastSeenOverrideRevision = -1;
 	private static int _lastSeenBaseDeckRevision = -1;
 	private static int _lastSeenCreatedCardsRevision = -1;
+	private static int _lastSeenDefinitionRevision = -1;
+	private static int _lastSeenRelicRevision = -1;
 	private static int _lastSeenSettingsRevision = -1;
 	private static int _nextSequence = 1;
 	private static CardEditorMultiplayerAuthorityMode _remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
@@ -1215,7 +1224,14 @@ internal static class CardEditorMultiplayerSync
 	{
 		CardEditorMultiplayerStateDto dto = new()
 		{
-			AuthorityMode = CardEditorMultiplayerSettings.AuthorityMode
+			AuthorityMode = CardEditorMultiplayerSettings.AuthorityMode,
+			CreatedCardSlotCount = Math.Clamp(CardEditorCreatedCardsStore.SlotCount, 1, CardEditorCreatedCardsStore.MaxSlotCount),
+			KeywordDefinitions = CardEditorDefinitionStore.GetKeywordDefinitions()
+				.Select(CardEditorPresetStore.CustomKeywordDefinitionDto.FromDefinition)
+				.ToList(),
+			StatusDefinitions = CardEditorDefinitionStore.GetStatusDefinitions()
+				.Select(CardEditorPresetStore.CustomStatusDefinitionDto.FromDefinition)
+				.ToList()
 		};
 
 		foreach ((ModelId cardId, CardOverride overrideData) in CardEditorOverrides.ExportSnapshot())
@@ -1248,7 +1264,17 @@ internal static class CardEditorMultiplayerSync
 				continue;
 			}
 
-			dto.CreatedCards[cardId.ToString()] = CardEditorMultiplayerCreatedCardDto.FromDefinition(definition);
+			dto.CreatedCards[cardId.ToString()] = CardEditorCreatedCardsStore.CreatedCardDto.FromDefinition(definition);
+		}
+
+		foreach ((ModelId relicId, RelicOverride overrideData) in CardEditorRelicOverrides.ExportSnapshot())
+		{
+			if (relicId == null || ModelDb.GetByIdOrNull<RelicModel>(relicId) == null || overrideData == null || overrideData.IsEmpty())
+			{
+				continue;
+			}
+
+			dto.RelicOverrides[relicId.ToString()] = CardEditorRelicOverrideStore.RelicOverrideDto.FromOverride(overrideData);
 		}
 
 		return dto;
@@ -1264,19 +1290,30 @@ internal static class CardEditorMultiplayerSync
 		Dictionary<ModelId, CardEditorCreatedCardDefinition> createdCards = DeserializeCreatedCards(state.CreatedCards);
 		Dictionary<ModelId, CardOverride> overrides = DeserializeOverrides(state.Overrides);
 		Dictionary<ModelId, List<ModelId>> baseDecks = DeserializeBaseDecks(state.BaseDecks);
+		List<CardEditorCustomKeywordDefinition> keywords = DeserializeKeywordDefinitions(state.KeywordDefinitions);
+		List<CardEditorCustomStatusDefinition> statuses = DeserializeStatusDefinitions(state.StatusDefinitions);
+		Dictionary<ModelId, RelicOverride> relicOverrides = DeserializeRelicOverrides(state.RelicOverrides);
 
 		HashSet<ModelId> previousOverrideIds = CardEditorOverrides.AllOverrides.Keys.ToHashSet();
 		bool previousPersistenceSuspended = CardEditorCreatedCardsStore.PersistenceSuspended;
+		bool previousDefinitionPersistenceSuspended = CardEditorDefinitionStore.PersistenceSuspended;
 
 		try
 		{
 			if (_netService?.Type == NetGameType.Client)
 			{
 				CardEditorCreatedCardsStore.PersistenceSuspended = true;
+				CardEditorDefinitionStore.PersistenceSuspended = true;
 			}
 
+			CardEditorDefinitionStore.ReplaceDefinitions(keywords, statuses);
+			if (state.CreatedCardSlotCount > 0)
+			{
+				CardEditorCreatedCardsStore.SetSlotCountForNextRun(state.CreatedCardSlotCount);
+			}
 			CardEditorCreatedCardsStore.ImportSnapshot(createdCards);
 			CardEditorOverrides.ReplaceAll(overrides);
+			CardEditorRelicOverrides.ReplaceAll(relicOverrides);
 			HashSet<ModelId> currentOverrideIds = CardEditorOverrides.AllOverrides.Keys.ToHashSet();
 			previousOverrideIds.ExceptWith(currentOverrideIds);
 			CardEditorOverrides.ResetExistingCardsForIds(previousOverrideIds);
@@ -1296,6 +1333,7 @@ internal static class CardEditorMultiplayerSync
 		finally
 		{
 			CardEditorCreatedCardsStore.PersistenceSuspended = previousPersistenceSuspended;
+			CardEditorDefinitionStore.PersistenceSuspended = previousDefinitionPersistenceSuspended;
 		}
 	}
 
@@ -1310,7 +1348,10 @@ internal static class CardEditorMultiplayerSync
 		{
 			Overrides = CardEditorOverrides.ExportSnapshot(),
 			BaseDecks = CardEditorBaseDeckStore.ExportSnapshot(),
-			CreatedCards = CardEditorCreatedCardsStore.ExportSnapshot()
+			CreatedCards = CardEditorCreatedCardsStore.ExportSnapshot(),
+			KeywordDefinitions = CardEditorDefinitionStore.GetKeywordDefinitions().ToList(),
+			StatusDefinitions = CardEditorDefinitionStore.GetStatusDefinitions().ToList(),
+			RelicOverrides = CardEditorRelicOverrides.ExportSnapshot()
 		};
 		CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Backed up local card editor state before applying host snapshot.");
 	}
@@ -1325,12 +1366,16 @@ internal static class CardEditorMultiplayerSync
 
 			CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Restoring local card editor state after multiplayer session.");
 		bool previousPersistenceSuspended = CardEditorCreatedCardsStore.PersistenceSuspended;
+		bool previousDefinitionPersistenceSuspended = CardEditorDefinitionStore.PersistenceSuspended;
 
 		try
 		{
 			CardEditorCreatedCardsStore.PersistenceSuspended = true;
+			CardEditorDefinitionStore.PersistenceSuspended = true;
+			CardEditorDefinitionStore.ReplaceDefinitions(_localBackup.KeywordDefinitions, _localBackup.StatusDefinitions);
 			CardEditorCreatedCardsStore.ImportSnapshot(_localBackup.CreatedCards);
 			CardEditorOverrides.ReplaceAll(_localBackup.Overrides);
+			CardEditorRelicOverrides.ReplaceAll(_localBackup.RelicOverrides);
 			CardEditorBaseDeckStore.ImportSnapshot(_localBackup.BaseDecks);
 			CardEditorBaseDeckUiState.ClearTransientState();
 			CardEditorBaseDeckUiState.EnsureValidCharacter();
@@ -1345,6 +1390,7 @@ internal static class CardEditorMultiplayerSync
 		finally
 		{
 			CardEditorCreatedCardsStore.PersistenceSuspended = previousPersistenceSuspended;
+			CardEditorDefinitionStore.PersistenceSuspended = previousDefinitionPersistenceSuspended;
 		}
 
 		_localBackup = null;
@@ -1355,6 +1401,8 @@ internal static class CardEditorMultiplayerSync
 		return _lastSeenOverrideRevision != CardEditorOverrides.Revision
 			|| _lastSeenBaseDeckRevision != CardEditorBaseDeckStore.Revision
 			|| _lastSeenCreatedCardsRevision != CardEditorCreatedCardsStore.Revision
+			|| _lastSeenDefinitionRevision != CardEditorDefinitionStore.Revision
+			|| _lastSeenRelicRevision != CardEditorRelicOverrides.Revision
 			|| _lastSeenSettingsRevision != CardEditorMultiplayerSettings.Revision;
 	}
 
@@ -1363,6 +1411,8 @@ internal static class CardEditorMultiplayerSync
 		_lastSeenOverrideRevision = CardEditorOverrides.Revision;
 		_lastSeenBaseDeckRevision = CardEditorBaseDeckStore.Revision;
 		_lastSeenCreatedCardsRevision = CardEditorCreatedCardsStore.Revision;
+		_lastSeenDefinitionRevision = CardEditorDefinitionStore.Revision;
+		_lastSeenRelicRevision = CardEditorRelicOverrides.Revision;
 		_lastSeenSettingsRevision = CardEditorMultiplayerSettings.Revision;
 	}
 
@@ -1453,7 +1503,7 @@ internal static class CardEditorMultiplayerSync
 		return baseDecks;
 	}
 
-	private static Dictionary<ModelId, CardEditorCreatedCardDefinition> DeserializeCreatedCards(Dictionary<string, CardEditorMultiplayerCreatedCardDto>? serialized)
+	private static Dictionary<ModelId, CardEditorCreatedCardDefinition> DeserializeCreatedCards(Dictionary<string, CardEditorCreatedCardsStore.CreatedCardDto>? serialized)
 	{
 		Dictionary<ModelId, CardEditorCreatedCardDefinition> createdCards = new();
 		if (serialized == null)
@@ -1461,7 +1511,7 @@ internal static class CardEditorMultiplayerSync
 			return createdCards;
 		}
 
-		foreach ((string rawCardId, CardEditorMultiplayerCreatedCardDto dto) in serialized)
+		foreach ((string rawCardId, CardEditorCreatedCardsStore.CreatedCardDto dto) in serialized)
 		{
 			if (!TryParseModelId(rawCardId, out ModelId cardId) || !CardEditorCreatedCardsStore.IsCreatedCardId(cardId))
 			{
@@ -1479,6 +1529,82 @@ internal static class CardEditorMultiplayerSync
 		}
 
 		return createdCards;
+	}
+
+	private static Dictionary<ModelId, RelicOverride> DeserializeRelicOverrides(Dictionary<string, CardEditorRelicOverrideStore.RelicOverrideDto>? serialized)
+	{
+		Dictionary<ModelId, RelicOverride> relicOverrides = new();
+		if (serialized == null)
+		{
+			return relicOverrides;
+		}
+
+		foreach ((string rawRelicId, CardEditorRelicOverrideStore.RelicOverrideDto dto) in serialized)
+		{
+			if (!TryParseModelId(rawRelicId, out ModelId relicId) || ModelDb.GetByIdOrNull<RelicModel>(relicId) == null)
+			{
+				continue;
+			}
+
+			try
+			{
+				RelicOverride overrideData = dto.ToOverride();
+				if (overrideData != null && !overrideData.IsEmpty())
+				{
+					relicOverrides[relicId] = overrideData;
+				}
+			}
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor][MultiplayerSync] Failed deserializing relic override {rawRelicId}: {ex}");
+			}
+		}
+
+		return relicOverrides;
+	}
+
+	private static List<CardEditorCustomKeywordDefinition> DeserializeKeywordDefinitions(List<CardEditorPresetStore.CustomKeywordDefinitionDto>? serialized)
+	{
+		List<CardEditorCustomKeywordDefinition> definitions = new();
+		foreach (CardEditorPresetStore.CustomKeywordDefinitionDto dto in serialized ?? new List<CardEditorPresetStore.CustomKeywordDefinitionDto>())
+		{
+			try
+			{
+				CardEditorCustomKeywordDefinition? definition = dto.ToDefinitionSafe();
+				if (definition != null)
+				{
+					definitions.Add(definition);
+				}
+			}
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor][MultiplayerSync] Failed deserializing custom keyword definition: {ex}");
+			}
+		}
+
+		return definitions;
+	}
+
+	private static List<CardEditorCustomStatusDefinition> DeserializeStatusDefinitions(List<CardEditorPresetStore.CustomStatusDefinitionDto>? serialized)
+	{
+		List<CardEditorCustomStatusDefinition> definitions = new();
+		foreach (CardEditorPresetStore.CustomStatusDefinitionDto dto in serialized ?? new List<CardEditorPresetStore.CustomStatusDefinitionDto>())
+		{
+			try
+			{
+				CardEditorCustomStatusDefinition? definition = dto.ToDefinitionSafe();
+				if (definition != null)
+				{
+					definitions.Add(definition);
+				}
+			}
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor][MultiplayerSync] Failed deserializing custom status definition: {ex}");
+			}
+		}
+
+		return definitions;
 	}
 
 	private static bool TryParseModelId(string text, out ModelId modelId)

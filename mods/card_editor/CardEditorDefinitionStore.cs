@@ -56,6 +56,7 @@ internal static class CardEditorDefinitionStore
 	private static bool _loaded;
 
 	public static int Revision { get; private set; }
+	internal static bool PersistenceSuspended { get; set; }
 
 	public static void EnsureLoaded()
 	{
@@ -156,6 +157,60 @@ internal static class CardEditorDefinitionStore
 		if (!changed)
 		{
 			return;
+		}
+
+		Revision++;
+		Save();
+	}
+
+	internal static void ReplaceDefinitions(
+		IEnumerable<CardEditorCustomKeywordDefinition>? keywords,
+		IEnumerable<CardEditorCustomStatusDefinition>? statuses)
+	{
+		EnsureLoaded();
+		_keywords.Clear();
+		_statuses.Clear();
+
+		foreach (CardEditorCustomKeywordDefinition def in keywords ?? Array.Empty<CardEditorCustomKeywordDefinition>())
+		{
+			string name = NormalizeName(def?.Name);
+			string? id = string.IsNullOrWhiteSpace(def?.Id) ? BuildKeywordId(name) : def.Id.Trim();
+			if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+			{
+				continue;
+			}
+
+			_keywords[id] = new CardEditorCustomKeywordDefinition
+			{
+				Id = id,
+				Name = name,
+				Description = NormalizeDescription(def?.Description),
+				Effects = CloneEffects(def?.Effects)
+			};
+		}
+
+		foreach (CardEditorCustomStatusDefinition def in statuses ?? Array.Empty<CardEditorCustomStatusDefinition>())
+		{
+			string name = NormalizeName(def?.Name);
+			string? id = string.IsNullOrWhiteSpace(def?.Id) ? CardEditorCustomStatusRegistry.BuildId(name) : def.Id.Trim();
+			if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+			{
+				continue;
+			}
+
+			_statuses[id] = new CardEditorCustomStatusDefinition
+			{
+				Id = id,
+				Name = name,
+				Description = NormalizeDescription(def?.Description),
+				SourceCardId = null,
+				BehaviorEffects = CloneEffects(def?.BehaviorEffects),
+				Type = def?.Type ?? PowerType.Buff,
+				IconMode = def?.IconMode ?? CardExtraEffectStatusIconMode.Auto,
+				IconPowerId = NormalizeOptional(def?.IconPowerId),
+				CustomPackedIconPath = NormalizeOptional(def?.CustomPackedIconPath),
+				CustomBigIconPath = NormalizeOptional(def?.CustomBigIconPath)
+			};
 		}
 
 		Revision++;
@@ -307,6 +362,11 @@ internal static class CardEditorDefinitionStore
 
 	private static void Save()
 	{
+		if (PersistenceSuspended)
+		{
+			return;
+		}
+
 		try
 		{
 			string path = GetStorePath();

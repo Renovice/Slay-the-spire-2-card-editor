@@ -121,7 +121,7 @@ internal sealed class CardEditorCountdownEffectPower : PowerModel
 		_payload = payload;
 	}
 
-	public override async Task AfterTurnEnd(PlayerChoiceContext choiceContext, CombatSide side)
+	public override async Task AfterSideTurnEnd(PlayerChoiceContext choiceContext, CombatSide side, IEnumerable<Creature> participants)
 	{
 		if (!MatchesBoundary(side, isStart: false))
 		{

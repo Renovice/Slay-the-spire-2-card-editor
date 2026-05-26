@@ -1,6 +1,6 @@
 Put your custom card portrait images in this folder.
 
-- Supported: .png / .jpg / .jpeg / .webp
+- Supported: .png / .jpg / .jpeg / .webp / .gif
 
 NORMAL portrait (Full Art OFF):
   - Aspect ratio: landscape 4:3 (wider than tall)

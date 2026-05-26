@@ -195,6 +195,11 @@ internal static class CardEditorTemporaryExtraEffectController
 			&& existing.CardCostsLessMode == candidate.CardCostsLessMode;
 	}
 
+	private static bool IsCardCostEffect(CardExtraEffect? effect)
+	{
+		return effect?.Kind is CardExtraEffectKind.CardCostsLess or CardExtraEffectKind.CardStarCostsLess;
+	}
+
 	public static void Grant(CombatState combatState, CardModel card, CardExtraEffect effect, CardExtraEffectCardGrantDuration duration, int turns)
 	{
 		if (combatState == null || card == null || !card.IsMutable || effect == null)
@@ -280,6 +285,10 @@ internal static class CardEditorTemporaryExtraEffectController
 			}
 			if (grant.Duration == CardExtraEffectCardGrantDuration.UntilPlayed)
 			{
+				if (IsCardCostEffect(grant.Effect))
+				{
+					CardEditorExtraEffects.NotifyCardCostAdjustmentChanged(card, grant.Effect.Kind == CardExtraEffectKind.CardCostsLess, grant.Effect.Kind == CardExtraEffectKind.CardStarCostsLess);
+				}
 				state.Grants.RemoveAt(i);
 				state.Effects.RemoveAt(i);
 			}
@@ -335,6 +344,10 @@ internal static class CardEditorTemporaryExtraEffectController
 					grant.RemainingTurns--;
 					if (grant.RemainingTurns <= 0)
 					{
+						if (IsCardCostEffect(grant.Effect))
+						{
+							CardEditorExtraEffects.NotifyCardCostAdjustmentChanged(card, grant.Effect.Kind == CardExtraEffectKind.CardCostsLess, grant.Effect.Kind == CardExtraEffectKind.CardStarCostsLess);
+						}
 						state.Grants.RemoveAt(i);
 						state.Effects.RemoveAt(i);
 					}

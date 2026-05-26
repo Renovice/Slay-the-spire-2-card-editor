@@ -85,7 +85,7 @@ internal static class CardEditorCreatedCardsStore
 {
 	private const int CurrentVersion = 3;
 	public const int DefaultSlotCount = 50;
-	public const int MaxSlotCount = 200;
+	public const int MaxSlotCount = 500;
 	public static int SlotCount { get; private set; } = DefaultSlotCount;
 	public static int ConfiguredSlotCount { get; private set; } = DefaultSlotCount;
 	private const string CardArtFolderName = "card art";
@@ -436,7 +436,8 @@ internal static class CardEditorCreatedCardsStore
 				".png",
 				".jpg",
 				".jpeg",
-				".webp"
+				".webp",
+				".gif"
 			};
 
 			return Directory.EnumerateFiles(dir, "*.*", SearchOption.TopDirectoryOnly)
@@ -1240,7 +1241,7 @@ internal static class CardEditorCreatedCardsStore
 		};
 	}
 
-	private sealed class CreatedCardDto
+	internal sealed class CreatedCardDto
 	{
 		public bool Enabled { get; set; }
 		public string? Title { get; set; }

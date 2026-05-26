@@ -171,6 +171,9 @@ internal static class CardEditorExtraEffectTriggerPatchHelpers
 [HarmonyPatch(typeof(Hook), nameof(Hook.BeforeCombatStart))]
 internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 {
+	private static readonly Dictionary<CombatState, HashSet<CardModel>> DeferredChoiceCardsByCombat =
+		new Dictionary<CombatState, HashSet<CardModel>>(ReferenceEqualityComparer<CombatState>.Instance);
+
 	public static void Postfix(IRunState runState, CombatState? combatState, ref Task __result)
 	{
 		if (__result == null || runState == null || combatState == null)
@@ -209,6 +212,12 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 				List<CardModel> deckSnapshot = player.Deck.Cards.Where(card => card != null).ToList();
 				foreach (CardModel card in deckSnapshot)
 				{
+					if (CardEditorExtraEffects.TriggerMayOpenCardSelectionUi(combatState, card, CardExtraEffectTrigger.DeckPassiveCombatStart))
+					{
+						DeferChoiceCard(combatState, card);
+						continue;
+					}
+
 					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
 					Task task = CardEditorExtraEffects.RunDeckPassiveCombatStart(combatState, choiceContext, card);
 					bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
@@ -223,6 +232,58 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 		{
 			Log.Warn($"[CardEditor] Deck Passive combat-start effects failed: {ex}");
 		}
+	}
+
+	private static void DeferChoiceCard(CombatState combatState, CardModel card)
+	{
+		if (combatState == null || card == null)
+		{
+			return;
+		}
+
+		if (!DeferredChoiceCardsByCombat.TryGetValue(combatState, out HashSet<CardModel>? cards))
+		{
+			cards = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
+			DeferredChoiceCardsByCombat[combatState] = cards;
+		}
+
+		cards.Add(card);
+	}
+
+	internal static async Task RunDeferredChoiceCards(CombatState combatState, Player player, PlayerChoiceContext choiceContext)
+	{
+		if (combatState == null || player == null || choiceContext == null)
+		{
+			return;
+		}
+
+		if (!DeferredChoiceCardsByCombat.TryGetValue(combatState, out HashSet<CardModel>? cards) || cards.Count == 0)
+		{
+			return;
+		}
+
+		List<CardModel> playerCards = cards
+			.Where(card => card != null && ReferenceEquals(card.Owner, player))
+			.ToList();
+		foreach (CardModel card in playerCards)
+		{
+			cards.Remove(card);
+			await CardEditorExtraEffects.RunDeckPassiveCombatStart(combatState, choiceContext, card);
+		}
+
+		if (cards.Count == 0)
+		{
+			DeferredChoiceCardsByCombat.Remove(combatState);
+		}
+	}
+
+	private sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class
+	{
+		public static readonly ReferenceEqualityComparer<T> Instance = new ReferenceEqualityComparer<T>();
+
+		public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+
+		public int GetHashCode(T obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
 	}
 }
 
@@ -254,7 +315,9 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 
 		try
 		{
-			Creature? attackTarget = CardEditorExtraEffects.FlattenDamageResults(command.GetResultsCompat()).FirstOrDefault()?.Receiver;
+			List<DamageResult> attackResults = CardEditorExtraEffects.FlattenDamageResults(command.GetResultsCompat());
+			Creature? attackTarget = attackResults.FirstOrDefault()?.Receiver;
+			using IDisposable triggerAttackResults = CardEditorEffectExecutionAmountContext.PushTriggerAttackDamageResultsScoped(attackResults);
 			foreach (Player player in combatState.Players)
 			{
 				if (player == null)
@@ -586,6 +649,7 @@ internal static class Hook_AfterCardDrawn_CardEditorExtraEffects_Patch
 		{
 			await CardEditorExtraEffects.RunAfterCardDrawn(combatState, choiceContext, card);
 			await CardEditorQuestEffects.RecordCardDrawn(combatState, card);
+			CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, card.Owner?.Creature, CardExtraEffectCountEvent.Drawn);
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue && combatState != null)
 			{
@@ -634,6 +698,7 @@ internal static class Hook_AfterCardDiscarded_CardEditorExtraEffects_Patch
 		{
 			await CardEditorExtraEffects.RunAfterCardDiscarded(combatState, choiceContext, card);
 			await CardEditorQuestEffects.RecordCardDiscarded(combatState, card);
+			CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, card.Owner?.Creature, CardExtraEffectCountEvent.Discarded);
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue && combatState != null)
 			{
@@ -682,6 +747,7 @@ internal static class Hook_AfterCardExhausted_CardEditorExtraEffects_Patch
 		{
 			await CardEditorExtraEffects.RunAfterCardExhausted(combatState, choiceContext, card);
 			await CardEditorQuestEffects.RecordCardExhausted(combatState, card);
+			CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, card.Owner?.Creature, CardExtraEffectCountEvent.Exhausted);
 			ulong? netId = LocalContext.NetId;
 			if (netId.HasValue && combatState != null)
 			{
@@ -941,6 +1007,7 @@ internal static class Hook_BeforeHandDraw_AutoPlaySelfFromPile_Patch
 		try
 		{
 			CardEditorConditionalFromPileFiredTracker.Clear(combatState);
+			await Hook_BeforeCombatStart_CardEditorDeckPassive_Patch.RunDeferredChoiceCards(combatState, player, choiceContext);
 
 			CardPile? hand = player?.PlayerCombatState?.Hand;
 			CardPile? drawPile = player?.PlayerCombatState?.DrawPile;
@@ -994,7 +1061,10 @@ internal static class Hook_AfterDeath_CardEditorExtraEffects_Patch
 		{
 			return;
 		}
-		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorTemporaryExtraEffectController.HasAny(combatState))
+		CardPlay? currentPlay = CardEditorCardPlayContext.Current;
+		if (!CardEditorOverrides.HasAnyOverrides
+			&& !CardEditorTemporaryExtraEffectController.HasAny(combatState)
+			&& currentPlay?.Card is not CardEditorCreatedCardBase)
 		{
 			return;
 		}
@@ -1003,6 +1073,15 @@ internal static class Hook_AfterDeath_CardEditorExtraEffects_Patch
 
 	private static async Task RunAfter(Task original, CombatState combatState, Creature creature)
 	{
+		try
+		{
+			await RunCurrentCardFinalKillFatalBeforeDeathResolution(combatState, creature);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Final-kill Fatal pre-death effects failed: {ex}");
+		}
+
 		await original;
 
 		ulong? netId = LocalContext.NetId;
@@ -1031,6 +1110,61 @@ internal static class Hook_AfterDeath_CardEditorExtraEffects_Patch
 		{
 			Log.Warn($"[CardEditor] AfterDeath extra effects failed: {ex}");
 		}
+	}
+
+	private static async Task RunCurrentCardFinalKillFatalBeforeDeathResolution(CombatState combatState, Creature creature)
+	{
+		CardPlay? currentPlay = CardEditorCardPlayContext.Current;
+		CardModel? currentCard = currentPlay?.Card;
+		Player? player = currentCard?.Owner;
+		Creature? ownerCreature = player?.Creature;
+		if (combatState == null
+			|| creature == null
+			|| currentPlay == null
+			|| currentCard == null
+			|| player == null
+			|| ownerCreature == null
+			|| creature.Side == ownerCreature.Side
+			|| !creature.Powers.All(power => power.ShouldOwnerDeathTriggerFatal())
+			|| !IsFinalOpponentDeath(combatState, ownerCreature, creature))
+		{
+			return;
+		}
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		await CardEditorExtraEffectTriggerPatchHelpers.RunForCard(
+			player,
+			netId.Value,
+			currentCard,
+			(choiceContext, _) => CardEditorExtraEffects.RunFatalForCardPlayNow(combatState, choiceContext, currentPlay));
+	}
+
+	private static bool IsFinalOpponentDeath(CombatState combatState, Creature ownerCreature, Creature deadCreature)
+	{
+		if (combatState == null || ownerCreature == null || deadCreature == null)
+		{
+			return false;
+		}
+
+		foreach (Creature opponent in combatState.GetOpponentsOf(ownerCreature))
+		{
+			if (opponent == null || ReferenceEquals(opponent, deadCreature))
+			{
+				continue;
+			}
+
+			if (opponent.IsAlive)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 }
 

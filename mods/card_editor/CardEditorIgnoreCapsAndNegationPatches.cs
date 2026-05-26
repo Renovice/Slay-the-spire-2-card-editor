@@ -472,9 +472,14 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.ModifyHpLostAfterOsty))]
+[HarmonyPatch(typeof(Hook), "ModifyHpLostAfterOsty")]
 internal static class Hook_ModifyHpLostAfterOsty_IgnoreNegation_Patch
 {
+	public static bool Prepare()
+	{
+		return AccessTools.Method(typeof(Hook), "ModifyHpLostAfterOsty") != null;
+	}
+
 	public static bool Prefix(
 		IRunState runState,
 		CombatState? combatState,
@@ -541,9 +546,43 @@ internal static class IntangiblePower_ModifyHpLostAfterOsty_IgnoreCaps_Patch
 	}
 }
 
+[HarmonyPatch(typeof(BufferPower), nameof(BufferPower.ModifyHpLostAfterOstyLate))]
+internal static class BufferPower_ModifyHpLostAfterOstyLate_IgnoreNegation_Patch
+{
+	public static bool Prefix(
+		BufferPower __instance,
+		ref decimal __result,
+		Creature target,
+		decimal amount,
+		ValueProp props,
+		Creature? dealer,
+		CardModel? cardSource)
+	{
+		if (target != __instance.Owner)
+		{
+			return true;
+		}
+
+		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
+		if (!CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageNegation, effectiveSource, dealer, target.GetConcreteCombatState(), target))
+		{
+			return true;
+		}
+
+		__result = amount;
+		return false;
+	}
+}
+
 [HarmonyPatch(typeof(SlipperyPower), nameof(SlipperyPower.ModifyDamageCap))]
 internal static class SlipperyPower_ModifyDamageCap_IgnoreCaps_Patch
 {
+	public static bool Prepare()
+	{
+		MethodInfo? method = AccessTools.Method(typeof(SlipperyPower), nameof(SlipperyPower.ModifyDamageCap));
+		return method != null && method.DeclaringType == typeof(SlipperyPower);
+	}
+
 	public static bool Prefix(
 		ref decimal __result,
 		Creature? target,

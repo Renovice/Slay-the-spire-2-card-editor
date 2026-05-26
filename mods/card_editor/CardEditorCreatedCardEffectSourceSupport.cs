@@ -376,7 +376,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 				return;
 			}
 
-			if (effectSourceCard is CardEditorCreatedCardBase)
+			if (IsEditorCreatedEffectSource(effectSourceId, effectSourceCard))
 			{
 				return;
 			}
@@ -701,7 +701,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		}
 
 		CardModel? sourceCard = BuildEffectSourceCard(createdCard, effectSourceId, isUpgradePreview: false);
-		if (sourceCard == null || sourceCard is CardEditorCreatedCardBase)
+		if (sourceCard == null || IsEditorCreatedEffectSource(effectSourceId, sourceCard))
 		{
 			return sourceCard;
 		}
@@ -712,6 +712,21 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			CombatState = hostCombatState
 		};
 		return sourceCard;
+	}
+
+	private static bool IsEditorCreatedEffectSource(ModelId effectSourceId, CardModel? sourceCard)
+	{
+		if (sourceCard is CardEditorCreatedCardBase)
+		{
+			return true;
+		}
+
+		if (effectSourceId != null && CardEditorCreatedCardsStore.IsCreatedCardId(effectSourceId))
+		{
+			return true;
+		}
+
+		return sourceCard?.Id != null && CardEditorCreatedCardsStore.IsCreatedCardId(sourceCard.Id);
 	}
 
 	private static bool TryGetPersistentVanillaEffectSourceCard(CardModel createdCard, ModelId effectSourceId, string? runtimeSourceInstanceKey, out CardModel? sourceCard)

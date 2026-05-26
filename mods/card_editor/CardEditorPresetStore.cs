@@ -13,9 +13,20 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorPresetStore
 {
-	private const int CurrentVersion = 15;
+	private const int CurrentVersion = 17;
 	private const string PresetExtension = ".json";
 	private const string SettingsPath = "user://card_editor/presets_settings.json";
+
+	internal sealed class UnifiedPresetSnapshot
+	{
+		public Dictionary<ModelId, CardOverride> Overrides { get; init; } = new();
+		public Dictionary<ModelId, List<ModelId>> BaseDecks { get; init; } = new();
+		public Dictionary<ModelId, CardEditorCreatedCardDefinition> CreatedCards { get; init; } = new();
+		public Dictionary<ModelId, RelicOverride> RelicOverrides { get; init; } = new();
+		public int CreatedCardSlotCount { get; init; }
+		public bool HasCreatedCards { get; init; }
+		public bool HasRelicOverrides { get; init; }
+	}
 
 	public static List<string> ListPresetNames()
 	{
@@ -44,6 +55,19 @@ internal static class CardEditorPresetStore
 	{
 		overrides = new Dictionary<ModelId, CardOverride>();
 		baseDecks = new Dictionary<ModelId, List<ModelId>>();
+		if (!TryLoadUnifiedPreset(presetName, out UnifiedPresetSnapshot snapshot))
+		{
+			return false;
+		}
+
+		overrides = snapshot.Overrides;
+		baseDecks = snapshot.BaseDecks;
+		return true;
+	}
+
+	internal static bool TryLoadUnifiedPreset(string presetName, out UnifiedPresetSnapshot snapshot)
+	{
+		snapshot = new UnifiedPresetSnapshot();
 		string safeName = SanitizePresetName(presetName);
 		if (string.IsNullOrWhiteSpace(safeName))
 		{
@@ -71,6 +95,7 @@ internal static class CardEditorPresetStore
 				return false;
 			}
 
+			Dictionary<ModelId, CardOverride> overrides = new();
 			foreach ((string idString, CardOverrideDto dto) in data.Overrides)
 			{
 				if (!TryParseModelId(idString, out ModelId cardId))
@@ -89,12 +114,56 @@ internal static class CardEditorPresetStore
 				}
 			}
 
+			Dictionary<ModelId, List<ModelId>> baseDecks = new();
 			if (data.BaseDecks != null)
 			{
 				baseDecks = DeserializeBaseDecks(data.BaseDecks);
 			}
+
+			Dictionary<ModelId, CardEditorCreatedCardDefinition> createdCards = new();
+			if (data.CreatedCards != null)
+			{
+				foreach ((string idString, CardEditorCreatedCardsStore.CreatedCardDto dto) in data.CreatedCards)
+				{
+					if (!TryParseModelId(idString, out ModelId cardId) || !CardEditorCreatedCardsStore.IsCreatedCardId(cardId))
+					{
+						continue;
+					}
+
+					createdCards[cardId] = dto.ToDefinitionSafe(cardId);
+				}
+			}
+
+			Dictionary<ModelId, RelicOverride> relicOverrides = new();
+			if (data.RelicOverrides != null)
+			{
+				foreach ((string idString, CardEditorRelicOverrideStore.RelicOverrideDto dto) in data.RelicOverrides)
+				{
+					if (!TryParseModelId(idString, out ModelId relicId) || ModelDb.GetByIdOrNull<RelicModel>(relicId) == null)
+					{
+						continue;
+					}
+
+					RelicOverride overrideData = dto.ToOverride();
+					if (!overrideData.IsEmpty())
+					{
+						relicOverrides[relicId] = overrideData;
+					}
+				}
+			}
+
 			ImportDefinitionsFromPreset(data);
 
+			snapshot = new UnifiedPresetSnapshot
+			{
+				Overrides = overrides,
+				BaseDecks = baseDecks,
+				CreatedCards = createdCards,
+				RelicOverrides = relicOverrides,
+				CreatedCardSlotCount = data.CreatedCardSlotCount,
+				HasCreatedCards = data.CreatedCards != null,
+				HasRelicOverrides = data.RelicOverrides != null
+			};
 			return true;
 		}
 		catch (Exception ex)
@@ -131,6 +200,17 @@ internal static class CardEditorPresetStore
 					kvp => CardOverrideDto.FromOverride(kvp.Value),
 					StringComparer.Ordinal),
 				BaseDecks = SerializeBaseDecks(baseDecks),
+				CreatedCardSlotCount = Math.Clamp(CardEditorCreatedCardsStore.ConfiguredSlotCount, 1, CardEditorCreatedCardsStore.MaxSlotCount),
+				CreatedCards = CardEditorCreatedCardsStore.ExportSnapshot()
+					.Where(kvp => kvp.Key != null && CardEditorCreatedCardsStore.IsCreatedCardId(kvp.Key))
+					.ToDictionary(
+						kvp => kvp.Key.ToString(),
+						kvp => CardEditorCreatedCardsStore.CreatedCardDto.FromDefinition(kvp.Value),
+						StringComparer.Ordinal),
+				RelicOverrides = CardEditorRelicOverrides.AllOverrides.ToDictionary(
+					kvp => kvp.Key.ToString(),
+					kvp => CardEditorRelicOverrideStore.RelicOverrideDto.FromOverride(kvp.Value),
+					StringComparer.Ordinal),
 				KeywordDefinitions = CardEditorDefinitionStore.GetKeywordDefinitions()
 					.Select(CustomKeywordDefinitionDto.FromDefinition)
 					.ToList(),
@@ -241,6 +321,38 @@ internal static class CardEditorPresetStore
 			return false;
 		}
 		return TryLoadPreset(presetName, out overrides, out baseDecks);
+	}
+
+	internal static bool TryLoadStartupUnifiedPreset(out string presetName, out UnifiedPresetSnapshot snapshot)
+	{
+		snapshot = new UnifiedPresetSnapshot();
+		presetName = GetStartupPresetName() ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(presetName))
+		{
+			return false;
+		}
+		return TryLoadUnifiedPreset(presetName, out snapshot);
+	}
+
+	internal static void ApplyUnifiedSnapshot(UnifiedPresetSnapshot snapshot)
+	{
+		if (snapshot.HasCreatedCards)
+		{
+			if (snapshot.CreatedCardSlotCount > 0)
+			{
+				CardEditorCreatedCardsStore.SetSlotCountForNextRun(snapshot.CreatedCardSlotCount);
+			}
+			CardEditorCreatedCardsStore.ImportSnapshot(snapshot.CreatedCards);
+		}
+
+		CardEditorOverrides.ReplaceAll(snapshot.Overrides);
+		CardEditorBaseDeckStore.ImportSnapshot(snapshot.BaseDecks);
+
+		if (snapshot.HasRelicOverrides)
+		{
+			CardEditorRelicOverrides.ReplaceAll(snapshot.RelicOverrides);
+			CardEditorRelicOverrideStore.Save();
+		}
 	}
 
 	private static string EnsurePresetDirectory()
@@ -652,11 +764,14 @@ internal static class CardEditorPresetStore
 		public DateTime SavedAtUtc { get; set; }
 		public Dictionary<string, CardOverrideDto> Overrides { get; set; } = new Dictionary<string, CardOverrideDto>(StringComparer.Ordinal);
 		public Dictionary<string, List<string>> BaseDecks { get; set; } = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+		public int CreatedCardSlotCount { get; set; }
+		public Dictionary<string, CardEditorCreatedCardsStore.CreatedCardDto>? CreatedCards { get; set; }
+		public Dictionary<string, CardEditorRelicOverrideStore.RelicOverrideDto>? RelicOverrides { get; set; }
 		public List<CustomKeywordDefinitionDto> KeywordDefinitions { get; set; } = new();
 		public List<CustomStatusDefinitionDto> StatusDefinitions { get; set; } = new();
 	}
 
-	private sealed class CustomKeywordDefinitionDto
+	internal sealed class CustomKeywordDefinitionDto
 	{
 		public string? Id { get; set; }
 		public string? Name { get; set; }
@@ -693,7 +808,7 @@ internal static class CardEditorPresetStore
 		}
 	}
 
-	private sealed class CustomStatusDefinitionDto
+	internal sealed class CustomStatusDefinitionDto
 	{
 		public string? Id { get; set; }
 		public string? Name { get; set; }
@@ -1432,6 +1547,7 @@ internal static class CardEditorPresetStore
 		public string? Kind { get; set; }
 		public string? Target { get; set; }
 		public int Amount { get; set; }
+		public bool PayloadOnly { get; set; }
 		public bool AmountIsX { get; set; }
 		public int AmountXPlus { get; set; }
 		public string? AmountSourceMode { get; set; }
@@ -1446,6 +1562,7 @@ internal static class CardEditorPresetStore
 		public string? PowerTriggerCountEvent { get; set; }
 		public string? PowerTriggerEnemyStatus { get; set; }
 		public string? PowerTriggerPowerId { get; set; }
+		public bool PowerTriggerUsesEventAmount { get; set; }
 		public string? TurnBoundary { get; set; }
 		public string? TurnBoundarySide { get; set; }
 		public string? TurnBoundaryCardLocation { get; set; }
@@ -1455,6 +1572,7 @@ internal static class CardEditorPresetStore
 		public bool AsPower { get; set; }
 		public string? TriggerCardPool { get; set; }
 		public string? TriggerCardType { get; set; }
+		public string? TriggerCardRarity { get; set; }
 		public string? TriggerCardFilter { get; set; }
 		public int TriggerEveryN { get; set; }
 		public int TriggerMaxFires { get; set; }
@@ -1463,6 +1581,7 @@ internal static class CardEditorPresetStore
 		public int AutoPlayLoopLimit { get; set; }
 		public string? AutoPlayLoopScope { get; set; }
 		public string? UseLimitWindow { get; set; }
+		public string? UseLimitGroupId { get; set; }
 		public string? PowerStackMode { get; set; }
 		public string? PowerPersistenceMode { get; set; }
 		public string? DurationTickPolicy { get; set; }
@@ -1474,6 +1593,8 @@ internal static class CardEditorPresetStore
 		public string? QuestMode { get; set; }
 		public int QuestActIndex { get; set; } = -1;
 		public string? QuestEventId { get; set; }
+		public string? QuestActiveScope { get; set; }
+		public int QuestCompletionLimit { get; set; } = 1;
 		public string? ConsumedCardAction { get; set; }
 		public string? ConsumedCardValueSource { get; set; }
 		public string? PotionMode { get; set; }
@@ -1492,6 +1613,8 @@ internal static class CardEditorPresetStore
 		public int CardCostsLessTurns { get; set; }
 		public string? CardCostsLessMode { get; set; }
 		public string? CardCostsLessModifier { get; set; }
+		public string? MatchingCostUseLimitMode { get; set; }
+		public int MatchingCostUseLimit { get; set; } = 1;
 		public string? GeneratedCardPool { get; set; }
 		public string? GeneratedCardType { get; set; }
 		public string? GeneratedCardCustomTag { get; set; }
@@ -1505,10 +1628,18 @@ internal static class CardEditorPresetStore
 		public string? CountCardPile { get; set; }
 		public string? CountCardPool { get; set; }
 		public string? CountCardType { get; set; }
+		public string? CountCardRarity { get; set; }
 		public string? CountCardFilter { get; set; }
 		public bool CountOnlyBlockCards { get; set; }
 		public string? CountAggregationMode { get; set; }
 		public bool CountUsesCardEffectAmount { get; set; }
+		public string? CountDamageTarget { get; set; }
+		public string? CountDamageDealer { get; set; }
+		public string? CountDamageSource { get; set; }
+		public string? CountDamageAggregation { get; set; }
+		public string? CountDamageCurrentInclusion { get; set; }
+		public string? CountResultEffectId { get; set; }
+		public string? CountResultMetric { get; set; }
 		public bool HistoryScalingIncludesBase { get; set; }
 		public int? HistoryScalingBaseAmount { get; set; }
 		public int HistoryScalingCountStep { get; set; }
@@ -1534,6 +1665,7 @@ internal static class CardEditorPresetStore
 		public int CardSelectionOfferCount { get; set; } = 3;
 		public string? CardSelectionPool { get; set; }
 		public string? CardSelectionType { get; set; }
+		public string? CardSelectionRarity { get; set; }
 		public string? CardSelectionFilter { get; set; }
 		public string? MoveToPile { get; set; }
 		public string? MoveToPosition { get; set; }
@@ -1546,6 +1678,7 @@ internal static class CardEditorPresetStore
 		public string? DrawnFromPile { get; set; }
 		public string? SpecificCardId { get; set; }
 		public bool ShowReferencedCardText { get; set; }
+		public string? SpecificCardUpgradeMode { get; set; }
 		public string? SpecificCardId2 { get; set; }
 		public string? SpecificCardId3 { get; set; }
 		public string? ChooseOneExecutionMode { get; set; }
@@ -1580,7 +1713,14 @@ internal static class CardEditorPresetStore
 		public string? BranchCountCardPile { get; set; }
 		public string? BranchCountCardPool { get; set; }
 		public string? BranchCountCardType { get; set; }
+		public string? BranchCountCardRarity { get; set; }
 		public string? BranchCountCardFilter { get; set; }
+		public string? BranchCountCardMatchMode { get; set; }
+		public string? BranchCountMatchCardId { get; set; }
+		public string? BranchCountMatchTagKind { get; set; }
+		public string? BranchCountMatchVanillaTag { get; set; }
+		public string? BranchCountMatchCustomTag { get; set; }
+		public string? BranchCountMatchCustomKeyword { get; set; }
 		public string? BranchCountAggregationMode { get; set; }
 		public bool BranchCountUsesCardEffectAmount { get; set; }
 		public bool BranchCountExcludeSourceCard { get; set; }
@@ -1589,6 +1729,13 @@ internal static class CardEditorPresetStore
 		public string? BranchCountEnemyStatus { get; set; }
 		public string? BranchCountPowerId { get; set; }
 		public string? BranchCountEnemyIntent { get; set; }
+		public string? BranchCountDamageTarget { get; set; }
+		public string? BranchCountDamageDealer { get; set; }
+		public string? BranchCountDamageSource { get; set; }
+		public string? BranchCountDamageAggregation { get; set; }
+		public string? BranchCountDamageCurrentInclusion { get; set; }
+		public string? BranchCountResultEffectId { get; set; }
+		public string? BranchCountResultMetric { get; set; }
 		public string? BranchCountComparison { get; set; }
 		public int BranchCountConditionAmount { get; set; } = 1;
 		public string? PowerId { get; set; }
@@ -1607,6 +1754,8 @@ internal static class CardEditorPresetStore
 		public string? ConditionProgressDisplay { get; set; }
 		public bool CountExcludeSourceCard { get; set; }
 		public string? OstyAction { get; set; }
+		public string? CreatureCommand { get; set; }
+		public string? CreatureCommandId { get; set; }
 		public string? MultiplierStat { get; set; }
 		public string? MultiplierSourceMode { get; set; }
 		public string? MultiplierPowerId { get; set; }
@@ -1620,6 +1769,7 @@ internal static class CardEditorPresetStore
 		public string? PowerHost { get; set; }
 		public string? PowerTriggerFrom { get; set; }
 		public string? PowerTargeting { get; set; }
+		public string? ActivePowerSelection { get; set; }
 		public string? CardMatchMode { get; set; }
 		public string? MatchCardId { get; set; }
 		public string? MatchTagKind { get; set; }
@@ -1633,6 +1783,8 @@ internal static class CardEditorPresetStore
 		public string? CostFilterMode { get; set; }
 		public int CostFilterMax { get; set; }
 		public string? EffectId { get; set; }
+		public string? AutoActionEffectIds { get; set; }
+		public string? EffectLimitTargetEffectIds { get; set; }
 		public string? ResourceConsumptionMode { get; set; }
 		public string? ResourceConsumptionStat { get; set; }
 		public string? StatusToStatusMode { get; set; }
@@ -1750,6 +1902,7 @@ internal static class CardEditorPresetStore
 				Kind = effect.Kind.ToString(),
 				Target = effect.Target.ToString(),
 				Amount = effect.Amount,
+				PayloadOnly = effect.PayloadOnly,
 				AmountIsX = effect.AmountIsX,
 				AmountXPlus = effect.AmountXPlus,
 				AmountSourceMode = effect.AmountSourceMode.ToString(),
@@ -1764,6 +1917,7 @@ internal static class CardEditorPresetStore
 				PowerTriggerCountEvent = effect.PowerTriggerCountEvent.ToString(),
 				PowerTriggerEnemyStatus = effect.PowerTriggerEnemyStatus.ToString(),
 				PowerTriggerPowerId = effect.PowerTriggerPowerId,
+				PowerTriggerUsesEventAmount = effect.PowerTriggerUsesEventAmount,
 				TurnBoundary = effect.TurnBoundary.ToString(),
 				TurnBoundarySide = effect.TurnBoundarySide.ToString(),
 				TurnBoundaryCardLocation = effect.TurnBoundaryCardLocation.ToString(),
@@ -1773,6 +1927,7 @@ internal static class CardEditorPresetStore
 				AsPower = effect.AsPower,
 				TriggerCardPool = effect.TriggerCardPool.ToString(),
 				TriggerCardType = effect.TriggerCardType.ToString(),
+				TriggerCardRarity = effect.TriggerCardRarity.ToString(),
 				TriggerCardFilter = effect.TriggerCardFilter.ToString(),
 				TriggerEveryN = effect.TriggerEveryN,
 				TriggerMaxFires = effect.TriggerMaxFires,
@@ -1781,6 +1936,7 @@ internal static class CardEditorPresetStore
 				AutoPlayLoopLimit = effect.AutoPlayLoopLimit,
 				AutoPlayLoopScope = effect.AutoPlayLoopScope.ToString(),
 				UseLimitWindow = effect.UseLimitWindow.ToString(),
+				UseLimitGroupId = effect.UseLimitGroupId,
 				PowerStackMode = effect.PowerStackMode.ToString(),
 				PowerPersistenceMode = effect.PowerPersistenceMode.ToString(),
 				DurationTickPolicy = effect.DurationTickPolicy.ToString(),
@@ -1792,6 +1948,8 @@ internal static class CardEditorPresetStore
 				QuestMode = effect.QuestMode.ToString(),
 				QuestActIndex = effect.QuestActIndex,
 				QuestEventId = effect.QuestEventId,
+				QuestActiveScope = effect.QuestActiveScope.ToString(),
+				QuestCompletionLimit = Math.Clamp(effect.QuestCompletionLimit, 0, 999),
 				ConsumedCardAction = effect.ConsumedCardAction.ToString(),
 				ConsumedCardValueSource = effect.ConsumedCardValueSource.ToString(),
 				PotionMode = effect.PotionMode.ToString(),
@@ -1810,6 +1968,10 @@ internal static class CardEditorPresetStore
 				CardCostsLessTurns = effect.CardCostsLessTurns,
 				CardCostsLessMode = effect.CardCostsLessMode.ToString(),
 				CardCostsLessModifier = effect.CardCostsLessModifier.ToString(),
+				MatchingCostUseLimitMode = effect.MatchingCostUseLimitMode.ToString(),
+				MatchingCostUseLimit = numericFieldsAreDeltas
+					? effect.MatchingCostUseLimit
+					: Math.Clamp(effect.MatchingCostUseLimit <= 0 ? 1 : effect.MatchingCostUseLimit, 1, 999),
 				GeneratedCardPool = effect.GeneratedCardPool.ToString(),
 				GeneratedCardType = effect.GeneratedCardType.ToString(),
 				GeneratedCardCustomTag = effect.GeneratedCardCustomTag,
@@ -1823,10 +1985,18 @@ internal static class CardEditorPresetStore
 				CountCardPile = effect.CountCardPile.ToString(),
 				CountCardPool = effect.CountCardPool.ToString(),
 				CountCardType = effect.CountCardType.ToString(),
+				CountCardRarity = effect.CountCardRarity.ToString(),
 				CountCardFilter = effect.CountCardFilter.ToString(),
 				CountOnlyBlockCards = effect.CountOnlyBlockCards,
 				CountAggregationMode = CardEditorExtraEffects.GetEffectiveCountAggregationMode(effect).ToString(),
 				CountUsesCardEffectAmount = effect.CountUsesCardEffectAmount,
+				CountDamageTarget = effect.CountDamageTarget.ToString(),
+				CountDamageDealer = effect.CountDamageDealer.ToString(),
+				CountDamageSource = effect.CountDamageSource.ToString(),
+				CountDamageAggregation = effect.CountDamageAggregation.ToString(),
+				CountDamageCurrentInclusion = effect.CountDamageCurrentInclusion.ToString(),
+				CountResultEffectId = effect.CountResultEffectId,
+				CountResultMetric = effect.CountResultMetric.ToString(),
 				HistoryScalingIncludesBase = effect.HistoryScalingIncludesBase,
 				HistoryScalingBaseAmount = effect.HistoryScalingBaseAmount,
 				HistoryScalingCountStep = numericFieldsAreDeltas
@@ -1855,6 +2025,7 @@ internal static class CardEditorPresetStore
 				CardSelectionOfferCount = effect.CardSelectionOfferCount,
 				CardSelectionPool = effect.CardSelectionPool.ToString(),
 				CardSelectionType = effect.CardSelectionType.ToString(),
+				CardSelectionRarity = effect.CardSelectionRarity.ToString(),
 				CardSelectionFilter = effect.CardSelectionFilter.ToString(),
 				MoveToPile = effect.MoveToPile.ToString(),
 				MoveToPosition = effect.MoveToPosition.ToString(),
@@ -1867,6 +2038,7 @@ internal static class CardEditorPresetStore
 				DrawnFromPile = effect.DrawnFromPile.ToString(),
 				SpecificCardId = effect.SpecificCardId,
 				ShowReferencedCardText = effect.CardReferenceDisplayMode == CardExtraEffectCardReferenceDisplayMode.FullText,
+				SpecificCardUpgradeMode = effect.SpecificCardUpgradeMode.ToString(),
 				SpecificCardId2 = effect.SpecificCardId2,
 				SpecificCardId3 = effect.SpecificCardId3,
 				ChooseOneExecutionMode = effect.ChooseOneExecutionMode.ToString(),
@@ -1903,7 +2075,14 @@ internal static class CardEditorPresetStore
 				BranchCountCardPile = effect.BranchCountCardPile.ToString(),
 				BranchCountCardPool = effect.BranchCountCardPool.ToString(),
 				BranchCountCardType = effect.BranchCountCardType.ToString(),
+				BranchCountCardRarity = effect.BranchCountCardRarity.ToString(),
 				BranchCountCardFilter = effect.BranchCountCardFilter.ToString(),
+				BranchCountCardMatchMode = effect.BranchCountCardMatchMode.ToString(),
+				BranchCountMatchCardId = effect.BranchCountMatchCardId,
+				BranchCountMatchTagKind = effect.BranchCountMatchTagKind.ToString(),
+				BranchCountMatchVanillaTag = effect.BranchCountMatchVanillaTag.ToString(),
+				BranchCountMatchCustomTag = effect.BranchCountMatchCustomTag,
+				BranchCountMatchCustomKeyword = effect.BranchCountMatchCustomKeyword,
 				BranchCountAggregationMode = CardEditorExtraEffects.GetEffectiveBranchCountAggregationMode(effect).ToString(),
 				BranchCountUsesCardEffectAmount = effect.BranchCountUsesCardEffectAmount,
 				BranchCountExcludeSourceCard = effect.BranchCountExcludeSourceCard,
@@ -1912,6 +2091,13 @@ internal static class CardEditorPresetStore
 				BranchCountEnemyStatus = effect.BranchCountEnemyStatus.ToString(),
 				BranchCountPowerId = effect.BranchCountPowerId,
 				BranchCountEnemyIntent = effect.BranchCountEnemyIntent.ToString(),
+				BranchCountDamageTarget = effect.BranchCountDamageTarget.ToString(),
+				BranchCountDamageDealer = effect.BranchCountDamageDealer.ToString(),
+				BranchCountDamageSource = effect.BranchCountDamageSource.ToString(),
+				BranchCountDamageAggregation = effect.BranchCountDamageAggregation.ToString(),
+				BranchCountDamageCurrentInclusion = effect.BranchCountDamageCurrentInclusion.ToString(),
+				BranchCountResultEffectId = effect.BranchCountResultEffectId,
+				BranchCountResultMetric = effect.BranchCountResultMetric.ToString(),
 				BranchCountComparison = effect.BranchCountComparison.ToString(),
 				BranchCountConditionAmount = effect.BranchCountConditionAmount,
 				PowerId = effect.PowerId,
@@ -1930,6 +2116,8 @@ internal static class CardEditorPresetStore
 				ConditionProgressDisplay = effect.ConditionProgressDisplay.ToString(),
 				CountExcludeSourceCard = effect.CountExcludeSourceCard,
 				OstyAction = effect.OstyAction.ToString(),
+				CreatureCommand = effect.CreatureCommand.ToString(),
+				CreatureCommandId = effect.CreatureCommandId,
 				MultiplierStat = effect.MultiplierStat.ToString(),
 				MultiplierSourceMode = effect.MultiplierSourceMode.ToString(),
 				MultiplierPowerId = effect.MultiplierPowerId,
@@ -1943,6 +2131,7 @@ internal static class CardEditorPresetStore
 				PowerHost = CardEditorExtraEffects.GetEffectivePowerHost(effect).ToString(),
 				PowerTriggerFrom = CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect).ToString(),
 				PowerTargeting = effect.PowerTargeting.ToString(),
+				ActivePowerSelection = effect.ActivePowerSelection.ToString(),
 				CardMatchMode = effect.CardMatchMode.ToString(),
 				MatchCardId = effect.MatchCardId,
 				MatchTagKind = effect.MatchTagKind.ToString(),
@@ -1956,6 +2145,8 @@ internal static class CardEditorPresetStore
 				CostFilterMode = effect.CostFilterMode.ToString(),
 				CostFilterMax = effect.CostFilterMax,
 				EffectId = effect.EffectId,
+				AutoActionEffectIds = effect.AutoActionEffectIds,
+				EffectLimitTargetEffectIds = effect.EffectLimitTargetEffectIds,
 				ResourceConsumptionMode = effect.ResourceConsumptionMode.ToString(),
 				ResourceConsumptionStat = effect.ResourceConsumptionStat.ToString(),
 				StatusToStatusMode = effect.StatusToStatusMode.ToString(),
@@ -2007,6 +2198,7 @@ internal static class CardEditorPresetStore
 			effect.Kind = kind;
 			effect.Target = target;
 			effect.Amount = Amount;
+			effect.PayloadOnly = PayloadOnly;
 			effect.AmountIsX = AmountIsX;
 			effect.AmountXPlus = AmountIsX ? Math.Max(0, AmountXPlus) : 0;
 			effect.AmountSourceMode = CardExtraEffectAmountSourceMode.Fixed;
@@ -2061,6 +2253,7 @@ internal static class CardEditorPresetStore
 			effect.PowerTriggerPowerId = string.IsNullOrWhiteSpace(PowerTriggerPowerId)
 				? null
 				: PowerTriggerPowerId.Trim();
+			effect.PowerTriggerUsesEventAmount = PowerTriggerUsesEventAmount;
 			effect.TurnBoundary = CardExtraEffectTurnBoundary.End;
 			if (!string.IsNullOrWhiteSpace(TurnBoundary) && Enum.TryParse(TurnBoundary, out CardExtraEffectTurnBoundary parsedTurnBoundary))
 			{
@@ -2130,6 +2323,12 @@ internal static class CardEditorPresetStore
 			}
 			effect.TriggerCardType = triggerType;
 
+			effect.TriggerCardRarity = CardExtraEffectCardRarityFilter.Any;
+			if (!string.IsNullOrWhiteSpace(TriggerCardRarity) && Enum.TryParse(TriggerCardRarity, out CardExtraEffectCardRarityFilter parsedTriggerRarity))
+			{
+				effect.TriggerCardRarity = parsedTriggerRarity;
+			}
+
 			CardExtraEffectCountCardFilter triggerFilter = CardExtraEffectCountCardFilter.Any;
 			if (!string.IsNullOrWhiteSpace(TriggerCardFilter) && Enum.TryParse(TriggerCardFilter, out CardExtraEffectCountCardFilter parsedTriggerFilter))
 			{
@@ -2156,6 +2355,7 @@ internal static class CardEditorPresetStore
 			{
 				effect.UseLimitWindow = parsedUseLimitWindow;
 			}
+			effect.UseLimitGroupId = string.IsNullOrWhiteSpace(UseLimitGroupId) ? null : UseLimitGroupId.Trim();
 			effect.PowerStackMode = CardExtraEffectPowerStackMode.Merge;
 			if (!string.IsNullOrWhiteSpace(PowerStackMode)
 				&& Enum.TryParse(PowerStackMode, out CardExtraEffectPowerStackMode parsedPowerStackMode))
@@ -2200,8 +2400,15 @@ internal static class CardEditorPresetStore
 			{
 				effect.QuestMode = parsedQuestMode;
 			}
-			effect.QuestActIndex = QuestActIndex <= 0 ? -1 : QuestActIndex;
+			effect.QuestActIndex = QuestActIndex < 0 ? -1 : QuestActIndex;
 			effect.QuestEventId = string.IsNullOrWhiteSpace(QuestEventId) ? null : QuestEventId.Trim();
+			effect.QuestActiveScope = CardExtraEffectQuestActiveScope.RunDeck;
+			if (!string.IsNullOrWhiteSpace(QuestActiveScope)
+				&& Enum.TryParse(QuestActiveScope, out CardExtraEffectQuestActiveScope parsedQuestActiveScope))
+			{
+				effect.QuestActiveScope = parsedQuestActiveScope;
+			}
+			effect.QuestCompletionLimit = Math.Clamp(QuestCompletionLimit, 0, 999);
 			effect.ConsumedCardAction = CardExtraEffectConsumedCardAction.Exhaust;
 			if (!string.IsNullOrWhiteSpace(ConsumedCardAction)
 				&& Enum.TryParse(ConsumedCardAction, out CardExtraEffectConsumedCardAction parsedConsumedCardAction))
@@ -2299,6 +2506,16 @@ internal static class CardEditorPresetStore
 			}
 			effect.CardCostsLessModifier = costsLessModifier;
 
+			effect.MatchingCostUseLimitMode = CardExtraEffectMatchingCostUseLimitMode.Unlimited;
+			if (!string.IsNullOrWhiteSpace(MatchingCostUseLimitMode)
+				&& Enum.TryParse(MatchingCostUseLimitMode, out CardExtraEffectMatchingCostUseLimitMode parsedMatchingCostUseLimitMode))
+			{
+				effect.MatchingCostUseLimitMode = parsedMatchingCostUseLimitMode;
+			}
+			effect.MatchingCostUseLimit = numericFieldsAreDeltas
+				? Math.Clamp(MatchingCostUseLimit, -999, 999)
+				: Math.Clamp(MatchingCostUseLimit <= 0 ? 1 : MatchingCostUseLimit, 1, 999);
+
 			CardGeneratedCardPool generatedPool = CardGeneratedCardPool.Default;
 			if (!string.IsNullOrWhiteSpace(GeneratedCardPool) && Enum.TryParse(GeneratedCardPool, out CardGeneratedCardPool parsedPool))
 			{
@@ -2380,6 +2597,12 @@ internal static class CardEditorPresetStore
 			}
 			effect.CountCardType = countType;
 
+			effect.CountCardRarity = CardExtraEffectCardRarityFilter.Any;
+			if (!string.IsNullOrWhiteSpace(CountCardRarity) && Enum.TryParse(CountCardRarity, out CardExtraEffectCardRarityFilter parsedCountRarity))
+			{
+				effect.CountCardRarity = parsedCountRarity;
+			}
+
 			CardExtraEffectCountCardFilter countFilter = CardExtraEffectCountCardFilter.Any;
 			if (!string.IsNullOrWhiteSpace(CountCardFilter) && Enum.TryParse(CountCardFilter, out CardExtraEffectCountCardFilter parsedCountFilter))
 			{
@@ -2394,6 +2617,38 @@ internal static class CardEditorPresetStore
 				effect.CountAggregationMode = parsedCountAggregationMode;
 			}
 			effect.CountUsesCardEffectAmount = CountUsesCardEffectAmount;
+			effect.CountDamageTarget = CardExtraEffectDamageHistoryTarget.Any;
+			if (!string.IsNullOrWhiteSpace(CountDamageTarget) && Enum.TryParse(CountDamageTarget, out CardExtraEffectDamageHistoryTarget parsedCountDamageTarget))
+			{
+				effect.CountDamageTarget = parsedCountDamageTarget;
+			}
+			effect.CountDamageDealer = CardExtraEffectDamageHistoryDealer.Any;
+			if (!string.IsNullOrWhiteSpace(CountDamageDealer) && Enum.TryParse(CountDamageDealer, out CardExtraEffectDamageHistoryDealer parsedCountDamageDealer))
+			{
+				effect.CountDamageDealer = parsedCountDamageDealer;
+			}
+			effect.CountDamageSource = CardExtraEffectDamageHistorySource.Any;
+			if (!string.IsNullOrWhiteSpace(CountDamageSource) && Enum.TryParse(CountDamageSource, out CardExtraEffectDamageHistorySource parsedCountDamageSource))
+			{
+				effect.CountDamageSource = parsedCountDamageSource;
+			}
+			effect.CountDamageAggregation = CardExtraEffectDamageHistoryAggregation.Instances;
+			if (!string.IsNullOrWhiteSpace(CountDamageAggregation) && Enum.TryParse(CountDamageAggregation, out CardExtraEffectDamageHistoryAggregation parsedCountDamageAggregation))
+			{
+				effect.CountDamageAggregation = parsedCountDamageAggregation;
+			}
+			effect.CountDamageCurrentInclusion = CardExtraEffectDamageHistoryCurrentInclusion.IncludeCurrentPlay;
+			if (!string.IsNullOrWhiteSpace(CountDamageCurrentInclusion)
+				&& Enum.TryParse(CountDamageCurrentInclusion, out CardExtraEffectDamageHistoryCurrentInclusion parsedCountDamageCurrentInclusion))
+			{
+				effect.CountDamageCurrentInclusion = parsedCountDamageCurrentInclusion;
+			}
+			effect.CountResultEffectId = string.IsNullOrWhiteSpace(CountResultEffectId) ? null : CountResultEffectId.Trim();
+			effect.CountResultMetric = CardExtraEffectResultMetric.Kills;
+			if (!string.IsNullOrWhiteSpace(CountResultMetric) && Enum.TryParse(CountResultMetric, out CardExtraEffectResultMetric parsedCountResultMetric))
+			{
+				effect.CountResultMetric = parsedCountResultMetric;
+			}
 			effect.HistoryScalingIncludesBase = HistoryScalingIncludesBase;
 			effect.HistoryScalingBaseAmount = HistoryScalingBaseAmount;
 			effect.HistoryScalingCountStep = numericFieldsAreDeltas
@@ -2498,6 +2753,12 @@ internal static class CardEditorPresetStore
 			}
 			effect.CardSelectionType = selectionType;
 
+			effect.CardSelectionRarity = CardExtraEffectCardRarityFilter.Any;
+			if (!string.IsNullOrWhiteSpace(CardSelectionRarity) && Enum.TryParse(CardSelectionRarity, out CardExtraEffectCardRarityFilter parsedSelectionRarity))
+			{
+				effect.CardSelectionRarity = parsedSelectionRarity;
+			}
+
 			CardExtraEffectCountCardFilter selectionFilter = CardExtraEffectCountCardFilter.Any;
 			if (!string.IsNullOrWhiteSpace(CardSelectionFilter) && Enum.TryParse(CardSelectionFilter, out CardExtraEffectCountCardFilter parsedSelectionFilter))
 			{
@@ -2563,6 +2824,12 @@ internal static class CardEditorPresetStore
 			effect.CardReferenceDisplayMode = ShowReferencedCardText
 				? CardExtraEffectCardReferenceDisplayMode.FullText
 				: CardExtraEffectCardReferenceDisplayMode.NameOnly;
+			effect.SpecificCardUpgradeMode = CardExtraEffectSpecificCardUpgradeMode.MatchSource;
+			if (!string.IsNullOrWhiteSpace(SpecificCardUpgradeMode)
+				&& Enum.TryParse(SpecificCardUpgradeMode, out CardExtraEffectSpecificCardUpgradeMode parsedSpecificCardUpgradeMode))
+			{
+				effect.SpecificCardUpgradeMode = parsedSpecificCardUpgradeMode;
+			}
 			effect.ResourceConsumptionMode = CardExtraEffectResourceConsumptionMode.Vigor;
 			if (!string.IsNullOrWhiteSpace(ResourceConsumptionMode)
 				&& Enum.TryParse(ResourceConsumptionMode, out CardExtraEffectResourceConsumptionMode parsedResourceConsumptionMode))
@@ -2740,11 +3007,34 @@ internal static class CardEditorPresetStore
 			{
 				effect.BranchCountCardType = parsedBranchCountCardType;
 			}
+			effect.BranchCountCardRarity = CardExtraEffectCardRarityFilter.Any;
+			if (!string.IsNullOrWhiteSpace(BranchCountCardRarity) && Enum.TryParse(BranchCountCardRarity, out CardExtraEffectCardRarityFilter parsedBranchCountCardRarity))
+			{
+				effect.BranchCountCardRarity = parsedBranchCountCardRarity;
+			}
 			effect.BranchCountCardFilter = CardExtraEffectCountCardFilter.Any;
 			if (!string.IsNullOrWhiteSpace(BranchCountCardFilter) && Enum.TryParse(BranchCountCardFilter, out CardExtraEffectCountCardFilter parsedBranchCountCardFilter))
 			{
 				effect.BranchCountCardFilter = parsedBranchCountCardFilter;
 			}
+			effect.BranchCountCardMatchMode = CardExtraEffectCardMatchMode.Any;
+			if (!string.IsNullOrWhiteSpace(BranchCountCardMatchMode) && Enum.TryParse(BranchCountCardMatchMode, out CardExtraEffectCardMatchMode parsedBranchCountCardMatchMode))
+			{
+				effect.BranchCountCardMatchMode = parsedBranchCountCardMatchMode;
+			}
+			effect.BranchCountMatchCardId = string.IsNullOrWhiteSpace(BranchCountMatchCardId) ? null : BranchCountMatchCardId.Trim();
+			effect.BranchCountMatchTagKind = CardExtraEffectCardMatchTagKind.Vanilla;
+			if (!string.IsNullOrWhiteSpace(BranchCountMatchTagKind) && Enum.TryParse(BranchCountMatchTagKind, out CardExtraEffectCardMatchTagKind parsedBranchCountMatchTagKind))
+			{
+				effect.BranchCountMatchTagKind = parsedBranchCountMatchTagKind;
+			}
+			effect.BranchCountMatchVanillaTag = CardTag.None;
+			if (!string.IsNullOrWhiteSpace(BranchCountMatchVanillaTag) && Enum.TryParse(BranchCountMatchVanillaTag, out CardTag parsedBranchCountMatchVanillaTag))
+			{
+				effect.BranchCountMatchVanillaTag = parsedBranchCountMatchVanillaTag;
+			}
+			effect.BranchCountMatchCustomTag = string.IsNullOrWhiteSpace(BranchCountMatchCustomTag) ? null : BranchCountMatchCustomTag.Trim();
+			effect.BranchCountMatchCustomKeyword = string.IsNullOrWhiteSpace(BranchCountMatchCustomKeyword) ? null : BranchCountMatchCustomKeyword.Trim();
 			effect.BranchCountAggregationMode = CardExtraEffectCountAggregationMode.CardCount;
 			if (!string.IsNullOrWhiteSpace(BranchCountAggregationMode) && Enum.TryParse(BranchCountAggregationMode, out CardExtraEffectCountAggregationMode parsedBranchCountAggregationMode))
 			{
@@ -2775,6 +3065,38 @@ internal static class CardEditorPresetStore
 			{
 				effect.BranchCountEnemyIntent = parsedBranchCountEnemyIntent;
 			}
+			effect.BranchCountDamageTarget = CardExtraEffectDamageHistoryTarget.Any;
+			if (!string.IsNullOrWhiteSpace(BranchCountDamageTarget) && Enum.TryParse(BranchCountDamageTarget, out CardExtraEffectDamageHistoryTarget parsedBranchCountDamageTarget))
+			{
+				effect.BranchCountDamageTarget = parsedBranchCountDamageTarget;
+			}
+			effect.BranchCountDamageDealer = CardExtraEffectDamageHistoryDealer.Any;
+			if (!string.IsNullOrWhiteSpace(BranchCountDamageDealer) && Enum.TryParse(BranchCountDamageDealer, out CardExtraEffectDamageHistoryDealer parsedBranchCountDamageDealer))
+			{
+				effect.BranchCountDamageDealer = parsedBranchCountDamageDealer;
+			}
+			effect.BranchCountDamageSource = CardExtraEffectDamageHistorySource.Any;
+			if (!string.IsNullOrWhiteSpace(BranchCountDamageSource) && Enum.TryParse(BranchCountDamageSource, out CardExtraEffectDamageHistorySource parsedBranchCountDamageSource))
+			{
+				effect.BranchCountDamageSource = parsedBranchCountDamageSource;
+			}
+			effect.BranchCountDamageAggregation = CardExtraEffectDamageHistoryAggregation.Instances;
+			if (!string.IsNullOrWhiteSpace(BranchCountDamageAggregation) && Enum.TryParse(BranchCountDamageAggregation, out CardExtraEffectDamageHistoryAggregation parsedBranchCountDamageAggregation))
+			{
+				effect.BranchCountDamageAggregation = parsedBranchCountDamageAggregation;
+			}
+			effect.BranchCountDamageCurrentInclusion = CardExtraEffectDamageHistoryCurrentInclusion.IncludeCurrentPlay;
+			if (!string.IsNullOrWhiteSpace(BranchCountDamageCurrentInclusion)
+				&& Enum.TryParse(BranchCountDamageCurrentInclusion, out CardExtraEffectDamageHistoryCurrentInclusion parsedBranchCountDamageCurrentInclusion))
+			{
+				effect.BranchCountDamageCurrentInclusion = parsedBranchCountDamageCurrentInclusion;
+			}
+			effect.BranchCountResultEffectId = string.IsNullOrWhiteSpace(BranchCountResultEffectId) ? null : BranchCountResultEffectId.Trim();
+			effect.BranchCountResultMetric = CardExtraEffectResultMetric.Kills;
+			if (!string.IsNullOrWhiteSpace(BranchCountResultMetric) && Enum.TryParse(BranchCountResultMetric, out CardExtraEffectResultMetric parsedBranchCountResultMetric))
+			{
+				effect.BranchCountResultMetric = parsedBranchCountResultMetric;
+			}
 			effect.BranchCountComparison = CardExtraEffectCountComparison.None;
 			if (!string.IsNullOrWhiteSpace(BranchCountComparison) && Enum.TryParse(BranchCountComparison, out CardExtraEffectCountComparison parsedBranchCountComparison))
 			{
@@ -2796,7 +3118,14 @@ internal static class CardEditorPresetStore
 				parsedBranchEffect.BranchCountCardPile = default;
 				parsedBranchEffect.BranchCountCardPool = default;
 				parsedBranchEffect.BranchCountCardType = default;
+				parsedBranchEffect.BranchCountCardRarity = default;
 				parsedBranchEffect.BranchCountCardFilter = default;
+				parsedBranchEffect.BranchCountCardMatchMode = default;
+				parsedBranchEffect.BranchCountMatchCardId = null;
+				parsedBranchEffect.BranchCountMatchTagKind = default;
+				parsedBranchEffect.BranchCountMatchVanillaTag = default;
+				parsedBranchEffect.BranchCountMatchCustomTag = null;
+				parsedBranchEffect.BranchCountMatchCustomKeyword = null;
 				parsedBranchEffect.BranchCountAggregationMode = default;
 				parsedBranchEffect.BranchCountUsesCardEffectAmount = false;
 				parsedBranchEffect.BranchCountExcludeSourceCard = false;
@@ -2804,6 +3133,13 @@ internal static class CardEditorPresetStore
 				parsedBranchEffect.BranchCountOrbSelection = default;
 				parsedBranchEffect.BranchCountEnemyStatus = default;
 				parsedBranchEffect.BranchCountEnemyIntent = default;
+				parsedBranchEffect.BranchCountDamageTarget = default;
+				parsedBranchEffect.BranchCountDamageDealer = default;
+				parsedBranchEffect.BranchCountDamageSource = default;
+				parsedBranchEffect.BranchCountDamageAggregation = default;
+				parsedBranchEffect.BranchCountDamageCurrentInclusion = default;
+				parsedBranchEffect.BranchCountResultEffectId = null;
+				parsedBranchEffect.BranchCountResultMetric = default;
 				parsedBranchEffect.BranchCountComparison = default;
 				parsedBranchEffect.BranchCountConditionAmount = 0;
 				parsedBranchEffect.BranchEffect = null;
@@ -2902,6 +3238,14 @@ internal static class CardEditorPresetStore
 			}
 			effect.OstyAction = ostyAction;
 
+			effect.CreatureCommand = CardExtraEffectCreatureCommand.Stun;
+			if (!string.IsNullOrWhiteSpace(CreatureCommand)
+				&& Enum.TryParse(CreatureCommand, out CardExtraEffectCreatureCommand parsedCreatureCommand))
+			{
+				effect.CreatureCommand = parsedCreatureCommand;
+			}
+			effect.CreatureCommandId = string.IsNullOrWhiteSpace(CreatureCommandId) ? null : CreatureCommandId.Trim();
+
 			CardExtraEffectMultiplierStat multiplierStat = CardExtraEffectMultiplierStat.Strength;
 			if (!string.IsNullOrWhiteSpace(MultiplierStat) && Enum.TryParse(MultiplierStat, out CardExtraEffectMultiplierStat parsedMultiplierStat))
 			{
@@ -2953,8 +3297,16 @@ internal static class CardEditorPresetStore
 			{
 				effect.PowerTargeting = parsedPowerTargeting;
 			}
+			effect.ActivePowerSelection = CardExtraEffectActivePowerSelection.All;
+			if (!string.IsNullOrWhiteSpace(ActivePowerSelection)
+				&& Enum.TryParse(ActivePowerSelection, out CardExtraEffectActivePowerSelection parsedActivePowerSelection))
+			{
+				effect.ActivePowerSelection = parsedActivePowerSelection;
+			}
 
 			effect.EffectId = string.IsNullOrWhiteSpace(EffectId) ? null : EffectId.Trim();
+			effect.AutoActionEffectIds = string.IsNullOrWhiteSpace(AutoActionEffectIds) ? null : AutoActionEffectIds.Trim();
+			effect.EffectLimitTargetEffectIds = string.IsNullOrWhiteSpace(EffectLimitTargetEffectIds) ? null : EffectLimitTargetEffectIds.Trim();
 			if (!string.IsNullOrWhiteSpace(SelfScalingOperation)
 				&& Enum.TryParse(SelfScalingOperation, out CardExtraEffectSelfScalingOperation parsedSelfScalingOperation))
 			{

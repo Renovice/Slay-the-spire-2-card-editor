@@ -141,6 +141,8 @@ internal static class Hook_AfterDamageReceived_CardEditorPowerCountEvent_Patch
 			{
 				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(combatState, choiceContext, target, CardExtraEffectCountEvent.DamageTaken, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(target, CardExtraEffectCountEvent.DamageTaken, delta, combatState);
+				CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, target, CardExtraEffectCountEvent.DamageTaken);
+				CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, target, CardExtraEffectCountEvent.TimesLostHp);
 			}
 		}
 		catch (Exception ex)
@@ -419,6 +421,8 @@ internal static class CreatureCmd_Heal_CardEditorResourceCount_Patch
 				CardEditorExtraEffects.RecordResourceCount(combatState, creature, CardExtraEffectCountEvent.HealingReceived, delta);
 				CardEditorExtraEffects.TriggerPowerCountEvent(combatState, creature, CardExtraEffectCountEvent.HealingReceived, amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.HealingReceived, delta, combatState);
+				CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, creature, CardExtraEffectCountEvent.HealingReceived);
+				CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, creature, CardExtraEffectCountEvent.TimesGainedHp);
 			}
 		}
 		catch (Exception ex)
@@ -438,15 +442,15 @@ internal static class Hook_AfterPowerAmountChanged_CardEditorPowerCountEvent_Pat
 			return;
 		}
 
-		__result = TrackAfter(__result, combatState, power, amount, cardSource);
+		Creature owner = power.Owner;
+		__result = TrackAfter(__result, combatState, owner, power, amount, cardSource);
 	}
 
-	private static async Task TrackAfter(Task original, CombatState combatState, PowerModel power, decimal amount, CardModel? cardSource)
+	private static async Task TrackAfter(Task original, CombatState combatState, Creature owner, PowerModel power, decimal amount, CardModel? cardSource)
 	{
 		await original;
 		try
 		{
-			Creature owner = power.Owner;
 			if (owner == null)
 			{
 				return;

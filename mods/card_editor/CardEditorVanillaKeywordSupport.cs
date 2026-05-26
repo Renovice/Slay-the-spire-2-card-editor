@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using HarmonyLib;
@@ -45,6 +46,7 @@ internal static class CardEditorVanillaKeywordSupport
 
 	private static readonly object _cacheLock = new object();
 	private static Cache? _cache;
+	private static MethodInfo? _fromPowerGenericMethod;
 
 	public static bool ShouldAugmentCard(CardModel card)
 	{
@@ -197,7 +199,50 @@ internal static class CardEditorVanillaKeywordSupport
 			index = tagEnd + 1;
 		}
 
-		return IHoverTip.RemoveDupes(tips).ToList();
+		return RemoveDuplicateHoverTips(tips);
+	}
+
+	internal static List<IHoverTip> RemoveDuplicateHoverTips(IEnumerable<IHoverTip>? tips)
+	{
+		if (tips == null)
+		{
+			return new List<IHoverTip>();
+		}
+
+		List<IHoverTip> vanillaDeduped;
+		try
+		{
+			vanillaDeduped = IHoverTip.RemoveDupes(tips.Where(tip => tip != null)).ToList();
+		}
+		catch
+		{
+			vanillaDeduped = tips.Where(tip => tip != null).ToList();
+		}
+
+		List<IHoverTip> result = new List<IHoverTip>(vanillaDeduped.Count);
+		HashSet<string> seenTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (IHoverTip tip in vanillaDeduped)
+		{
+			string? key = GetHoverTipDedupeKey(tip);
+			if (!string.IsNullOrWhiteSpace(key) && !seenTitles.Add(key))
+			{
+				continue;
+			}
+
+			result.Add(tip);
+		}
+
+		return result;
+	}
+
+	private static string? GetHoverTipDedupeKey(IHoverTip? tip)
+	{
+		if (tip is HoverTip hoverTip && !string.IsNullOrWhiteSpace(hoverTip.Title))
+		{
+			return Regex.Replace(hoverTip.Title.Trim(), @"\s+", " ");
+		}
+
+		return null;
 	}
 
 	private static void AppendFormattedPlainText(StringBuilder builder, string text, bool shouldFormat, Cache cache)
@@ -411,8 +456,9 @@ internal static class CardEditorVanillaKeywordSupport
 	private static string BuildSignature()
 	{
 		string blockTitle = GetHoverTipTitle(HoverTipFactory.Static(StaticHoverTip.Block)) ?? "Block";
-		string strengthTitle = GetHoverTipTitle(HoverTipFactory.FromPower<StrengthPower>()) ?? "Strength";
-		return blockTitle + "|" + strengthTitle;
+		string strengthTitle = GetHoverTipTitle(TryCreatePowerHoverTip(typeof(StrengthPower))) ?? "Strength";
+		string powerFactorySignature = GetFromPowerGenericMethod()?.ToString() ?? "no-power-factory";
+		return blockTitle + "|" + strengthTitle + "|" + powerFactorySignature;
 	}
 
 	private static Dictionary<string, HoverTerm> BuildTerms()
@@ -476,7 +522,10 @@ internal static class CardEditorVanillaKeywordSupport
 
 	private static void AddPowerTerm<T>(Dictionary<string, HoverTerm> terms) where T : PowerModel
 	{
-		AddTerm(terms, GetHoverTipTitle(HoverTipFactory.FromPower<T>()), () => HoverTipFactory.FromPower<T>());
+		Type powerType = typeof(T);
+		IHoverTip? previewTip = TryCreatePowerHoverTip(powerType);
+		string? term = GetHoverTipTitle(previewTip) ?? GetFallbackPowerTerm(powerType);
+		AddTerm(terms, term, () => TryCreatePowerHoverTip(powerType) ?? previewTip ?? CreateDynamicHoverTip(term ?? GetFallbackPowerTerm(powerType), term ?? GetFallbackPowerTerm(powerType)));
 	}
 
 	private static void AddOrbTerm<T>(Dictionary<string, HoverTerm> terms) where T : OrbModel
@@ -517,7 +566,7 @@ internal static class CardEditorVanillaKeywordSupport
 		terms[term] = new HoverTerm(term, createHoverTip);
 	}
 
-	private static string? GetHoverTipTitle(IHoverTip tip)
+	private static string? GetHoverTipTitle(IHoverTip? tip)
 	{
 		if (tip is HoverTip hoverTip && !string.IsNullOrWhiteSpace(hoverTip.Title))
 		{
@@ -525,6 +574,59 @@ internal static class CardEditorVanillaKeywordSupport
 		}
 
 		return null;
+	}
+
+	private static MethodInfo? GetFromPowerGenericMethod()
+	{
+		if (_fromPowerGenericMethod != null)
+		{
+			return _fromPowerGenericMethod;
+		}
+
+		_fromPowerGenericMethod = typeof(HoverTipFactory)
+			.GetMethods(BindingFlags.Public | BindingFlags.Static)
+			.Where(method => method.Name == "FromPower" && method.IsGenericMethodDefinition)
+			.OrderBy(method => method.GetParameters().Length)
+			.FirstOrDefault(method =>
+			{
+				ParameterInfo[] parameters = method.GetParameters();
+				return parameters.Length == 0
+					|| (parameters.Length == 1 && Nullable.GetUnderlyingType(parameters[0].ParameterType) == typeof(int));
+			});
+		return _fromPowerGenericMethod;
+	}
+
+	private static IHoverTip? TryCreatePowerHoverTip(Type powerType)
+	{
+		try
+		{
+			MethodInfo? genericMethod = GetFromPowerGenericMethod();
+			if (genericMethod == null)
+			{
+				return null;
+			}
+
+			MethodInfo constructedMethod = genericMethod.MakeGenericMethod(powerType);
+			object?[]? args = constructedMethod.GetParameters().Length == 0
+				? null
+				: new object?[] { null };
+			return constructedMethod.Invoke(null, args) as IHoverTip;
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static string GetFallbackPowerTerm(Type powerType)
+	{
+		string name = powerType.Name;
+		if (name.EndsWith("Power", StringComparison.Ordinal))
+		{
+			name = name.Substring(0, name.Length - "Power".Length);
+		}
+
+		return Regex.Replace(name, "([a-z])([A-Z])", "$1 $2");
 	}
 
 	internal static IHoverTip CreateDynamicHoverTip(string title, string description)
@@ -613,7 +715,7 @@ internal static class CardModel_HoverTips_CardEditorKeywordSupport_Patch
 				combinedTips = combinedTips.Concat(hoverPreviewTips);
 			}
 
-			List<IHoverTip> finalTips = IHoverTip.RemoveDupes(combinedTips).ToList();
+			List<IHoverTip> finalTips = CardEditorVanillaKeywordSupport.RemoveDuplicateHoverTips(combinedTips);
 			if (finalTips.Count == 0)
 			{
 				return;

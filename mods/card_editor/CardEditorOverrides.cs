@@ -213,6 +213,12 @@ public sealed class CardUpgradeOverride
 
 public static class CardEditorOverrides
 {
+	private sealed class RuntimeEnchantmentSnapshot
+	{
+		public required ModelId Id { get; init; }
+		public required int Amount { get; init; }
+	}
+
 	private static readonly Dictionary<ModelId, CardOverride> _overrides = new();
 	private static readonly ConditionalWeakTable<CardModel, CardOverride> _instanceOverrides = new();
 	private static readonly FieldInfo? _afflictionAmountField = typeof(AfflictionModel).GetField("_amount", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -610,6 +616,8 @@ public static class CardEditorOverrides
 	private static void ApplyOverride(CardModel card, CardOverride overrideData)
 	{
 		CardEditorUpgradeDeltaDebugLog.LogCardState("Overrides.ApplyOverride.before", card, overrideData);
+		TryGet(card, out CardOverride previousOverride);
+		RuntimeEnchantmentSnapshot? runtimeEnchantmentToRestore = CaptureRuntimeEnchantmentBeforeExplicitNone(card, overrideData, previousOverride);
 		SetInstanceOverride(card, overrideData);
 
 		if (!string.IsNullOrWhiteSpace(overrideData.PoolTitle))
@@ -652,6 +660,7 @@ public static class CardEditorOverrides
 		{
 			card.BaseReplayCount = overrideData.ReplayCount.Value;
 		}
+		ApplyActiveUpgradeCostOverrides(card, overrideData);
 		if (overrideData.Keywords != null)
 		{
 			HashSet<CardKeyword> desired = overrideData.Keywords;
@@ -681,8 +690,126 @@ public static class CardEditorOverrides
 			}
 		}
 		ApplyEnchantmentOverride(card, overrideData);
+		RestoreRuntimeEnchantmentAfterExplicitNone(card, runtimeEnchantmentToRestore);
 		ApplyAfflictionOverride(card, overrideData);
+		ReapplyRuntimeModifiers(card);
+	}
 
+	private static void ApplyActiveUpgradeCostOverrides(CardModel card, CardOverride overrideData)
+	{
+		if (card == null || overrideData?.Upgrade == null || card.GetSafeCurrentUpgradeLevel() <= 0)
+		{
+			return;
+		}
+
+		CardUpgradeOverride upgrade = overrideData.Upgrade;
+		if (!upgrade.EnergyCostDelta.HasValue && !upgrade.StarCostDelta.HasValue && !upgrade.ReplayCountDelta.HasValue)
+		{
+			return;
+		}
+
+		if (upgrade.EnergyCostDelta.HasValue
+			&& !card.EnergyCost.CostsX
+			&& TryResolveBaseEnergyCost(card, overrideData, out int baseEnergyCost))
+		{
+			try
+			{
+				MarkEnergyCostJustUpgraded(card);
+				card.EnergyCost.SetCustomBaseCost(Math.Max(-1, baseEnergyCost + upgrade.EnergyCostDelta.Value));
+			}
+			catch
+			{
+			}
+		}
+
+		if (upgrade.StarCostDelta.HasValue
+			&& !card.HasStarCostX
+			&& TryResolveBaseStarCost(card, overrideData, out int baseStarCost))
+		{
+			try
+			{
+				SetBaseStarCostUnsafe(card, Math.Max(-1, baseStarCost + upgrade.StarCostDelta.Value));
+				MarkStarCostJustUpgraded(card);
+			}
+			catch
+			{
+			}
+		}
+
+		if (upgrade.ReplayCountDelta.HasValue
+			&& TryResolveBaseReplayCount(card, overrideData, out int baseReplayCount))
+		{
+			try
+			{
+				card.BaseReplayCount = Math.Max(0, baseReplayCount + upgrade.ReplayCountDelta.Value);
+			}
+			catch
+			{
+			}
+		}
+	}
+
+	private static bool TryResolveBaseEnergyCost(CardModel card, CardOverride overrideData, out int cost)
+	{
+		if (overrideData.EnergyCost.HasValue)
+		{
+			cost = overrideData.EnergyCost.Value;
+			return true;
+		}
+
+		try
+		{
+			CardModel canonical = ModelDb.GetById<CardModel>(card.Id);
+			cost = canonical.EnergyCost.Canonical;
+			return cost >= -1;
+		}
+		catch
+		{
+			cost = 0;
+			return false;
+		}
+	}
+
+	private static bool TryResolveBaseStarCost(CardModel card, CardOverride overrideData, out int cost)
+	{
+		if (overrideData.StarCost.HasValue)
+		{
+			cost = overrideData.StarCost.Value;
+			return true;
+		}
+
+		try
+		{
+			CardModel canonical = ModelDb.GetById<CardModel>(card.Id);
+			cost = canonical.CanonicalStarCost;
+			return cost >= -1;
+		}
+		catch
+		{
+			cost = 0;
+			return false;
+		}
+	}
+
+	private static bool TryResolveBaseReplayCount(CardModel card, CardOverride overrideData, out int replayCount)
+	{
+		if (overrideData.ReplayCount.HasValue)
+		{
+			replayCount = overrideData.ReplayCount.Value;
+			return true;
+		}
+
+		try
+		{
+			CardModel canonical = ModelDb.GetById<CardModel>(card.Id);
+			replayCount = canonical.BaseReplayCount;
+			return replayCount >= 0;
+		}
+		catch
+		{
+			replayCount = 0;
+			return false;
+		}
 	}
 
 	private static void TrySetCardType(CardModel card, CardType type)
@@ -814,6 +941,104 @@ public static class CardEditorOverrides
 		TrySetBaseStarCost(card, cost);
 	}
 
+	private static RuntimeEnchantmentSnapshot? CaptureRuntimeEnchantmentBeforeExplicitNone(CardModel card, CardOverride overrideData, CardOverride? previousOverride)
+	{
+		if (card?.Enchantment == null || overrideData.EnchantmentId != ModelId.none)
+		{
+			return null;
+		}
+		if (!IsRuntimeCardInstance(card))
+		{
+			return null;
+		}
+		if (previousOverride?.EnchantmentId is ModelId previousId
+			&& previousId != ModelId.none
+			&& previousId == card.Enchantment.Id)
+		{
+			return null;
+		}
+
+		return new RuntimeEnchantmentSnapshot
+		{
+			Id = card.Enchantment.Id,
+			Amount = Math.Max(1, card.Enchantment.Amount)
+		};
+	}
+
+	private static bool IsRuntimeCardInstance(CardModel card)
+	{
+		try
+		{
+			if (card.GetConcreteCombatState() != null)
+			{
+				return true;
+			}
+		}
+		catch
+		{
+		}
+
+		try
+		{
+			if ((card.Pile?.Type ?? PileType.None) != PileType.None)
+			{
+				return true;
+			}
+		}
+		catch
+		{
+		}
+
+		try
+		{
+			if (card.DeckVersion != null)
+			{
+				return true;
+			}
+		}
+		catch
+		{
+		}
+
+		try
+		{
+			return card.Owner?.PlayerCombatState != null;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static void RestoreRuntimeEnchantmentAfterExplicitNone(CardModel card, RuntimeEnchantmentSnapshot? snapshot)
+	{
+		if (card == null || snapshot == null || snapshot.Id == ModelId.none || snapshot.Amount <= 0)
+		{
+			return;
+		}
+		if (card.Enchantment != null)
+		{
+			return;
+		}
+
+		EnchantmentModel? enchantment = ModelDb.GetByIdOrNull<EnchantmentModel>(snapshot.Id)?.ToMutable();
+		if (enchantment == null)
+		{
+			return;
+		}
+
+		try
+		{
+			card.EnchantInternal(enchantment, Math.Max(1, snapshot.Amount));
+			card.Enchantment?.ModifyCard();
+			card.FinalizeUpgradeInternal();
+			card.InvokeEnergyCostChanged();
+		}
+		catch
+		{
+		}
+	}
+
 	private static void ApplyEnchantmentOverride(CardModel card, CardOverride overrideData)
 	{
 		if (overrideData.EnchantmentId == null)
@@ -864,6 +1089,51 @@ public static class CardEditorOverrides
 		}
 
 		SetAfflictionPreviewSafe(card, affliction, amount);
+	}
+
+	internal static void ReapplyRuntimeModifiers(CardModel card)
+	{
+		if (card == null || !card.IsMutable)
+		{
+			return;
+		}
+
+		bool changed = false;
+		try
+		{
+			if (card.Enchantment != null)
+			{
+				card.Enchantment.ModifyCard();
+				card.FinalizeUpgradeInternal();
+				changed = true;
+			}
+		}
+		catch
+		{
+		}
+
+		try
+		{
+			if (card.Affliction != null)
+			{
+				card.Affliction.AfterApplied();
+				changed = true;
+			}
+		}
+		catch
+		{
+		}
+
+		if (changed)
+		{
+			try
+			{
+				card.InvokeEnergyCostChanged();
+			}
+			catch
+			{
+			}
+		}
 	}
 
 	private static void TryClearAffliction(CardModel card)
@@ -977,43 +1247,9 @@ public static class CardEditorOverrides
 		}
 
 		// Preserve run-time state (enchantments/afflictions) when syncing existing cards.
-		// Users expect mid-run edits/resets to not delete event enchantments like Royal Seal.
-		try
-		{
-			if (card.Enchantment != null && !card.Enchantment.CanEnchant(card))
-			{
-				card.ClearEnchantmentInternal();
-			}
-			else
-			{
-				card.Enchantment?.ModifyCard();
-			}
-		}
-		catch
-		{
-		}
-
-		try
-		{
-			if (card.Affliction != null && !card.Affliction.CanAfflict(card))
-			{
-				TryClearAffliction(card);
-			}
-			else
-			{
-				card.Affliction?.AfterApplied();
-			}
-		}
-		catch
-		{
-		}
-		try
-		{
-			card.InvokeEnergyCostChanged();
-		}
-		catch
-		{
-		}
+		// Do not call CanEnchant/CanAfflict on an already attached modifier: vanilla rejects
+		// non-stackable modifiers when the card already has that same modifier attached.
+		ReapplyRuntimeModifiers(card);
 	}
 
 	public static void ApplyToExistingCards(ModelId id)
@@ -1123,6 +1359,8 @@ public static class CardEditorOverrides
 				break;
 			}
 		}
+
+		ReapplyRuntimeModifiers(card);
 
 		try
 		{

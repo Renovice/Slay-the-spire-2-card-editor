@@ -785,27 +785,111 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return upgradedDescription;
 		}
 
-		List<string> baseTokens = ExtractVisibleNumberTokens(baseDescription, includeHighlightedNumbers: false);
-		if (baseTokens.Count == 0)
+		string[] baseLines = SplitDescriptionLines(baseDescription);
+		string[] upgradedLines = SplitDescriptionLines(upgradedDescription);
+		if (baseLines.Length > 1 || upgradedLines.Length > 1)
 		{
-			return upgradedDescription;
+			return HighlightChangedNumbersByLine(baseLines, upgradedLines);
 		}
 
-		StringBuilder builder = new StringBuilder(upgradedDescription.Length + 24);
-		int tokenIndex = 0;
-		int highlightDepth = 0;
-		int imageDepth = 0;
+		List<string> baseTokens = ExtractVisibleNumberTokens(baseDescription, includeHighlightedNumbers: false);
+		return HighlightChangedNumbersInLine(upgradedDescription, baseTokens);
+	}
 
-		for (int i = 0; i < upgradedDescription.Length;)
+	private static string HighlightChangedNumbersByLine(string[] baseLines, string[] upgradedLines)
+	{
+		if (upgradedLines.Length == 0)
 		{
-			if (TryAppendTag(upgradedDescription, ref i, builder, ref highlightDepth, ref imageDepth))
+			return string.Empty;
+		}
+
+		Dictionary<string, List<string>> baseTokensByLineKey = BuildUniqueBaseNumberTokensByLineKey(baseLines);
+		List<string> renderedLines = new List<string>(upgradedLines.Length);
+		for (int i = 0; i < upgradedLines.Length; i++)
+		{
+			string upgradedLine = upgradedLines[i];
+			List<string>? baseTokens = null;
+			string upgradedKey = NormalizeVisibleLineWithoutNumbers(upgradedLine);
+			if (!string.IsNullOrWhiteSpace(upgradedKey))
+			{
+				baseTokensByLineKey.TryGetValue(upgradedKey, out baseTokens);
+			}
+
+			if (baseTokens == null && i < baseLines.Length)
+			{
+				string baseKeyAtSameIndex = NormalizeVisibleLineWithoutNumbers(baseLines[i]);
+				if (!string.IsNullOrWhiteSpace(upgradedKey)
+					&& string.Equals(baseKeyAtSameIndex, upgradedKey, StringComparison.OrdinalIgnoreCase))
+				{
+					baseTokens = ExtractVisibleNumberTokens(baseLines[i], includeHighlightedNumbers: false);
+				}
+			}
+
+			renderedLines.Add(baseTokens == null
+				? upgradedLine
+				: HighlightChangedNumbersInLine(upgradedLine, baseTokens));
+		}
+
+		return string.Join('\n', renderedLines);
+	}
+
+	private static Dictionary<string, List<string>> BuildUniqueBaseNumberTokensByLineKey(string[] baseLines)
+	{
+		Dictionary<string, List<string>> tokensByKey = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> duplicateKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (string baseLine in baseLines)
+		{
+			string key = NormalizeVisibleLineWithoutNumbers(baseLine);
+			if (string.IsNullOrWhiteSpace(key))
 			{
 				continue;
 			}
 
-			if (highlightDepth == 0 && imageDepth == 0 && TryReadNumericToken(upgradedDescription, i, out int tokenEndExclusive))
+			List<string> tokens = ExtractVisibleNumberTokens(baseLine, includeHighlightedNumbers: false);
+			if (tokens.Count == 0)
 			{
-				string token = upgradedDescription.Substring(i, tokenEndExclusive - i);
+				continue;
+			}
+
+			if (tokensByKey.ContainsKey(key))
+			{
+				duplicateKeys.Add(key);
+				continue;
+			}
+
+			tokensByKey[key] = tokens;
+		}
+
+		foreach (string duplicateKey in duplicateKeys)
+		{
+			tokensByKey.Remove(duplicateKey);
+		}
+
+		return tokensByKey;
+	}
+
+	private static string HighlightChangedNumbersInLine(string upgradedLine, IReadOnlyList<string> baseTokens)
+	{
+		if (string.IsNullOrWhiteSpace(upgradedLine) || baseTokens.Count == 0)
+		{
+			return upgradedLine;
+		}
+
+		StringBuilder builder = new StringBuilder(upgradedLine.Length + 24);
+		int tokenIndex = 0;
+		int highlightDepth = 0;
+		int imageDepth = 0;
+
+		for (int i = 0; i < upgradedLine.Length;)
+		{
+			if (TryAppendTag(upgradedLine, ref i, builder, ref highlightDepth, ref imageDepth))
+			{
+				continue;
+			}
+
+			if (highlightDepth == 0 && imageDepth == 0 && TryReadNumericToken(upgradedLine, i, out int tokenEndExclusive))
+			{
+				string token = upgradedLine.Substring(i, tokenEndExclusive - i);
 				string? baseToken = tokenIndex < baseTokens.Count ? baseTokens[tokenIndex] : null;
 				int comparison = GetUpgradeHighlightComparison(baseToken, token);
 				builder.Append(comparison != 0
@@ -816,7 +900,7 @@ internal static class CardEditorDescriptionNumberHighlighter
 				continue;
 			}
 
-			builder.Append(upgradedDescription[i]);
+			builder.Append(upgradedLine[i]);
 			i++;
 		}
 

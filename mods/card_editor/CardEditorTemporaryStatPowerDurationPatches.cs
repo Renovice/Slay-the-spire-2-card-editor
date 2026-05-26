@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
@@ -80,9 +83,13 @@ internal static class CardEditorTemporaryStatPowerDurationController
 		}
 	}
 
-	public static bool ShouldSkipTurnEndRemoval(PowerModel power, CombatSide side)
+	public static bool ShouldSkipTurnEndRemoval(PowerModel power, CombatSide side, IEnumerable<Creature>? participants = null)
 	{
 		if (power == null || power.Owner == null)
+		{
+			return false;
+		}
+		if (participants != null && !participants.Contains(power.Owner))
 		{
 			return false;
 		}
@@ -113,9 +120,74 @@ internal static class CardEditorTemporaryStatPowerDurationController
 	}
 }
 
-[HarmonyPatch(typeof(TemporaryStrengthPower), nameof(TemporaryStrengthPower.AfterTurnEnd))]
+[HarmonyPatch]
+internal static class TemporaryStrengthPower_AfterSideTurnEnd_CardEditorDurationOverride_Patch
+{
+	private static System.Reflection.MethodBase? TargetMethod()
+	{
+		return AccessTools.Method(typeof(TemporaryStrengthPower), "AfterSideTurnEnd");
+	}
+
+	public static bool Prefix(TemporaryStrengthPower __instance, PlayerChoiceContext choiceContext, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
+	{
+		if (!CardEditorTemporaryStatPowerDurationController.ShouldSkipTurnEndRemoval(__instance, side, participants))
+		{
+			return true;
+		}
+
+		__result = Task.CompletedTask;
+		return false;
+	}
+}
+
+[HarmonyPatch]
+internal static class TemporaryDexterityPower_AfterSideTurnEnd_CardEditorDurationOverride_Patch
+{
+	private static System.Reflection.MethodBase? TargetMethod()
+	{
+		return AccessTools.Method(typeof(TemporaryDexterityPower), "AfterSideTurnEnd");
+	}
+
+	public static bool Prefix(TemporaryDexterityPower __instance, PlayerChoiceContext choiceContext, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
+	{
+		if (!CardEditorTemporaryStatPowerDurationController.ShouldSkipTurnEndRemoval(__instance, side, participants))
+		{
+			return true;
+		}
+
+		__result = Task.CompletedTask;
+		return false;
+	}
+}
+
+[HarmonyPatch]
+internal static class TemporaryFocusPower_AfterSideTurnEnd_CardEditorDurationOverride_Patch
+{
+	private static System.Reflection.MethodBase? TargetMethod()
+	{
+		return AccessTools.Method(typeof(TemporaryFocusPower), "AfterSideTurnEnd");
+	}
+
+	public static bool Prefix(TemporaryFocusPower __instance, PlayerChoiceContext choiceContext, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
+	{
+		if (!CardEditorTemporaryStatPowerDurationController.ShouldSkipTurnEndRemoval(__instance, side, participants))
+		{
+			return true;
+		}
+
+		__result = Task.CompletedTask;
+		return false;
+	}
+}
+
+[HarmonyPatch(typeof(TemporaryStrengthPower), "AfterTurnEnd")]
 internal static class TemporaryStrengthPower_AfterTurnEnd_CardEditorDurationOverride_Patch
 {
+	public static bool Prepare()
+	{
+		return AccessTools.Method(typeof(TemporaryStrengthPower), "AfterTurnEnd") != null;
+	}
+
 	public static bool Prefix(TemporaryStrengthPower __instance, PlayerChoiceContext choiceContext, CombatSide side, ref Task __result)
 	{
 		if (!CardEditorTemporaryStatPowerDurationController.ShouldSkipTurnEndRemoval(__instance, side))
@@ -128,9 +200,14 @@ internal static class TemporaryStrengthPower_AfterTurnEnd_CardEditorDurationOver
 	}
 }
 
-[HarmonyPatch(typeof(TemporaryDexterityPower), nameof(TemporaryDexterityPower.AfterTurnEnd))]
+[HarmonyPatch(typeof(TemporaryDexterityPower), "AfterTurnEnd")]
 internal static class TemporaryDexterityPower_AfterTurnEnd_CardEditorDurationOverride_Patch
 {
+	public static bool Prepare()
+	{
+		return AccessTools.Method(typeof(TemporaryDexterityPower), "AfterTurnEnd") != null;
+	}
+
 	public static bool Prefix(TemporaryDexterityPower __instance, PlayerChoiceContext choiceContext, CombatSide side, ref Task __result)
 	{
 		if (!CardEditorTemporaryStatPowerDurationController.ShouldSkipTurnEndRemoval(__instance, side))
@@ -143,9 +220,14 @@ internal static class TemporaryDexterityPower_AfterTurnEnd_CardEditorDurationOve
 	}
 }
 
-[HarmonyPatch(typeof(TemporaryFocusPower), nameof(TemporaryFocusPower.AfterTurnEnd))]
+[HarmonyPatch(typeof(TemporaryFocusPower), "AfterTurnEnd")]
 internal static class TemporaryFocusPower_AfterTurnEnd_CardEditorDurationOverride_Patch
 {
+	public static bool Prepare()
+	{
+		return AccessTools.Method(typeof(TemporaryFocusPower), "AfterTurnEnd") != null;
+	}
+
 	public static bool Prefix(TemporaryFocusPower __instance, PlayerChoiceContext choiceContext, CombatSide side, ref Task __result)
 	{
 		if (!CardEditorTemporaryStatPowerDurationController.ShouldSkipTurnEndRemoval(__instance, side))
@@ -157,4 +239,3 @@ internal static class TemporaryFocusPower_AfterTurnEnd_CardEditorDurationOverrid
 		return false;
 	}
 }
-

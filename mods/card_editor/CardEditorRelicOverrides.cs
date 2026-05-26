@@ -1,11 +1,17 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Events;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
@@ -20,12 +26,18 @@ namespace SlayTheSpire2Mod.CardEditor;
 public sealed class RelicOverride
 {
 	public Dictionary<string, decimal>? DynamicVarBaseValues { get; set; }
+	public bool? CustomDescriptionEnabled { get; set; }
+	public string? CustomDescription { get; set; }
 	public HashSet<string>? PoolKeys { get; set; }
+	public HashSet<string>? FixedSourceKeys { get; set; }
 
 	public bool IsEmpty()
 	{
 		return (DynamicVarBaseValues == null || DynamicVarBaseValues.Count == 0)
-			&& (PoolKeys == null || PoolKeys.Count == 0);
+			&& CustomDescriptionEnabled == null
+			&& string.IsNullOrWhiteSpace(CustomDescription)
+			&& PoolKeys == null
+			&& FixedSourceKeys == null;
 	}
 }
 
@@ -36,6 +48,7 @@ internal static class CardEditorRelicOverrides
 	internal static IReadOnlyDictionary<ModelId, RelicOverride> AllOverrides => _overrides;
 
 	internal static bool HasAnyOverrides => _overrides.Count > 0;
+	internal static int Revision { get; private set; }
 
 	internal static void EnsureLoaded()
 	{
@@ -57,11 +70,15 @@ internal static class CardEditorRelicOverrides
 	{
 		if (overrideData == null || overrideData.IsEmpty())
 		{
-			_overrides.Remove(relicId);
+			if (_overrides.Remove(relicId))
+			{
+				Revision++;
+			}
 			return;
 		}
 
 		_overrides[relicId] = Clone(overrideData);
+		Revision++;
 	}
 
 	internal static void SetAndSave(ModelId relicId, RelicOverride? overrideData)
@@ -80,6 +97,24 @@ internal static class CardEditorRelicOverrides
 				_overrides[relicId] = Clone(overrideData);
 			}
 		}
+
+		Revision++;
+	}
+
+	internal static Dictionary<ModelId, RelicOverride> ExportSnapshot()
+	{
+		EnsureLoaded();
+		Dictionary<ModelId, RelicOverride> snapshot = new(_overrides.Count);
+		foreach ((ModelId relicId, RelicOverride overrideData) in _overrides)
+		{
+			if (overrideData == null || overrideData.IsEmpty())
+			{
+				continue;
+			}
+
+			snapshot[relicId] = Clone(overrideData);
+		}
+		return snapshot;
 	}
 
 	internal static RelicOverride Clone(RelicOverride source)
@@ -89,8 +124,13 @@ internal static class CardEditorRelicOverrides
 			DynamicVarBaseValues = source.DynamicVarBaseValues != null
 				? new Dictionary<string, decimal>(source.DynamicVarBaseValues, StringComparer.Ordinal)
 				: null,
+			CustomDescriptionEnabled = source.CustomDescriptionEnabled,
+			CustomDescription = source.CustomDescription,
 			PoolKeys = source.PoolKeys != null
 				? new HashSet<string>(source.PoolKeys, StringComparer.Ordinal)
+				: null,
+			FixedSourceKeys = source.FixedSourceKeys != null
+				? new HashSet<string>(source.FixedSourceKeys, StringComparer.Ordinal)
 				: null
 		};
 	}
@@ -117,18 +157,66 @@ internal static class CardEditorRelicOverrides
 
 	internal static void ApplyOverride(RelicModel relic, RelicOverride overrideData)
 	{
-		if (overrideData.DynamicVarBaseValues == null)
+		if (overrideData.DynamicVarBaseValues != null)
 		{
-			return;
-		}
-
-		foreach ((string key, decimal value) in overrideData.DynamicVarBaseValues)
-		{
-			if (relic.DynamicVars.TryGetValue(key, out DynamicVar? dynamicVar))
+			foreach ((string key, decimal value) in overrideData.DynamicVarBaseValues)
 			{
-				dynamicVar.BaseValue = value;
+				if (relic.DynamicVars.TryGetValue(key, out DynamicVar? dynamicVar))
+				{
+					dynamicVar.BaseValue = value;
+				}
 			}
 		}
+	}
+
+	internal static bool TryBuildCustomDynamicDescription(RelicModel relic, out LocString locString)
+	{
+		locString = null!;
+		if (relic == null
+			|| !_overrides.TryGetValue(relic.Id, out RelicOverride? overrideData)
+			|| overrideData.CustomDescriptionEnabled != true)
+		{
+			return false;
+		}
+
+		string text = overrideData.CustomDescription ?? string.Empty;
+		locString = CreateRuntimeRelicLocString("CARD_EDITOR.RELIC_DESCRIPTION.", text);
+		relic.DynamicVars.AddTo(locString);
+		string prefix = EnergyIconHelper.GetPrefix(relic);
+		locString.Add("energyPrefix", prefix);
+		locString.Add("singleStarIcon", "[img]res://images/packed/sprite_fonts/star_icon.png[/img]");
+		foreach (KeyValuePair<string, object> variable in locString.Variables)
+		{
+			if (variable.Value is EnergyVar energyVar)
+			{
+				energyVar.ColorPrefix = prefix;
+			}
+		}
+		return true;
+	}
+
+	private static LocString CreateRuntimeRelicLocString(string prefix, string text)
+	{
+		string safeText = text ?? string.Empty;
+		string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(safeText)));
+		string key = prefix + hash;
+
+		if (LocManager.Instance != null)
+		{
+			try
+			{
+				LocTable table = LocManager.Instance.GetTable("extensions");
+				table.MergeWith(new Dictionary<string, string>
+				{
+					[key] = safeText
+				});
+			}
+			catch
+			{
+			}
+		}
+
+		return new LocString("extensions", key);
 	}
 
 	internal static List<RelicPoolModel> EditablePools()
@@ -152,9 +240,49 @@ internal static class CardEditorRelicOverrides
 	internal static string GetPoolLabel(RelicPoolModel pool)
 	{
 		string name = pool.GetType().Name;
+		switch (name)
+		{
+			case "SharedRelicPool":
+				return "Shared Reward Pool";
+			case "EventRelicPool":
+				return "Event/Special Pool";
+			case "IroncladRelicPool":
+				return "Ironclad Reward Pool";
+			case "SilentRelicPool":
+				return "Silent Reward Pool";
+			case "DefectRelicPool":
+				return "Defect Reward Pool";
+			case "NecrobinderRelicPool":
+				return "Necrobinder Reward Pool";
+			case "RegentRelicPool":
+				return "Regent Reward Pool";
+			case "DeprecatedRelicPool":
+				return "Deprecated Pool";
+			case "FallbackRelicPool":
+				return "Fallback Pool";
+		}
+
 		return name.EndsWith("RelicPool", StringComparison.Ordinal)
 			? name[..^"RelicPool".Length]
 			: name;
+	}
+
+	internal static string GetPoolDescription(RelicPoolModel pool)
+	{
+		string name = pool.GetType().Name;
+		return name switch
+		{
+			"SharedRelicPool" => "Normal reward pool shared by all characters. Standard relic rewards use Shared plus the current character's pool.",
+			"EventRelicPool" => "Broad special/event catalog pool. This is not a per-event source list; many event and ancient relic grants are hard-coded event options.",
+			"IroncladRelicPool" => "Normal reward pool added while playing Ironclad.",
+			"SilentRelicPool" => "Normal reward pool added while playing Silent.",
+			"DefectRelicPool" => "Normal reward pool added while playing Defect.",
+			"NecrobinderRelicPool" => "Normal reward pool added while playing Necrobinder.",
+			"RegentRelicPool" => "Normal reward pool added while playing Regent.",
+			"DeprecatedRelicPool" => "Internal deprecated pool, hidden from the relic editor.",
+			"FallbackRelicPool" => "Internal fallback pool, hidden from the relic editor.",
+			_ => "Relic pool exposed by the game."
+		};
 	}
 
 	internal static HashSet<string> GetVanillaPoolKeys(RelicModel relic)
@@ -232,6 +360,395 @@ internal static class CardEditorRelicOverrides
 
 		return null;
 	}
+
+	internal static List<RelicSourceSummary> EditableFixedSources()
+	{
+		Dictionary<string, RelicSourceSummary> summaries = new(StringComparer.Ordinal);
+		foreach ((PropertyInfo property, object source) in EnumerateFixedRelicSourceObjects())
+		{
+			bool isAncient = IsAncientSource(property, source);
+			string key = BuildFixedSourceKey(isAncient ? "Ancient" : "Event", source);
+			string id = GetSourceIdText(source);
+			string label = GetSourceTitleText(source);
+			string sourceName = string.IsNullOrWhiteSpace(label) ? id : label;
+			summaries.TryAdd(key, new RelicSourceSummary(
+				key: key,
+				kind: isAncient ? "Ancient" : "Event",
+				label: $"{(isAncient ? "Ancient" : "Event")}: {sourceName}",
+				description: isAncient
+					? "Ancient option source. These choices come from AncientEventModel.AllPossibleOptions, not RelicPoolModel."
+					: "Fixed event option source. This is listed for visibility; generic editing is not enabled because event options can have custom scripts.",
+				editable: isAncient));
+		}
+
+		return summaries.Values
+			.OrderByDescending(summary => summary.Editable)
+			.ThenBy(summary => summary.Kind, StringComparer.OrdinalIgnoreCase)
+			.ThenBy(summary => summary.Label, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	internal static HashSet<string> GetVanillaFixedSourceKeys(RelicModel relic)
+	{
+		HashSet<string> keys = new(StringComparer.Ordinal);
+		foreach (RelicSourceSummary summary in EnumerateFixedRelicSourceSummaries(relic.Id))
+		{
+			keys.Add(summary.Key);
+		}
+		return keys;
+	}
+
+	internal static HashSet<string> GetEffectiveFixedSourceKeys(RelicModel relic)
+	{
+		if (_overrides.TryGetValue(relic.Id, out RelicOverride? overrideData)
+			&& overrideData.FixedSourceKeys != null)
+		{
+			return new HashSet<string>(overrideData.FixedSourceKeys, StringComparer.Ordinal);
+		}
+
+		return GetVanillaFixedSourceKeys(relic);
+	}
+
+	internal static IEnumerable<EventOption> ApplyFixedSourceOverrides(AncientEventModel source, IEnumerable<EventOption> result)
+	{
+		List<EventOption> options = result?.Where(option => option != null).ToList() ?? new List<EventOption>();
+		if (source == null || _overrides.Count == 0)
+		{
+			return options;
+		}
+
+		string sourceKey = BuildFixedSourceKey("Ancient", source);
+		options.RemoveAll(option =>
+			option.Relic != null
+			&& TryGetRelicModelId(option.Relic, out ModelId relicId)
+			&& _overrides.TryGetValue(relicId, out RelicOverride? overrideData)
+			&& overrideData.FixedSourceKeys != null
+			&& !overrideData.FixedSourceKeys.Contains(sourceKey));
+
+		HashSet<ModelId> existingIds = options
+			.Select(option => option.Relic)
+			.Where(relic => relic != null)
+			.Select(relic => relic!.CanonicalInstance?.Id ?? relic.Id)
+			.ToHashSet();
+
+		foreach ((ModelId relicId, RelicOverride overrideData) in _overrides)
+		{
+			if (overrideData.FixedSourceKeys == null
+				|| !overrideData.FixedSourceKeys.Contains(sourceKey)
+				|| existingIds.Contains(relicId))
+			{
+				continue;
+			}
+
+			RelicModel? relic = ModelDb.GetByIdOrNull<RelicModel>(relicId);
+			if (relic == null || !TryCreateAncientRelicOption(source, relic, out EventOption? option) || option == null)
+			{
+				continue;
+			}
+
+			options.Add(option);
+			existingIds.Add(relicId);
+		}
+
+		return options;
+	}
+
+	internal static List<RelicSourceSummary> GetFixedRelicSourceSummaries(RelicModel relic)
+	{
+		if (relic == null)
+		{
+			return new List<RelicSourceSummary>();
+		}
+
+		Dictionary<string, RelicSourceSummary> summaries = new(StringComparer.Ordinal);
+		foreach (RelicSourceSummary summary in EnumerateFixedRelicSourceSummaries(relic.Id))
+		{
+			summaries.TryAdd(summary.Key, summary);
+		}
+
+		return summaries.Values
+			.OrderBy(summary => summary.Kind, StringComparer.OrdinalIgnoreCase)
+			.ThenBy(summary => summary.Label, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+	}
+
+	private static IEnumerable<RelicSourceSummary> EnumerateFixedRelicSourceSummaries(ModelId relicId)
+	{
+		foreach ((PropertyInfo property, object source) in EnumerateFixedRelicSourceObjects())
+		{
+			if (!SourceContainsRelicOption(source, relicId))
+			{
+				continue;
+			}
+
+			bool isAncient = IsAncientSource(property, source);
+			string kind = isAncient ? "Ancient" : "Event";
+			string id = GetSourceIdText(source);
+			string label = GetSourceTitleText(source);
+			string sourceName = string.IsNullOrWhiteSpace(label) ? id : label;
+			yield return new RelicSourceSummary(
+				key: BuildFixedSourceKey(kind, source),
+				kind: kind,
+				label: $"{kind}: {sourceName}",
+				description: "Fixed source detected from event options. This is not a random relic reward pool.",
+				editable: isAncient);
+		}
+	}
+
+	private static IEnumerable<(PropertyInfo Property, object Source)> EnumerateFixedRelicSourceObjects()
+	{
+		HashSet<string> seen = new(StringComparer.Ordinal);
+		foreach (PropertyInfo property in typeof(ModelDb).GetProperties(BindingFlags.Public | BindingFlags.Static))
+		{
+			if (property.GetIndexParameters().Length != 0
+				|| property.PropertyType == typeof(string)
+				|| !typeof(IEnumerable).IsAssignableFrom(property.PropertyType))
+			{
+				continue;
+			}
+
+			IEnumerable? sources;
+			try
+			{
+				sources = property.GetValue(null) as IEnumerable;
+			}
+			catch
+			{
+				continue;
+			}
+
+			if (sources == null)
+			{
+				continue;
+			}
+
+			foreach (object? source in sources)
+			{
+				if (source == null)
+				{
+					continue;
+				}
+				PropertyInfo? optionsProperty = source.GetType().GetProperty("AllPossibleOptions", BindingFlags.Instance | BindingFlags.Public);
+				if (optionsProperty == null || !typeof(IEnumerable).IsAssignableFrom(optionsProperty.PropertyType))
+				{
+					continue;
+				}
+
+				bool isAncient = IsAncientSource(property, source);
+				string key = BuildFixedSourceKey(isAncient ? "Ancient" : "Event", source);
+				if (seen.Add(key))
+				{
+					yield return (property, source);
+				}
+			}
+		}
+	}
+
+	private static string BuildFixedSourceKey(string kind, object source)
+	{
+		return $"{kind}:{GetSourceIdText(source)}";
+	}
+
+	private static bool SourceContainsRelicOption(object source, ModelId relicId)
+	{
+		PropertyInfo? optionsProperty = source.GetType().GetProperty("AllPossibleOptions", BindingFlags.Instance | BindingFlags.Public);
+		if (optionsProperty == null || !typeof(IEnumerable).IsAssignableFrom(optionsProperty.PropertyType))
+		{
+			return false;
+		}
+
+		IEnumerable? options;
+		try
+		{
+			options = optionsProperty.GetValue(source) as IEnumerable;
+		}
+		catch
+		{
+			return false;
+		}
+
+		if (options == null)
+		{
+			return false;
+		}
+
+		foreach (object? option in options)
+		{
+			if (option == null)
+			{
+				continue;
+			}
+
+			PropertyInfo? relicProperty = option.GetType().GetProperty("Relic", BindingFlags.Instance | BindingFlags.Public);
+			if (relicProperty == null)
+			{
+				continue;
+			}
+
+			object? optionRelic;
+			try
+			{
+				optionRelic = relicProperty.GetValue(option);
+			}
+			catch
+			{
+				continue;
+			}
+
+			if (TryGetRelicModelId(optionRelic, out ModelId optionRelicId) && optionRelicId == relicId)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool TryGetRelicModelId(object? relicLike, out ModelId relicId)
+	{
+		relicId = ModelId.none;
+		if (relicLike == null)
+		{
+			return false;
+		}
+
+		if (relicLike is RelicModel relic)
+		{
+			relicId = relic.CanonicalInstance?.Id ?? relic.Id;
+			return relicId != ModelId.none;
+		}
+
+		try
+		{
+			PropertyInfo? canonicalProperty = relicLike.GetType().GetProperty("CanonicalInstance", BindingFlags.Instance | BindingFlags.Public);
+			if (canonicalProperty?.GetValue(relicLike) is RelicModel canonicalRelic)
+			{
+				relicId = canonicalRelic.Id;
+				return relicId != ModelId.none;
+			}
+		}
+		catch
+		{
+		}
+
+		try
+		{
+			PropertyInfo? idProperty = relicLike.GetType().GetProperty("Id", BindingFlags.Instance | BindingFlags.Public);
+			if (idProperty?.GetValue(relicLike) is ModelId id)
+			{
+				relicId = id;
+				return relicId != ModelId.none;
+			}
+		}
+		catch
+		{
+		}
+
+		return false;
+	}
+
+	private static string GetSourceIdText(object source)
+	{
+		try
+		{
+			object? id = source.GetType().GetProperty("Id", BindingFlags.Instance | BindingFlags.Public)?.GetValue(source);
+			if (id != null)
+			{
+				return id.ToString() ?? source.GetType().FullName ?? source.GetType().Name;
+			}
+		}
+		catch
+		{
+		}
+
+		return source.GetType().FullName ?? source.GetType().Name;
+	}
+
+	private static string GetSourceTitleText(object source)
+	{
+		try
+		{
+			object? title = source.GetType().GetProperty("Title", BindingFlags.Instance | BindingFlags.Public)?.GetValue(source);
+			if (title is LocString locString)
+			{
+				return locString.GetFormattedText();
+			}
+			if (title != null)
+			{
+				return title.ToString() ?? string.Empty;
+			}
+		}
+		catch
+		{
+		}
+
+		return string.Empty;
+	}
+
+	private static bool IsAncientSource(PropertyInfo property, object source)
+	{
+		return property.Name.Contains("Ancient", StringComparison.OrdinalIgnoreCase)
+			|| source.GetType().Name.Contains("Ancient", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool TryCreateAncientRelicOption(AncientEventModel ancient, RelicModel canonicalRelic, out EventOption? option)
+	{
+		option = null;
+		try
+		{
+			MethodInfo? method = GetAncientRelicOptionMethod();
+			if (method == null)
+			{
+				return false;
+			}
+
+			RelicModel mutableRelic = canonicalRelic.ToMutable();
+			option = method.Invoke(ancient, new object?[] { mutableRelic, "INITIAL", null }) as EventOption;
+			return option != null;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RelicEditor] Failed creating Ancient relic option ancient={ancient?.Id} relic={canonicalRelic?.Id}: {ex.Message}");
+			return false;
+		}
+	}
+
+	private static MethodInfo? GetAncientRelicOptionMethod()
+	{
+		return typeof(AncientEventModel)
+			.GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
+			.FirstOrDefault(method =>
+			{
+				if (!string.Equals(method.Name, "RelicOption", StringComparison.Ordinal) || method.IsGenericMethod)
+				{
+					return false;
+				}
+
+				ParameterInfo[] parameters = method.GetParameters();
+				return parameters.Length == 3
+					&& parameters[0].ParameterType == typeof(RelicModel)
+					&& parameters[1].ParameterType == typeof(string)
+					&& parameters[2].ParameterType == typeof(string);
+			});
+	}
+}
+
+internal sealed class RelicSourceSummary
+{
+	public RelicSourceSummary(string key, string kind, string label, string description, bool editable = false)
+	{
+		Key = key;
+		Kind = kind;
+		Label = label;
+		Description = description;
+		Editable = editable;
+	}
+
+	public string Key { get; }
+	public string Kind { get; }
+	public string Label { get; }
+	public string Description { get; }
+	public bool Editable { get; }
 }
 
 internal static class CardEditorRelicOverrideStore
@@ -347,10 +864,13 @@ internal static class CardEditorRelicOverrideStore
 		public Dictionary<string, RelicOverrideDto>? Overrides { get; set; }
 	}
 
-	private sealed class RelicOverrideDto
+	internal sealed class RelicOverrideDto
 	{
 		public Dictionary<string, decimal>? DynamicVarBaseValues { get; set; }
+		public bool? CustomDescriptionEnabled { get; set; }
+		public string? CustomDescription { get; set; }
 		public List<string>? PoolKeys { get; set; }
+		public List<string>? FixedSourceKeys { get; set; }
 
 		public RelicOverride ToOverride()
 		{
@@ -359,8 +879,13 @@ internal static class CardEditorRelicOverrideStore
 				DynamicVarBaseValues = DynamicVarBaseValues != null
 					? new Dictionary<string, decimal>(DynamicVarBaseValues, StringComparer.Ordinal)
 					: null,
+				CustomDescriptionEnabled = CustomDescriptionEnabled,
+				CustomDescription = CustomDescription,
 				PoolKeys = PoolKeys != null
 					? new HashSet<string>(PoolKeys.Where(p => !string.IsNullOrWhiteSpace(p)), StringComparer.Ordinal)
+					: null,
+				FixedSourceKeys = FixedSourceKeys != null
+					? new HashSet<string>(FixedSourceKeys.Where(p => !string.IsNullOrWhiteSpace(p)), StringComparer.Ordinal)
 					: null
 			};
 		}
@@ -372,8 +897,13 @@ internal static class CardEditorRelicOverrideStore
 				DynamicVarBaseValues = overrideData.DynamicVarBaseValues != null
 					? new Dictionary<string, decimal>(overrideData.DynamicVarBaseValues, StringComparer.Ordinal)
 					: null,
+				CustomDescriptionEnabled = overrideData.CustomDescriptionEnabled,
+				CustomDescription = overrideData.CustomDescription,
 				PoolKeys = overrideData.PoolKeys != null
 					? overrideData.PoolKeys.OrderBy(p => p, StringComparer.Ordinal).ToList()
+					: null,
+				FixedSourceKeys = overrideData.FixedSourceKeys != null
+					? overrideData.FixedSourceKeys.OrderBy(p => p, StringComparer.Ordinal).ToList()
 					: null
 			};
 		}
@@ -390,6 +920,7 @@ internal static class CardEditorRelicEditorSession
 
 	internal static void Begin()
 	{
+		NRelicEditorPopup.CloseAnyOpen();
 		CardEditorUiState.Mode = CardEditorLibraryMode.Relic;
 		_lastOpenedRelicId = ModelId.none;
 		_lastOpenTicks = 0;
@@ -403,6 +934,9 @@ internal static class CardEditorRelicEditorSession
 			Log.Info("[CardEditor][RelicEditor] Session ended");
 			CardEditorUiState.Mode = CardEditorLibraryMode.None;
 		}
+		NRelicEditorPopup.CloseAnyOpen();
+		_lastOpenedRelicId = ModelId.none;
+		_lastOpenTicks = 0;
 	}
 
 	internal static void WireEntries(Node root)
@@ -421,17 +955,20 @@ internal static class CardEditorRelicEditorSession
 			}
 
 			entry.SetMeta(WiredMetaKey, true);
-			entry.Connect(NClickableControl.SignalName.Released, Callable.From<NRelicCollectionEntry>(OnRelicEntryReleasedFallback));
 			wired++;
 		}
 
-		Log.Info($"[CardEditor][RelicEditor] Wired {wired} relic collection entries");
+		Log.Info($"[CardEditor][RelicEditor] Marked {wired} relic collection entries for editor mode");
 	}
 
 	internal static void OpenRelicEditorFor(RelicModel relic, string source)
 	{
 		if (!IsActive || relic == null)
 		{
+			if (relic != null)
+			{
+				Log.Info($"[CardEditor][RelicEditor] Ignored popup source={source} relic={relic.Id} active={IsActive}");
+			}
 			return;
 		}
 
@@ -444,15 +981,7 @@ internal static class CardEditorRelicEditorSession
 		_lastOpenedRelicId = relic.Id;
 		_lastOpenTicks = now;
 		Log.Info($"[CardEditor][RelicEditor] Opening popup source={source} relic={relic.Id}");
-		Callable.From(() => NRelicEditorPopup.Open(relic)).CallDeferred();
-	}
-
-	private static void OnRelicEntryReleasedFallback(NRelicCollectionEntry entry)
-	{
-		if (entry?.relic != null)
-		{
-			OpenRelicEditorFor(entry.relic, "fallback-signal");
-		}
+		Callable.From(() => Callable.From(() => NRelicEditorPopup.Open(relic)).CallDeferred()).CallDeferred();
 	}
 
 	private static IEnumerable<T> FindDescendants<T>(Node node)
@@ -473,12 +1002,207 @@ internal static class CardEditorRelicEditorSession
 	}
 }
 
+public partial class NRelicEditorPresetToggleButton : Control
+{
+	private static readonly string _buttonTexturePath = "res://images/packed/common_ui/settings_tab_selected.png";
+	private static readonly string _buttonOutlineTexturePath = "res://images/packed/common_ui/settings_tab_stroke.png";
+	private static readonly string _fontPath = "res://themes/kreon_bold_glyph_space_two.tres";
+	private static readonly string _labelThemePath = "res://themes/settings_screen_tab.tres";
+	private static readonly string _outlineMaterialPath = "res://themes/canvas_item_material_additive_shared.tres";
+	private static readonly string _shaderPath = "res://shaders/hsv.gdshader";
+
+	private static Texture2D? _buttonTexture;
+	private static Texture2D? _buttonOutlineTexture;
+	private static Font? _labelFont;
+	private static Theme? _labelTheme;
+	private static Material? _outlineMaterial;
+	private static Shader? _hsvShader;
+
+	private NRelicCollection _collection = null!;
+	private CardEditorBaseDeckActionButton _button = null!;
+
+	public static NRelicEditorPresetToggleButton Create(NRelicCollection collection)
+	{
+		NRelicEditorPresetToggleButton toggle = new();
+		toggle.Initialize(collection);
+		toggle.BuildUi();
+		return toggle;
+	}
+
+	private void Initialize(NRelicCollection collection)
+	{
+		_collection = collection;
+		Name = "CardEditorRelicPresetToggleButton";
+		ZIndex = 61;
+		MouseFilter = MouseFilterEnum.Ignore;
+		SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+	}
+
+	private void BuildUi()
+	{
+		CardEditorGodotResourceCache.Load(ref _buttonTexture, _buttonTexturePath);
+		CardEditorGodotResourceCache.Load(ref _buttonOutlineTexture, _buttonOutlineTexturePath);
+		CardEditorGodotResourceCache.Load(ref _labelFont, _fontPath);
+		CardEditorGodotResourceCache.Load(ref _labelTheme, _labelThemePath);
+		CardEditorGodotResourceCache.Load(ref _outlineMaterial, _outlineMaterialPath);
+		CardEditorGodotResourceCache.Load(ref _hsvShader, _shaderPath);
+
+		_button = new CardEditorBaseDeckActionButton();
+		_button.Initialize(CardEditorLoc.T("button.presetEditor", "Preset Editor"), Colors.White, _buttonTexture!, _buttonOutlineTexture!, _labelFont, _labelTheme, _outlineMaterial, _hsvShader);
+		_button.Triggered += OnTriggered;
+		AddChild(_button);
+	}
+
+	public void RefreshState(bool shouldShow, bool isPanelOpen)
+	{
+		Visible = shouldShow;
+		if (!shouldShow)
+		{
+			return;
+		}
+
+		_button.SetText(CardEditorLoc.T("button.presetEditor", "Preset Editor"));
+		_button.TooltipText = isPanelOpen
+			? CardEditorLoc.T("tooltip.hidePresets", "Hide Presets")
+			: CardEditorLoc.T("tooltip.showPresets", "Show Presets");
+		_button.SetButtonSize(CardEditorPresetButtonTuning.ButtonWidth, CardEditorPresetButtonTuning.ButtonHeight);
+		_button.SetTextSize(CardEditorPresetButtonTuning.ButtonFontSize);
+		_button.SetTextOffsets(0f, 0f, CardEditorPresetButtonTuning.TextOffsetX, CardEditorPresetButtonTuning.TextOffsetY);
+		_button.SetSelected(isPanelOpen);
+		_button.SetEmphasized(false);
+		_button.SetButtonEnabled(true);
+		_button.Position = CardEditorPresetButtonTuning.GetBaseDeckButtonPosition();
+	}
+
+	private void OnTriggered()
+	{
+		CardEditorRelicPresetPanelHooks.ToggleOpen(_collection);
+		RefreshState(true, CardEditorRelicPresetPanelHooks.IsOpen(_collection));
+	}
+}
+
+internal static class CardEditorRelicPresetPanelHooks
+{
+	private const string OpenMetaKey = "card_editor_relic_preset_panel_open";
+
+	public static bool IsOpen(NRelicCollection collection)
+	{
+		return collection != null
+			&& GodotObject.IsInstanceValid(collection)
+			&& collection.HasMeta(OpenMetaKey)
+			&& collection.GetMeta(OpenMetaKey).AsBool();
+	}
+
+	public static void ToggleOpen(NRelicCollection collection)
+	{
+		if (collection == null || !GodotObject.IsInstanceValid(collection))
+		{
+			return;
+		}
+
+		collection.SetMeta(OpenMetaKey, !IsOpen(collection));
+		Sync(collection);
+	}
+
+	public static void Sync(NRelicCollection collection)
+	{
+		if (collection == null || !GodotObject.IsInstanceValid(collection))
+		{
+			return;
+		}
+
+		NCardEditorPresetPanel? panel = collection.GetNodeOrNull<NCardEditorPresetPanel>("CardEditorPresetPanel");
+		NRelicEditorPresetToggleButton? button = collection.GetNodeOrNull<NRelicEditorPresetToggleButton>("CardEditorRelicPresetToggleButton");
+		if (!CardEditorRelicEditorSession.IsActive)
+		{
+			collection.SetMeta(OpenMetaKey, false);
+			if (panel != null)
+			{
+				panel.QueueFree();
+			}
+			if (button != null)
+			{
+				button.QueueFree();
+			}
+			return;
+		}
+
+		if (button == null)
+		{
+			button = NRelicEditorPresetToggleButton.Create(collection);
+			collection.AddChild(button);
+		}
+
+		bool isOpen = IsOpen(collection);
+		button.RefreshState(true, isOpen);
+
+		if (panel == null)
+		{
+			panel = NCardEditorPresetPanel.CreateForRelicEditor(collection);
+			collection.AddChild(panel);
+		}
+
+		panel.SetCreatorMode(false);
+		panel.Visible = isOpen;
+		if (isOpen)
+		{
+			panel.RefreshPresetList();
+			collection.MoveChild(panel, collection.GetChildCount() - 1);
+		}
+		collection.MoveChild(button, collection.GetChildCount() - 1);
+		Callable.From(() =>
+		{
+			if (GodotObject.IsInstanceValid(panel))
+			{
+				panel.ApplyLayoutTuning();
+			}
+			if (GodotObject.IsInstanceValid(button))
+			{
+				button.RefreshState(true, IsOpen(collection));
+			}
+		}).CallDeferred();
+	}
+
+	public static void Close(NRelicCollection collection)
+	{
+		if (collection == null || !GodotObject.IsInstanceValid(collection))
+		{
+			return;
+		}
+
+		foreach (NCardEditorPresetPanel panel in collection.GetChildren().OfType<NCardEditorPresetPanel>().ToArray())
+		{
+			panel.QueueFree();
+		}
+		foreach (NRelicEditorPresetToggleButton button in collection.GetChildren().OfType<NRelicEditorPresetToggleButton>().ToArray())
+		{
+			button.QueueFree();
+		}
+		collection.SetMeta(OpenMetaKey, false);
+	}
+}
+
 [HarmonyPatch(typeof(RelicModel), nameof(RelicModel.ToMutable))]
 internal static class RelicModel_ToMutable_CardEditorRelicOverrides_Patch
 {
 	public static void Postfix(ref RelicModel __result)
 	{
 		CardEditorRelicOverrides.ApplyTo(__result);
+	}
+}
+
+[HarmonyPatch(typeof(RelicModel), "get_DynamicDescription")]
+internal static class RelicModel_get_DynamicDescription_CardEditorRelicTextOverrides_Patch
+{
+	public static bool Prefix(RelicModel __instance, ref LocString __result)
+	{
+		if (CardEditorRelicOverrides.TryBuildCustomDynamicDescription(__instance, out LocString locString))
+		{
+			__result = locString;
+			return false;
+		}
+
+		return true;
 	}
 }
 
@@ -511,6 +1235,36 @@ internal static class RelicPoolModel_GetUnlockedRelics_CardEditorRelicPools_Patc
 	}
 }
 
+[HarmonyPatch]
+internal static class AncientEventModel_AllPossibleOptions_CardEditorRelicSources_Patch
+{
+	public static IEnumerable<MethodBase> TargetMethods()
+	{
+		HashSet<MethodBase> targets = new();
+		foreach (Type type in typeof(AncientEventModel).Assembly.GetTypes())
+		{
+			if (!typeof(AncientEventModel).IsAssignableFrom(type) || type.IsAbstract)
+			{
+				continue;
+			}
+
+			PropertyInfo? property = type.GetProperty(
+				nameof(AncientEventModel.AllPossibleOptions),
+				BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+			MethodInfo? getter = property?.GetGetMethod();
+			if (getter != null && targets.Add(getter))
+			{
+				yield return getter;
+			}
+		}
+	}
+
+	public static void Postfix(AncientEventModel __instance, ref IEnumerable<EventOption> __result)
+	{
+		__result = CardEditorRelicOverrides.ApplyFixedSourceOverrides(__instance, __result);
+	}
+}
+
 [HarmonyPatch(typeof(RelicModel), "get_Pool")]
 internal static class RelicModel_get_Pool_CardEditorRelicPools_Patch
 {
@@ -531,11 +1285,16 @@ internal static class RelicCollectionCategory_OnRelicEntryPressed_CardEditorReli
 	{
 		if (!CardEditorRelicEditorSession.IsActive)
 		{
+			if (entry?.relic != null)
+			{
+				Log.Info($"[CardEditor][RelicEditor] Letting vanilla relic entry open because session is inactive relic={entry.relic.Id}");
+			}
 			return true;
 		}
 
 		if (entry?.relic != null)
 		{
+			Log.Info($"[CardEditor][RelicEditor] Suppressed vanilla relic entry handler relic={entry.relic.Id}");
 			CardEditorRelicEditorSession.OpenRelicEditorFor(entry.relic, "vanilla-entry-handler");
 		}
 
@@ -546,17 +1305,21 @@ internal static class RelicCollectionCategory_OnRelicEntryPressed_CardEditorReli
 [HarmonyPatch(typeof(NInspectRelicScreen), nameof(NInspectRelicScreen.Open), typeof(IReadOnlyList<RelicModel>), typeof(RelicModel))]
 internal static class InspectRelicScreen_Open_CardEditorRelicEditor_Patch
 {
-	public static bool Prefix(RelicModel relic)
+	public static bool Prefix(RelicModel __1)
 	{
 		if (!CardEditorRelicEditorSession.IsActive)
 		{
+			if (__1 != null)
+			{
+				Log.Info($"[CardEditor][RelicEditor] Letting vanilla inspect screen open because session is inactive relic={__1.Id}");
+			}
 			return true;
 		}
 
-		if (relic != null)
+		if (__1 != null)
 		{
-			Log.Info($"[CardEditor][RelicEditor] Suppressed vanilla relic inspect relic={relic.Id}");
-			CardEditorRelicEditorSession.OpenRelicEditorFor(relic, "inspect-screen-open");
+			Log.Info($"[CardEditor][RelicEditor] Suppressed vanilla relic inspect relic={__1.Id}");
+			CardEditorRelicEditorSession.OpenRelicEditorFor(__1, "inspect-screen-open");
 		}
 
 		return false;
@@ -569,6 +1332,7 @@ internal static class RelicCollection_OnSubmenuOpened_CardEditorRelicMode_Patch
 	public static void Postfix(NRelicCollection __instance)
 	{
 		CardEditorRelicEditorSession.WireEntries(__instance);
+		CardEditorRelicPresetPanelHooks.Sync(__instance);
 	}
 }
 
@@ -584,8 +1348,9 @@ internal static class RelicCollectionCategory_LoadRelicNodes_CardEditorRelicMode
 [HarmonyPatch(typeof(NRelicCollection), nameof(NRelicCollection.OnSubmenuClosed))]
 internal static class RelicCollection_OnSubmenuClosed_CardEditorRelicMode_Patch
 {
-	public static void Postfix()
+	public static void Postfix(NRelicCollection __instance)
 	{
+		CardEditorRelicPresetPanelHooks.Close(__instance);
 		CardEditorRelicEditorSession.End();
 	}
 }

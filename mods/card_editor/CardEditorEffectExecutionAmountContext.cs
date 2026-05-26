@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Models;
@@ -9,6 +12,19 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorEffectExecutionAmountContext
 {
+	private sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class
+	{
+		public static readonly ReferenceEqualityComparer<T> Instance = new();
+
+		public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+
+		public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
+	}
+
+	private sealed class FatalTriggerState
+	{
+	}
+
 	private sealed class Session
 	{
 		public Dictionary<string, int> ConfiguredAmountsByEffectId { get; } = new(StringComparer.Ordinal);
@@ -198,7 +214,41 @@ internal static class CardEditorEffectExecutionAmountContext
 		}
 	}
 
+	private sealed class TriggerAttackDamageResultsScope : IDisposable
+	{
+		private readonly Stack<List<DamageResult>>? _stack;
+		private bool _disposed;
+
+		public TriggerAttackDamageResultsScope(Stack<List<DamageResult>>? stack)
+		{
+			_stack = stack;
+		}
+
+		public void Dispose()
+		{
+			if (_disposed)
+			{
+				return;
+			}
+			_disposed = true;
+
+			if (_stack == null || _stack.Count == 0)
+			{
+				return;
+			}
+
+			_stack.Pop();
+			if (_stack.Count == 0)
+			{
+				_triggerAttackDamageResults.Value = null;
+			}
+		}
+	}
+
 	private static readonly AsyncLocal<Session?> _currentSession = new();
+	private static readonly AsyncLocal<Stack<List<DamageResult>>?> _triggerAttackDamageResults = new();
+	private static readonly ConditionalWeakTable<CardPlay, FatalTriggerState> _fatalTriggeredCardPlays = new();
+	private static readonly object _fatalTriggeredCardPlaysLock = new();
 
 	public static IDisposable PushSessionScoped()
 	{
@@ -209,6 +259,38 @@ internal static class CardEditorEffectExecutionAmountContext
 
 		_currentSession.Value = new Session();
 		return new RootSessionScope();
+	}
+
+	public static bool TryMarkFatalTriggered(CardPlay? cardPlay)
+	{
+		if (cardPlay == null)
+		{
+			return false;
+		}
+
+		lock (_fatalTriggeredCardPlaysLock)
+		{
+			if (_fatalTriggeredCardPlays.TryGetValue(cardPlay, out _))
+			{
+				return false;
+			}
+
+			_fatalTriggeredCardPlays.Add(cardPlay, new FatalTriggerState());
+			return true;
+		}
+	}
+
+	public static bool HasFatalTriggered(CardPlay? cardPlay)
+	{
+		if (cardPlay == null)
+		{
+			return false;
+		}
+
+		lock (_fatalTriggeredCardPlaysLock)
+		{
+			return _fatalTriggeredCardPlays.TryGetValue(cardPlay, out _);
+		}
 	}
 
 	public static IDisposable PushEffectScoped(CardExtraEffect effect, int fallbackAppliedAmount, int fallbackAppliedCount = 0)
@@ -279,6 +361,30 @@ internal static class CardEditorEffectExecutionAmountContext
 		}
 
 		return new SelectedCardsScope(session, selectedCardsByEffectId);
+	}
+
+	public static IDisposable PushTriggerAttackDamageResultsScoped(IEnumerable<DamageResult>? results)
+	{
+		List<DamageResult> copied = results?
+			.Where(result => result != null)
+			.ToList()
+			?? new List<DamageResult>();
+		if (copied.Count == 0)
+		{
+			return NoopScope.Instance;
+		}
+
+		Stack<List<DamageResult>> stack = _triggerAttackDamageResults.Value ??= new Stack<List<DamageResult>>();
+		stack.Push(copied);
+		return new TriggerAttackDamageResultsScope(stack);
+	}
+
+	public static List<DamageResult> SnapshotTriggerAttackDamageResults()
+	{
+		Stack<List<DamageResult>>? stack = _triggerAttackDamageResults.Value;
+		return stack == null || stack.Count == 0
+			? new List<DamageResult>()
+			: stack.Peek().Where(result => result != null).ToList();
 	}
 
 	private static bool ShouldDefaultActualResultToZero(CardExtraEffectKind kind)
@@ -590,6 +696,14 @@ internal static class CardEditorEffectExecutionAmountContext
 		return session != null && session.CurrentPlayDamageResults.Contains(result);
 	}
 
+	public static List<DamageResult> SnapshotCurrentPlayDamageResults()
+	{
+		Session? session = _currentSession.Value;
+		return session == null
+			? new List<DamageResult>()
+			: session.CurrentPlayDamageResults.Where(result => result != null).ToList();
+	}
+
 	public static void ReportCurrentBlockApplied(int amount)
 	{
 		ReportIfCurrentKindMatches(amount, CardExtraEffectKind.GainBlock);
@@ -778,21 +892,14 @@ internal static class CardEditorEffectExecutionAmountContext
 			return false;
 		}
 
-		if (effect.Kind == CardExtraEffectKind.ApplyPower)
+		if (effect.Kind is CardExtraEffectKind.ApplyPower or CardExtraEffectKind.RemovePower)
 		{
 			if (string.IsNullOrWhiteSpace(effect.PowerId))
 			{
 				return false;
 			}
 
-			try
-			{
-				return string.Equals(power.Id.ToString(), effect.PowerId.Trim(), StringComparison.Ordinal);
-			}
-			catch
-			{
-				return false;
-			}
+			return CardEditorExtraEffects.PowerMatchesConfiguredPowerId(power, effect.PowerId);
 		}
 
 		return CardEditorExtraEffects.TryGetEffectPowerMatchStatus(effect.Kind, out CardExtraEffectEnemyStatus status)
@@ -972,5 +1079,45 @@ internal static class CardEditorEffectExecutionAmountContext
 	private static int ClampNonNegative(int value)
 	{
 		return value <= 0 ? 0 : value;
+	}
+}
+
+internal static class CardEditorFatalExecutionContext
+{
+	private sealed class NoopScope : IDisposable
+	{
+		public static readonly NoopScope Instance = new();
+
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class Scope : IDisposable
+	{
+		private bool _disposed;
+
+		public void Dispose()
+		{
+			if (_disposed)
+			{
+				return;
+			}
+			_disposed = true;
+			_depth.Value = Math.Max(0, _depth.Value - 1);
+		}
+	}
+
+	private static readonly AsyncLocal<int> _depth = new();
+
+	public static bool IsActive => _depth.Value > 0;
+
+	public static IDisposable PushScopedIf(bool active)
+		=> active ? PushScoped() : NoopScope.Instance;
+
+	public static IDisposable PushScoped()
+	{
+		_depth.Value++;
+		return new Scope();
 	}
 }
