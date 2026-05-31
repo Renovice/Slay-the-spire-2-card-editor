@@ -63,7 +63,7 @@ public static class CardEditorMod
 
 	public static void Init()
 	{
-		Log.Info("[CardEditor] Build tag: relic preset button polish + gif art 2026-05-26");
+		Log.Info("[CardEditor] Build tag: hand choice transform cleanup 2026-05-31");
 		CardEditorExternalLocalization.Init();
 		CardEditorCreatedCardsStore.EnsureLoaded();
 		CardEditorDefinitionStore.EnsureLoaded();

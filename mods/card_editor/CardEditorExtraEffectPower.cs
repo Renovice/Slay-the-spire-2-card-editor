@@ -467,7 +467,47 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		{
 			effect.AutoPlayLoopLimit = Math.Clamp(effect.AutoPlayLoopLimit * stackCount, 1, 999);
 		}
+		ScaleMergedResourceAmount(effect, stackCount);
 		return effect;
+	}
+
+	private static bool UsesMergedResourceAmount(CardExtraEffect? effect, int stackCount)
+	{
+		return effect != null
+			&& stackCount > 1
+			&& effect.PowerStackMode == CardExtraEffectPowerStackMode.Merge
+			&& !effect.AmountIsX
+			&& effect.AmountSourceMode == CardExtraEffectAmountSourceMode.Fixed
+			&& effect.ScaleMode == CardExtraEffectScaleMode.None
+			&& effect.Kind is CardExtraEffectKind.GainEnergy or CardExtraEffectKind.GainStars;
+	}
+
+	private static void ScaleMergedResourceAmount(CardExtraEffect? effect, int stackCount)
+	{
+		if (!UsesMergedResourceAmount(effect, stackCount) || effect == null)
+		{
+			return;
+		}
+
+		effect.Amount = ClampStackedAmount(effect.Amount, stackCount);
+		if (effect.ConditionalBonusAmount != 0)
+		{
+			effect.ConditionalBonusAmount = ClampStackedAmount(effect.ConditionalBonusAmount, stackCount);
+		}
+	}
+
+	private static int ClampStackedAmount(int amount, int stackCount)
+	{
+		long scaled = (long)amount * Math.Clamp(stackCount, 1, 999);
+		if (scaled > 999_999L)
+		{
+			return 999_999;
+		}
+		if (scaled < -999_999L)
+		{
+			return -999_999;
+		}
+		return (int)scaled;
 	}
 
 	private static int GetEffectiveTriggerMaxFires(PowerEffectEntry entry)
@@ -874,7 +914,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		}
 
 		int stackCount = GetStackCount(entry);
-		int runCount = remainingUses >= 0 ? Math.Min(stackCount, remainingUses) : stackCount;
+		bool runMergedResourceAsSingleEffect = UsesMergedResourceAmount(effect, stackCount);
+		int desiredRunCount = runMergedResourceAsSingleEffect ? 1 : stackCount;
+		int runCount = remainingUses >= 0 ? Math.Min(desiredRunCount, remainingUses) : desiredRunCount;
 		if (runCount <= 0)
 		{
 			return 0;

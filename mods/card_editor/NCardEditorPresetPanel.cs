@@ -50,6 +50,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private LineEdit _presetNameField = null!;
 	private PresetVanillaTickbox _startupCheckbox = null!;
 	private PresetVanillaTickbox? _sortByCharacterCheckbox;
+	private PresetVanillaTickbox? _stopDeadTargetFollowupsCheckbox;
 	private HBoxContainer? _slotCountRow;
 	private LineEdit? _slotCountField;
 	private MarginContainer _margin = null!;
@@ -65,6 +66,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	private MarginContainer _startupCheckboxWrapper = null!;
 	private MarginContainer? _slotCountRowWrapper;
 	private MarginContainer? _sortByCharacterCheckboxWrapper;
+	private MarginContainer? _stopDeadTargetFollowupsCheckboxWrapper;
 	private MarginContainer _presetNameWrapper = null!;
 	private MarginContainer _bottomActionsWrapper = null!;
 	private MarginContainer _saveButtonWrapper = null!;
@@ -592,6 +594,14 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		_sortByCharacterCheckboxWrapper = CreateTunableWrapper(_sortByCharacterCheckbox);
 		_content.AddChild(_sortByCharacterCheckboxWrapper);
 
+		_stopDeadTargetFollowupsCheckbox = CreateTickbox(CardEditorLoc.T("presets.stopDeadTargetFollowups", "Stop dead-target followups"));
+		_stopDeadTargetFollowupsCheckbox.Toggled += OnStopDeadTargetFollowupsToggled;
+		_stopDeadTargetFollowupsCheckbox.TooltipText = CardEditorLoc.T(
+			"tooltip.stopDeadTargetFollowups",
+			"When enabled, later single-target effects on a card do not retarget to a random enemy if the original target died.");
+		_stopDeadTargetFollowupsCheckboxWrapper = CreateTunableWrapper(_stopDeadTargetFollowupsCheckbox);
+		_content.AddChild(_stopDeadTargetFollowupsCheckboxWrapper);
+
 		_content.AddChild(CreateDivider());
 
 		_presetNameField = new NMegaLineEdit
@@ -1051,6 +1061,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 
 		RefreshStartupCheckbox();
 		RefreshSortByCharacterCheckbox();
+		RefreshStopDeadTargetFollowupsCheckbox();
 
 		if (_presetNameField != null && GodotObject.IsInstanceValid(_presetNameField) && string.IsNullOrWhiteSpace(_presetNameField.Text))
 		{
@@ -1249,6 +1260,20 @@ public partial class NCardEditorPresetPanel : PanelContainer
 			return;
 		}
 		_sortByCharacterCheckbox.SetTickedSilent(CardEditorCreatorPresetStore.GetSortByCharacter());
+	}
+
+	private void OnStopDeadTargetFollowupsToggled(bool enabled)
+	{
+		CardEditorCreatorPresetStore.SetStopDeadTargetFollowups(enabled);
+	}
+
+	private void RefreshStopDeadTargetFollowupsCheckbox()
+	{
+		if (_stopDeadTargetFollowupsCheckbox == null || !GodotObject.IsInstanceValid(_stopDeadTargetFollowupsCheckbox))
+		{
+			return;
+		}
+		_stopDeadTargetFollowupsCheckbox.SetTickedSilent(CardEditorCreatorPresetStore.GetStopDeadTargetFollowups());
 	}
 
 	private void OnStartupToggled(bool enabled)

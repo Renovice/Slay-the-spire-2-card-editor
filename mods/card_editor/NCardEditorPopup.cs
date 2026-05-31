@@ -3375,6 +3375,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 
 		_cardPreviewNode.UpdateVisuals(PileType.None, GetEditorPreviewMode());
+		CardEditorCardFinishOverlayController.Sync(_cardPreviewNode);
 	}
 
 	private void QueuePreviewLayout()
@@ -8465,6 +8466,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			new("strength", "Intensity", 0f, 1f, 0.01f, 0.58f),
 			new("glareStrength", "Glare", 0f, 1f, 0.01f, 0.34f),
+			new("lineCount", "Lines", 1f, 60f, 1f, 22.0f),
+			new("lineWidth", "Line Width", 0.01f, 0.50f, 0.001f, 0.10f),
 			new("metallicStrength", "Metallic", 0f, 1f, 0.01f, 0.42f),
 			new("saturation", "Saturation", 0f, 1f, 0.01f, 1.0f),
 			new("speed", "Speed", 0f, 3f, 0.01f, 1.0f),
@@ -8481,6 +8484,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			new("brightness", "Brightness", 0.5f, 2f, 0.01f, 1.22f),
 			new("pastel", "Pastel", 0f, 1f, 0.01f, 0.30f),
 			new("saturation", "Saturation", 0f, 1f, 0.01f, 0.60f),
+			new("patternScale", "Pattern Scale", 0.10f, 4f, 0.01f, 0.85f),
+			new("hueSpread", "Rainbow Spread", 0.05f, 2f, 0.01f, 0.72f),
+			new("glareStrength", "Glare", 0f, 1f, 0.01f, 0.22f),
+			new("glareWidth", "Glare Width", 0.02f, 0.60f, 0.001f, 0.18f),
+			new("glareSpeed", "Glare Speed", 0f, 3f, 0.01f, 0.28f),
 			new("speed", "Speed", 0f, 3f, 0.01f, 1.0f),
 			new("timeOffset", "Freeze Frame", 0f, 10f, 0.01f, 0f),
 			new("hueShift", "Hue Shift", 0f, 1f, 0.01f, 0f),
@@ -15524,12 +15532,22 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		StyleInput(powerTriggerFromSelect);
 		ConstrainOptionButtonPopup(powerTriggerFromSelect);
-		powerTriggerFromSelect.TooltipText = CardEditorLoc.T("tooltip.powerTriggerFrom", "Who can cause this persistent effect to trigger.");
+		powerTriggerFromSelect.TooltipText = CardEditorLoc.T("tooltip.powerTriggerFrom", "Who can cause this persistent effect to trigger. For enemy status reactions, use Any Enemy and set Target to Trigger Target.");
+		int powerTriggerSelfIndex = powerTriggerFromSelect.ItemCount;
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.self", "Self"), (int)CardExtraEffectPowerTriggerFrom.Self);
+		powerTriggerFromSelect.SetItemTooltip(powerTriggerSelfIndex, CardEditorLoc.T("tooltip.powerTriggerFrom.self", "Only the creature holding this persistent effect can trigger it."));
+		int powerTriggerAnyEnemyIndex = powerTriggerFromSelect.ItemCount;
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.anyEnemy", "Any Enemy"), (int)CardExtraEffectPowerTriggerFrom.AnyEnemy);
+		powerTriggerFromSelect.SetItemTooltip(powerTriggerAnyEnemyIndex, CardEditorLoc.T("tooltip.powerTriggerFrom.anyEnemy", "React to enemies. For \"enemy gains Poison, enemy gains Doom\", use this with Gained Power/Status, Status = Poison, Target = Target, and Power Targeting = Trigger Target."));
+		int powerTriggerAnyAllyIndex = powerTriggerFromSelect.ItemCount;
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.anyAlly", "Any Ally"), (int)CardExtraEffectPowerTriggerFrom.AnyAlly);
+		powerTriggerFromSelect.SetItemTooltip(powerTriggerAnyAllyIndex, CardEditorLoc.T("tooltip.powerTriggerFrom.anyAlly", "React to another creature on the same side as the effect holder."));
+		int powerTriggerAnyoneIndex = powerTriggerFromSelect.ItemCount;
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.anyone", "Anyone"), (int)CardExtraEffectPowerTriggerFrom.Anyone);
+		powerTriggerFromSelect.SetItemTooltip(powerTriggerAnyoneIndex, CardEditorLoc.T("tooltip.powerTriggerFrom.anyone", "React to any player, ally, or enemy."));
+		int powerTriggerMarkedIndex = powerTriggerFromSelect.ItemCount;
 		powerTriggerFromSelect.AddItem(CardEditorLoc.T("powerTriggerFrom.markedTarget", "Marked Target"), (int)CardExtraEffectPowerTriggerFrom.MarkedTarget);
+		powerTriggerFromSelect.SetItemTooltip(powerTriggerMarkedIndex, CardEditorLoc.T("tooltip.powerTriggerFrom.markedTarget", "React only to the target remembered when this persistent effect was created."));
 		powerTriggerFromSelect.Select((int)CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect));
 		powerTriggerFromSelect.ItemSelected += _ => QueuePreviewUpdate();
 
@@ -16911,7 +16929,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		ConstrainOptionButtonPopup(cardActionVariantSelect);
 		cardActionVariantSelect.TooltipText = CardEditorLoc.T("tooltip.cardAction", "Choose which pile action this effect uses. The selector and filter knobs below are shared across these actions.");
 		cardActionVariantSelect.AddItem(CardEditorLoc.T("cardAction.variant.move", "Move Between Piles"));
-		cardActionVariantSelect.AddItem(CardEditorLoc.T("cardAction.variant.play", "Play Random Existing Card"));
+		cardActionVariantSelect.AddItem(CardEditorLoc.T("cardAction.variant.play", "Play Existing Card"));
 		cardActionVariantSelect.AddItem(CardEditorLoc.T("cardAction.variant.discard", "Discard"));
 		cardActionVariantSelect.AddItem(CardEditorLoc.T("cardAction.variant.exhaust", "Exhaust"));
 		cardActionVariantSelect.AddItem(CardEditorLoc.T("cardAction.variant.transform", "Transform"));
@@ -20965,6 +20983,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		powerCountEventSelect.ItemSelected += _ =>
 		{
 			ApplySuggestedCountSelectorDefaults(effectRow);
+			ConfigureExtraEffectTargets(effectRow, desiredTarget: null);
 			UpdateExtraEffectCustomRows(effectRow);
 			QueuePreviewUpdate();
 		};
@@ -29317,9 +29336,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		row.AllowedTargets.Clear();
 		IReadOnlyList<CardExtraEffectTarget> allowed = ExpandMultiplayerTargets(def.AllowedTargets);
+		bool supportsEventTarget = SupportsSelectedEventTarget(row) && allowed.Contains(CardExtraEffectTarget.Target);
 		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay)
 		{
 			allowed = allowed.Where(t => t != CardExtraEffectTarget.Target).ToArray();
+			if (supportsEventTarget && !allowed.Contains(CardExtraEffectTarget.EventTarget))
+			{
+				allowed = allowed.Concat(new[] { CardExtraEffectTarget.EventTarget }).ToArray();
+			}
 		}
 
 		// For OstyAction, restrict targets based on which action is selected
@@ -29352,7 +29376,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardExtraEffectTarget wanted = desiredTarget ?? def.DefaultTarget;
 		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay && wanted == CardExtraEffectTarget.Target)
 		{
-			wanted = row.AllowedTargets.Contains(CardExtraEffectTarget.RandomEnemy) ? CardExtraEffectTarget.RandomEnemy : CardExtraEffectTarget.Self;
+			wanted = row.AllowedTargets.Contains(CardExtraEffectTarget.EventTarget)
+				? CardExtraEffectTarget.EventTarget
+				: row.AllowedTargets.Contains(CardExtraEffectTarget.RandomEnemy)
+					? CardExtraEffectTarget.RandomEnemy
+					: CardExtraEffectTarget.Self;
 		}
 		int selectIndex = 0;
 		for (int i = 0; i < row.AllowedTargets.Count; i++)
@@ -29369,6 +29397,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		row.TargetSelect.Disabled = !enabled;
 		row.TargetSelect.SelfModulate = enabled ? Colors.White : StsColors.gray;
 }
+
+	private static bool SupportsSelectedEventTarget(ExtraEffectRow row)
+	{
+		if (row == null || GetSelectedTrigger(row) != CardExtraEffectTrigger.OnCountEvent)
+		{
+			return false;
+		}
+
+		return GetSelectedPowerTriggerCountEvent(row) is CardExtraEffectCountEvent.DamageDealt or CardExtraEffectCountEvent.DamageTaken;
+	}
 
 	private Control CreateSpinButtons(LineEdit field, decimal step, decimal? minValue, decimal? maxValue, bool isInteger = false)
 	{

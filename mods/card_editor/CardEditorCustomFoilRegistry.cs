@@ -50,9 +50,14 @@ internal sealed class CardEditorCustomFoilDefinition
 internal static class CardEditorCustomFoilRegistry
 {
 	private const string FolderName = "custom_foils";
+	private const string CardSpaceUvMacro = "CARD_EDITOR_EFFECT_UV";
+	private const string KeepLocalUvMarker = "CARD_EDITOR_KEEP_LOCAL_UV";
 	private static readonly Regex UniformRegex = new(
 		@"^\s*uniform\s+(?<type>[A-Za-z0-9_]+)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*(?<hint>[^=;]+))?(?:\s*=\s*(?<default>[^;]+))?\s*;",
 		RegexOptions.Multiline | RegexOptions.Compiled);
+	private static readonly Regex ShaderHeaderRegex = new(
+		@"\A(?<header>\s*shader_type\s+canvas_item\s*;\s*(?:render_mode\s+[^;]+;\s*)*)",
+		RegexOptions.Singleline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
 	private static readonly object _lock = new();
 	private static readonly Dictionary<string, CardEditorCustomFoilDefinition> _byId = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly HashSet<string> _warned = new(StringComparer.Ordinal);
@@ -264,7 +269,7 @@ internal static class CardEditorCustomFoilRegistry
 				return false;
 			}
 
-			string shaderCode = File.ReadAllText(shaderPath);
+			string shaderCode = PrepareShaderCode(File.ReadAllText(shaderPath));
 			string fallbackId = Path.GetFileNameWithoutExtension(shaderPath);
 			string id = NormalizeId(dto.Id, fallbackId);
 			Dictionary<string, string> defaults = ConvertDefaults(dto.Defaults);
@@ -298,7 +303,7 @@ internal static class CardEditorCustomFoilRegistry
 		definition = null;
 		try
 		{
-			string shaderCode = File.ReadAllText(shaderPath);
+			string shaderCode = PrepareShaderCode(File.ReadAllText(shaderPath));
 			string id = NormalizeId(null, Path.GetFileNameWithoutExtension(shaderPath));
 			definition = new CardEditorCustomFoilDefinition
 			{
@@ -335,6 +340,38 @@ internal static class CardEditorCustomFoilRegistry
 			}
 		}
 		return manifestParams;
+	}
+
+	private static string PrepareShaderCode(string shaderCode)
+	{
+		if (string.IsNullOrWhiteSpace(shaderCode)
+			|| shaderCode.Contains(KeepLocalUvMarker, StringComparison.Ordinal)
+			|| shaderCode.Contains("card_effect_uv_origin", StringComparison.Ordinal)
+			|| shaderCode.Contains(CardSpaceUvMacro, StringComparison.Ordinal))
+		{
+			return shaderCode;
+		}
+
+		string transformed = Regex.Replace(shaderCode, @"\bTEXTURE_PIXEL_SIZE\b", "(1.0 / max(card_effect_rect_size, vec2(1.0)))");
+		transformed = Regex.Replace(transformed, @"\bUV\b", CardSpaceUvMacro);
+
+		const string injection = """
+
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_rect_size = vec2(320.0, 446.0);
+uniform float card_effect_pattern_scale = 1.0;
+#define CARD_EDITOR_EFFECT_UV ((card_effect_uv_origin + UV * card_effect_uv_scale))
+
+""";
+		Match header = ShaderHeaderRegex.Match(transformed);
+		if (!header.Success)
+		{
+			return injection + transformed;
+		}
+
+		int insertAt = header.Index + header.Length;
+		return transformed.Insert(insertAt, injection);
 	}
 
 	private static CardEditorCustomFoilParam? ToParam(CustomFoilKnobDto dto, List<CardEditorCustomFoilParam> autoParams, Dictionary<string, string> defaults)
@@ -656,7 +693,13 @@ internal static class CardEditorCustomFoilRegistry
 	private static bool IsAutoUniform(string key)
 		=> string.Equals(key, "rect_size", StringComparison.Ordinal)
 			|| string.Equals(key, "foil_size", StringComparison.Ordinal)
-			|| string.Equals(key, "full_art", StringComparison.Ordinal);
+			|| string.Equals(key, "full_art", StringComparison.Ordinal)
+			|| string.Equals(key, "card_effect_uv_origin", StringComparison.Ordinal)
+			|| string.Equals(key, "card_effect_uv_scale", StringComparison.Ordinal)
+			|| string.Equals(key, "card_effect_screen_origin", StringComparison.Ordinal)
+			|| string.Equals(key, "card_effect_screen_size", StringComparison.Ordinal)
+			|| string.Equals(key, "card_effect_rect_size", StringComparison.Ordinal)
+			|| string.Equals(key, "card_effect_pattern_scale", StringComparison.Ordinal);
 
 	private static bool TryParseFloat(string text, out float value)
 		=> float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);

@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -88,17 +89,17 @@ internal static class Hook_AfterEnergySpent_CardEditorPowerCountEvent_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterDamageGiven))]
 internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 {
-	public static void Postfix(PlayerChoiceContext choiceContext, CombatState combatState, Creature? dealer, DamageResult results, ref Task __result)
+	public static void Postfix(PlayerChoiceContext choiceContext, CombatState combatState, Creature? dealer, DamageResult results, ValueProp props, Creature target, CardModel? cardSource, ref Task __result)
 	{
 		if (__result == null || choiceContext == null || combatState == null || dealer == null)
 		{
 			return;
 		}
 
-		__result = TrackAfter(__result, choiceContext, combatState, dealer, results);
+		__result = TrackAfter(__result, choiceContext, combatState, dealer, results, target, cardSource);
 	}
 
-	private static async Task TrackAfter(Task original, PlayerChoiceContext choiceContext, CombatState combatState, Creature dealer, DamageResult results)
+	private static async Task TrackAfter(Task original, PlayerChoiceContext choiceContext, CombatState combatState, Creature dealer, DamageResult results, Creature? target, CardModel? cardSource)
 	{
 		await original;
 		try
@@ -107,7 +108,15 @@ internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 			if (delta > 0)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentDamageApplied(delta);
-				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(combatState, choiceContext, dealer, CardExtraEffectCountEvent.DamageDealt, amount: delta);
+				CardPlay? triggeringPlay = BuildEventTargetPlay(cardSource, target);
+				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(
+					combatState,
+					choiceContext,
+					dealer,
+					CardExtraEffectCountEvent.DamageDealt,
+					triggeringCard: cardSource,
+					triggeringPlay: triggeringPlay,
+					amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(dealer, CardExtraEffectCountEvent.DamageDealt, delta, combatState);
 			}
 		}
@@ -116,22 +125,47 @@ internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 			Log.Warn($"[CardEditor] Damage-dealt trigger failed: {ex}");
 		}
 	}
+
+	internal static CardPlay? BuildEventTargetPlay(CardModel? cardSource, Creature? target)
+	{
+		if (cardSource == null)
+		{
+			return null;
+		}
+
+		return new CardPlay
+		{
+			Card = cardSource,
+			Target = target,
+			ResultPile = cardSource.Pile?.Type ?? PileType.None,
+			Resources = new ResourceInfo
+			{
+				EnergySpent = 0,
+				EnergyValue = 0,
+				StarsSpent = 0,
+				StarValue = 0
+			},
+			IsAutoPlay = true,
+			PlayIndex = 0,
+			PlayCount = 1
+		};
+	}
 }
 
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterDamageReceived))]
 internal static class Hook_AfterDamageReceived_CardEditorPowerCountEvent_Patch
 {
-	public static void Postfix(PlayerChoiceContext choiceContext, IRunState runState, CombatState? combatState, Creature target, DamageResult result, ref Task __result)
+	public static void Postfix(PlayerChoiceContext choiceContext, IRunState runState, CombatState? combatState, Creature target, DamageResult result, ValueProp props, Creature? dealer, CardModel? cardSource, ref Task __result)
 	{
 		if (__result == null || choiceContext == null || combatState == null || target == null)
 		{
 			return;
 		}
 
-		__result = TrackAfter(__result, choiceContext, combatState, target, result);
+		__result = TrackAfter(__result, choiceContext, combatState, target, result, cardSource);
 	}
 
-	private static async Task TrackAfter(Task original, PlayerChoiceContext choiceContext, CombatState combatState, Creature target, DamageResult result)
+	private static async Task TrackAfter(Task original, PlayerChoiceContext choiceContext, CombatState combatState, Creature target, DamageResult result, CardModel? cardSource)
 	{
 		await original;
 		try
@@ -139,7 +173,15 @@ internal static class Hook_AfterDamageReceived_CardEditorPowerCountEvent_Patch
 			int delta = Math.Max(0, result?.UnblockedDamage ?? 0);
 			if (delta > 0)
 			{
-				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(combatState, choiceContext, target, CardExtraEffectCountEvent.DamageTaken, amount: delta);
+				CardPlay? triggeringPlay = Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch.BuildEventTargetPlay(cardSource, target);
+				await CardEditorExtraEffects.TriggerPowerCountEventWithContextAsync(
+					combatState,
+					choiceContext,
+					target,
+					CardExtraEffectCountEvent.DamageTaken,
+					triggeringCard: cardSource,
+					triggeringPlay: triggeringPlay,
+					amount: delta);
 				await CardEditorQuestEffects.RecordRunProgress(target, CardExtraEffectCountEvent.DamageTaken, delta, combatState);
 				CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, target, CardExtraEffectCountEvent.DamageTaken);
 				CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, target, CardExtraEffectCountEvent.TimesLostHp);

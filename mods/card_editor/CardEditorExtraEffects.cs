@@ -728,7 +728,8 @@ public enum CardExtraEffectTarget
 	AnyPlayer = 4,
 	AnyAlly = 5,
 	AllAllies = 6,
-	OtherEnemies = 7
+	OtherEnemies = 7,
+	EventTarget = 8
 }
 
 public enum CardExtraEffectTrigger
@@ -2295,7 +2296,7 @@ internal static class CardEditorExtraEffects
 		new()
 		{
 			Kind = CardExtraEffectKind.CreateRandomPotion,
-			Label = "Create Random Potion",
+			Label = "Create Potion",
 			AllowedTargets = new [] { CardExtraEffectTarget.Self },
 			DefaultAmount = 1,
 			DefaultTarget = CardExtraEffectTarget.Self
@@ -3137,6 +3138,7 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectTarget.RandomEnemy => "Random Enemy",
 			CardExtraEffectTarget.AllEnemies => "All Enemies",
 			CardExtraEffectTarget.OtherEnemies => "Other Enemies",
+			CardExtraEffectTarget.EventTarget => "Event Target",
 			CardExtraEffectTarget.AnyPlayer => "Any Player",
 			CardExtraEffectTarget.AnyAlly => "Any Ally",
 			CardExtraEffectTarget.AllAllies => "All Allies",
@@ -22606,6 +22608,8 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 					: combatState.GetOpponentsOf(ownerCreature);
 				return source.Where(c => c != null && c.IsAlive && !ReferenceEquals(c, hoveredTarget)).Cast<Creature?>().ToList();
 			}
+			case CardExtraEffectTarget.EventTarget:
+				return hoveredTarget != null && hoveredTarget.IsAlive ? new Creature?[] { hoveredTarget } : Array.Empty<Creature?>();
 			case CardExtraEffectTarget.AllAllies:
 				return ResolveFriendlyGroupTargets(combatState, ownerCreature, includeSelf: true).Cast<Creature?>().ToList();
 			case CardExtraEffectTarget.AnyPlayer:
@@ -26085,6 +26089,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			CardExtraEffectTarget.AllEnemies => combatState.GetOpponentsOf(ownerCreature).Count(c => c.IsAlive),
 			CardExtraEffectTarget.OtherEnemies => ResolveOtherEnemyTargets(combatState, ownerCreature, cardPlay).Count(),
 			CardExtraEffectTarget.RandomEnemy => combatState.GetOpponentsOf(ownerCreature).Any(c => c.IsAlive) ? 1 : 0,
+			CardExtraEffectTarget.EventTarget => cardPlay?.Target != null ? 1 : 0,
 			_ => ResolveSingleTarget(combatState, ownerCreature, cardPlay) != null ? 1 : 0
 		};
 	}
@@ -28471,7 +28476,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		bool excludeSourceCardInHandSelector,
 		bool preferHandDiscardSelector,
 		MegaCrit.Sts2.Core.Random.Rng? shuffleRng,
-		int randomOfferCount = 0)
+		int randomOfferCount = 0,
+		CardExtraEffect? sourceEffect = null)
 	{
 		if (choiceContext == null
 			|| owner == null
@@ -28551,7 +28557,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			&& (sourceCard == null || excludeSourceCardInHandSelector);
 		if (canUseHandSelector)
 		{
-			CardModel? source = excludeSourceCardInHandSelector ? sourceCard : null;
+			CardModel? source = ResolveHandSelectionUiSource(sourceEffect, sourceCard, excludeSourceCardInHandSelector);
 			HashSet<CardModel> candidateSet = new HashSet<CardModel>(candidates.Where(c => c != null), ReferenceEqualityComparer<CardModel>.Instance);
 			Func<CardModel, bool>? filter = candidateSet.Count == 0 ? null : (CardModel c) => c != null && candidateSet.Contains(c);
 
@@ -28563,6 +28569,52 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		return ReportSelectedCards((await CardSelectCmd.FromSimpleGrid(choiceContext, candidates, owner, prefs)).OfType<CardModel>().ToList());
+	}
+
+	private static CardModel? ResolveHandSelectionUiSource(CardExtraEffect? effect, CardModel? sourceCard, bool excludeSourceCardInHandSelector)
+	{
+		if (!excludeSourceCardInHandSelector || sourceCard == null)
+		{
+			return null;
+		}
+
+		if (effect == null)
+		{
+			return null;
+		}
+
+		// Vanilla hand selection keeps picked card nodes in a temporary holder until
+		// source.ExecutionFinished. Timed/power effects use synthetic sources that are
+		// not normal resolving hand cards, so waiting on them can strand selected cards.
+		return ShouldKeepHandSelectionAttachedToSource(effect) ? sourceCard : null;
+	}
+
+	private static bool ShouldKeepHandSelectionAttachedToSource(CardExtraEffect effect)
+	{
+		return effect != null
+			&& !IsPowerEffect(effect)
+			&& effect.Trigger == CardExtraEffectTrigger.OnPlay;
+	}
+
+	private static bool IsInteractiveCardSelectionMode(CardExtraEffectCardSelectionMode selectionMode)
+	{
+		return selectionMode is CardExtraEffectCardSelectionMode.Choose
+			or CardExtraEffectCardSelectionMode.UpTo
+			or CardExtraEffectCardSelectionMode.RandomOffer
+			or CardExtraEffectCardSelectionMode.TopOffer;
+	}
+
+	private static async Task YieldAfterInteractiveHandSelectionIfNeeded(CardExtraEffect effect, IReadOnlyList<CardModel> selected)
+	{
+		if (effect == null
+			|| selected == null
+			|| !IsInteractiveCardSelectionMode(effect.CardSelectionMode)
+			|| !selected.Any(card => card?.Pile?.Type == PileType.Hand))
+		{
+			return;
+		}
+
+		await Task.Yield();
 	}
 
 	private static int ResolveCardSelectionOfferCount(CardExtraEffect? effect, CardPlay? cardPlay, int fallbackCount)
@@ -29224,12 +29276,15 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
 			owner.RunState?.Rng?.Shuffle,
-			ResolveCardSelectionOfferCount(effect, null, count));
+			ResolveCardSelectionOfferCount(effect, null, count),
+			effect);
 
 		if (selected.Count == 0)
 		{
 			return;
 		}
+
+		await YieldAfterInteractiveHandSelectionIfNeeded(effect, selected);
 
 		if (effect.TransformMode == CardExtraEffectTransformMode.SpecificCard)
 		{
@@ -29347,7 +29402,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
 				owner.RunState?.Rng?.Shuffle,
-				ResolveCardSelectionOfferCount(effect, null, count));
+				ResolveCardSelectionOfferCount(effect, null, count),
+				effect);
 
 		if (useFutureAura)
 		{
@@ -29355,6 +29411,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 			return;
 		}
+
+		await YieldAfterInteractiveHandSelectionIfNeeded(effect, selected);
 
 		int granted = 0;
 		foreach (CardModel card in selected)
@@ -34170,6 +34228,7 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 					CardExtraEffectTarget.AnyPlayer => ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: true),
 					CardExtraEffectTarget.AnyAlly => ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: false),
 					CardExtraEffectTarget.AllAllies => ResolveFriendlySingleTarget(combatState, ownerCreature, cardPlay, includeSelf: true),
+					CardExtraEffectTarget.EventTarget => cardPlay.Target,
 					CardExtraEffectTarget.AllEnemies => ResolveSingleTarget(combatState, ownerCreature, cardPlay),
 					_ => ResolveSingleTarget(combatState, ownerCreature, cardPlay)
 				};
@@ -36568,6 +36627,8 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 				Creature? picked = combatState.RunState.Rng.CombatTargets.NextItem(combatState.GetOpponentsOf(ownerCreature).Where(c => c.IsAlive));
 				return picked != null ? new[] { picked } : Array.Empty<Creature>();
 			}
+			case CardExtraEffectTarget.EventTarget:
+				return cardPlay?.Target != null ? new[] { cardPlay.Target } : Array.Empty<Creature>();
 			default:
 			{
 				Creature? picked = ResolveSingleTarget(combatState, ownerCreature, cardPlay);
@@ -36642,6 +36703,10 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 		{
 			return cardPlay.Target;
 		}
+		if (cardPlay?.Target != null && CardEditorCreatorPresetStore.GetStopDeadTargetFollowups())
+		{
+			return null;
+		}
 		if (cardPlay?.Card?.TargetType == TargetType.Self)
 		{
 			return ownerCreature.IsAlive ? ownerCreature : null;
@@ -36654,6 +36719,10 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 		if (TryGetManualTarget(cardPlay.Card, out Creature? manualTarget) && manualTarget != null && manualTarget.IsAlive)
 		{
 			return manualTarget;
+		}
+		if (manualTarget != null && CardEditorCreatorPresetStore.GetStopDeadTargetFollowups())
+		{
+			return null;
 		}
 		if (cardPlay.IsFirstInSeries && RequiresManualEnemyTarget(cardPlay.Card))
 		{

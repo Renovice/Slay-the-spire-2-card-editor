@@ -148,6 +148,443 @@ internal static class CardEditorCardFinishResolver
 	}
 }
 
+internal static class CardEditorArtFinishCardSpace
+{
+	private static readonly Vector2 FallbackCardSize = new(300f, 422f);
+	private const float ReferencePortraitHeightFraction = 190f / 422f;
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> FrameRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_frame");
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> AncientPortraitRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_ancientPortrait");
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> AncientBorderRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_ancientBorder");
+
+	public static Vector2 GetCardRectSize(NCard card, Control artControl)
+	{
+		Resolve(card, artControl, out _, out _, out Vector2 effectSize, out _, out _);
+		return effectSize;
+	}
+
+	public static Vector2 GetDisplayedArtRectSize(Control artControl)
+	{
+		Rect2 artRect = SafeGlobalRect(artControl);
+		if (HasUsefulSize(artRect.Size))
+		{
+			return artRect.Size;
+		}
+
+		Vector2 size = artControl.Size;
+		if (HasUsefulSize(size))
+		{
+			Vector2 scale = artControl.Scale.Abs();
+			if (!IsFinite(scale) || scale.X <= 0f || scale.Y <= 0f)
+			{
+				scale = Vector2.One;
+			}
+
+			Vector2 scaledSize = size * scale;
+			if (HasUsefulSize(scaledSize))
+			{
+				return scaledSize;
+			}
+
+			return size;
+		}
+
+		return FallbackCardSize;
+	}
+
+	public static void Apply(ShaderMaterial material, NCard card, Control artControl)
+	{
+		if (material == null)
+		{
+			return;
+		}
+
+		Resolve(card, artControl, out Vector2 origin, out Vector2 scale, out Vector2 effectSize, out Vector2 effectScreenOrigin, out float patternScale);
+		material.SetShaderParameter("card_effect_uv_origin", origin);
+		material.SetShaderParameter("card_effect_uv_scale", scale);
+		material.SetShaderParameter("card_effect_rect_size", effectSize);
+		material.SetShaderParameter("card_effect_screen_origin", effectScreenOrigin);
+		material.SetShaderParameter("card_effect_screen_size", effectSize);
+		material.SetShaderParameter("card_effect_pattern_scale", patternScale);
+	}
+
+	public static Vector2 ApplyLocalArtSpace(ShaderMaterial material, Control artControl)
+	{
+		Vector2 effectSize = GetDisplayedArtRectSize(artControl);
+		Vector2 screenOrigin = Vector2.Zero;
+		Rect2 artRect = SafeGlobalRect(artControl);
+		if (HasUsefulSize(artRect.Size))
+		{
+			screenOrigin = artRect.Position;
+		}
+
+		material.SetShaderParameter("card_effect_uv_origin", Vector2.Zero);
+		material.SetShaderParameter("card_effect_uv_scale", Vector2.One);
+		material.SetShaderParameter("card_effect_rect_size", effectSize);
+		material.SetShaderParameter("card_effect_screen_origin", screenOrigin);
+		material.SetShaderParameter("card_effect_screen_size", effectSize);
+		material.SetShaderParameter("card_effect_pattern_scale", 1.0f);
+		material.SetShaderParameter("rect_size", effectSize);
+		return effectSize;
+	}
+
+	private static void Resolve(NCard card, Control artControl, out Vector2 origin, out Vector2 scale, out Vector2 effectSize, out Vector2 effectScreenOrigin, out float patternScale)
+	{
+		Rect2 artRect = SafeGlobalRect(artControl);
+		Rect2 cardRect = ResolveCardBorderRect(card, artControl, artRect);
+
+		if (!HasUsefulSize(cardRect.Size) || !HasUsefulSize(artRect.Size) || !LooksLikeCardRect(cardRect, artRect))
+		{
+			cardRect = FindLikelyCardAncestorRect(artControl, artRect);
+		}
+
+		if (!HasUsefulSize(cardRect.Size))
+		{
+			cardRect = new Rect2(Vector2.Zero, HasUsefulSize(artRect.Size) ? artRect.Size : FallbackCardSize);
+		}
+
+		if (!HasUsefulSize(artRect.Size))
+		{
+			artRect = new Rect2(cardRect.Position, cardRect.Size);
+		}
+
+		Vector2 cardSize = HasUsefulSize(cardRect.Size) ? cardRect.Size : FallbackCardSize;
+		Rect2 drawRect = HasUsefulSize(artRect.Size) ? artRect : new Rect2(cardRect.Position, cardSize);
+		effectSize = cardSize;
+		effectScreenOrigin = cardRect.Position;
+		origin = new Vector2(
+			(drawRect.Position.X - cardRect.Position.X) / Mathf.Max(cardSize.X, 1f),
+			(drawRect.Position.Y - cardRect.Position.Y) / Mathf.Max(cardSize.Y, 1f));
+		scale = new Vector2(
+			drawRect.Size.X / Mathf.Max(cardSize.X, 1f),
+			drawRect.Size.Y / Mathf.Max(cardSize.Y, 1f));
+		patternScale = 1f;
+
+		if (!IsFinite(origin) || !IsFinite(scale) || scale.X <= 0f || scale.Y <= 0f)
+		{
+			origin = Vector2.Zero;
+			scale = Vector2.One;
+		}
+		if (!IsFinite(effectSize))
+		{
+			effectSize = FallbackCardSize;
+		}
+		if (!IsFinite(effectScreenOrigin))
+		{
+			effectScreenOrigin = Vector2.Zero;
+		}
+		if (!float.IsFinite(patternScale) || patternScale <= 0f)
+		{
+			patternScale = 1f;
+		}
+	}
+
+	private static float ComputePatternScale(Vector2 effectSize, Vector2 cardSize)
+	{
+		if (!HasUsefulSize(effectSize) || !HasUsefulSize(cardSize))
+		{
+			return 1f;
+		}
+
+		float visibleHeightFraction = effectSize.Y / Mathf.Max(cardSize.Y, 1f);
+		float normalized = visibleHeightFraction / ReferencePortraitHeightFraction;
+		return Mathf.Clamp(normalized, 0.65f, 2.6f);
+	}
+
+	private static Rect2 ResolveCardBorderRect(NCard card, Control artControl, Rect2 artRect)
+	{
+		TextureRect? ancientPortrait = TryGetAncientPortrait(card);
+		if (ReferenceEquals(artControl, ancientPortrait) || (ancientPortrait?.Visible ?? false))
+		{
+			Rect2 ancientBorderRect = SafeGlobalRect(TryGetAncientBorder(card));
+			if (HasUsefulSize(ancientBorderRect.Size))
+			{
+				return ancientBorderRect;
+			}
+
+			Rect2 ancientArtRect = SafeGlobalRect(ancientPortrait);
+			if (HasUsefulSize(ancientArtRect.Size))
+			{
+				return ancientArtRect;
+			}
+		}
+
+		Rect2 frameRect = SafeGlobalRect(TryGetFrame(card));
+		if (HasUsefulSize(frameRect.Size))
+		{
+			return frameRect;
+		}
+
+		Rect2 cardRect = SafeGlobalRect(card as Control);
+		if (HasUsefulSize(cardRect.Size))
+		{
+			return cardRect;
+		}
+
+		return default;
+	}
+
+	private static TextureRect? TryGetFrame(NCard card)
+	{
+		try
+		{
+			return FrameRef(card);
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static TextureRect? TryGetAncientPortrait(NCard card)
+	{
+		try
+		{
+			return AncientPortraitRef(card);
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static TextureRect? TryGetAncientBorder(NCard card)
+	{
+		try
+		{
+			return AncientBorderRef(card);
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static Rect2 SafeGlobalRect(Control? control)
+	{
+		if (control == null || !GodotObject.IsInstanceValid(control))
+		{
+			return default;
+		}
+
+		try
+		{
+			Rect2 rect = control.GetGlobalRect();
+			if (HasUsefulSize(rect.Size))
+			{
+				return rect;
+			}
+		}
+		catch
+		{
+		}
+
+		Vector2 size = control.Size;
+		if (HasUsefulSize(size))
+		{
+			Vector2 scale = control.Scale.Abs();
+			if (!HasUsefulSize(scale))
+			{
+				scale = Vector2.One;
+			}
+			return new Rect2(control.GlobalPosition, size * scale);
+		}
+
+		return default;
+	}
+
+	private static Rect2 FindLikelyCardAncestorRect(Control artControl, Rect2 artRect)
+	{
+		Node? node = artControl;
+		Rect2 best = default;
+		float bestArea = float.MaxValue;
+		while (node != null)
+		{
+			if (node is Control control)
+			{
+				Rect2 rect = SafeGlobalRect(control);
+				if (LooksLikeCardRect(rect, artRect))
+				{
+					float area = rect.Size.X * rect.Size.Y;
+					if (area < bestArea)
+					{
+						best = rect;
+						bestArea = area;
+					}
+				}
+			}
+
+			node = node.GetParent();
+		}
+
+		return best;
+	}
+
+	private static bool LooksLikeCardRect(Rect2 candidate, Rect2 artRect)
+	{
+		if (!HasUsefulSize(candidate.Size))
+		{
+			return false;
+		}
+
+		if (!HasUsefulSize(artRect.Size))
+		{
+			return true;
+		}
+
+		float aspect = candidate.Size.X / Mathf.Max(candidate.Size.Y, 1f);
+		bool cardAspect = aspect >= 0.58f && aspect <= 0.86f;
+		bool sameAsArt = Mathf.Abs(candidate.Size.X - artRect.Size.X) <= Mathf.Max(2f, artRect.Size.X * 0.01f)
+			&& Mathf.Abs(candidate.Size.Y - artRect.Size.Y) <= Mathf.Max(2f, artRect.Size.Y * 0.01f);
+		bool largerThanArt = candidate.Size.X >= artRect.Size.X * 1.01f
+			&& candidate.Size.Y >= artRect.Size.Y * 1.01f;
+		bool notViewportSized = candidate.Size.X <= artRect.Size.X * 3.0f
+			&& candidate.Size.Y <= artRect.Size.Y * 3.0f;
+		return cardAspect && (sameAsArt || largerThanArt) && notViewportSized;
+	}
+
+	private static bool HasUsefulSize(Vector2 size)
+		=> size.X > 1f && size.Y > 1f && IsFinite(size);
+
+	private static bool IsFinite(Vector2 value)
+		=> float.IsFinite(value.X) && float.IsFinite(value.Y);
+}
+
+internal static class CardEditorArtFinishOverlayNodes
+{
+	private const string OverlayNodeNamePrefix = "CardEditorArtFinishOverlay_";
+	private static readonly AccessTools.FieldRef<NCard, CanvasGroup> PortraitCanvasGroupRef =
+		AccessTools.FieldRefAccess<NCard, CanvasGroup>("_portraitCanvasGroup");
+
+	public static ColorRect? SyncOverlay(NCard card, string key, bool enabled, bool fullArt)
+	{
+		CanvasGroup? group = TryGetPortraitCanvasGroup(card);
+		if (group == null || !GodotObject.IsInstanceValid(group))
+		{
+			return null;
+		}
+
+		string overlayName = OverlayNodeNamePrefix + key;
+		if (!enabled)
+		{
+			RemoveOverlay(group, overlayName);
+			return null;
+		}
+
+		ColorRect overlay = GetOrCreateOverlay(group, overlayName);
+		SyncOverlayLayout(overlay, fullArt);
+		return overlay;
+	}
+
+	public static void ApplyArtSpace(ShaderMaterial material, bool fullArt)
+	{
+		Vector2 effectSize = fullArt
+			? new Vector2(300f, 422f)
+			: new Vector2(250f, 190f);
+
+		material.SetShaderParameter("card_effect_uv_origin", Vector2.Zero);
+		material.SetShaderParameter("card_effect_uv_scale", Vector2.One);
+		material.SetShaderParameter("card_effect_rect_size", effectSize);
+		material.SetShaderParameter("card_effect_screen_origin", Vector2.Zero);
+		material.SetShaderParameter("card_effect_screen_size", effectSize);
+		material.SetShaderParameter("card_effect_pattern_scale", 1.0f);
+		material.SetShaderParameter("rect_size", effectSize);
+	}
+
+	public static void ClearPortraitMaterial(TextureRect? portrait, Shader shader)
+	{
+		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		{
+			return;
+		}
+
+		if (portrait.Material is ShaderMaterial existing && existing.Shader == shader)
+		{
+			portrait.Material = null;
+		}
+	}
+
+	private static CanvasGroup? TryGetPortraitCanvasGroup(NCard card)
+	{
+		try
+		{
+			return PortraitCanvasGroupRef(card);
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	private static ColorRect GetOrCreateOverlay(CanvasGroup group, string overlayName)
+	{
+		for (int i = 0; i < group.GetChildCount(); i++)
+		{
+			if (group.GetChild(i) is ColorRect existing && existing.Name == overlayName)
+			{
+				return existing;
+			}
+		}
+
+		ColorRect overlay = new()
+		{
+			Name = overlayName,
+			Color = Colors.White,
+			MouseFilter = Control.MouseFilterEnum.Ignore,
+			ClipContents = false
+		};
+		group.AddChild(overlay);
+		return overlay;
+	}
+
+	private static void RemoveOverlay(CanvasGroup group, string overlayName)
+	{
+		for (int i = group.GetChildCount() - 1; i >= 0; i--)
+		{
+			if (group.GetChild(i) is ColorRect rect && rect.Name == overlayName)
+			{
+				group.RemoveChild(rect);
+				rect.QueueFree();
+			}
+		}
+	}
+
+	private static void SyncOverlayLayout(ColorRect overlay, bool fullArt)
+	{
+		overlay.Visible = true;
+		overlay.Modulate = Colors.White;
+		overlay.SelfModulate = Colors.White;
+		overlay.LayoutMode = 1;
+		overlay.AnchorLeft = 0.5f;
+		overlay.AnchorTop = 0.5f;
+		overlay.AnchorRight = 0.5f;
+		overlay.AnchorBottom = 0.5f;
+		overlay.GrowHorizontal = Control.GrowDirection.Both;
+		overlay.GrowVertical = Control.GrowDirection.Both;
+		overlay.Scale = Vector2.One;
+		overlay.Rotation = 0f;
+
+		if (fullArt)
+		{
+			overlay.OffsetLeft = -150f;
+			overlay.OffsetTop = -211f;
+			overlay.OffsetRight = 150f;
+			overlay.OffsetBottom = 211f;
+			overlay.PivotOffset = new Vector2(150f, 211f);
+		}
+		else
+		{
+			overlay.OffsetLeft = -125f;
+			overlay.OffsetTop = -168f;
+			overlay.OffsetRight = 125f;
+			overlay.OffsetBottom = 22f;
+			overlay.PivotOffset = new Vector2(125f, 95f);
+		}
+	}
+}
+
 internal sealed class CardEditorRainbowFoilOverlay : Control
 {
 	private const string ShaderCode = @"shader_type canvas_item;
@@ -164,54 +601,54 @@ internal sealed class CardEditorRainbowFoilOverlay : Control
 
  float sd_round_rect(vec2 p, vec2 half_extents, float radius)
  {
- 	vec2 q = abs(p) - half_extents + vec2(radius);
- 	return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+	vec2 q = abs(p) - half_extents + vec2(radius);
+	return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
  }
 
  float hash(vec2 p)
  {
- 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
  }
 
  vec2 hash2(vec2 p)
  {
- 	vec2 q = vec2(
- 		dot(p, vec2(127.1, 311.7)),
- 		dot(p, vec2(269.5, 183.3)));
- 	return -1.0 + 2.0 * fract(sin(q) * 43758.5453123);
+	vec2 q = vec2(
+		dot(p, vec2(127.1, 311.7)),
+		dot(p, vec2(269.5, 183.3)));
+	return -1.0 + 2.0 * fract(sin(q) * 43758.5453123);
  }
 
  float noise(vec2 p)
  {
- 	vec2 i = floor(p);
- 	vec2 f = fract(p);
- 	vec2 u = f * f * (3.0 - 2.0 * f);
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
 
- 	float n00 = dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0));
- 	float n10 = dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
- 	float n01 = dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
- 	float n11 = dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+	float n00 = dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0));
+	float n10 = dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+	float n01 = dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+	float n11 = dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
 
- 	float n = mix(mix(n00, n10, u.x), mix(n01, n11, u.x), u.y);
- 	return clamp(n * 0.5 + 0.5, 0.0, 1.0);
+	float n = mix(mix(n00, n10, u.x), mix(n01, n11, u.x), u.y);
+	return clamp(n * 0.5 + 0.5, 0.0, 1.0);
  }
 
  float fbm(vec2 p)
  {
- 	float value = 0.0;
- 	float amplitude = 0.5;
+	float value = 0.0;
+	float amplitude = 0.5;
  
- 	for (int i = 0; i < 4; i++)
- 	{
- 		float footprint = max(fwidth(p).x, fwidth(p).y);
- 		float octaveWeight = clamp(1.0 - footprint * 1.75, 0.0, 1.0);
- 		value += noise(p) * amplitude * octaveWeight;
- 		p *= 2.03;
- 		p = vec2(0.80 * p.x - 0.60 * p.y, 0.60 * p.x + 0.80 * p.y) + vec2(17.1, 9.2);
- 		amplitude *= 0.5;
- 	}
+	for (int i = 0; i < 4; i++)
+	{
+		float footprint = max(fwidth(p).x, fwidth(p).y);
+		float octaveWeight = clamp(1.0 - footprint * 1.75, 0.0, 1.0);
+		value += noise(p) * amplitude * octaveWeight;
+		p *= 2.03;
+		p = vec2(0.80 * p.x - 0.60 * p.y, 0.60 * p.x + 0.80 * p.y) + vec2(17.1, 9.2);
+		amplitude *= 0.5;
+	}
  
- 	return value;
+	return value;
  }
 
 	void fragment()
@@ -392,9 +829,209 @@ internal sealed class CardEditorRainbowFoilOverlay : Control
 	}
 }
 
-internal sealed class CardEditorPrismaticBandGlareOverlay : Control
+internal static class CardEditorRainbowRareFoilArtController
 {
 	private const string ShaderCode = @"shader_type canvas_item;
+
+ uniform float intensity = 1.0;
+ uniform float lower_fade_start = 0.58;
+ uniform float lower_fade_end = 0.96;
+ uniform float lower_mask_min = 0.2;
+ uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+ uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+ uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
+
+ float hash(vec2 p)
+ {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+ }
+
+ vec2 hash2(vec2 p)
+ {
+	vec2 q = vec2(
+		dot(p, vec2(127.1, 311.7)),
+		dot(p, vec2(269.5, 183.3)));
+	return -1.0 + 2.0 * fract(sin(q) * 43758.5453123);
+ }
+
+ float noise(vec2 p)
+ {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+
+	float n00 = dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0));
+	float n10 = dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+	float n01 = dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+	float n11 = dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+
+	float n = mix(mix(n00, n10, u.x), mix(n01, n11, u.x), u.y);
+	return clamp(n * 0.5 + 0.5, 0.0, 1.0);
+ }
+
+ float fbm(vec2 p)
+ {
+	float value = 0.0;
+	float amplitude = 0.5;
+
+	for (int i = 0; i < 4; i++)
+	{
+		float footprint = max(fwidth(p).x, fwidth(p).y);
+		float octaveWeight = clamp(1.0 - footprint * 1.75, 0.0, 1.0);
+		value += noise(p) * amplitude * octaveWeight;
+		p *= 2.03;
+		p = vec2(0.80 * p.x - 0.60 * p.y, 0.60 * p.x + 0.80 * p.y) + vec2(17.1, 9.2);
+		amplitude *= 0.5;
+	}
+
+	return value;
+ }
+
+ void fragment()
+ {
+	vec2 uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 centered = uv - vec2(0.5);
+	float t = TIME * 0.33;
+	float diagonal = uv.x * 1.18 + uv.y * 0.82;
+	float sweepPhase = diagonal * 20.0 - t * 7.2;
+	float sweepAA = clamp(1.0 - fwidth(sweepPhase) * 0.35, 0.0, 1.0);
+	float sweepA = sin(sweepPhase) * 0.5 + 0.5;
+	float sweepB = sin((uv.x * -17.0 + uv.y * 13.0) + t * 9.0) * 0.5 + 0.5;
+
+	float mistScale = 7.2;
+	float mistFoot = max(fwidth(uv.x * mistScale), fwidth(uv.y * mistScale));
+	float mistLod = clamp(1.0 - mistFoot * 1.6, 0.0, 1.0);
+	float mist = fbm(uv * mix(4.8, mistScale, mistLod) + vec2(t * 0.18, -t * 0.16));
+
+	float shardScale = 19.0;
+	float shardFoot = max(fwidth(uv.x * shardScale), fwidth(uv.y * shardScale));
+	float shardLod = clamp(1.0 - shardFoot * 1.2, 0.0, 1.0);
+	float shards = fbm(uv * mix(11.0, shardScale, shardLod) + vec2(-t * 0.5, t * 0.38));
+	float crystal = smoothstep(0.56, 0.93, shards + sweepA * 0.34) * mix(0.55, 1.0, shardLod);
+
+	float prismaticLines = pow(smoothstep(0.18, 1.0, sweepA), 3.7) * sweepAA;
+	float centerGlow = 1.0 - smoothstep(0.16, 0.76, length(centered * vec2(1.0, 1.35)));
+	float edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+	float edgeGleam = 1.0 - smoothstep(0.02, 0.14, edgeDistance);
+
+	vec2 sparkleGrid = max(card_effect_rect_size * vec2(0.42, 0.46), vec2(96.0, 150.0));
+	vec2 sparkleUv = uv * sparkleGrid;
+	vec2 sparkleCell = floor(sparkleUv);
+	vec2 sparkleFract = fract(sparkleUv);
+	float sparkles = 0.0;
+	for (int y = -1; y <= 1; y++)
+	{
+		for (int x = -1; x <= 1; x++)
+		{
+			vec2 neighbor = vec2(float(x), float(y));
+			vec2 cell = sparkleCell + neighbor;
+			vec2 rnd = vec2(hash(cell), hash(cell + vec2(5.7, 11.3)));
+			vec2 pos = neighbor + rnd - sparkleFract;
+
+			float dist2 = dot(pos, pos);
+			float core = exp(-dist2 * 55.0);
+			float envelope = exp(-dist2 * 14.0);
+
+			float angle = rnd.x * 6.28318;
+			float c = cos(angle);
+			float s = sin(angle);
+			vec2 p = vec2(c * pos.x - s * pos.y, s * pos.x + c * pos.y);
+
+			float rayWidth = 0.05;
+			float invW = 1.0 / max(rayWidth * rayWidth, 0.0001);
+			float rayLen = 7.5;
+			float rayH = exp(-p.y * p.y * invW) * exp(-p.x * p.x * rayLen);
+			float rayV = exp(-p.x * p.x * invW) * exp(-p.y * p.y * rayLen);
+			float rays = max(rayH, rayV) * envelope;
+
+			float shape = clamp(core + rays * 0.85, 0.0, 1.0);
+
+			float pulse = 0.35 + 0.65 * sin(t * 7.0 + hash(cell + vec2(2.1, 9.2)) * 6.28318);
+			float gate = smoothstep(0.84, 1.0, hash(cell + vec2(13.2, 3.4)));
+			float candidate = shape * pulse * gate;
+			sparkles = max(sparkles, candidate);
+		}
+	}
+	sparkles = clamp(pow(sparkles, 0.85) * (0.26 + 0.74 * sweepB), 0.0, 1.0);
+
+	vec3 rainbowA = 0.5 + 0.5 * cos(vec3(0.0, 2.0, 4.0) + (diagonal * 5.2 + mist * 1.4 + t * 1.1) * 6.28318);
+	vec3 rainbowB = 0.5 + 0.5 * cos(vec3(1.15, 3.15, 5.15) + ((uv.y * 4.0 - uv.x * 2.2) + sweepB * 0.55 - t * 0.82) * 6.28318);
+	vec3 rainbow = mix(rainbowA, rainbowB, 0.5 + crystal * 0.25);
+	float lowerMask = 1.0 - smoothstep(lower_fade_start, lower_fade_end, uv.y);
+	lowerMask = mix(lower_mask_min, 1.0, lowerMask);
+	float alpha = 0.02;
+	alpha += prismaticLines * 0.08;
+	alpha += crystal * 0.08;
+	alpha += centerGlow * 0.05;
+	alpha += edgeGleam * (0.07 + 0.05 * sweepA);
+	alpha += sparkles * 0.26;
+	alpha *= lowerMask;
+	alpha = clamp(alpha * intensity, 0.0, 0.24);
+	vec3 foil = rainbow * (0.55 + prismaticLines * 0.55 + crystal * 0.35);
+	foil += vec3(1.0, 0.99, 0.95) * sparkles * 1.05;
+	foil += rainbowB * edgeGleam * 0.22;
+	foil = clamp(foil, vec3(0.0), vec3(1.05));
+	COLOR = vec4(clamp(foil, vec3(0.0), vec3(1.0)), alpha);
+ }";
+
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> PortraitRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_portrait");
+	private static readonly AccessTools.FieldRef<NCard, TextureRect> AncientPortraitRef =
+		AccessTools.FieldRefAccess<NCard, TextureRect>("_ancientPortrait");
+	private static readonly Shader SharedShader = new Shader { Code = ShaderCode };
+
+	public static void Sync(NCard card, bool enabled, bool fullArt, Dictionary<string, float>? fp = null)
+	{
+		if (card == null)
+		{
+			return;
+		}
+
+		TextureRect? portrait = null;
+		TextureRect? ancientPortrait = null;
+		try
+		{
+			portrait = PortraitRef(card);
+			ancientPortrait = AncientPortraitRef(card);
+		}
+		catch
+		{
+			return;
+		}
+
+		CardEditorArtFinishOverlayNodes.ClearPortraitMaterial(portrait, SharedShader);
+		CardEditorArtFinishOverlayNodes.ClearPortraitMaterial(ancientPortrait, SharedShader);
+
+		ColorRect? overlay = CardEditorArtFinishOverlayNodes.SyncOverlay(card, "RainbowRareFoil", enabled, fullArt);
+		if (overlay == null)
+		{
+			return;
+		}
+
+		ShaderMaterial material;
+		if (overlay.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == SharedShader)
+		{
+			material = existingMaterial;
+		}
+		else
+		{
+			material = new ShaderMaterial { Shader = SharedShader };
+			overlay.Material = material;
+		}
+
+		material.SetShaderParameter("intensity", CardEditorTextureLoader.P(fp, "strength", fullArt ? 1.0f : 0.86f));
+		material.SetShaderParameter("lower_fade_start", fullArt ? 0.86f : 0.72f);
+		material.SetShaderParameter("lower_fade_end", fullArt ? 0.998f : 0.92f);
+		material.SetShaderParameter("lower_mask_min", fullArt ? 0.35f : 0.22f);
+		CardEditorArtFinishOverlayNodes.ApplyArtSpace(material, fullArt);
+	}
+}
+
+internal sealed class CardEditorPrismaticBandGlareOverlay : Control
+{
+	internal const string ShaderCode = @"shader_type canvas_item;
 render_mode blend_premul_alpha;
 
 uniform vec2 rect_size = vec2(300.0, 422.0);
@@ -410,6 +1047,8 @@ uniform float lower_mask_min = 0.18;
 uniform float band_strength = 0.22;
 uniform float glare_strength = 0.24;
 uniform float sweep_speed = 1.0;
+uniform float line_count = 22.0;
+uniform float line_width = 0.10;
 
 float sd_round_rect(vec2 p, vec2 he, float r)
 {
@@ -498,8 +1137,8 @@ void fragment()
 	);
 
 	float angle = radians(133.0);
-	float bandA = metallic_band(UV + backgroundShift * 0.35, angle, 22.0, 0.10);
-	float bandB = metallic_band(UV - backgroundShift * 0.25, angle, 16.0, 0.14);
+	float bandA = metallic_band(UV + backgroundShift * 0.35, angle, line_count, line_width);
+	float bandB = metallic_band(UV - backgroundShift * 0.25, angle, max(1.0, line_count * 0.73), line_width * 1.4);
 	float bandSweep = sin(dot(UV, normalize(vec2(1.0, -0.72))) * 15.0 - t * 1.65) * 0.5 + 0.5;
 	float bandMix = max(bandA, bandB * 0.72) * (0.72 + 0.28 * bandSweep);
 
@@ -583,6 +1222,8 @@ void fragment()
 		_material.SetShaderParameter("band_strength", fullArt ? 0.24f : 0.22f);
 		_material.SetShaderParameter("glare_strength", fullArt ? 0.28f : 0.24f);
 		_material.SetShaderParameter("sweep_speed", 1.0f);
+		_material.SetShaderParameter("line_count", 22.0f);
+		_material.SetShaderParameter("line_width", 0.10f);
 		_material.SetShaderParameter("inset_px", fullArt ? 1.0f : 1.5f);
 		_material.SetShaderParameter("corner_radius_px", 30.0f);
 		_material.SetShaderParameter("corner_softness_px", 1.5f);
@@ -637,6 +1278,11 @@ uniform float time_offset = 0.0;
 uniform float motion_speed = 1.0;
 uniform vec3 color_tint = vec3(1.0, 1.0, 1.0);
 uniform float tint_strength = 0.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 
 float hash12(vec2 p)
 {
@@ -661,6 +1307,12 @@ vec3 overlay_blend(vec3 base_col, vec3 over)
 	);
 }
 
+vec2 art_rect_uv()
+{
+	vec2 safe_size = max(card_effect_screen_size, vec2(1.0));
+	return clamp((FRAGCOORD.xy - card_effect_screen_origin) / safe_size, vec2(0.0), vec2(1.0));
+}
+
 void fragment()
 {
 	vec4 tex = texture(TEXTURE, UV);
@@ -671,17 +1323,14 @@ void fragment()
 	}
 
 	float luma = dot(tex.rgb, vec3(0.2126, 0.7152, 0.0722));
-
-	// Lift midtones so most of the art shows vivid color,
-	// while truly dark lines (luma near 0) stay dark naturally.
 	float lit = clamp(pow(luma, contrast_gamma) * brightness_boost, 0.0, 1.0);
-
 	float t = TIME * motion_speed + time_offset;
+	vec2 effect_uv = art_rect_uv();
 	vec2 dir = normalize(gradient_dir);
 	vec2 crossDir = normalize(vec2(-dir.y, dir.x));
-	float phaseA = dot(UV - vec2(0.5), dir) * gradient_scale * hue_spread;
-	float phaseB = dot(UV - vec2(0.5), crossDir) * gradient_scale * 0.45;
-	float flow = sin((UV.x + UV.y * 0.8) * 2.3561945 + t * 0.22) * 0.035;
+	float phaseA = dot(effect_uv - vec2(0.5), dir) * gradient_scale * hue_spread;
+	float phaseB = dot(effect_uv - vec2(0.5), crossDir) * gradient_scale * 0.45;
+	float flow = sin((effect_uv.x + effect_uv.y * 0.8) * 2.3561945 + t * 0.22) * 0.035;
 	vec3 rainbowA = 0.5 + 0.5 * cos(vec3(0.0, 2.0, 4.0) + (phaseA + flow + t * hue_speed + hue_offset) * 6.2831853);
 	vec3 rainbowB = 0.5 + 0.5 * cos(vec3(0.8, 2.8, 4.8) + (phaseB - t * hue_speed * 0.45 + hue_offset) * 6.2831853);
 	vec3 rainbow = mix(rainbowA, rainbowB, 0.32);
@@ -690,21 +1339,12 @@ void fragment()
 	rainbow = mix(vec3(rl), rainbow, saturation);
 	rainbow = mix(rainbow, color_tint, tint_strength);
 
-	// Foil color: rainbow modulated by lifted luminance.
 	vec3 foilDirect = rainbow * lit;
-
-	// Overlay blend: preserves original art structure while tinting.
 	vec3 foilOverlay = overlay_blend(tex.rgb, rainbow);
-
-	// Combine: use overlay blend on midtones/lights, direct mul on darks.
-	// This keeps dark lines as dark rainbow tints instead of washed out.
 	vec3 foilColor = mix(foilDirect, foilOverlay, smoothstep(0.15, 0.55, luma));
-
-	// Add a soft pearly wash so the foil leans pastel instead of neon.
 	float pearlMask = smoothstep(0.20, 0.95, lit);
 	foilColor = mix(foilColor, mix(foilColor, vec3(1.0), 0.35), pastel * pearlMask * 0.55);
 
-	// Edge detection to keep ink lines extra crisp.
 	vec2 px = TEXTURE_PIXEL_SIZE * edge_px;
 	float lpx = dot(texture(TEXTURE, UV + vec2(px.x, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
 	float lnx = dot(texture(TEXTURE, UV - vec2(px.x, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -715,22 +1355,26 @@ void fragment()
 	float inkMask = edge * (1.0 - smoothstep(0.08, 0.42, luma));
 	foilColor *= mix(1.0, edge_darken, edge);
 
-	// Final blend between original art and holographic foil.
 	vec3 outColor = mix(tex.rgb, foilColor, strength);
 	outColor = mix(outColor, tex.rgb, inkMask * ink_preserve);
 
 	// Animated sweeping sheen highlight (the glossy flash).
 	float sheenPhase = fract(t * sheen_speed);
-	float sheenCoord = dot(UV, normalize(vec2(1.0, 1.4)));
+	float sheenCoord = dot(effect_uv, normalize(vec2(1.0, 1.4)));
 	float sheenWave = sheenPhase * 2.5 - 0.75;
 	float sheenDist = sheenCoord - sheenWave;
 	float sheenGlow = exp(-sheenDist * sheenDist / max(0.001, sheen_width * sheen_width));
 	outColor += (rainbow * 0.55 + vec3(1.0) * 0.45) * sheenGlow * sheen_strength * lit;
 
 	// Subtle animated grain for physical card feel.
-	float grain = hash12(UV * 320.0 + vec2(t * 0.08, 0.0)) - 0.5;
+	float grain = hash12(effect_uv * 320.0 + vec2(t * 0.08, 0.0)) - 0.5;
 	outColor += vec3(grain) * grain_strength;
 
+	float edgeFade = smoothstep(0.0, 0.05, effect_uv.x)
+		* smoothstep(0.0, 0.05, effect_uv.y)
+		* smoothstep(0.0, 0.05, 1.0 - effect_uv.x)
+		* smoothstep(0.0, 0.05, 1.0 - effect_uv.y);
+	outColor = mix(tex.rgb, outColor, edgeFade);
 	COLOR = vec4(clamp(outColor, vec3(0.0), vec3(1.0)), a);
 }";
 
@@ -763,9 +1407,10 @@ void fragment()
 			return;
 		}
 
+		CardEditorArtFinishOverlayNodes.SyncOverlay(card, "RainbowGlitterArt", enabled: false, fullArt);
 		SyncPortrait(portrait, enabled, fullArt, fp);
 		SyncPortrait(ancientPortrait, enabled, fullArt, fp);
-		SyncTitleBanner(titleBanner, enabled, fullArt, fp);
+		SyncTitleBanner(titleBanner, false, fullArt, fp);
 	}
 
 	private static void SyncPortrait(TextureRect? portrait, bool enabled, bool fullArt, Dictionary<string, float>? fp)
@@ -798,7 +1443,7 @@ void fragment()
 		material.SetShaderParameter("strength", CardEditorTextureLoader.P(fp, "strength", fullArt ? 0.78f : 0.76f));
 		material.SetShaderParameter("saturation", CardEditorTextureLoader.P(fp, "saturation", fullArt ? 0.62f : 0.60f));
 		material.SetShaderParameter("pastel", CardEditorTextureLoader.P(fp, "pastel", fullArt ? 0.28f : 0.30f));
-		material.SetShaderParameter("hue_spread", fullArt ? 0.75f : 0.72f);
+		material.SetShaderParameter("hue_spread", CardEditorTextureLoader.P(fp, "hueSpread", fullArt ? 0.75f : 0.72f));
 		material.SetShaderParameter("motion_speed", CardEditorTextureLoader.P(fp, "speed", 1.0f));
 		material.SetShaderParameter("hue_offset", CardEditorTextureLoader.P(fp, "hueShift", 0.0f));
 		material.SetShaderParameter("time_offset", CardEditorTextureLoader.P(fp, "timeOffset", 0.0f));
@@ -808,17 +1453,18 @@ void fragment()
 			CardEditorTextureLoader.P(fp, "tintB", 1.0f)));
 		material.SetShaderParameter("tint_strength", CardEditorTextureLoader.P(fp, "tintStrength", 0.0f));
 		material.SetShaderParameter("gradient_dir", new Vector2(1.0f, 0.7f));
-		material.SetShaderParameter("gradient_scale", fullArt ? 0.88f : 0.85f);
+		material.SetShaderParameter("gradient_scale", CardEditorTextureLoader.P(fp, "patternScale", fullArt ? 0.88f : 0.85f));
 		material.SetShaderParameter("contrast_gamma", fullArt ? 0.52f : 0.55f);
 		material.SetShaderParameter("brightness_boost", CardEditorTextureLoader.P(fp, "brightness", fullArt ? 1.24f : 1.22f));
 		material.SetShaderParameter("edge_px", fullArt ? 2.25f : 2.0f);
 		material.SetShaderParameter("edge_threshold", fullArt ? 0.04f : 0.05f);
 		material.SetShaderParameter("edge_darken", fullArt ? 0.80f : 0.78f);
 		material.SetShaderParameter("ink_preserve", fullArt ? 0.78f : 0.82f);
-		material.SetShaderParameter("sheen_strength", fullArt ? 0.24f : 0.22f);
-		material.SetShaderParameter("sheen_speed", 0.28f);
-		material.SetShaderParameter("sheen_width", fullArt ? 0.17f : 0.18f);
+		material.SetShaderParameter("sheen_strength", CardEditorTextureLoader.P(fp, "glareStrength", fullArt ? 0.24f : 0.22f));
+		material.SetShaderParameter("sheen_speed", CardEditorTextureLoader.P(fp, "glareSpeed", 0.28f));
+		material.SetShaderParameter("sheen_width", CardEditorTextureLoader.P(fp, "glareWidth", fullArt ? 0.17f : 0.18f));
 		material.SetShaderParameter("grain_strength", fullArt ? 0.006f : 0.005f);
+		CardEditorArtFinishCardSpace.ApplyLocalArtSpace(material, portrait);
 	}
 
 	private static void SyncTitleBanner(TextureRect? titleBanner, bool enabled, bool fullArt, Dictionary<string, float>? fp)
@@ -899,7 +1545,12 @@ uniform float time_offset = 0.0;
 uniform float motion_speed = 1.0;
 uniform vec2 rect_size = vec2(300.0, 422.0);
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
 uniform float y_offset = 0.25;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
 
 uniform vec4 sea_color_dark : source_color = vec4(0.04, 0.32, 0.55, 1.0);
 uniform vec4 sea_color_light : source_color = vec4(0.06, 0.47, 0.60, 1.0);
@@ -1058,7 +1709,8 @@ vec3 hsv2rgb(vec3 c)
 
 void fragment() {
 	vec2 safe_res = max(rect_size, vec2(1.0));
-	vec2 frag = UV * safe_res;
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 frag = effect_uv * safe_res;
 	vec2 uv = (-safe_res + 2.0 * frag) / safe_res.y;
 
 	float t = (TIME * motion_speed) + time_offset;
@@ -1066,7 +1718,7 @@ void fragment() {
 	// Keep the original framing; widening this makes some portraits miss the water surface (you only see flakes/bubbles).
 	uv.y *= 0.5;
 	uv.x *= 0.45;
-	float zoom = max(0.05, pattern_scale);
+	float zoom = max(0.05, pattern_scale * card_effect_pattern_scale);
 	uv *= zoom;
 	uv.y += y_offset;
 
@@ -1097,7 +1749,7 @@ void fragment() {
 	col += light_shaft_color.rgb * lightShafts(water_uv, t);
 	col = (col * col + sin(col)) / vec3(1.8, 1.8, 1.9);
 
-	vec2 q = UV;
+	vec2 q = effect_uv;
 	col *= 0.7 + 0.3 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.2);
 
 	// Alpha mask (transparent background) from wave distance + bubbles.
@@ -1125,14 +1777,12 @@ void fragment() {
 
 	col = mix(col, color_tint, clamp(tint_strength, 0.0, 1.0));
 
-		vec4 base = texture(TEXTURE, UV);
 		float a = clamp(strength, 0.0, 1.0) * effect_alpha;
-		vec3 out_col = mix(base.rgb, clamp(col, vec3(0.0), vec3(1.0)), a);
 		// Subtle dithering to reduce 8-bit banding in low-gradient areas.
 		float dither = hash(frag + vec2(17.0, 31.0)) - 0.5;
-		out_col += dither * (a * 0.003);
+		vec3 out_col = clamp(col, vec3(0.0), vec3(1.0)) + dither * (a * 0.003);
 		out_col = clamp(out_col, vec3(0.0), vec3(1.0));
-		COLOR = vec4(out_col, base.a);
+		COLOR = vec4(out_col, a);
 	}";
 
 	private static readonly Shader SharedShader = new Shader { Code = ShaderCode };
@@ -1160,38 +1810,30 @@ void fragment() {
 			return;
 		}
 
-		SyncPortrait(portrait, enabled, fullArt, fp);
-		SyncPortrait(ancientPortrait, enabled, fullArt, fp);
+		CardEditorArtFinishOverlayNodes.ClearPortraitMaterial(portrait, SharedShader);
+		CardEditorArtFinishOverlayNodes.ClearPortraitMaterial(ancientPortrait, SharedShader);
+		RemoveOverlay(portrait);
+		RemoveOverlay(ancientPortrait);
+		SyncPortrait(card, enabled, fullArt, fp);
 	}
 
-	private static void SyncPortrait(TextureRect? portrait, bool enabled, bool fullArt, Dictionary<string, float>? fp)
+	private static void SyncPortrait(NCard card, bool enabled, bool fullArt, Dictionary<string, float>? fp)
 	{
-		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		ColorRect? overlay = CardEditorArtFinishOverlayNodes.SyncOverlay(card, "PurpleWavesOcean", enabled, fullArt);
+		if (overlay == null)
 		{
-			return;
-		}
-
-		// Clean up any old overlay nodes from previous versions.
-		RemoveOverlay(portrait);
-
-		if (!enabled)
-		{
-			if (portrait.Material is ShaderMaterial existingFinishMaterial && existingFinishMaterial.Shader == SharedShader)
-			{
-				portrait.Material = null;
-			}
 			return;
 		}
 
 		ShaderMaterial material;
-		if (portrait.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == SharedShader)
+		if (overlay.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == SharedShader)
 		{
 			material = existingMaterial;
 		}
 		else
 		{
 			material = new ShaderMaterial { Shader = SharedShader };
-			portrait.Material = material;
+			overlay.Material = material;
 		}
 
 		material.SetShaderParameter("strength", CardEditorTextureLoader.P(fp, "strength", 0.60f));
@@ -1209,28 +1851,7 @@ void fragment() {
 		material.SetShaderParameter("pattern_scale", CardEditorTextureLoader.P(fp, "patternScale", 1.0f));
 		material.SetShaderParameter("y_offset", CardEditorTextureLoader.P(fp, "horizonOffset", 0.25f));
 
-		Vector2 visual = Vector2.Zero;
-		if (portrait.Texture != null)
-		{
-			visual = portrait.Texture.GetSize();
-		}
-		if (visual.X <= 0.0f || visual.Y <= 0.0f)
-		{
-			visual = portrait.GetGlobalRect().Size;
-		}
-		if (visual.X <= 0.0f || visual.Y <= 0.0f)
-		{
-			Vector2 sc = portrait.Scale;
-			Vector2 sz = portrait.Size;
-			visual = new Vector2(
-				sz.X * (Mathf.Abs(sc.X) > 0 ? Mathf.Abs(sc.X) : 1f),
-				sz.Y * (Mathf.Abs(sc.Y) > 0 ? Mathf.Abs(sc.Y) : 1f));
-		}
-		if (visual.X <= 0.0f || visual.Y <= 0.0f)
-		{
-			visual = new Vector2(300f, 422f);
-		}
-		material.SetShaderParameter("rect_size", visual);
+		CardEditorArtFinishOverlayNodes.ApplyArtSpace(material, fullArt);
 	}
 
 	private static ColorRect GetOrCreateOverlay(TextureRect portrait)
@@ -1268,8 +1889,13 @@ void fragment() {
 		return overlay;
 	}
 
-	private static void RemoveOverlay(TextureRect portrait)
+	private static void RemoveOverlay(TextureRect? portrait)
 	{
+		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		{
+			return;
+		}
+
 		Node? parent = portrait.GetParent();
 		string overlayName = OverlayNodeNamePrefix + portrait.Name;
 
@@ -1316,6 +1942,9 @@ void fragment() {
 
 internal static class CardEditorProceduralArtFinishController
 {
+	private const string OverlayNodeNamePrefix = "CardEditorProceduralArtFinishOverlay_";
+	private const string LegacyOverlayNodeName = "CardEditorProceduralArtFinishOverlay";
+
 	private const string WhirlpoolShaderCode = @"shader_type canvas_item;
 
 uniform float strength = 0.58;
@@ -1328,6 +1957,12 @@ uniform float tint_strength = 0.0;
 uniform float time_offset = 0.0;
 uniform float motion_speed = 1.0;
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 uniform float swirl_strength = 4.7;
 uniform float line_count = 6.0;
 uniform float line_sharpness = 0.10;
@@ -1371,13 +2006,9 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
 	float t = TIME * motion_speed + time_offset;
-	vec2 uv = (UV - vec2(0.5)) * max(pattern_scale, 0.05);
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 uv = (effect_uv - vec2(0.5)) * max(pattern_scale * card_effect_pattern_scale, 0.05);
 	float radius = length(uv);
 	float angle = atan(uv.y, uv.x);
 
@@ -1422,8 +2053,7 @@ void fragment() {
 	float effect_mask = clamp(0.24 + depth * 0.24 + lines_final * 0.76, 0.0, 1.0);
 	effect_mask *= 1.0 - smoothstep(0.72, 1.08, radius);
 	float blend_amount = clamp(strength * effect_mask, 0.0, 1.0);
-	vec3 out_col = mix(base.rgb, col, blend_amount);
-	COLOR = vec4(clamp(out_col, vec3(0.0), vec3(1.0)), base.a);
+	COLOR = vec4(clamp(col, vec3(0.0), vec3(1.0)), blend_amount);
 }";
 
 	private const string MiasmaShaderCode = @"shader_type canvas_item;
@@ -1438,6 +2068,12 @@ uniform float tint_strength = 0.0;
 uniform float time_offset = 0.0;
 uniform float motion_speed = 1.0;
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 uniform float contrast = 1.0;
 
 #define iTime ((TIME * motion_speed + time_offset))
@@ -1510,12 +2146,8 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
-	vec2 centered_uv = (UV - vec2(0.5)) * max(pattern_scale, 0.05) + vec2(0.5);
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 centered_uv = (effect_uv - vec2(0.5)) * max(pattern_scale * card_effect_pattern_scale, 0.05) + vec2(0.5);
 	vec3 pos = uvTo3D(centered_uv);
 	pos.y += sin(iTime / 5.0);
 	pos.x += cos(iTime / 5.0);
@@ -1549,8 +2181,7 @@ void fragment() {
 
 	float cloud_mask = smoothstep(0.12, 0.95, v);
 	float blend_amount = clamp(strength * (0.24 + cloud_mask * 0.76), 0.0, 1.0);
-	vec3 out_col = mix(base.rgb, res_color, blend_amount);
-	COLOR = vec4(clamp(out_col, vec3(0.0), vec3(1.0)), base.a);
+	COLOR = vec4(clamp(res_color, vec3(0.0), vec3(1.0)), blend_amount);
 }";
 
 	private const string AuroraShaderCode = @"shader_type canvas_item;
@@ -1571,6 +2202,12 @@ uniform float tint_strength = 0.0;
 uniform float time_offset = 0.0;
 uniform float motion_speed = 1.0;
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 uniform float projection_bend = 0.4;
 uniform float horizon = 0.0;
 uniform float reflection_strength = 0.65;
@@ -1690,12 +2327,8 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
-	vec2 local_uv = (UV - vec2(0.5)) * max(pattern_scale, 0.05) + vec2(0.5);
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 local_uv = (effect_uv - vec2(0.5)) * max(pattern_scale * card_effect_pattern_scale, 0.05) + vec2(0.5);
 	vec2 sphere_uv = clamp(local_uv, vec2(0.0), vec2(1.0));
 	float theta = clamp(sphere_uv.y + horizon * 0.15, 0.0, 1.0) * PI;
 	float phi = (sphere_uv.x - 0.5) * 2.0 * PI;
@@ -1746,8 +2379,7 @@ void fragment() {
 	float edge = smoothstep(0.0, 0.08, sphere_uv.x) * smoothstep(1.0, 0.92, sphere_uv.x)
 		* smoothstep(0.0, 0.08, sphere_uv.y) * smoothstep(1.0, 0.92, sphere_uv.y);
 	float blend_amount = clamp(strength * edge * (0.28 + aurora_mask * 0.72), 0.0, 1.0);
-	vec3 out_col = mix(base.rgb, col, blend_amount);
-	COLOR = vec4(clamp(out_col, vec3(0.0), vec3(1.0)), base.a);
+	COLOR = vec4(clamp(col, vec3(0.0), vec3(1.0)), blend_amount);
 }";
 
 	private const string ConstellationShaderCode = @"shader_type canvas_item;
@@ -1784,6 +2416,12 @@ uniform float tint_strength = 0.0;
 uniform float time_offset = 0.0;
 uniform float motion_speed = 1.0;
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 
 #define LOCAL_TIME (TIME * motion_speed + time_offset)
 
@@ -1863,14 +2501,9 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
-	vec2 tex_size = 1.0 / max(TEXTURE_PIXEL_SIZE, vec2(0.0001));
-	float aspect = tex_size.x / max(tex_size.y, 1.0);
-	vec2 uv = (UV - vec2(0.5)) * vec2(aspect, 1.0) * max(pattern_scale, 0.05);
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	float aspect = card_effect_rect_size.x / max(card_effect_rect_size.y, 1.0);
+	vec2 uv = (effect_uv - vec2(0.5)) * vec2(aspect, 1.0) * max(pattern_scale * card_effect_pattern_scale, 0.05);
 
 	vec3 cycle = sin(LOCAL_TIME * color_speed * vec3(0.234, 0.324, 0.768)) * 0.4 + 0.6;
 	cycle.x += (uv.x + 0.5) * color_spread;
@@ -1902,8 +2535,7 @@ void fragment() {
 
 	float effect_mask = clamp(background_glow * 0.18 + m, 0.0, 1.0);
 	float blend_amount = clamp(strength * effect_mask, 0.0, 1.0);
-	vec3 out_col = mix(base.rgb, col, blend_amount);
-COLOR = vec4(clamp(out_col, vec3(0.0), vec3(1.0)), base.a);
+	COLOR = vec4(clamp(col, vec3(0.0), vec3(1.0)), blend_amount);
 }";
 
 	private const string RippleShaderCode = @"shader_type canvas_item;
@@ -1921,6 +2553,12 @@ uniform float hue_shift = 0.0;
 uniform float time_offset = 0.0;
 uniform float motion_speed = 1.0;
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 uniform float debug_mode = 0.0;
 
 #define PI 3.14159265359
@@ -1992,14 +2630,10 @@ vec2 calcHitPos(vec2 move, vec2 dir, vec2 size) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
-	vec2 tex_size = 1.0 / max(TEXTURE_PIXEL_SIZE, vec2(0.0001));
-	float aspect = tex_size.x / max(tex_size.y, 1.0);
-	vec2 p = (UV * 2.0 - 1.0) * vec2(aspect, 1.0) * max(pattern_scale, 0.05);
+	vec2 tex_size = max(card_effect_rect_size, vec2(1.0));
+	float aspect = card_effect_rect_size.x / max(card_effect_rect_size.y, 1.0);
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 p = (effect_uv * 2.0 - 1.0) * vec2(aspect, 1.0) * max(pattern_scale * card_effect_pattern_scale, 0.05);
 	if (debug_mode > 0.5) {
 		p *= 2.0;
 	}
@@ -2067,7 +2701,7 @@ void fragment() {
 		col.rgb = mix(col.rgb, vec3(0.0), b);
 	}
 
-	vec2 px = floor(UV / max(TEXTURE_PIXEL_SIZE, vec2(0.0001)));
+	vec2 px = floor(effect_uv * card_effect_rect_size);
 	float n = hash21(px + vec2(floor(LOCAL_TIME * 24.0)));
 	col.rgb += (vec3(n) * 2.0 - 1.0) * noise_strength;
 	col.rgb = pow(max(col.rgb, vec3(0.0)), vec3(1.0 / 1.5));
@@ -2079,9 +2713,8 @@ void fragment() {
 	col.rgb = hsv2rgb(hsv);
 
 	float effect_mask = clamp(0.20 + ff * 16.0 + abs(col.a) * 0.18, 0.0, 1.0);
-	vec3 ripple_col = clamp(base.rgb + col.rgb, vec3(0.0), vec3(1.0));
-	vec3 out_col = mix(base.rgb, ripple_col, clamp(strength * effect_mask, 0.0, 1.0));
-	COLOR = vec4(clamp(out_col, vec3(0.0), vec3(1.0)), base.a);
+	float overlay_alpha = clamp(strength * effect_mask, 0.0, 1.0);
+	COLOR = vec4(clamp(col.rgb, vec3(0.0), vec3(1.0)), overlay_alpha);
 }";
 
 	private const string LightningShaderCode = @"shader_type canvas_item;
@@ -2095,6 +2728,12 @@ uniform float freq_coeff = 2.0;
 uniform float motion_speed = 0.5;
 uniform float time_offset = 0.0;
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 uniform float bolt_width = 0.045;
 uniform float bolt_count = 1.0;
 uniform float glow = 1.4;
@@ -2154,14 +2793,9 @@ vec3 hsv2rgb(vec3 c) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
-	vec2 tex_size = 1.0 / max(TEXTURE_PIXEL_SIZE, vec2(0.0001));
-	float aspect = tex_size.x / max(tex_size.y, 1.0);
-	vec2 uv = (2.0 * UV - 1.0) * vec2(aspect, 1.0) * max(pattern_scale, 0.05);
+	float aspect = card_effect_rect_size.x / max(card_effect_rect_size.y, 1.0);
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 uv = (2.0 * effect_uv - 1.0) * vec2(aspect, 1.0) * max(pattern_scale * card_effect_pattern_scale, 0.05);
 
 	vec2 uv_base = uv;
 	vec3 col = vec3(0.0);
@@ -2198,8 +2832,7 @@ void fragment() {
 	hsv.y = clamp(hsv.y * color_saturation, 0.0, 1.0);
 	col = hsv2rgb(hsv);
 
-	vec3 out_col = mix(base.rgb, clamp(base.rgb + col, vec3(0.0), vec3(1.0)), clamp(strength * mask, 0.0, 1.0));
-	COLOR = vec4(out_col, base.a);
+	COLOR = vec4(clamp(col, vec3(0.0), vec3(1.0)), clamp(strength * mask, 0.0, 1.0));
 }";
 
 	private const string FlameShaderCode = @"shader_type canvas_item;
@@ -2228,6 +2861,11 @@ uniform float glow_strength : hint_range(0.0, 2.0, 0.01) = 0.58;
 uniform float ember_density : hint_range(0.0, 1.0, 0.01) = 0.14;
 uniform float smoke_amount : hint_range(0.0, 1.0, 0.01) = 0.08;
 uniform float wind : hint_range(-1.0, 1.0, 0.01) = 0.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 
 #define LOCAL_TIME (TIME + time_offset)
 
@@ -2290,12 +2928,7 @@ vec3 fire_ramp(float t) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
-	vec2 uv = UV;
+	vec2 uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
 
 	// p.x = -1 left to 1 right
 	// p.y = 0 bottom to 1 top
@@ -2420,10 +3053,7 @@ void fragment() {
 
 	float overlay_alpha = clamp(out_alpha * strength, 0.0, 1.0);
 	vec3 overlay_col = clamp(col, vec3(0.0), vec3(1.0));
-	vec3 out_col = mix(base.rgb, overlay_col, overlay_alpha * 0.72);
-	out_col = clamp(out_col + overlay_col * overlay_alpha * 0.35, vec3(0.0), vec3(1.0));
-
-	COLOR = vec4(out_col, base.a);
+	COLOR = vec4(overlay_col, overlay_alpha);
 }";
 
 	private static readonly Shader WhirlpoolShader = new() { Code = WhirlpoolShaderCode };
@@ -2442,6 +3072,12 @@ uniform float brightness : hint_range(0.1, 4.0) = 1.0;
 uniform float motion_speed : hint_range(0.0, 5.0) = 1.0;
 uniform float time_offset : hint_range(0.0, 10.0) = 0.0;
 uniform float pattern_scale : hint_range(0.1, 4.0) = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
+uniform vec2 card_effect_uv_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_uv_scale = vec2(1.0, 1.0);
+uniform vec2 card_effect_screen_origin = vec2(0.0, 0.0);
+uniform vec2 card_effect_screen_size = vec2(300.0, 422.0);
+uniform vec2 card_effect_rect_size = vec2(300.0, 422.0);
 
 #define LOCAL_TIME ((TIME * motion_speed) + time_offset)
 
@@ -2475,15 +3111,9 @@ float getWeight(float f) {
 }
 
 void fragment() {
-	vec4 base = texture(TEXTURE, UV);
-	if (base.a <= 0.001) {
-		discard;
-	}
-
-	vec2 tex_size = 1.0 / max(TEXTURE_PIXEL_SIZE, vec2(0.0001));
-	float aspect = tex_size.x / max(tex_size.y, 1.0);
-	vec2 uvTrue = UV;
-	vec2 uv = (2.0 * uvTrue - 1.0) * max(pattern_scale, 0.05);
+	float aspect = card_effect_rect_size.x / max(card_effect_rect_size.y, 1.0);
+	vec2 uvTrue = (card_effect_uv_origin + UV * card_effect_uv_scale);
+	vec2 uv = (2.0 * uvTrue - 1.0) * max(pattern_scale * card_effect_pattern_scale, 0.05);
 	uv.x *= aspect;
 
 	vec3 color = vec3(0.0);
@@ -2514,9 +3144,8 @@ void fragment() {
 
 	float wave_mask = clamp(strongest_wave * 0.65 * wave_opacity, 0.0, 1.0);
 	float layer_alpha = clamp(max(background_opacity * 0.5, wave_mask) * strength, 0.0, 1.0);
-	vec3 out_col = mix(base.rgb, generated, layer_alpha);
 
-	COLOR = vec4(clamp(out_col, vec3(0.0), vec3(1.0)), base.a);
+	COLOR = vec4(clamp(generated, vec3(0.0), vec3(1.0)), layer_alpha);
 }";
 
 	private static readonly Shader AuroraShader = new() { Code = AuroraShaderCodeFlat };
@@ -2528,6 +3157,8 @@ void fragment() {
 		AccessTools.FieldRefAccess<NCard, TextureRect>("_portrait");
 	private static readonly AccessTools.FieldRef<NCard, TextureRect> AncientPortraitRef =
 		AccessTools.FieldRefAccess<NCard, TextureRect>("_ancientPortrait");
+	private static readonly AccessTools.FieldRef<NCard, CanvasGroup> PortraitCanvasGroupRef =
+		AccessTools.FieldRefAccess<NCard, CanvasGroup>("_portraitCanvasGroup");
 
 	public static void Sync(NCard card, CardEditorVisualFinish finish, bool fullArt, Dictionary<string, float>? fp = null)
 	{
@@ -2538,10 +3169,12 @@ void fragment() {
 
 		TextureRect? portrait = null;
 		TextureRect? ancientPortrait = null;
+		CanvasGroup? portraitCanvasGroup = null;
 		try
 		{
 			portrait = PortraitRef(card);
 			ancientPortrait = AncientPortraitRef(card);
+			portraitCanvasGroup = PortraitCanvasGroupRef(card);
 		}
 		catch
 		{
@@ -2560,36 +3193,37 @@ void fragment() {
 			_ => null
 		};
 
-		SyncPortrait(portrait, shader, finish, fullArt, fp);
-		SyncPortrait(ancientPortrait, shader, finish, fullArt, fp);
-	}
+		ClearLegacyPortraitMaterial(portrait);
+		ClearLegacyPortraitMaterial(ancientPortrait);
+		RemoveLegacyPortraitOverlay(portrait);
+		RemoveLegacyPortraitOverlay(ancientPortrait);
 
-	private static void SyncPortrait(TextureRect? portrait, Shader? desiredShader, CardEditorVisualFinish finish, bool fullArt, Dictionary<string, float>? fp)
-	{
-		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		if (portraitCanvasGroup == null || !GodotObject.IsInstanceValid(portraitCanvasGroup))
 		{
 			return;
 		}
 
-		if (desiredShader == null)
+		if (shader == null)
 		{
-			if (portrait.Material is ShaderMaterial existing && IsManagedShader(existing.Shader))
-			{
-				portrait.Material = null;
-			}
+			RemoveOverlay(portraitCanvasGroup);
 			return;
 		}
+
+		ColorRect overlay = GetOrCreateOverlay(portraitCanvasGroup);
+		SyncOverlayLayout(overlay, fullArt);
 
 		ShaderMaterial material;
-		if (portrait.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == desiredShader)
+		if (overlay.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == shader)
 		{
 			material = existingMaterial;
 		}
 		else
 		{
-			material = new ShaderMaterial { Shader = desiredShader };
-			portrait.Material = material;
+			material = new ShaderMaterial { Shader = shader };
+			overlay.Material = material;
 		}
+
+		ApplyOverlayArtSpace(material, fullArt);
 
 		if (finish == CardEditorVisualFinish.Whirlpool)
 		{
@@ -2619,6 +3253,136 @@ void fragment() {
 		{
 			ApplyFlameParams(material, fullArt, fp);
 		}
+	}
+
+	private static ColorRect GetOrCreateOverlay(CanvasGroup portraitCanvasGroup)
+	{
+		string overlayName = OverlayNodeNamePrefix + "CardSpace";
+
+		for (int i = 0; i < portraitCanvasGroup.GetChildCount(); i++)
+		{
+			if (portraitCanvasGroup.GetChild(i) is ColorRect existing && existing.Name == overlayName)
+			{
+				return existing;
+			}
+		}
+
+		ColorRect overlay = new()
+		{
+			Name = overlayName,
+			Color = Colors.White,
+			MouseFilter = Control.MouseFilterEnum.Ignore,
+			ClipContents = false
+		};
+		portraitCanvasGroup.AddChild(overlay);
+		return overlay;
+	}
+
+	private static void RemoveOverlay(CanvasGroup portraitCanvasGroup)
+	{
+		string overlayName = OverlayNodeNamePrefix + "CardSpace";
+		for (int i = portraitCanvasGroup.GetChildCount() - 1; i >= 0; i--)
+		{
+			if (portraitCanvasGroup.GetChild(i) is ColorRect rect && rect.Name == overlayName)
+			{
+				portraitCanvasGroup.RemoveChild(rect);
+				rect.QueueFree();
+			}
+		}
+	}
+
+	private static void ClearLegacyPortraitMaterial(TextureRect? portrait)
+	{
+		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		{
+			return;
+		}
+
+		if (portrait.Material is ShaderMaterial existing && IsManagedShader(existing.Shader))
+		{
+			portrait.Material = null;
+		}
+	}
+
+	private static void RemoveLegacyPortraitOverlay(TextureRect? portrait)
+	{
+		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		{
+			return;
+		}
+
+		Node? parent = portrait.GetParent();
+		string overlayName = OverlayNodeNamePrefix + portrait.Name;
+
+		if (parent != null && GodotObject.IsInstanceValid(parent))
+		{
+			for (int i = parent.GetChildCount() - 1; i >= 0; i--)
+			{
+				if (parent.GetChild(i) is ColorRect rect && rect.Name == overlayName)
+				{
+					parent.RemoveChild(rect);
+					rect.QueueFree();
+				}
+			}
+		}
+
+		for (int i = portrait.GetChildCount() - 1; i >= 0; i--)
+		{
+			Node child = portrait.GetChild(i);
+			if ((child is TextureRect || child is ColorRect)
+				&& (child.Name == overlayName || child.Name == LegacyOverlayNodeName))
+			{
+				portrait.RemoveChild(child);
+				child.QueueFree();
+			}
+		}
+	}
+
+	private static void SyncOverlayLayout(ColorRect overlay, bool fullArt)
+	{
+		overlay.Visible = true;
+		overlay.Modulate = Colors.White;
+		overlay.SelfModulate = Colors.White;
+		overlay.LayoutMode = 1;
+		overlay.AnchorLeft = 0.5f;
+		overlay.AnchorTop = 0.5f;
+		overlay.AnchorRight = 0.5f;
+		overlay.AnchorBottom = 0.5f;
+		overlay.GrowHorizontal = Control.GrowDirection.Both;
+		overlay.GrowVertical = Control.GrowDirection.Both;
+		overlay.Scale = Vector2.One;
+		overlay.Rotation = 0f;
+
+		if (fullArt)
+		{
+			overlay.OffsetLeft = -150f;
+			overlay.OffsetTop = -211f;
+			overlay.OffsetRight = 150f;
+			overlay.OffsetBottom = 211f;
+			overlay.PivotOffset = new Vector2(150f, 211f);
+		}
+		else
+		{
+			overlay.OffsetLeft = -125f;
+			overlay.OffsetTop = -168f;
+			overlay.OffsetRight = 125f;
+			overlay.OffsetBottom = 22f;
+			overlay.PivotOffset = new Vector2(125f, 95f);
+		}
+	}
+
+	private static void ApplyOverlayArtSpace(ShaderMaterial material, bool fullArt)
+	{
+		Vector2 effectSize = fullArt
+			? new Vector2(300f, 422f)
+			: new Vector2(250f, 190f);
+
+		material.SetShaderParameter("card_effect_uv_origin", Vector2.Zero);
+		material.SetShaderParameter("card_effect_uv_scale", Vector2.One);
+		material.SetShaderParameter("card_effect_rect_size", effectSize);
+		material.SetShaderParameter("card_effect_screen_origin", Vector2.Zero);
+		material.SetShaderParameter("card_effect_screen_size", effectSize);
+		material.SetShaderParameter("card_effect_pattern_scale", 1.0f);
 	}
 
 	private static bool IsManagedShader(Shader? shader)
@@ -2847,11 +3611,11 @@ internal static class CardEditorCustomShaderFoilController
 			CardEditorCustomFoilRegistry.TryGet(customFinishId, out definition!);
 		}
 
-		SyncPortrait(portrait, definition, fullArt, customParams);
-		SyncPortrait(ancientPortrait, definition, fullArt, customParams);
+		SyncPortrait(card, portrait, definition, fullArt, customParams);
+		SyncPortrait(card, ancientPortrait, definition, fullArt, customParams);
 	}
 
-	private static void SyncPortrait(TextureRect? portrait, CardEditorCustomFoilDefinition? definition, bool fullArt, Dictionary<string, string>? customParams)
+	private static void SyncPortrait(NCard card, TextureRect? portrait, CardEditorCustomFoilDefinition? definition, bool fullArt, Dictionary<string, string>? customParams)
 	{
 		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
 		{
@@ -2878,8 +3642,9 @@ internal static class CardEditorCustomShaderFoilController
 			portrait.Material = material;
 		}
 
-		Vector2 rectSize = portrait.Size;
+		Vector2 rectSize = CardEditorArtFinishCardSpace.GetDisplayedArtRectSize(portrait);
 		CardEditorCustomFoilRegistry.ApplyParameters(material, definition, fullArt, customParams, rectSize);
+		CardEditorArtFinishCardSpace.ApplyLocalArtSpace(material, portrait);
 	}
 }
 
@@ -2991,6 +3756,7 @@ uniform float corner_softness_px = 1.5;
 uniform float opacity = 0.78;
 uniform float flow_speed = 1.0;
 uniform float pattern_scale = 1.0;
+uniform float card_effect_pattern_scale = 1.0;
 uniform float glow_strength = 0.55;
 uniform float time_offset = 0.0;
 uniform float hue_shift = 0.0;
@@ -3781,7 +4547,7 @@ internal static class CardEditorPrismaticBandGlareController
 
 	private static Shader? GetShader()
 	{
-		_shader ??= GD.Load<Shader>("res://mods/card_editor/dev/holo_card_codes_preview.gdshader");
+		_shader ??= new Shader { Code = CardEditorPrismaticBandGlareOverlay.ShaderCode };
 		return _shader;
 	}
 
@@ -3795,69 +4561,69 @@ internal static class CardEditorPrismaticBandGlareController
 	{
 		TextureRect? portrait = PortraitRef(card);
 		TextureRect? ancientPortrait = AncientPortraitRef(card);
-		SyncPortrait(portrait, enabled, fullArt, fp);
-		SyncPortrait(ancientPortrait, enabled, fullArt, fp);
-	}
-
-	private static void SyncPortrait(TextureRect? portrait, bool enabled, bool fullArt, Dictionary<string, float>? fp)
-	{
-		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
-		{
-			return;
-		}
-
 		Shader? shader = GetShader();
-
-		if (!enabled)
-		{
-			if (portrait.Material is ShaderMaterial existing && existing.Shader == shader)
-			{
-				portrait.Material = null;
-			}
-			return;
-		}
-
 		if (shader == null)
 		{
 			return;
 		}
 
+		ClearPortraitMaterial(portrait, shader);
+		ClearPortraitMaterial(ancientPortrait, shader);
+		SyncPortrait(card, shader, enabled, fullArt, fp);
+	}
+
+	private static void SyncPortrait(NCard card, Shader shader, bool enabled, bool fullArt, Dictionary<string, float>? fp)
+	{
+		ColorRect? overlay = CardEditorArtFinishOverlayNodes.SyncOverlay(card, "PrismaticBandGlare", enabled, fullArt);
+		if (overlay == null)
+		{
+			return;
+		}
+
 		ShaderMaterial material;
-		if (portrait.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == shader)
+		if (overlay.Material is ShaderMaterial existingMaterial && existingMaterial.Shader == shader)
 		{
 			material = existingMaterial;
 		}
 		else
 		{
 			material = new ShaderMaterial { Shader = shader };
-			portrait.Material = material;
+			overlay.Material = material;
 		}
 
-		Texture2D? grain = GetGrainTex();
-		if (grain != null)
-		{
-			material.SetShaderParameter("grain_tex", grain);
-		}
-
+		material.SetShaderParameter("intensity", CardEditorTextureLoader.P(fp, "strength", fullArt ? 1.0f : 0.92f));
+		material.SetShaderParameter("lower_fade_start", fullArt ? 0.90f : 0.74f);
+		material.SetShaderParameter("lower_fade_end", fullArt ? 0.998f : 0.94f);
+		material.SetShaderParameter("lower_mask_min", fullArt ? 0.40f : 0.24f);
+		material.SetShaderParameter("band_strength", fullArt ? 0.24f : 0.22f);
+		material.SetShaderParameter("glare_strength", CardEditorTextureLoader.P(fp, "glareStrength", fullArt ? 0.28f : 0.24f));
+		material.SetShaderParameter("sweep_speed", CardEditorTextureLoader.P(fp, "speed", 1.0f));
+		material.SetShaderParameter("line_count", CardEditorTextureLoader.P(fp, "lineCount", 22.0f));
+		material.SetShaderParameter("line_width", CardEditorTextureLoader.P(fp, "lineWidth", 0.10f));
+		material.SetShaderParameter("inset_px", fullArt ? 1.0f : 1.5f);
 		material.SetShaderParameter("corner_radius_px", 0.0f);
-		material.SetShaderParameter("inset_px", 0.0f);
-		material.SetShaderParameter("motion_speed", CardEditorTextureLoader.P(fp, "speed", 1.0f));
-		material.SetShaderParameter("time_offset", CardEditorTextureLoader.P(fp, "timeOffset", 0.0f));
-		material.SetShaderParameter("foil_strength", CardEditorTextureLoader.P(fp, "strength", fullArt ? 0.62f : 0.58f));
-		material.SetShaderParameter("soft_light_strength", 0.5f);
-		material.SetShaderParameter("glare_strength", CardEditorTextureLoader.P(fp, "glareStrength", fullArt ? 0.38f : 0.34f));
-		material.SetShaderParameter("grain_strength", 0.22f);
-		material.SetShaderParameter("metallic_strength", CardEditorTextureLoader.P(fp, "metallicStrength", 0.42f));
-		material.SetShaderParameter("shadow_strength", 0.34f);
-		material.SetShaderParameter("hue_shift", CardEditorTextureLoader.P(fp, "hueShift", 0.0f));
-		material.SetShaderParameter("color_saturation", CardEditorTextureLoader.P(fp, "saturation", 1.0f));
-		material.SetShaderParameter("color_tint", new Vector3(
-			CardEditorTextureLoader.P(fp, "tintR", 1.0f),
-			CardEditorTextureLoader.P(fp, "tintG", 1.0f),
-			CardEditorTextureLoader.P(fp, "tintB", 1.0f)));
-		material.SetShaderParameter("tint_strength", CardEditorTextureLoader.P(fp, "tintStrength", 0.0f));
-		Vector2 size = portrait.Size;
-		material.SetShaderParameter("rect_size", size.X > 0 && size.Y > 0 ? size : new Vector2(300f, 422f));
+		material.SetShaderParameter("corner_softness_px", 1.5f);
+		CardEditorArtFinishOverlayNodes.ApplyArtSpace(material, fullArt);
+	}
+
+	private static void ClearPortraitMaterial(TextureRect? portrait, Shader shader)
+	{
+		if (portrait == null || !GodotObject.IsInstanceValid(portrait))
+		{
+			return;
+		}
+
+		if (portrait.Material is not ShaderMaterial existing)
+		{
+			return;
+		}
+
+		Shader? existingShader = existing.Shader;
+		if (existingShader == shader
+			|| string.Equals(existingShader?.ResourcePath, "res://mods/card_editor/dev/holo_card_codes_preview.gdshader", StringComparison.Ordinal))
+		{
+			portrait.Material = null;
+		}
 	}
 }
 
@@ -3909,6 +4675,7 @@ internal static class CardEditorCardFinishOverlayController
 				CardEditorProceduralArtFinishController.Sync(card, desiredFinish, fullArt, finishParams);
 				CardEditorBaseGameOverlayFinishController.Sync(card, desiredFinish);
 				CardEditorCustomShaderFoilController.Sync(card, hasCustomFinish ? customFinishId : null, fullArt, customFinishParams);
+				CardEditorRainbowRareFoilArtController.Sync(card, desiredFinish == CardEditorVisualFinish.RainbowRareFoil, fullArt, finishParams);
                 CardEditorBorderFoilOverlayController.Sync(overlayContainer, borderFinish, fullArt, borderFinishParams);
 
                 if (desiredFinish == CardEditorVisualFinish.None)
@@ -3925,20 +4692,14 @@ internal static class CardEditorCardFinishOverlayController
 						return;
 				}
 
-                if (desiredFinish != CardEditorVisualFinish.RainbowRareFoil)
-                {
-                        RemoveOverlay(overlayContainer, overlay);
-                        return;
-                }
+				if (desiredFinish == CardEditorVisualFinish.RainbowRareFoil)
+				{
+						RemoveOverlay(overlayContainer, overlay);
+						RemovePrismaticOverlay(overlayContainer, prismaticOverlay);
+						return;
+				}
 
-                if (overlay == null)
-                {
-                        overlay = new CardEditorRainbowFoilOverlay();
-                        overlayContainer.AddChild(overlay);
-                }
-
-                overlay.ApplyStyle(fullArt);
-                overlay.Show();
+				RemoveOverlay(overlayContainer, overlay);
         }
 
                 private static CardEditorRainbowFoilOverlay? FindOverlay(Node overlayContainer)

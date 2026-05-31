@@ -1065,9 +1065,13 @@ public partial class NRelicEditorPresetToggleButton : Control
 		_button.TooltipText = isPanelOpen
 			? CardEditorLoc.T("tooltip.hidePresets", "Hide Presets")
 			: CardEditorLoc.T("tooltip.showPresets", "Show Presets");
-		_button.SetButtonSize(CardEditorPresetButtonTuning.ButtonWidth, CardEditorPresetButtonTuning.ButtonHeight);
-		_button.SetTextSize(CardEditorPresetButtonTuning.ButtonFontSize);
-		_button.SetTextOffsets(0f, 0f, CardEditorPresetButtonTuning.TextOffsetX, CardEditorPresetButtonTuning.TextOffsetY);
+		_button.SetButtonSize(CardEditorBaseDeckActionBarTuning.ButtonWidth, CardEditorBaseDeckActionBarTuning.ButtonHeight);
+		_button.SetTextSize(CardEditorBaseDeckActionBarTuning.ButtonFontSize);
+		_button.SetTextOffsets(
+			CardEditorBaseDeckActionBarTuning.BarTextOffsetX,
+			CardEditorBaseDeckActionBarTuning.BarTextOffsetY,
+			CardEditorBaseDeckActionBarTuning.ResetTextOffsetX,
+			CardEditorBaseDeckActionBarTuning.ResetTextOffsetY);
 		_button.SetSelected(isPanelOpen);
 		_button.SetEmphasized(false);
 		_button.SetButtonEnabled(true);

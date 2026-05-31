@@ -20,5 +20,5 @@ C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Debug\net9.0\refint\card_editor.dll
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Debug\net9.0\card_editor.pdb
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Debug\net9.0\ref\card_editor.dll
-c:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Debug\net9.0\card_edi.AECB2639.Up2Date
 C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Debug\net9.0\card_editor.sourcelink.json
+C:\Users\Bartek\OneDrive\Dokumenter\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Debug\net9.0\Card_edi.ACF6FD99.Up2Date

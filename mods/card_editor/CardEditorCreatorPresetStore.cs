@@ -18,6 +18,7 @@ internal static class CardEditorCreatorPresetStore
 	private const string SettingsPath = "user://card_editor/creator_presets_settings.json";
 
 	private static bool? _sortByCharacterCached;
+	private static bool? _stopDeadTargetFollowupsCached;
 
 	public static List<string> ListPresetNames()
 	{
@@ -202,6 +203,27 @@ internal static class CardEditorCreatorPresetStore
 		{
 			CreatorPresetSettingsDto data = ReadSettingsInternal();
 			data.SortByCharacter = value;
+			WriteSettingsInternal(data);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed saving creator preset settings: {ex}");
+		}
+	}
+
+	public static bool GetStopDeadTargetFollowups()
+	{
+		_stopDeadTargetFollowupsCached ??= ReadSettingsInternal().StopDeadTargetFollowups;
+		return _stopDeadTargetFollowupsCached.Value;
+	}
+
+	public static void SetStopDeadTargetFollowups(bool value)
+	{
+		_stopDeadTargetFollowupsCached = value;
+		try
+		{
+			CreatorPresetSettingsDto data = ReadSettingsInternal();
+			data.StopDeadTargetFollowups = value;
 			WriteSettingsInternal(data);
 		}
 		catch (Exception ex)
@@ -492,6 +514,7 @@ internal static class CardEditorCreatorPresetStore
 	{
 		public string? StartupPresetName { get; set; }
 		public bool SortByCharacter { get; set; }
+		public bool StopDeadTargetFollowups { get; set; }
 	}
 
 	private sealed class CreatedCardDto

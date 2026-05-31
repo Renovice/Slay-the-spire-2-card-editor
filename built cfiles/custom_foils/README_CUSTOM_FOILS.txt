@@ -34,7 +34,13 @@ Use Godot 4 canvas-item shaders:
 
   shader_type canvas_item;
 
-Use UV coordinates for card-relative placement. UV is normalized from 0.0 to 1.0:
+Use UV coordinates for card-relative placement. Card Editor rewrites plain UV
+reads to an art-centered card-border-scale coordinate field, even though the
+shader is clipped to the art layer. This keeps a foil centered in the visible
+art while giving normal vanilla art, vanilla full art, and external high-resolution
+custom art the same apparent feature scale.
+
+The effective UV is normalized from 0.0 to 1.0:
 
   UV.x = left to right
   UV.y = top to bottom
@@ -47,14 +53,19 @@ The card art/foil rectangle uses roughly the STS2 card ratio:
   width:height ~= 320:446
   aspect ~= 0.7175
 
-If your shader needs aspect correction, use a uniform like:
+If your shader needs aspect correction, use the card-sized uniforms:
 
-  uniform vec2 foil_size = vec2(320.0, 446.0);
+  uniform vec2 card_effect_rect_size = vec2(320.0, 446.0);
 
 Then correct UV like:
 
   vec2 centered = UV - 0.5;
-  centered.x *= foil_size.x / foil_size.y;
+  centered.x *= card_effect_rect_size.x / max(card_effect_rect_size.y, 1.0);
+
+If you intentionally need the old art-local 0..1 UV behavior, add this marker
+anywhere in the shader:
+
+  CARD_EDITOR_KEEP_LOCAL_UV
 
 Good shader uniforms
 --------------------
