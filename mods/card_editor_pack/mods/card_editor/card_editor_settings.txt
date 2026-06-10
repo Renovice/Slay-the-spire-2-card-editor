@@ -1,12 +1,10 @@
 ﻿{
-  // Popup performance
   "PreloadEditorPopupsOnLaunch": false,
   "LegacyPreloadEveryEditorPopupOnLaunch": false,
   "IncrementalPopupHydrationOnOpen": true,
   "BackgroundPopupWarmupAfterDirtyClose": true,
   "BackgroundPopupWarmupDelaySeconds": 0.08,
 
-  // Diagnostics
   "VerboseLogging": false,
   "VerboseDamageDebugLogging": false
 }

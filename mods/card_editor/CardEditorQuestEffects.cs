@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -990,7 +991,10 @@ internal static class CardEditorQuestEffects
 		{
 			if (HasActiveQuest(runState, CardExtraEffectQuestMode.SpoilsMap, actIndex))
 			{
-				__result = new SpoilsActMap(runState);
+				if (TryCreateSpoilsActMap(runState, out ActMap? spoilsMap))
+				{
+					__result = spoilsMap;
+				}
 			}
 		}
 	}
@@ -1007,9 +1011,58 @@ internal static class CardEditorQuestEffects
 
 			if (HasActiveQuest(runState, CardExtraEffectQuestMode.SpoilsMap, actIndex))
 			{
-				__result = new SpoilsActMap(runState);
+				if (TryCreateSpoilsActMap(runState, out ActMap? spoilsMap))
+				{
+					__result = spoilsMap;
+				}
 			}
 		}
+	}
+
+	private static bool TryCreateSpoilsActMap(IRunState runState, [NotNullWhen(true)] out ActMap? spoilsMap)
+	{
+		spoilsMap = null;
+		if (runState == null)
+		{
+			return false;
+		}
+
+		try
+		{
+			const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+			Type spoilsMapType = typeof(SpoilsActMap);
+			ConstructorInfo? constructor = spoilsMapType.GetConstructor(
+				flags,
+				binder: null,
+				types: new[] { typeof(IRunState), typeof(MapPointTypeCounts) },
+				modifiers: null);
+
+			if (constructor != null)
+			{
+				spoilsMap = constructor.Invoke(new object?[] { runState, null }) as ActMap;
+				return spoilsMap != null;
+			}
+
+			constructor = spoilsMapType.GetConstructor(
+				flags,
+				binder: null,
+				types: new[] { typeof(IRunState) },
+				modifiers: null);
+
+			if (constructor != null)
+			{
+				spoilsMap = constructor.Invoke(new object?[] { runState }) as ActMap;
+				return spoilsMap != null;
+			}
+
+			Log.Warn("[CardEditor] SpoilsMap quest skipped: compatible SpoilsActMap constructor was not found.");
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] SpoilsMap quest skipped: failed creating SpoilsActMap: {ex}");
+		}
+
+		return false;
 	}
 
 	[HarmonyPatch(typeof(Hook), nameof(Hook.AfterMapGenerated))]

@@ -8,8 +8,8 @@
     <LangVersion>latest</LangVersion>
     <OutputPath>build\</OutputPath>
     <Sts2GameDir Condition="'$(Sts2GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64</Sts2GameDir>
-    <Sts2ReferenceDir Condition="'$(Sts2ReferenceDir)' == '' and Exists('$(MSBuildProjectDirectory)\build\net9.0\sts2.dll')">$(MSBuildProjectDirectory)\build\net9.0</Sts2ReferenceDir>
-    <Sts2ReferenceDir Condition="'$(Sts2ReferenceDir)' == ''">$(Sts2GameDir)</Sts2ReferenceDir>
+    <Sts2ReferenceDir Condition="'$(Sts2ReferenceDir)' == '' and Exists('$(Sts2GameDir)\sts2.dll')">$(Sts2GameDir)</Sts2ReferenceDir>
+    <Sts2ReferenceDir Condition="'$(Sts2ReferenceDir)' == ''">$(MSBuildProjectDirectory)\build\net9.0</Sts2ReferenceDir>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="sts2">

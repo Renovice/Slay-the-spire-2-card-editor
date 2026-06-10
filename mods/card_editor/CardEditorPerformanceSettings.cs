@@ -189,14 +189,11 @@ internal static class CardEditorPerformanceSettings
 	{
 		StringBuilder builder = new();
 		builder.AppendLine("{");
-		builder.AppendLine("  // Popup performance");
 		AppendBool(builder, nameof(CardEditorPerformanceSettingsData.PreloadEditorPopupsOnLaunch), data.PreloadEditorPopupsOnLaunch, comma: true);
 		AppendBool(builder, nameof(CardEditorPerformanceSettingsData.LegacyPreloadEveryEditorPopupOnLaunch), data.LegacyPreloadEveryEditorPopupOnLaunch, comma: true);
 		AppendBool(builder, nameof(CardEditorPerformanceSettingsData.IncrementalPopupHydrationOnOpen), data.IncrementalPopupHydrationOnOpen, comma: true);
 		AppendBool(builder, nameof(CardEditorPerformanceSettingsData.BackgroundPopupWarmupAfterDirtyClose), data.BackgroundPopupWarmupAfterDirtyClose, comma: true);
 		AppendNumber(builder, nameof(CardEditorPerformanceSettingsData.BackgroundPopupWarmupDelaySeconds), Math.Max(0.0, data.BackgroundPopupWarmupDelaySeconds), comma: true);
-		builder.AppendLine();
-		builder.AppendLine("  // Diagnostics");
 		AppendBool(builder, nameof(CardEditorPerformanceSettingsData.VerboseLogging), data.VerboseLogging, comma: true);
 		AppendBool(builder, nameof(CardEditorPerformanceSettingsData.VerboseDamageDebugLogging), data.VerboseDamageDebugLogging, comma: false);
 		builder.AppendLine("}");

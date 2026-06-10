@@ -189,9 +189,17 @@ internal static class NCardPlayQueue_UpdateCardBeforeExecution_CardEditorTransfo
 	}
 }
 
-[HarmonyPatch(typeof(NCardTransformVfx), nameof(NCardTransformVfx.PlayAnimOnCardInHand))]
+[HarmonyPatch]
 internal static class NCardTransformVfx_PlayAnimOnCardInHand_CardEditorTransformInterop_Patch
 {
+	private static MethodBase? TargetMethod()
+	{
+		return AccessTools.Method(
+			typeof(NCardTransformVfx),
+			"PlayAnimOnCardInHand",
+			new[] { typeof(NCard), typeof(CardModel) });
+	}
+
 	public static void Postfix(NCard cardNode, CardModel endCard, ref Task __result)
 	{
 		CardModel? startCard = TryGetModel(cardNode);

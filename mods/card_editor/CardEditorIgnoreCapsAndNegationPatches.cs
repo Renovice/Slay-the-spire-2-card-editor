@@ -574,7 +574,6 @@ internal static class BufferPower_ModifyHpLostAfterOstyLate_IgnoreNegation_Patch
 	}
 }
 
-[HarmonyPatch(typeof(SlipperyPower), nameof(SlipperyPower.ModifyDamageCap))]
 internal static class SlipperyPower_ModifyDamageCap_IgnoreCaps_Patch
 {
 	public static bool Prepare()
