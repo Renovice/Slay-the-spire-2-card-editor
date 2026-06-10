@@ -1675,6 +1675,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		BindCreatedRewardPoolControls(def);
 		BindCosmeticControls(existingOverride);
 		BindCreatedArtControls(def);
+		BindPortraitTransformFields(existingOverride);
 		BindCreatedFinishControls(def);
 
 		bool hasCustomText = def.CustomTextEnabled;
@@ -1895,6 +1896,16 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			? (null, existing!.CustomPortraitFile)
 			: (existing?.PortraitSourceCardId ?? ModelId.none, null);
 		RebuildVanillaArtDropdown(_vanillaArtSearchField?.Text ?? string.Empty, selectedPortrait);
+		BindPortraitTransformFields(existing);
+	}
+
+	private void BindPortraitTransformFields(CardOverride? existing)
+	{
+		// The shared popup is retargeted across cards; without an explicit rebind the previous card's
+		// art tuning text persists in these fields and is silently applied to the next card on Apply.
+		SetLineEditText(_portraitOffsetXField, FormatPortraitTransformValue(existing?.PortraitOffsetX ?? 0f));
+		SetLineEditText(_portraitOffsetYField, FormatPortraitTransformValue(existing?.PortraitOffsetY ?? 0f));
+		SetLineEditText(_portraitZoomField, FormatPortraitTransformValue(existing?.PortraitZoom ?? 1f));
 	}
 
 	private void EnsureVanillaPortraitCatalogForCurrentCard()
@@ -4980,6 +4991,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public LineEdit ScalingBaseAmountField { get; init; } = null!;
 		public Control RepeatScalingExtraTimesRow { get; init; } = null!;
 		public LineEdit RepeatScalingExtraTimesField { get; init; } = null!;
+		public KeywordTickbox RepeatScalingReplacesBaseTickbox { get; init; } = null!;
 		public Control ScalingCountStepRow { get; init; } = null!;
 		public LineEdit ScalingCountStepField { get; init; } = null!;
 	}
@@ -19332,6 +19344,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CreateEffectCompactValuePair(repeatScalingExtraTimesSpin, repeatScalingExtraTimesField));
 		repeatScalingExtraTimesRow.Visible = false;
 
+		Control repeatReplacesBaseTickboxVisuals = InstantiateTickboxVisuals(tickboxScene);
+		Label repeatReplacesBaseLabel = new Label { Text = CardEditorLoc.T("scaling.repeatReplacesBase", "Total = Count") };
+		StyleBodyLabel(repeatReplacesBaseLabel);
+		KeywordTickbox repeatScalingReplacesBaseTickbox = new KeywordTickbox(repeatReplacesBaseTickboxVisuals, repeatReplacesBaseLabel, effect?.RepeatScalingReplacesBase ?? false);
+		repeatScalingReplacesBaseTickbox.TooltipText = CardEditorLoc.T("tooltip.scalingRepeatReplacesBase", "Total executions equal the scaled count instead of adding to the base hit. With a count of 0 the effect does not run at all.");
+		repeatScalingReplacesBaseTickbox.Toggled += QueuePreviewUpdate;
+		repeatScalingReplacesBaseTickbox.Visible = false;
+		scalingToggleRow.AddChild(repeatScalingReplacesBaseTickbox);
+
 		int initialHistoryScalingCountStep = isUpgradeDeltaRow
 			? effect?.HistoryScalingCountStep ?? 0
 			: CardEditorExtraEffects.ResolveHistoryScalingCountStep(effect);
@@ -20565,6 +20586,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			ScalingBaseAmountField = scalingBaseAmountField,
 			RepeatScalingExtraTimesRow = repeatScalingExtraTimesRow,
 			RepeatScalingExtraTimesField = repeatScalingExtraTimesField,
+			RepeatScalingReplacesBaseTickbox = repeatScalingReplacesBaseTickbox,
 			ScalingCountStepRow = scalingCountStepRow,
 			ScalingCountStepField = scalingCountStepField
 		};
@@ -24177,6 +24199,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		DisableTickbox(row.PowerTickbox);
 		DisableTickbox(row.ScalingTickbox);
 		DisableTickbox(row.ScalingBaseTickbox);
+		DisableTickbox(row.RepeatScalingReplacesBaseTickbox);
 		DisableOptionButton(row.PowerPersistenceModeSelect);
 		DisableOptionButton(row.PlayPreventionBlockModeSelect);
 		DisableOptionButton(row.PlayPreventionExemptionSelect);
@@ -26222,6 +26245,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			SetSpinFieldState(row.RepeatScalingExtraTimesField, visible: showRepeatScalingExtraTimes, enabled: showRepeatScalingExtraTimes);
 		}
+		if (row.RepeatScalingReplacesBaseTickbox != null && GodotObject.IsInstanceValid(row.RepeatScalingReplacesBaseTickbox))
+		{
+			row.RepeatScalingReplacesBaseTickbox.Visible = showRepeatScalingExtraTimes;
+		}
 
 		if (!supportsCountLogic)
 		{
@@ -26895,6 +26922,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			&& GodotObject.IsInstanceValid(row.ScalingBaseTickbox)
 			&& row.ScalingBaseTickbox.Visible
 			&& row.ScalingBaseTickbox.IsTicked;
+	}
+
+	private static bool IsRepeatScalingReplacesBaseEnabled(ExtraEffectRow row)
+	{
+		return row?.RepeatScalingReplacesBaseTickbox != null
+			&& GodotObject.IsInstanceValid(row.RepeatScalingReplacesBaseTickbox)
+			&& row.RepeatScalingReplacesBaseTickbox.Visible
+			&& row.RepeatScalingReplacesBaseTickbox.IsTicked;
 	}
 
 	private static bool UsesSplitHistoryScalingAmounts(ExtraEffectRow row, CardExtraEffectKind kind, CardExtraEffectScaleMode scaleMode, bool amountIsX)
@@ -32373,6 +32408,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					HistoryScalingBaseAmount = historyScalingBaseAmount,
 					HistoryScalingCountStep = GetSelectedHistoryScalingCountStep(row),
 					RepeatScalingExtraTimes = GetSelectedRepeatScalingExtraTimes(row),
+				RepeatScalingReplacesBase = IsRepeatScalingReplacesBaseEnabled(row),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,
@@ -33826,6 +33862,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					HistoryScalingBaseAmount = historyScalingBaseAmount,
 					HistoryScalingCountStep = GetSelectedHistoryScalingCountStep(row),
 					RepeatScalingExtraTimes = GetSelectedRepeatScalingExtraTimes(row),
+				RepeatScalingReplacesBase = IsRepeatScalingReplacesBaseEnabled(row),
 					RepeatIsX = repeatIsX,
 					RepeatCount = repeatCount,
 					GrantToCard = grantToCard,
@@ -36400,7 +36437,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		actionRow.AddThemeConstantOverride("separation", 10);
 		form.AddChild(actionRow);
 
-		Button newButton = CreateDefinitionActionButton(CardEditorLoc.T("button.createEffect", "Create Effect"), minWidth: 190f);
+		Button newButton = CreateDefinitionActionButton(CardEditorLoc.T("button.newStatus", "New Status"), minWidth: 190f);
 		Button editBehaviorButton = CreateDefinitionActionButton(CardEditorLoc.T("button.editSavedStatus", "Edit Saved Status"), minWidth: 220f);
 		Button importButton = CreateDefinitionActionButton(CardEditorLoc.T("button.importFromCard", "Import From Current Card"), minWidth: 220f);
 		Button saveButton = CreateDefinitionActionButton(CardEditorLoc.T("button.save", "Save"));
@@ -36692,8 +36729,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				return;
 			}
 
+			// Saving under a changed name must create a NEW status: passing the old id to UpsertStatus
+			// would delete the loaded status as a silent rename, which users hit as data loss.
+			string? prospectiveId = CardEditorCustomStatusRegistry.BuildId(statusName);
+			bool savedAsNew = !string.IsNullOrWhiteSpace(selectedId)
+				&& !string.IsNullOrWhiteSpace(prospectiveId)
+				&& !string.Equals(selectedId!.Trim(), prospectiveId, StringComparison.OrdinalIgnoreCase);
+			bool replacedOtherStatus = !string.IsNullOrWhiteSpace(prospectiveId)
+				&& !string.Equals(selectedId?.Trim(), prospectiveId, StringComparison.OrdinalIgnoreCase)
+				&& definitions.Any(def => string.Equals(def.Id, prospectiveId, StringComparison.OrdinalIgnoreCase));
+
 			selectedId = CardEditorDefinitionStore.UpsertStatus(
-				selectedId,
+				savedAsNew ? null : selectedId,
 				statusName,
 				descriptionField.Text,
 				typeSelect.Selected == 1 ? PowerType.Debuff : PowerType.Buff,
@@ -36704,7 +36751,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				currentEffects);
 			ReloadDefinitions();
 			RebuildSavedList();
-			messageLabel.Text = CardEditorLoc.T("ui.statusEditor.savedMessage", "Status definition saved.");
+			messageLabel.Text = replacedOtherStatus
+				? CardEditorLoc.T("ui.statusEditor.replacedExistingMessage", "Replaced the existing status with that name.")
+				: savedAsNew
+					? CardEditorLoc.T("ui.statusEditor.savedAsNewMessage", "Saved as a new status; the previously loaded status was kept.")
+					: CardEditorLoc.T("ui.statusEditor.savedMessage", "Status definition saved.");
 			RefreshPreview();
 		}
 
@@ -36788,6 +36839,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		newButton.Pressed += () =>
 		{
+			// Detach from a loaded status so the new one can never overwrite it — but keep text the
+			// user already typed into a fresh form (it seeds CustomPowerName for the behavior rows).
+			if (!string.IsNullOrWhiteSpace(selectedId))
+			{
+				ClearForm();
+			}
 			OpenStatusBehaviorEditor(new[] { CreateStatusSeedEffect() }, creatingNewDefinition: true);
 		};
 		editBehaviorButton.Pressed += () =>
@@ -36829,14 +36886,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		ReloadDefinitions();
 		RebuildSavedList();
-		if (definitions.Count > 0)
-		{
-			LoadDefinition(definitions[0]);
-		}
-		else
-		{
-			ClearForm();
-		}
+		// Open on a clean form: auto-loading the first saved status made every "type a name and Save"
+		// session silently rename/destroy that status instead of creating a new one.
+		ClearForm();
 		Callable.From(() => nameField.GrabFocus()).CallDeferred();
 	}
 

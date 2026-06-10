@@ -1348,8 +1348,10 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			}
 
 			Creature? owner = Owner;
-			bool allowEnemyOwnedAfterAttack = trigger == CardExtraEffectTrigger.AfterAttack;
-			if (owner == null || (!owner.IsPlayer && !allowEnemyOwnedAfterAttack))
+			// AfterDeath must also run for enemy-hosted powers (Effect Host = Trigger Target / Effect Targets,
+			// e.g. Corpse Explosion); vanilla fires Hook.AfterDeath before removing the dying host's powers.
+			bool allowEnemyOwned = trigger is CardExtraEffectTrigger.AfterAttack or CardExtraEffectTrigger.AfterDeath;
+			if (owner == null || (!owner.IsPlayer && !allowEnemyOwned))
 			{
 				return;
 			}
@@ -1454,6 +1456,14 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 	public override async Task AfterDeath(PlayerChoiceContext choiceContext, Creature creature, bool wasRemovalPrevented, float deathAnimLength)
 	{
+		// Vanilla dispatches AfterDeath once with wasRemovalPrevented=true on prevented deaths and again
+		// with false if the creature actually dies; reacting to the prevented dispatch double-fires
+		// (vanilla on-death powers like InfestedPower filter it the same way).
+		if (wasRemovalPrevented)
+		{
+			return;
+		}
+
 		await RunLifecycleTrigger(choiceContext, CardExtraEffectTrigger.AfterDeath, eventActor: creature, target: creature);
 	}
 

@@ -40,6 +40,22 @@ internal static class CardEditorCardVisualElementController
 	private static readonly FieldInfo _ancientTextBgField = AccessTools.Field(typeof(NCard), "_ancientTextBg")!;
 	private static readonly FieldInfo _ancientBorderGlassOverlayField = AccessTools.Field(typeof(NCard), "_ancientBorderGlassOverlay")!;
 
+	internal static void HandleReturnedFromPool(NCard? cardNode)
+	{
+		if (cardNode == null)
+		{
+			return;
+		}
+
+		// Pooled NCard nodes are rebound to arbitrary cards; un-hide everything before reuse so a
+		// hide applied for one card can never leak onto whichever card lands on this node next.
+		if (_snapshots.TryGetValue(cardNode, out VisibilitySnapshot? snapshot) && snapshot != null)
+		{
+			RestoreSnapshot(cardNode, snapshot);
+			snapshot.TrackedModel = null;
+		}
+	}
+
 	internal static void Sync(NCard? cardNode)
 	{
 		if (cardNode == null)
@@ -49,6 +65,13 @@ internal static class CardEditorCardVisualElementController
 
 		var card = cardNode.Model;
 		if (card == null)
+		{
+			return;
+		}
+
+		// NCard.Create assigns Model before the node enters the tree; the visual fields are only
+		// assigned in _Ready, so syncing earlier captures null snapshots that latch elements hidden.
+		if (!cardNode.IsNodeReady())
 		{
 			return;
 		}
@@ -120,6 +143,19 @@ internal static class CardEditorCardVisualElementController
 	{
 		if (snapshot.IsCaptured)
 		{
+			// A null entry means the element was not valid at capture time; left null, the restore is a
+			// permanent no-op and the element latches hidden. Repair nulls before the hide is applied.
+			snapshot.TitleVisible ??= GetVisible(cardNode, _titleLabelField);
+			snapshot.DescriptionVisible ??= GetVisible(cardNode, _descriptionLabelField);
+			snapshot.BannerVisible ??= GetVisible(cardNode, _bannerField);
+			snapshot.AncientBannerVisible ??= GetVisible(cardNode, _ancientBannerField);
+			snapshot.TypePlaqueVisible ??= GetVisible(cardNode, _typePlaqueField);
+			snapshot.TypeLabelVisible ??= GetVisible(cardNode, _typeLabelField);
+			snapshot.EnergyIconVisible ??= GetVisible(cardNode, _energyIconField);
+			snapshot.EnergyLabelVisible ??= GetVisible(cardNode, _energyLabelField);
+			snapshot.UnplayableEnergyIconVisible ??= GetVisible(cardNode, _unplayableEnergyIconField);
+			snapshot.AncientTextBgVisible ??= GetVisible(cardNode, _ancientTextBgField);
+			snapshot.AncientBorderGlassOverlayVisible ??= GetVisible(cardNode, _ancientBorderGlassOverlayField);
 			return;
 		}
 
@@ -248,6 +284,21 @@ internal static class NCard_UpdateEnergyCostVisuals_CardVisualElement_Patch
 		try
 		{
 			CardEditorCardVisualElementController.Sync(__instance);
+		}
+		catch
+		{
+		}
+	}
+}
+
+[HarmonyPatch(typeof(NCard), nameof(NCard.OnReturnedFromPool))]
+internal static class NCard_OnReturnedFromPool_CardVisualElement_Patch
+{
+	public static void Postfix(NCard __instance)
+	{
+		try
+		{
+			CardEditorCardVisualElementController.HandleReturnedFromPool(__instance);
 		}
 		catch
 		{

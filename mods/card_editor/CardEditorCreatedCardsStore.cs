@@ -750,6 +750,7 @@ internal static class CardEditorCreatedCardsStore
 
 	private static void LoadInternal()
 	{
+		bool preserveUnreadFile = false;
 		try
 		{
 			_definitions.Clear();
@@ -775,6 +776,16 @@ internal static class CardEditorCreatedCardsStore
 						_definitions[cardId] = def;
 					}
 				}
+				else
+				{
+					preserveUnreadFile = true;
+					string reason = file == null
+						? "file could not be parsed"
+						: file.Cards == null
+							? "file has no card data"
+							: $"file version {file.Version} is outside the supported range (1..{CurrentVersion})";
+					Log.Warn($"[CardEditor] created_cards.json not loaded ({reason}); leaving the file untouched.");
+				}
 			}
 
 			SlotCount = Math.Clamp(desiredSlotCount, 1, MaxSlotCount);
@@ -783,13 +794,39 @@ internal static class CardEditorCreatedCardsStore
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Failed loading created cards store: {ex}");
+			preserveUnreadFile = true;
 			_definitions.Clear();
 			SlotCount = DefaultSlotCount;
 			ConfiguredSlotCount = DefaultSlotCount;
 		}
 
 		EnsureDefaultDefinitions();
+		if (preserveUnreadFile)
+		{
+			// Auto-saving here would overwrite the user's cards with defaults. Keep the file as-is and
+			// stash a one-time backup so a later save cannot silently destroy the original data.
+			TryBackupUnreadStoreFile();
+			return;
+		}
 		Save();
+	}
+
+	private static void TryBackupUnreadStoreFile()
+	{
+		try
+		{
+			string path = GetStorePath();
+			string backupPath = path + ".load-failed.bak";
+			if (File.Exists(path) && !File.Exists(backupPath))
+			{
+				File.Copy(path, backupPath, overwrite: false);
+				Log.Warn($"[CardEditor] Backed up unreadable created cards store to {backupPath}");
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Could not back up created cards store: {ex}");
+		}
 	}
 
 	public static Dictionary<ModelId, CardEditorCreatedCardDefinition> ExportSnapshot()

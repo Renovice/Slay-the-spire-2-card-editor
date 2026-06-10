@@ -1518,6 +1518,9 @@ public sealed class CardExtraEffect
 	public int? HistoryScalingBaseAmount { get; set; }
 	public int HistoryScalingCountStep { get; set; }
 	public int RepeatScalingExtraTimes { get; set; }
+	// "Total hits = count": the scaled repeats REPLACE the base execution instead of adding to it,
+	// so a count of 0 means the effect does not run at all. Defaults to false for back-compat.
+	public bool RepeatScalingReplacesBase { get; set; }
 
 	public bool GrantToCard { get; set; }
 	public CardExtraEffectCardSelectionMode CardSelectionMode { get; set; }
@@ -12148,6 +12151,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			&& baseEffect.CountEnemyIntent == upgradeEffect.CountEnemyIntent
 			&& baseEffect.CountComparison == upgradeEffect.CountComparison
 			&& baseEffect.HistoryScalingIncludesBase == upgradeEffect.HistoryScalingIncludesBase
+			&& baseEffect.RepeatScalingReplacesBase == upgradeEffect.RepeatScalingReplacesBase
 			&& ResolveHistoryScalingCountStep(baseEffect) == ResolveHistoryScalingCountStep(upgradeEffect)
 			&& ResolveRepeatScalingExtraTimes(baseEffect) == ResolveRepeatScalingExtraTimes(upgradeEffect)
 			&& baseEffect.RepeatIsX == upgradeEffect.RepeatIsX
@@ -16871,14 +16875,30 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		{
 			timesText = StsTextUtilities.HighlightChangeText(timesText, repeatScalingExtraTimesUpgradeComparison);
 		}
-		string unit = additionalTimes == 1
-			? CardEditorLoc.T("cardText.repeat.additionalTime.singular", "additional time")
-			: CardEditorLoc.T("cardText.repeat.additionalTime.plural", "additional times");
-		string rule = CardEditorLoc.F(
-			"cardText.repeat.scalingRule.additional",
-			$"Repeat {timesText} {unit}",
-			("Times", timesText),
-			("Unit", unit));
+		string unit;
+		string rule;
+		if (effect.RepeatScalingReplacesBase && !UsesCurrentEffectResultRepeat(effect))
+		{
+			unit = additionalTimes == 1
+				? CardEditorLoc.T("cardText.repeat.totalTime.singular", "time")
+				: CardEditorLoc.T("cardText.repeat.totalTime.plural", "times");
+			rule = CardEditorLoc.F(
+				"cardText.repeat.scalingRule.total",
+				$"Performed {timesText} {unit}",
+				("Times", timesText),
+				("Unit", unit));
+		}
+		else
+		{
+			unit = additionalTimes == 1
+				? CardEditorLoc.T("cardText.repeat.additionalTime.singular", "additional time")
+				: CardEditorLoc.T("cardText.repeat.additionalTime.plural", "additional times");
+			rule = CardEditorLoc.F(
+				"cardText.repeat.scalingRule.additional",
+				$"Repeat {timesText} {unit}",
+				("Times", timesText),
+				("Unit", unit));
+		}
 		return ApplyHistoryScalingSuffix(card, rule, effect, historyCountStepUpgradeComparison);
 	}
 
@@ -23597,6 +23617,9 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		int baseRepeat = ResolveBaseRepeatCount(cardPlay, effect);
 		if (effect.ScaleMode == CardExtraEffectScaleMode.RepeatByCount)
 		{
+			// The self-result dynamic repeat loop must keep its bootstrap hit: its count is always 0
+			// before the first hit, so replacing the base would make the effect permanently unable to fire.
+			bool replacesBase = effect.RepeatScalingReplacesBase && !UsesCurrentEffectResultRepeat(effect);
 			CardModel? card = cardPlay?.Card;
 			CombatState? combatState = card.GetConcreteCombatState();
 			Creature? ownerCreature = card?.Owner?.Creature;
@@ -23606,13 +23629,18 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 				bool countPasses = effect.CountComparison == CardExtraEffectCountComparison.None || DoesCountConditionPass(rawCount, effect);
 				if (!countPasses)
 				{
-					return baseRepeat;
+					return replacesBase ? 0 : baseRepeat;
 				}
 
 				int rawSteps = rawCount / ResolveHistoryScalingCountStep(effect);
 				int scaledRepeats = rawSteps * ResolveRepeatScalingExtraTimes(effect);
-				long totalRepeats = (long)baseRepeat + scaledRepeats;
+				long totalRepeats = replacesBase ? scaledRepeats : (long)baseRepeat + scaledRepeats;
 				return totalRepeats >= 99 ? 99 : totalRepeats <= 0 ? 0 : (int)totalRepeats;
+			}
+			if (replacesBase)
+			{
+				// Count source unavailable means a total of zero, not a free base execution.
+				return 0;
 			}
 		}
 
@@ -23654,6 +23682,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		int? resolvedRepeat = null;
 		CombatState? repeatCombatState = scalesRepeat ? card.GetConcreteCombatState() : null;
 		Creature? repeatOwnerCreature = repeatCombatState != null ? card.TryGetOwnerCreature() : null;
+		bool repeatReplacesBase = effect.RepeatScalingReplacesBase && !UsesCurrentEffectResultRepeat(effect);
 		if (scalesRepeat && repeatCombatState != null && repeatOwnerCreature != null)
 		{
 			int rawCount = Math.Max(0, GetHistoryCountMultiplier(repeatCombatState, repeatOwnerCreature, cardPlay: null, effect, card));
@@ -23662,7 +23691,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			{
 				int rawSteps = rawCount / ResolveHistoryScalingCountStep(effect);
 				int scaledRepeats = rawSteps * ResolveRepeatScalingExtraTimes(effect);
-				long totalRepeats = (long)baseRepeat + scaledRepeats;
+				long totalRepeats = repeatReplacesBase ? scaledRepeats : (long)baseRepeat + scaledRepeats;
 				resolvedRepeat = totalRepeats >= 99 ? 99 : totalRepeats <= 0 ? 0 : (int)totalRepeats;
 				if (repeatComparison == 0)
 				{
@@ -23671,8 +23700,15 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			}
 			else
 			{
-				resolvedRepeat = baseRepeat;
+				resolvedRepeat = repeatReplacesBase ? 0 : baseRepeat;
 			}
+		}
+
+		if (!resolvedRepeat.HasValue && scalesRepeat && repeatReplacesBase)
+		{
+			// Out of combat there is no count to resolve and no base hit to describe;
+			// the scaling rule line carries the "X times per ..." wording instead.
+			return baseLine;
 		}
 
 		string repeatSuffix;
@@ -33388,14 +33424,36 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 		return MatchesCountWindow(GetCombatHistoryEntryRoundNumber(entry, combatState), combatState, effect);
 	}
 
+	private static MemberInfo? _combatHistoryEntryRoundNumberMember;
+	private static bool _combatHistoryEntryRoundNumberMemberResolved;
+
 	private static int GetCombatHistoryEntryRoundNumber(CombatHistoryEntry entry, CombatState combatState)
 	{
 		try
 		{
-			const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-			object? value = entry.GetType().GetProperty("RoundNumber", flags)?.GetValue(entry)
-				?? entry.GetType().GetField("RoundNumber", flags)?.GetValue(entry)
-				?? entry.GetType().GetField("<RoundNumber>k__BackingField", flags)?.GetValue(entry);
+			if (!_combatHistoryEntryRoundNumberMemberResolved)
+			{
+				// RoundNumber is declared PRIVATE on the abstract base CombatHistoryEntry; reflection on the
+				// derived runtime type never returns private base members, so walk the hierarchy explicitly.
+				const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+				for (Type? type = entry.GetType(); type != null && _combatHistoryEntryRoundNumberMember == null; type = type.BaseType)
+				{
+					_combatHistoryEntryRoundNumberMember = (MemberInfo?)type.GetProperty("RoundNumber", flags)
+						?? (MemberInfo?)type.GetField("RoundNumber", flags)
+						?? type.GetField("<RoundNumber>k__BackingField", flags);
+				}
+				_combatHistoryEntryRoundNumberMemberResolved = true;
+				if (_combatHistoryEntryRoundNumberMember == null)
+				{
+					Log.Warn("[CardEditor] CombatHistoryEntry.RoundNumber not found via reflection; ThisTurn/LastTurns count windows will behave as This Combat (game update changed the type?).");
+				}
+			}
+			object? value = _combatHistoryEntryRoundNumberMember switch
+			{
+				PropertyInfo property => property.GetValue(entry),
+				FieldInfo field => field.GetValue(entry),
+				_ => null
+			};
 			return value == null ? combatState.RoundNumber : Convert.ToInt32(value, CultureInfo.InvariantCulture);
 		}
 		catch
@@ -37343,6 +37401,7 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 			&& a.CountConditionAmount == b.CountConditionAmount
 			&& a.ConditionProgressDisplay == b.ConditionProgressDisplay
 			&& a.HistoryScalingIncludesBase == b.HistoryScalingIncludesBase
+			&& a.RepeatScalingReplacesBase == b.RepeatScalingReplacesBase
 			&& Nullable.Equals(a.HistoryScalingBaseAmount, b.HistoryScalingBaseAmount)
 			&& ResolveHistoryScalingCountStep(a) == ResolveHistoryScalingCountStep(b)
 			&& ResolveRepeatScalingExtraTimes(a) == ResolveRepeatScalingExtraTimes(b)
@@ -37737,6 +37796,7 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 			HistoryScalingBaseAmount = source.HistoryScalingBaseAmount,
 			HistoryScalingCountStep = source.HistoryScalingCountStep,
 			RepeatScalingExtraTimes = source.RepeatScalingExtraTimes,
+			RepeatScalingReplacesBase = source.RepeatScalingReplacesBase,
 			GrantToCard = source.GrantToCard,
 			CardSelectionMode = source.CardSelectionMode,
 			CardSelectionCountIsX = source.CardSelectionCountIsX,

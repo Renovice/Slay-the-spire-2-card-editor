@@ -1644,6 +1644,7 @@ internal static class CardEditorPresetStore
 		public int? HistoryScalingBaseAmount { get; set; }
 		public int HistoryScalingCountStep { get; set; }
 		public int RepeatScalingExtraTimes { get; set; }
+		public bool RepeatScalingReplacesBase { get; set; }
 		public bool DisableOnUpgrade { get; set; }
 
 		public bool GrantToCard { get; set; }
@@ -2005,6 +2006,7 @@ internal static class CardEditorPresetStore
 				RepeatScalingExtraTimes = numericFieldsAreDeltas
 					? effect.RepeatScalingExtraTimes
 					: CardEditorExtraEffects.ResolveRepeatScalingExtraTimes(effect),
+				RepeatScalingReplacesBase = effect.RepeatScalingReplacesBase,
 				DisableOnUpgrade = effect.DisableOnUpgrade,
 				GrantToCard = effect.GrantToCard,
 				CardSelectionMode = effect.CardSelectionMode.ToString(),
@@ -2167,10 +2169,12 @@ internal static class CardEditorPresetStore
 
 			if (string.IsNullOrWhiteSpace(Kind) || !Enum.TryParse(Kind, out CardExtraEffectKind kind))
 			{
+				Log.Warn($"[CardEditor] Dropping saved effect with unknown Kind '{Kind}' (saved by a newer mod version?).");
 				return false;
 			}
 			if (string.IsNullOrWhiteSpace(Target) || !Enum.TryParse(Target, out CardExtraEffectTarget target))
 			{
+				Log.Warn($"[CardEditor] Dropping saved effect Kind '{Kind}' with unknown Target '{Target}'.");
 				return false;
 			}
 
@@ -2657,6 +2661,7 @@ internal static class CardEditorPresetStore
 			effect.RepeatScalingExtraTimes = numericFieldsAreDeltas
 				? Math.Clamp(RepeatScalingExtraTimes, -99, 99)
 				: RepeatScalingExtraTimes <= 0 ? 1 : Math.Clamp(RepeatScalingExtraTimes, 1, 99);
+			effect.RepeatScalingReplacesBase = RepeatScalingReplacesBase;
 
 			effect.GrantToCard = GrantToCard;
 			effect.RepeatIsX = RepeatIsX;

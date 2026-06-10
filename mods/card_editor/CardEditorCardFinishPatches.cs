@@ -481,7 +481,7 @@ internal static class CardEditorArtFinishOverlayNodes
 	public static void ApplyArtSpace(ShaderMaterial material, bool fullArt)
 	{
 		Vector2 effectSize = fullArt
-			? new Vector2(300f, 422f)
+			? new Vector2(299f, 421f)
 			: new Vector2(250f, 190f);
 
 		material.SetShaderParameter("card_effect_uv_origin", Vector2.Zero);
@@ -568,11 +568,14 @@ internal static class CardEditorArtFinishOverlayNodes
 
 		if (fullArt)
 		{
-			overlay.OffsetLeft = -150f;
-			overlay.OffsetTop = -211f;
-			overlay.OffsetRight = 150f;
-			overlay.OffsetBottom = 211f;
-			overlay.PivotOffset = new Vector2(150f, 211f);
+			// Must match the AncientPortrait visual rect exactly: any child extending past it inflates the
+			// portrait CanvasGroup's backbuffer union and stretches the vanilla ancient-portrait mask,
+			// revealing art below the frame window.
+			overlay.OffsetLeft = -153f;
+			overlay.OffsetTop = -215f;
+			overlay.OffsetRight = 146f;
+			overlay.OffsetBottom = 206f;
+			overlay.PivotOffset = new Vector2(149.5f, 210.5f);
 		}
 		else
 		{
@@ -1307,10 +1310,12 @@ vec3 overlay_blend(vec3 base_col, vec3 over)
 	);
 }
 
-vec2 art_rect_uv()
+vec2 art_rect_uv(vec2 frag)
 {
+	// FRAGCOORD is a stage built-in: it is only visible inside fragment(), so it must be
+	// passed in as a parameter or the shader fails to compile and the finish renders nothing.
 	vec2 safe_size = max(card_effect_screen_size, vec2(1.0));
-	return clamp((FRAGCOORD.xy - card_effect_screen_origin) / safe_size, vec2(0.0), vec2(1.0));
+	return clamp((frag - card_effect_screen_origin) / safe_size, vec2(0.0), vec2(1.0));
 }
 
 void fragment()
@@ -1325,7 +1330,7 @@ void fragment()
 	float luma = dot(tex.rgb, vec3(0.2126, 0.7152, 0.0722));
 	float lit = clamp(pow(luma, contrast_gamma) * brightness_boost, 0.0, 1.0);
 	float t = TIME * motion_speed + time_offset;
-	vec2 effect_uv = art_rect_uv();
+	vec2 effect_uv = art_rect_uv(FRAGCOORD.xy);
 	vec2 dir = normalize(gradient_dir);
 	vec2 crossDir = normalize(vec2(-dir.y, dir.x));
 	float phaseA = dot(effect_uv - vec2(0.5), dir) * gradient_scale * hue_spread;
@@ -3355,11 +3360,14 @@ void fragment() {
 
 		if (fullArt)
 		{
-			overlay.OffsetLeft = -150f;
-			overlay.OffsetTop = -211f;
-			overlay.OffsetRight = 150f;
-			overlay.OffsetBottom = 211f;
-			overlay.PivotOffset = new Vector2(150f, 211f);
+			// Must match the AncientPortrait visual rect exactly: any child extending past it inflates the
+			// portrait CanvasGroup's backbuffer union and stretches the vanilla ancient-portrait mask,
+			// revealing art below the frame window.
+			overlay.OffsetLeft = -153f;
+			overlay.OffsetTop = -215f;
+			overlay.OffsetRight = 146f;
+			overlay.OffsetBottom = 206f;
+			overlay.PivotOffset = new Vector2(149.5f, 210.5f);
 		}
 		else
 		{
@@ -3374,7 +3382,7 @@ void fragment() {
 	private static void ApplyOverlayArtSpace(ShaderMaterial material, bool fullArt)
 	{
 		Vector2 effectSize = fullArt
-			? new Vector2(300f, 422f)
+			? new Vector2(299f, 421f)
 			: new Vector2(250f, 190f);
 
 		material.SetShaderParameter("card_effect_uv_origin", Vector2.Zero);
