@@ -676,7 +676,10 @@ public enum CardExtraEffectCostModifier
 	Reduce = 0,
 	Free = 1,
 	HalfCost = 2,
-	FreeToPlay = 3
+	FreeToPlay = 3,
+	// Internal scheduling use only (multi-turn "costs more" entries); never offered in the UI.
+	// Encoding increases as negative Reduce amounts collided with the -1 = Free sentinel.
+	Increase = 4
 }
 
 public enum CardExtraEffectMatchingCostUseLimitMode
@@ -8317,7 +8320,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		}
 
 		CardOverride snapshot = CreateSelfScalingSnapshot(targetCard);
-		MegaCrit.Sts2.Core.Random.Rng? rng = card.Owner?.RunState?.Rng?.Shuffle;
+		MegaCrit.Sts2.Core.Random.Rng? rng = card.Owner?.RunState?.Rng?.CombatCardSelection;
 		if (!TryApplySelfScalingMutationToSnapshot(targetCard, snapshot, effect, delta, rng))
 		{
 			return false;
@@ -8356,7 +8359,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 		CardOverride beforeSnapshot = CreateSelfScalingSnapshot(targetCard);
 		CardOverride afterSnapshot = CardEditorOverrides.Clone(beforeSnapshot);
-		MegaCrit.Sts2.Core.Random.Rng? rng = card.Owner?.RunState?.Rng?.Shuffle;
+		MegaCrit.Sts2.Core.Random.Rng? rng = card.Owner?.RunState?.Rng?.CombatCardSelection;
 		if (!TryApplySelfScalingMutationToSnapshot(targetCard, afterSnapshot, effect, delta, rng))
 		{
 			return false;
@@ -8442,7 +8445,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		CardOverride? runtimeSnapshot = beforeRuntimeSnapshot != null
 			? CardEditorOverrides.Clone(beforeRuntimeSnapshot)
 			: null;
-		MegaCrit.Sts2.Core.Random.Rng? rng = card.Owner?.RunState?.Rng?.Shuffle;
+		MegaCrit.Sts2.Core.Random.Rng? rng = card.Owner?.RunState?.Rng?.CombatCardSelection;
 		if (!TryApplySelfScalingMutationToSnapshot(persistentCard, persistentSnapshot, effect, delta, rng))
 		{
 			return false;
@@ -8601,7 +8604,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			sourceCard,
 			excludeSourceCardInHandSelector: true,
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, cardPlay, desiredCount));
 
 		foreach (CardModel card in chosen)
@@ -10066,6 +10069,63 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			destination.Add(effect);
 		}
+	}
+
+	// Vanilla cards declare a hover tip for every power they reference (ExtraHoverTips, e.g.
+	// Abrasive); generate the same tips for powers and custom statuses applied by effect rows
+	// so hovering the card in hand explains what it applies.
+	internal static IReadOnlyList<IHoverTip> GetAppliedPowerHoverTips(CardModel? card, bool isUpgradePreview)
+	{
+		List<IHoverTip> tips = new();
+		if (card == null)
+		{
+			return tips;
+		}
+
+		try
+		{
+			foreach (CardExtraEffect effect in GetEffectsForDescription(card, isUpgradePreview))
+			{
+				if (effect == null)
+				{
+					continue;
+				}
+
+				if (effect.AsPower && !string.IsNullOrWhiteSpace(effect.CustomPowerName))
+				{
+					tips.Add(CardEditorVanillaKeywordSupport.CreateDynamicHoverTip(
+						effect.CustomPowerName.Trim(),
+						effect.CustomPowerDescription ?? string.Empty));
+					continue;
+				}
+
+				if (effect.Kind is not (CardExtraEffectKind.ApplyPower or CardExtraEffectKind.GainStatusEqualToStatus)
+					|| string.IsNullOrWhiteSpace(effect.PowerId))
+				{
+					continue;
+				}
+
+				if (CardEditorCustomStatusRegistry.IsCustomStatusId(effect.PowerId))
+				{
+					CardEditorCustomStatusDefinition definition = CardEditorCustomStatusRegistry.Resolve(effect.PowerId);
+					tips.Add(CardEditorVanillaKeywordSupport.CreateDynamicHoverTip(
+						definition.Name ?? "Custom Status",
+						definition.Description ?? string.Empty));
+					continue;
+				}
+
+				if (TryResolveConfiguredPowerModel(effect.PowerId, out PowerModel? canonical) && canonical != null)
+				{
+					tips.Add(HoverTipFactory.FromPower(canonical, Math.Max(1, effect.Amount)));
+				}
+			}
+		}
+		catch
+		{
+			// Hover tips are cosmetic; never break card rendering over them.
+		}
+
+		return tips;
 	}
 
 	internal static IReadOnlyList<IHoverTip> GetAdditionalHoverPreviewTips(CardModel? card)
@@ -15581,8 +15641,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.ConditionalAutoDrawFromPile => FormatAutoDrawSelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
 				CardExtraEffectKind.ConditionalAutoRunEffects => FormatAutoRunEffectRows(card, NormalizeSelfPileAutoEffect(effect) ?? effect, target, isUpgradePreview),
 				CardExtraEffectKind.GrantKeywordToPile => FormatGrantKeywordToPile(effect, grammarAmount, amountText),
-				CardExtraEffectKind.GainGold => $"Gain {amountText} Gold.",
-				CardExtraEffectKind.LoseGold => $"Lose {amountText} Gold.",
+				CardExtraEffectKind.GainGold => $"Gain {amountText} [gold]Gold[/gold].",
+				CardExtraEffectKind.LoseGold => $"Lose {amountText} [gold]Gold[/gold].",
 				CardExtraEffectKind.UpgradeDeckCards => FormatUpgradeDeckCards(effect, grammarAmount, amountText),
 				CardExtraEffectKind.FetchSpecificCardToHand => FormatFetchSpecificCardToHand(effect, grammarAmount, amountText),
 				_ => null
@@ -19095,9 +19155,9 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 	private static string FormatChannelOrb(string amountText, int amount, string orbName)
 	{
 		string localizedOrbName = OrbTitle(orbName, orbName);
-		string fallback = amount == 1
-			? $"[gold]Channel[/gold] {amountText} [gold]{localizedOrbName}[/gold] Orb."
-			: $"[gold]Channel[/gold] {amountText} [gold]{localizedOrbName}[/gold] Orbs.";
+		// Vanilla never writes "Orb" after a named orb: "Channel 1 [gold]Frost[/gold]." (Cold Snap);
+		// the word only appears for random channels ("Channel 2 random Orbs").
+		string fallback = $"[gold]Channel[/gold] {amountText} [gold]{localizedOrbName}[/gold].";
 		return amount == 1
 			? CardEditorLoc.F("cardText.channelOrb.one", fallback, ("Amount", amountText), ("Orb", localizedOrbName))
 			: CardEditorLoc.F("cardText.channelOrb.many", fallback, ("Amount", amountText), ("Orb", localizedOrbName));
@@ -19795,12 +19855,13 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 
 	private static string FormatEvokeOrbs(int amount, string amountText)
 	{
+		// Vanilla STS2 wording (Dualcast/Multi-Cast): "Evoke your rightmost Orb" — "next" is STS1.
 		if (amount == 1)
 		{
-			return CardEditorLoc.T("cardText.evoke.one", "Evoke your next Orb.");
+			return CardEditorLoc.T("cardText.evoke.one", "[gold]Evoke[/gold] your rightmost Orb.");
 		}
 
-		return CardEditorLoc.F("cardText.evoke.many", $"Evoke {amountText} Orbs.", ("Amount", amountText));
+		return CardEditorLoc.F("cardText.evoke.many", $"[gold]Evoke[/gold] {amountText} Orbs.", ("Amount", amountText));
 	}
 
 	private static string FormatOrbAction(CardExtraEffect effect, int amount, string amountText)
@@ -19834,9 +19895,10 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			string orbTypeTitle = GetOrbTypeTitle(effect.OrbType);
 			string orbTypePrefix = string.IsNullOrWhiteSpace(orbTypeTitle) ? string.Empty : orbTypeTitle + " ";
 
+			// Vanilla wording (Darkness): "Trigger the passive ability of all [gold]Dark[/gold] Orbs."
 			if (effect.OrbScope == CardExtraEffectOrbScope.All)
 			{
-				return $"Trigger the passive effect of all {orbTypePrefix}Orbs.";
+				return $"Trigger the passive ability of all {orbTypePrefix}Orbs.";
 			}
 
 			string selectionWord = effect.OrbSelection switch
@@ -19847,8 +19909,8 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			};
 
 			return amount == 1
-				? $"Trigger the passive effect of your {selectionWord} {orbTypePrefix}Orb."
-				: $"Trigger the passive effect of your {selectionWord} {orbTypePrefix}Orb {amountText} times.";
+				? $"Trigger the passive ability of your {selectionWord} {orbTypePrefix}Orb."
+				: $"Trigger the passive ability of your {selectionWord} {orbTypePrefix}Orb {amountText} times.";
 		}
 
 		string actionText = effect.OrbAction == CardExtraEffectOrbAction.Remove ? "Lose" : "Evoke";
@@ -19893,10 +19955,11 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		}
 		return effect.OstyAction switch
 		{
-			CardExtraEffectOstyAction.Attack => $"Osty attacks for {amountText} damage.",
-			CardExtraEffectOstyAction.AttackAll => $"Osty attacks ALL enemies for {amountText} damage.",
-			CardExtraEffectOstyAction.Heal => $"Heal Osty {amountText} HP.",
-			CardExtraEffectOstyAction.Kill => "Kill Osty.",
+			// Vanilla wording: "[gold]Osty[/gold] deals X damage." / "heals X HP." / "dies."
+			CardExtraEffectOstyAction.Attack => $"[gold]Osty[/gold] deals {amountText} damage.",
+			CardExtraEffectOstyAction.AttackAll => $"[gold]Osty[/gold] deals {amountText} damage to ALL enemies.",
+			CardExtraEffectOstyAction.Heal => $"[gold]Osty[/gold] heals {amountText} HP.",
+			CardExtraEffectOstyAction.Kill => "[gold]Osty[/gold] dies.",
 			_ => string.Empty
 		};
 	}
@@ -24865,6 +24928,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		await ReducePowerWithTemporaryTracking<PoisonPower, CardEditorTempPoisonTrackerPower>(target, int.MaxValue, applier, cardSource);
 		await ReducePowerWithTemporaryTracking<DoomPower, CardEditorTempDoomTrackerPower>(target, int.MaxValue, applier, cardSource);
 		await ReducePowerWithTemporaryTracking<ConstrictPower, CardEditorTempConstrictTrackerPower>(target, int.MaxValue, applier, cardSource);
+		await CleanseRemainingPowersByType(target, PowerType.Debuff, applier, cardSource);
 	}
 
 	private static async Task CleanseBuffs(Creature target, Creature applier, CardModel? cardSource)
@@ -24878,6 +24942,38 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		await ReducePowerWithTemporaryTracking<VigorPower, CardEditorTempVigorTrackerPower>(target, int.MaxValue, applier, cardSource);
 		await ReducePowerWithTemporaryTracking<BlurPower, CardEditorTempBlurTrackerPower>(target, int.MaxValue, applier, cardSource);
 		await ReducePowerWithTemporaryTracking<RitualPower, CardEditorTempRitualTrackerPower>(target, int.MaxValue, applier, cardSource);
+		await CleanseRemainingPowersByType(target, PowerType.Buff, applier, cardSource);
+	}
+
+	// Vanilla "remove all debuffs/buffs" effects enumerate by PowerType (Misery, IllusionPower),
+	// so they also catch powers outside any fixed list: No Draw, negative stats, custom statuses.
+	// Runs AFTER the tracker-aware typed removals; only visible powers qualify so the mod's
+	// invisible infrastructure powers are never swept.
+	private static async Task CleanseRemainingPowersByType(Creature target, PowerType type, Creature applier, CardModel? cardSource)
+	{
+		// Exclusion must be type-based, not IsVisible-based: IsVisible is NetId-dependent (false for
+		// a co-op teammate's powers on other clients), which would desync cleanses. Sweep vanilla
+		// powers and custom statuses; never the mod's own infrastructure powers (behavior holders,
+		// temp/duration/persistence trackers, cosmetic mirrors).
+		List<PowerModel> matching = target?.Powers?
+			.Where(power => power != null
+				&& (power is CardEditorCustomStatusPower
+					|| power.GetType().Assembly != typeof(CardEditorExtraEffects).Assembly)
+				&& power.GetTypeForAmount(power.Amount) == type)
+			.ToList() ?? new List<PowerModel>();
+		foreach (PowerModel power in matching)
+		{
+			if (power is ITemporaryPower temporaryPower)
+			{
+				temporaryPower.IgnoreNextInstance();
+			}
+
+			await PowerCmd.Remove(power);
+			if (power is CardEditorCustomStatusPower customStatus)
+			{
+				await RemoveCustomStatusBehaviorEntries(target, customStatus.CustomStatusId);
+			}
+		}
 	}
 
 	private static async Task MultiplyBlock(Creature target, int factor, CardPlay cardPlay)
@@ -25623,12 +25719,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			int appliedAmount = total >= int.MaxValue ? int.MaxValue : (int)total;
 			if (effect.StatusToStatusMode == CardExtraEffectStatusToStatusMode.Lose)
 			{
-				if (canonical != null && ShouldPreserveSelfProtectedPower(cardPlay, ownerCreature, effect.Target, canonical))
-				{
-					continue;
-				}
-
-				appliedAmount = -appliedAmount;
+				// Losing must reduce an EXISTING power: applying a negative amount to a target
+				// without the power creates a live phantom instance with negative stacks.
+				await ReduceConfiguredPower(target, effect.PowerId, appliedAmount, ownerCreature, cardPlay.Card, cardPlay, effect.Target);
+				continue;
 			}
 
 			if (appliesCustomStatus)
@@ -26709,6 +26803,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 
 			var attack = DamageCmd.Attack(amount).FromCard(cardPlay.Card).WithHitCount(repeats);
+			if (UsesDamageResultAmountSource(effect))
+			{
+				// "Damage equal to damage dealt" already includes Strength/Vigor from the source hit;
+				// vanilla echo damage (Omnislice) is Unpowered so the bonuses are never added twice.
+				attack.Unpowered();
+			}
 			if (!playAttackerAnim)
 			{
 				// Most vanilla Attack cards already play their own animation. Suppress animation here to avoid double-attacks.
@@ -26729,6 +26829,9 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					{
 						return;
 					}
+					// Vanilla self-damage ("Take X damage", e.g. Burn) is never a powered attack:
+					// your own Strength/Vigor must not scale it and it must not latch attack buffs.
+					attack.Unpowered();
 					attack.Targeting(ownerCreature);
 					break;
 				default:
@@ -26843,8 +26946,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					PowerModel power = canonical.ToMutable();
 					ApplyDurationTickPolicy(power, effect, targetAlreadyHadPower);
 					await PowerCmd.Apply(power, target, amount, ownerCreature, cardPlay.Card);
+					// Re-apply AFTER Apply unconditionally: the engine sets SkipNextDurationTick for
+					// fresh player-side debuffs inside Apply, which would clobber TickNormally.
 					PowerModel? activePower = GetActivePowerById(target, power);
-					if (activePower != null && !ReferenceEquals(activePower, power))
+					if (activePower != null)
 					{
 						ApplyDurationTickPolicy(activePower, effect, targetAlreadyHadPower);
 					}
@@ -27031,33 +27136,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.ApplyVulnerable:
 			{
-				bool targetAlreadyHadSelfVulnerable = effect.Target == CardExtraEffectTarget.Self
-					&& TargetAlreadyHasPower<VulnerablePower>(ownerCreature);
-				await ApplyPower<VulnerablePower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
-				// STS2 sets SkipNextDurationTick on debuffs applied to players so enemy-applied debuffs
-				// last through the player's next turn. For self-applied debuffs during the player's own
-				// turn, this makes 1-stack debuffs linger an extra round (e.g. Vulnerable lasting to Turn 3).
-				// Clear the skip in this specific case so the duration matches vanilla expectations for
-				// self-inflicted debuffs played on your turn.
-				if (!ShouldSuppressNextDurationTick(effect, targetAlreadyHadSelfVulnerable)
-					&& effect.Target == CardExtraEffectTarget.Self
-					&& ownerCreature.Side == CombatSide.Player
-					&& combatState.CurrentSide == CombatSide.Player)
-				{
-					try
-					{
-						VulnerablePower? power = ownerCreature.GetPower<VulnerablePower>();
-						if (power != null)
-						{
-							power.SkipNextDurationTick = false;
-						}
-					}
-					catch
-					{
-						// ignored
-					}
-				}
-				await TrackBuiltInPowerDuration<VulnerablePower, CardEditorTempVulnerableTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
+				// Vanilla keeps SkipNextDurationTick even for self-applied debuffs (Doubt/Shame rely
+				// on it), so Vulnerable uses the same pipeline as every other status — which also
+				// restores duration tracking AND persistence handling dropped by the old special case.
+				await ApplyPowerWithDuration<VulnerablePower, CardEditorTempVulnerableTrackerPower>(combatState, ownerCreature, cardPlay, effect.Target, amount, effect);
 				break;
 			}
 			case CardExtraEffectKind.RemoveVulnerable:
@@ -27926,7 +28008,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle,
+				owner.RunState?.Rng?.CombatCardSelection,
 				ResolveCardSelectionOfferCount(effect, cardPlay, Math.Min(desiredCount, candidates.Count)));
 		}
 		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random)
@@ -27935,7 +28017,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			{
 				return;
 			}
-			selected = PickRandomDistinct(candidates, Math.Min(desiredCount, candidates.Count), owner.RunState?.Rng?.Shuffle);
+			selected = PickRandomDistinct(candidates, Math.Min(desiredCount, candidates.Count), owner.RunState?.Rng?.CombatCardSelection);
 		}
 		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo)
 		{
@@ -28068,7 +28150,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle,
+				owner.RunState?.Rng?.CombatCardSelection,
 				ResolveCardSelectionOfferCount(effect, cardPlay, Math.Min(desiredCount, candidates.Count)));
 
 		if (selected.Count == 0 && !useFutureAura)
@@ -28208,7 +28290,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle,
+				owner.RunState?.Rng?.CombatCardSelection,
 				ResolveCardSelectionOfferCount(effect, cardPlay, Math.Min(desiredCount, candidates.Count)));
 
 		if (selected.Count == 0 && !useFutureAura)
@@ -28630,9 +28712,22 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return drawnCards;
 		}
 
+		// Filtered draws are still draws: respect the vanilla draw gate (No Draw powers etc.)
+		// exactly like CardPileCmd.Draw does.
+		if (!Hook.ShouldDraw(owner.Creature.CombatState, owner, fromHandDraw: false, out AbstractModel drawModifier))
+		{
+			await Hook.AfterPreventingDraw(owner.Creature.CombatState, drawModifier);
+			return drawnCards;
+		}
+
 		int drawsRequested = Math.Max(0, amount);
 		for (int i = 0; i < drawsRequested; i++)
 		{
+			if (CombatManager.Instance.IsOverOrEnding)
+			{
+				break;
+			}
+
 			if (handPile.Cards.Count >= 10)
 			{
 				ThinkCmd.Play(new LocString("combat_messages", "HAND_FULL"), owner.Creature, 2.0);
@@ -28730,7 +28825,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: toPileType == PileType.Discard,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
@@ -28837,7 +28932,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: effect.DelayedPileAction == CardExtraEffectDelayedPileAction.Discard,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, actionCount));
 
 		if (selected.Count == 0)
@@ -28984,7 +29079,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
@@ -29046,7 +29141,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle,
+				owner.RunState?.Rng?.CombatCardSelection,
 				ResolveCardSelectionOfferCount(effect, null, count));
 			selected.AddRange(pileSelected.Where(card => card != null));
 		}
@@ -29108,7 +29203,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: true,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
@@ -29162,7 +29257,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
@@ -29200,7 +29295,9 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			includeDeck: false,
 			requireDeckVersion: false,
 			includeCostFilter: true)
-			.Where(card => card != null && card.IsTransformable)
+			// Vanilla transform selection excludes Quest cards: transforming one bypasses
+			// Hook.BeforeCardRemoved and strands its quest cleanup (e.g. Spoils Map markers).
+			.Where(card => card != null && card.IsTransformable && card.Type != CardType.Quest)
 			.ToList();
 		if (candidates.Count == 0)
 		{
@@ -29226,7 +29323,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count),
 			effect);
 
@@ -29352,7 +29449,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				sourceCard,
 				ShouldExcludeSourceCardFromSelection(effect),
 				preferHandDiscardSelector: false,
-				owner.RunState?.Rng?.Shuffle,
+				owner.RunState?.Rng?.CombatCardSelection,
 				ResolveCardSelectionOfferCount(effect, null, count),
 				effect);
 
@@ -29432,7 +29529,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 		else
 		{
-			selected = PickRandomDistinct(candidates, count, owner.RunState?.Rng?.Shuffle);
+			selected = PickRandomDistinct(candidates, count, owner.RunState?.Rng?.CombatCardSelection);
 		}
 
 		int upgraded = UpgradeCardsWithFatalFinalKillFallback(selected, GetCardModificationPreviewStyle(selected.Count));
@@ -29723,7 +29820,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, cardPlay, count));
 
 		if (selected.Count == 0)
@@ -29801,7 +29898,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count));
 
 		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
@@ -29818,6 +29915,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		List<CardModel> candidates = selectingDeckDirectly
 			? GetCandidatesFromConfiguredPile(owner, effect, sourceCard, includeDeck: true, requireDeckVersion: false, includeCostFilter: true)
 			: GetCandidatesFromConfiguredPile(owner, effect, sourceCard, includeDeck: false, requireDeckVersion: true, includeCostFilter: true);
+		// Vanilla removal flows always filter IsRemovable (Eternal cards can never be removed).
+		candidates = candidates.Where(card => card != null && card.IsRemovable).ToList();
 		if (candidates.Count == 0)
 		{
 			return;
@@ -29845,7 +29944,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
@@ -30015,6 +30114,13 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 		return;
 	}
 
+	// Vanilla auto-play from the draw pile (Havoc/Mayhem) reshuffles the discard pile in first;
+	// without this the effect silently does nothing on an empty draw pile.
+	if (effect.CardSelectionPile == CardExtraEffectCardPile.DrawPile)
+	{
+		await CardPileCmd.ShuffleIfNecessary(choiceContext, owner);
+	}
+
 	List<CardModel> candidates = GetCandidatesFromConfiguredPile(
 		owner,
 		effect,
@@ -30054,7 +30160,7 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: false,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, null, count));
 
 		if (selected.Count == 0)
@@ -30149,7 +30255,7 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			sourceCard,
 			ShouldExcludeSourceCardFromSelection(effect),
 			preferHandDiscardSelector: effect.ConsumedCardAction == CardExtraEffectConsumedCardAction.Discard,
-			owner.RunState?.Rng?.Shuffle,
+			owner.RunState?.Rng?.CombatCardSelection,
 			ResolveCardSelectionOfferCount(effect, cardPlay, count));
 		if (selected.Count == 0)
 		{
@@ -33781,9 +33887,12 @@ private static bool MatchesCountCardFilters(Player owner, CardModel card, CardEx
 
 		return selection switch
 		{
-			CardExtraEffectOrbSelection.Rightmost => orbs[orbs.Count - 1],
+			// Orbs[0] (oldest, next to evoke) renders RIGHTMOST on screen; the newest channel is
+			// leftmost. This must agree with SelectOrb so a card's condition and action halves
+			// look at the same orb.
+			CardExtraEffectOrbSelection.Rightmost => orbs[0],
 			CardExtraEffectOrbSelection.Middle => orbs[(orbs.Count - 1) / 2],
-			_ => orbs[0]
+			_ => orbs[orbs.Count - 1]
 		};
 	}
 
@@ -35535,6 +35644,25 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 		};
 	}
 
+	// Quest rewards completing OUT of combat must honor the same rarity/pool filters as the
+	// in-combat path; a bare PotionReward would roll any rarity from the default pools.
+	internal static PotionModel? CreateFilteredPotionForReward(Player owner, CardExtraEffect? effect, HashSet<ModelId> chosenIds)
+	{
+		List<PotionModel> candidates = GetPotionCandidates(owner, effect, chosenIds);
+		if (candidates.Count == 0)
+		{
+			return null;
+		}
+
+		PotionModel? potion = SelectRandomPotionCandidate(owner, candidates, effect);
+		if (potion != null && effect?.PotionAllowDuplicates != true)
+		{
+			chosenIds.Add(potion.Id);
+		}
+
+		return potion;
+	}
+
 	private static List<PotionModel> GetPotionCandidates(Player owner, CardExtraEffect? effect, HashSet<ModelId> chosenIds)
 	{
 		if (owner == null)
@@ -35768,7 +35896,7 @@ private static async Task PlayMatchingGeneratedCards(CombatState? combatState, P
 		sourceCard: null,
 		excludeSourceCardInHandSelector: true,
 		preferHandDiscardSelector: false,
-		owner.RunState?.Rng?.Shuffle,
+		owner.RunState?.Rng?.CombatCardSelection,
 		ResolveCardSelectionOfferCount(effect, null, count));
 	if (selected.Count == 0)
 	{
@@ -35995,7 +36123,7 @@ private static async Task ChooseOneEffectSourceCard(PlayerChoiceContext choiceCo
 
 	if (effect.ChooseOneResolveMode == CardExtraEffectChooseOneResolveMode.Random)
 	{
-		List<int> selectedIndices = PickRandomDistinctIndices(optionCards.Count, targetCount, owner.RunState?.Rng?.Shuffle);
+		List<int> selectedIndices = PickRandomDistinctIndices(optionCards.Count, targetCount, owner.RunState?.Rng?.CombatCardSelection);
 		selectedIndices.Sort();
 		foreach (int selectedIndex in selectedIndices)
 		{

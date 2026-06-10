@@ -2837,6 +2837,50 @@ internal static class CardEditorPowerTurnBoundaryRunner
 		}
 	}
 
+	// Runs power-hosted EndOfTurnInHand/EndOfTurn entries PRE-FLUSH (from Hook.BeforeTurnEnd),
+	// where vanilla end-of-turn powers act — before the hand is discarded and before Burn-style cards.
+	public static async Task RunEndOfTurnTimedWithHookContexts(CombatState combatState, CombatSide side)
+	{
+		if (combatState == null || side == CombatSide.None)
+		{
+			return;
+		}
+
+		ulong? netId = LocalContext.NetId;
+		if (!netId.HasValue)
+		{
+			return;
+		}
+
+		foreach (Creature creature in SnapshotCreatures(combatState))
+		{
+			if (creature.Side != side)
+			{
+				continue;
+			}
+
+			CardEditorExtraEffectPower? power = creature.GetPower<CardEditorExtraEffectPower>();
+			if (power == null)
+			{
+				continue;
+			}
+
+			Player? contextPlayer = FindContextPlayer(combatState, creature);
+			if (contextPlayer == null)
+			{
+				continue;
+			}
+
+			HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(contextPlayer, netId.Value, GameActionType.Combat);
+			Task powerTask = power.RunEndOfTurnTimed(choiceContext);
+			bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(powerTask);
+			if (!completed && choiceContext.GameAction != null)
+			{
+				await choiceContext.GameAction.CompletionTask;
+			}
+		}
+	}
+
 	public static async Task RunForObservedSideWithHookContexts(
 		CombatState combatState,
 		CardExtraEffectTurnBoundary boundary,
@@ -3133,6 +3177,7 @@ public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 			}
 
 			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.End, side);
+			await CardEditorPowerTurnBoundaryRunner.RunEndOfTurnTimedWithHookContexts(combatState, side);
 		}
 		catch (Exception ex)
 		{

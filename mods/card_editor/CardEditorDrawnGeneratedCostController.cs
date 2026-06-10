@@ -437,10 +437,9 @@ internal static class CardEditorDrawnGeneratedCostController
 				{
 					int turns = Math.Max(1, effect.CardCostsLessTurns);
 					card.EnergyCost.SetThisTurn(halfCost, reduceOnly: true);
-					if (turns > 1)
-					{
-						CardEditorCreatedCardsCostController.ApplyForTurns(combatState, card, 0, turns, CardExtraEffectCostModifier.HalfCost);
-					}
+					// Schedule-only: ApplyForTurns would re-halve the already-halved cost on the
+					// first turn (quarter cost).
+					CardEditorCreatedCardsCostController.ScheduleRemainingTurns(combatState, card, 0, turns - 1, CardExtraEffectCostModifier.HalfCost);
 					break;
 				}
 				default:
@@ -477,11 +476,15 @@ internal static class CardEditorDrawnGeneratedCostController
 					card.EnergyCost.AddThisTurn(amount, reduceOnly: false);
 				else
 					card.EnergyCost.AddThisTurn(-amount, reduceOnly: true);
-				int remaining = turns - 1;
-				if (remaining > 0)
-				{
-					CardEditorCreatedCardsCostController.ApplyForTurns(combatState, card, isCostMore ? -amount : amount, remaining + 1, CardExtraEffectCostModifier.Reduce);
-				}
+				// Schedule-only (the first turn was just stamped). Increases use the explicit
+				// Increase modifier: encoding them as negative Reduce amounts collided with the
+				// -1 = Free sentinel and turned "cost 1 more" into "free".
+				CardEditorCreatedCardsCostController.ScheduleRemainingTurns(
+					combatState,
+					card,
+					amount,
+					turns - 1,
+					isCostMore ? CardExtraEffectCostModifier.Increase : CardExtraEffectCostModifier.Reduce);
 				break;
 			}
 			default:

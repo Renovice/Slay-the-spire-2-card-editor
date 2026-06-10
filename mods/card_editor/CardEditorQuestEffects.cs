@@ -493,9 +493,18 @@ internal static class CardEditorQuestEffects
 			return;
 		}
 
+		HashSet<ModelId> chosenIds = new();
 		for (int i = 0; i < amount; i++)
 		{
-			rewards.Add(new PotionReward(owner));
+			// Honor the effect's rarity/pool filters out of combat too, like the in-combat path.
+			PotionModel? potion = CardEditorExtraEffects.CreateFilteredPotionForReward(owner, effect, chosenIds);
+			if (potion == null)
+			{
+				rewards.Add(new PotionReward(owner));
+				continue;
+			}
+
+			rewards.Add(new PotionReward(potion.ToMutable(), owner));
 		}
 	}
 
@@ -520,7 +529,10 @@ internal static class CardEditorQuestEffects
 		}
 
 		int count = Math.Clamp(optionCount, 1, 99);
-		CardCreationOptions options = CardEditorExtraEffects.BuildCardRewardCreationOptions(owner, RoomType.RestSite, effect);
+		// Vanilla out-of-combat card rewards (Dream Catcher, Prayer Wheel) use ForRoom(Monster)
+		// so the rare-pity timer applies and advances; RestSite maps to Source=Other which
+		// rolls flat base odds and never touches the pity counter.
+		CardCreationOptions options = CardEditorExtraEffects.BuildCardRewardCreationOptions(owner, RoomType.Monster, effect);
 		CardReward reward = new(options, count, owner);
 		CardEditorCardRewardSpecs.Attach(reward, CardEditorCardRewardSpecs.FromEffect(effect));
 		rewards.Add(reward);

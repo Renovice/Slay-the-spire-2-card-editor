@@ -657,8 +657,10 @@ internal static class CardEditorCardRewardSpecs
 			.ToList();
 		if (candidates.Count == 0)
 		{
-			cards.Clear();
-			return true;
+			// Vanilla never offers an empty card reward (CardFactory throws instead). Keep the
+			// vanilla-generated cards rather than presenting a selection screen with nothing in it.
+			Log.Warn("[CardEditor][RewardPools] Card reward filter matched no cards; offering unfiltered reward instead.");
+			return false;
 		}
 
 		int count = Math.Min(Math.Max(optionCount, 1), candidates.Count);
@@ -667,8 +669,8 @@ internal static class CardEditorCardRewardSpecs
 			List<CardCreationResult> generated = GenerateFilteredRewardCards(player, options, spec, candidates, count);
 			if (generated.Count == 0)
 			{
-				cards.Clear();
-				return true;
+				Log.Warn("[CardEditor][RewardPools] Card reward filter generated no cards; offering unfiltered reward instead.");
+				return false;
 			}
 
 			cards.Clear();

@@ -878,6 +878,21 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			return 0;
 		}
 
+		// A custom status' behavior must die with its icon, like a vanilla power's behavior does.
+		// The icon can be removed by duration expiry, stack loss, or vanilla type-based removal —
+		// none of which clean these entries — so verify the visible status is still present.
+		if (!string.IsNullOrWhiteSpace(entry.CustomStatusBehaviorId))
+		{
+			bool statusStillPresent = Owner?.Powers?
+				.OfType<CardEditorCustomStatusPower>()
+				.Any(status => status.MatchesConfiguredId(entry.CustomStatusBehaviorId) && status.Amount > 0) == true;
+			if (!statusStillPresent)
+			{
+				Entries.Remove(entry);
+				return 0;
+			}
+		}
+
 		using IDisposable selectedSession = CardEditorEffectExecutionAmountContext.PushSessionScoped();
 		using IDisposable selectedScope = CardEditorEffectExecutionAmountContext.PushSelectedCardsScoped(entry.SelectedCardsByEffectId);
 
@@ -1607,8 +1622,9 @@ public override async Task AfterSideTurnEnd(PlayerChoiceContext choiceContext, C
 		if (side == owner.Side)
 		{
 			await RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.EndAfterDiscard, CardExtraEffectTurnBoundarySide.YourTurn);
-			await RunStartOrEndTimed(choiceContext, CardExtraEffectTrigger.EndOfTurnInHand);
-			await RunStartOrEndTimed(choiceContext, CardExtraEffectTrigger.EndOfTurn);
+			// EndOfTurnInHand/EndOfTurn entries run PRE-FLUSH from the Hook.BeforeTurnEnd patch
+			// (RunEndOfTurnTimed): vanilla end-of-turn powers act before the hand is discarded
+			// and before Burn-style cards, so running them here (post-flush) saw an empty hand.
 
 			// Expire temporary power-mode entries for non-status kinds.
 			ExpireNonStatusDurationEntries(CardExtraEffectTurnBoundary.EndAfterDiscard, CardExtraEffectTurnBoundarySide.YourTurn);
@@ -1641,6 +1657,14 @@ public override async Task AfterSideTurnEnd(PlayerChoiceContext choiceContext, C
 	{
 		await SyncVisibleMirrorPowers();
 	}
+}
+
+// Invoked pre-flush from the Hook.BeforeTurnEnd patch so end-of-turn power effects see the
+// full hand and resolve before Burn-style cards, matching vanilla end-of-turn powers.
+public async Task RunEndOfTurnTimed(PlayerChoiceContext choiceContext)
+{
+	await RunStartOrEndTimed(choiceContext, CardExtraEffectTrigger.EndOfTurnInHand);
+	await RunStartOrEndTimed(choiceContext, CardExtraEffectTrigger.EndOfTurn);
 }
 
 public async Task RunStartOfTurn(PlayerChoiceContext choiceContext)
@@ -1788,7 +1812,10 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 					// Letting them flow through Start/End-of-turn legacy hooks makes
 					// "before draw" / "before discard" fire a second time.
 					|| entry.Effect.Trigger == CardExtraEffectTrigger.TurnBoundary
-					|| !CardEditorExtraEffects.DoesTriggerMatch(entry.Effect, trigger, entry.SourceCard)
+					// Power entries match their timed trigger EXACTLY: the EndOfTurnInHand->EndOfTurn
+					// cross-map in DoesTriggerMatch exists for the card-hosted hand loop; here it made
+					// every EndOfTurn entry fire in BOTH end-of-turn passes (double execution + broken Every-N).
+					|| entry.Effect.Trigger != trigger
 					|| !CardEditorExtraEffects.IsValidEffectAmount(entry.Effect.Kind, entry.Effect.Amount))
 				{
 					continue;

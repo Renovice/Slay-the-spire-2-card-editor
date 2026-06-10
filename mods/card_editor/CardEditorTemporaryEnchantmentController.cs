@@ -28,6 +28,12 @@ internal static class CardEditorTemporaryEnchantmentController
 	private sealed class CardState
 	{
 		public EnchantmentSnapshot? Baseline { get; set; }
+		// What the CURRENT grant application contributed to the card's LOCAL keywords (OnEnchant
+		// adds/removes: Steady adds Retain, Souls removes Exhaust). Vanilla never strips an
+		// enchantment mid-combat, so clearing a temporary one leaks these changes — on reapply we
+		// undo exactly this delta and recapture, leaving keywords from OTHER sources untouched.
+		public HashSet<CardKeyword> GrantAddedKeywords { get; } = new HashSet<CardKeyword>();
+		public HashSet<CardKeyword> GrantRemovedKeywords { get; } = new HashSet<CardKeyword>();
 		public List<EnchantmentGrant> Grants { get; } = new List<EnchantmentGrant>();
 	}
 
@@ -305,6 +311,10 @@ internal static class CardEditorTemporaryEnchantmentController
 		}
 		else
 		{
+			// The moved state's keyword attribution describes the ORIGINAL card; undoing it on the
+			// replacement would delete the replacement's own keywords. Start attribution fresh.
+			state.GrantAddedKeywords.Clear();
+			state.GrantRemovedKeywords.Clear();
 			schedule.States[toKey] = state;
 		}
 
@@ -386,6 +396,20 @@ internal static class CardEditorTemporaryEnchantmentController
 		}
 
 		ClearCardEnchantment(card);
+
+		// Undo exactly what the previous grant application contributed to the LOCAL keywords —
+		// keywords granted by other sources in the meantime stay untouched.
+		foreach (CardKeyword keyword in state.GrantAddedKeywords)
+		{
+			card.RemoveKeyword(keyword);
+		}
+		foreach (CardKeyword keyword in state.GrantRemovedKeywords)
+		{
+			card.AddKeyword(keyword);
+		}
+
+		HashSet<CardKeyword> beforeGrants = new HashSet<CardKeyword>(card.GetKeywordsWithSources(KeywordSources.Local));
+
 		if (state.Baseline != null)
 		{
 			ApplySnapshot(card, state.Baseline);
@@ -403,6 +427,25 @@ internal static class CardEditorTemporaryEnchantmentController
 				Id = grant.Id,
 				Amount = grant.Amount
 			});
+		}
+
+		// Recapture the delta the now-active grant set contributes, for the next undo.
+		HashSet<CardKeyword> afterGrants = new HashSet<CardKeyword>(card.GetKeywordsWithSources(KeywordSources.Local));
+		state.GrantAddedKeywords.Clear();
+		state.GrantRemovedKeywords.Clear();
+		foreach (CardKeyword keyword in afterGrants)
+		{
+			if (!beforeGrants.Contains(keyword))
+			{
+				state.GrantAddedKeywords.Add(keyword);
+			}
+		}
+		foreach (CardKeyword keyword in beforeGrants)
+		{
+			if (!afterGrants.Contains(keyword))
+			{
+				state.GrantRemovedKeywords.Add(keyword);
+			}
 		}
 	}
 

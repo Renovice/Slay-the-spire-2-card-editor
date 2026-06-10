@@ -714,6 +714,11 @@ internal static class CardModel_HoverTips_CardEditorKeywordSupport_Patch
 			{
 				combinedTips = combinedTips.Concat(hoverPreviewTips);
 			}
+			IReadOnlyList<IHoverTip> appliedPowerTips = CardEditorExtraEffects.GetAppliedPowerHoverTips(__instance, isUpgradePreview: false);
+			if (appliedPowerTips.Count > 0)
+			{
+				combinedTips = combinedTips.Concat(appliedPowerTips);
+			}
 
 			List<IHoverTip> finalTips = CardEditorVanillaKeywordSupport.RemoveDuplicateHoverTips(combinedTips);
 			if (finalTips.Count == 0)

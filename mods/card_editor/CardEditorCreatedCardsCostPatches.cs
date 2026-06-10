@@ -102,6 +102,10 @@ internal static class CardEditorCreatedCardsCostController
 		public required int Amount { get; init; }
 		public required CardExtraEffectCostModifier Modifier { get; init; }
 		public int RemainingTurns { get; set; }
+		// Cards stamped during the turn-start sequence (opening hand draw runs BEFORE
+		// AfterPlayerTurnStart) must not have their first scheduled turn consumed in the same
+		// round — that double-applies the modifier on turn one and ends the span a turn early.
+		public int CreatedRoundNumber { get; init; }
 	}
 
 	private sealed class PendingStarDiscount
@@ -397,6 +401,13 @@ internal static class CardEditorCreatedCardsCostController
 				return ApplyTrueFreeThisTurn(card);
 			case CardExtraEffectCostModifier.HalfCost:
 				return TryApplyHalfCost(card, value => card.EnergyCost.SetThisTurn(value, reduceOnly: true));
+			case CardExtraEffectCostModifier.Increase:
+				if (amount <= 0)
+				{
+					return false;
+				}
+				card.EnergyCost.AddThisTurn(amount, reduceOnly: false);
+				return true;
 			default:
 				if (amount == -1)
 				{
@@ -504,7 +515,26 @@ internal static class CardEditorCreatedCardsCostController
 			list = new List<PendingTurnDiscount>();
 			schedule.DiscountsByCard[card] = list;
 		}
-		list.Add(new PendingTurnDiscount { Amount = amount, Modifier = modifier, RemainingTurns = remaining });
+		list.Add(new PendingTurnDiscount { Amount = amount, Modifier = modifier, RemainingTurns = remaining, CreatedRoundNumber = combatState.RoundNumber });
+	}
+
+	// Enqueue future-turn applications WITHOUT applying anything now — for callers that already
+	// stamped the first turn themselves. ApplyForTurns always applies immediately, which made the
+	// controller's stamped-then-scheduled discounts double-apply on the first turn.
+	public static void ScheduleRemainingTurns(CombatState combatState, CardModel card, int amount, int remainingTurns, CardExtraEffectCostModifier modifier)
+	{
+		if (combatState == null || card == null || remainingTurns <= 0)
+		{
+			return;
+		}
+
+		CombatSchedule schedule = _schedules.GetOrCreateValue(combatState);
+		if (!schedule.DiscountsByCard.TryGetValue(card, out List<PendingTurnDiscount>? list))
+		{
+			list = new List<PendingTurnDiscount>();
+			schedule.DiscountsByCard[card] = list;
+		}
+		list.Add(new PendingTurnDiscount { Amount = amount, Modifier = modifier, RemainingTurns = remainingTurns, CreatedRoundNumber = combatState.RoundNumber });
 	}
 
 	public static void ApplyThisTurn(CardModel card, int amount, CardExtraEffectCostModifier modifier = CardExtraEffectCostModifier.Reduce, CardCreatedCardsCostResource resource = CardCreatedCardsCostResource.Energy)
@@ -636,6 +666,14 @@ internal static class CardEditorCreatedCardsCostController
 				if (pending.RemainingTurns <= 0)
 				{
 					discounts.RemoveAt(i);
+					continue;
+				}
+
+				// Skip entries created earlier in this same round (opening-draw stamps run before
+				// AfterPlayerTurnStart): consuming them now double-applies on turn one and ends
+				// the span a turn early.
+				if (pending.CreatedRoundNumber == combatState.RoundNumber)
+				{
 					continue;
 				}
 

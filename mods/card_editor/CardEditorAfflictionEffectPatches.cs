@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using HarmonyLib;
@@ -110,6 +111,27 @@ internal static class CardEditorAfflictionEffects
 				return;
 			}
 
+			// Tainted fallback: vanilla VitalSparkPower applies TaintedPower to the card's owner
+			// when a Tainted card is played; editor-set Tainted needs the same behavior when no
+			// VitalSparkPower exists in the fight.
+			if (card.Affliction is Tainted tainted)
+			{
+				Creature? taintedOwner = card.TryGetOwnerCreature();
+				if (taintedOwner == null
+					|| taintedOwner.HasPower<VitalSparkPower>()
+					|| combatState.Enemies.Any(e => e != null && e.HasPower<VitalSparkPower>()))
+				{
+					return;
+				}
+
+				int taintedAmount = Math.Max(0, tainted.Amount);
+				if (taintedAmount > 0)
+				{
+					await PowerCmd.Apply<TaintedPower>(choiceContext, taintedOwner, taintedAmount, null, null);
+				}
+				return;
+			}
+
 			if (card.Affliction is not Galvanized galvanized)
 			{
 				return;
@@ -129,11 +151,8 @@ internal static class CardEditorAfflictionEffects
 				return;
 			}
 
-			// Mirror the base game's behavior: Galvanized triggers on Power cards.
-			if (card.Type != CardType.Power)
-			{
-				return;
-			}
+			// Vanilla GalvanicPower.AfterCardPlayed triggers on ANY card carrying the Galvanized
+			// affliction — the Power-card restriction only governs which cards GET afflicted.
 
 			int damage = Math.Max(0, galvanized.Amount);
 			if (damage <= 0)
@@ -154,11 +173,13 @@ internal static class CardEditorAfflictionEffects
 [HarmonyPatch(typeof(Hook), nameof(Hook.ModifyEnergyCostInCombat))]
 internal static class Hook_ModifyEnergyCostInCombat_Afflictions_Patch
 {
-	public static void Postfix(CombatState combatState, CardModel card, decimal originalCost, ref decimal __result)
+	// Applied as a PREFIX so the increase enters before vanilla's hooks, exactly like the real
+	// TangledPower (early hook) — late "free" powers must still be able to zero the cost.
+	public static void Prefix(CombatState combatState, CardModel card, ref decimal originalCost)
 	{
 		try
 		{
-			if (__result < 0m)
+			if (originalCost < 0m)
 			{
 				return;
 			}
@@ -169,11 +190,41 @@ internal static class Hook_ModifyEnergyCostInCombat_Afflictions_Patch
 				return;
 			}
 
-			__result += increase;
+			originalCost += increase;
 		}
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] Affliction ModifyEnergyCostInCombat failed: {ex}");
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.ModifyKeywordsInCombat))]
+internal static class Hook_ModifyKeywordsInCombat_HexedFallback_Patch
+{
+	// Vanilla Hexed has no behavior of its own: HexPower injects Ethereal onto Hexed cards via
+	// this keyword hook. Editor-set Hexed (persisting without HexPower) needs the same injection,
+	// otherwise the card shows the Ethereal tooltip but never actually exhausts at end of turn.
+	public static void Postfix(ICombatState combatState, CardModel card, ISet<CardKeyword> keywords)
+	{
+		try
+		{
+			if (card?.Affliction is not Hexed || keywords == null)
+			{
+				return;
+			}
+
+			Creature? owner = card.TryGetOwnerCreature();
+			if (owner == null || owner.HasPower<HexPower>())
+			{
+				return;
+			}
+
+			keywords.Add(CardKeyword.Ethereal);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Hexed keyword fallback failed: {ex}");
 		}
 	}
 }

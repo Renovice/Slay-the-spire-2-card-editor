@@ -10,6 +10,34 @@ namespace SlayTheSpire2Mod.CardEditor;
 [HarmonyPatch(typeof(Hook), nameof(Hook.ModifyEnergyCostInCombat))]
 internal static class Hook_ModifyEnergyCostInCombat_CardEditorCardCostsLess_Patch
 {
+	// Cost INCREASES enter the pipeline BEFORE the vanilla hooks run, like vanilla TangledPower's
+	// early hook, so late "free" powers (Free Skill, Corruption, Void Form) still win over them.
+	public static void Prefix(CombatState combatState, CardModel card, ref decimal originalCost)
+	{
+		try
+		{
+			if (CardEditorEnergyCostVisibilityHelper.SuppressCardEditorCostHooks
+				|| combatState == null
+				|| card == null
+				|| originalCost < 0m)
+			{
+				return;
+			}
+
+			CardExtraEffect.CardCostAdjustment combined = CardExtraEffect.CardCostAdjustment.Combine(
+				CardEditorExtraEffects.GetCardCostsLessAdjustment(combatState, card),
+				CardEditorCardTypeCostAuras.GetEnergyCostAdjustment(combatState, card));
+			if (combined.Delta < 0)
+			{
+				originalCost = Math.Max(0m, originalCost - combined.Delta);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] CardCostsLess prefix failed: {ex}");
+		}
+	}
+
 	public static void Postfix(CombatState combatState, CardModel card, decimal originalCost, ref decimal __result)
 	{
 		try
@@ -41,7 +69,8 @@ internal static class Hook_ModifyEnergyCostInCombat_CardEditorCardCostsLess_Patc
 				return;
 			}
 
-			if (combined.Delta != 0)
+			// Increases were applied in the Prefix; only reductions act after the vanilla hooks.
+			if (combined.Delta > 0)
 			{
 				__result = Math.Max(0m, __result - combined.Delta);
 			}

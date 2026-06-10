@@ -1,5 +1,21 @@
 # Vanilla-Parity Audit (2026-06-10)
 
+> **STATUS UPDATE (same day, parity fix wave shipped):** Tier 1 items 1-12 and 14-20 FIXED, plus
+> Tier 2: start-of-turn asymmetry partially (end-of-turn side fully fixed; start-of-turn left as
+> designed), RNG streams, cleanse-by-type, self-debuff tick consistency, Vulnerable persistence,
+> empty rewards, pity room type, quest potion filters, and the Tier 3 text conventions
+> (Channel/Evoke/Gold/Osty wording) + hover tips for applied powers/custom statuses.
+> All fixes adversarially reviewed (22 checks; 3 findings fixed: cleanse IsVisible→type-based
+> exclusion, pending-discount creation-round guard, enchant keyword attribution instead of
+> absolute baseline).
+> **DEFERRED (need design decisions):** #10 Gigantification one-stack-per-row (needs single
+> AttackContext per card play or a generic latched-power preserver); #13 override-row timing
+> (needs rows moved into the play wrapper like created cards — structural); half-cost snapshot
+> double-dip of vanilla auras (deliberate snapshot design, ambiguous either way); co-op
+> extra-turn participants filtering; moved-pile triggers during reshuffles; in-hand grid
+> selector for self-inclusive discards; multi-evoke same-orb-N-times (missing feature, text is
+> honest); scheduled end-of-turn effects still post-flush (power-hosted ones fixed).
+
 10 comparison agents traced each mechanic through BOTH the mod engine and the decompiled vanilla source;
 every major finding was adversarially re-verified (23 verified, 0 refuted). Detailed evidence with
 file:line on both sides lives in `Notes/parity/*.md`. This file is the ranked synthesis.

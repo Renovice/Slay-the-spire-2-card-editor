@@ -38,10 +38,36 @@ internal abstract class CardEditorTempStatTrackerPower<TUnderlying> : PowerModel
 
 		int delta = Amount;
 		await PowerCmd.Remove(this);
-		if (delta != 0)
+		if (delta == 0)
 		{
-			await PowerCmd.Apply<TUnderlying>(owner, -delta, owner, null);
+			return;
 		}
+
+		// The underlying power may already be gone (e.g. Weak's own duration tick removed the
+		// last stack this same turn end). Applying the negative delta anyway would create a live
+		// phantom power with negative stacks that still affects combat. Reduce only what exists.
+		if (delta > 0)
+		{
+			TUnderlying? active = owner.GetPower<TUnderlying>();
+			if (active == null || active.Amount <= 0)
+			{
+				return;
+			}
+
+			int toRemove = Math.Min(delta, active.Amount);
+			if (toRemove >= active.Amount)
+			{
+				await PowerCmd.Remove(active);
+			}
+			else
+			{
+				await PowerCmd.ModifyAmount(active, -toRemove, owner, null);
+			}
+			return;
+		}
+
+		// Negative tracked delta means the temporary effect REDUCED the stat; restore it.
+		await PowerCmd.Apply<TUnderlying>(owner, -delta, owner, null);
 	}
 }
 

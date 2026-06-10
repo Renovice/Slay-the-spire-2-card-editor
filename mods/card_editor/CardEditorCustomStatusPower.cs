@@ -55,7 +55,12 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 
 	public override LocString Title => CreateRuntimeLocString("CARD_EDITOR.CUSTOM_STATUS_TITLE.", _customStatusName);
 
-	public override PowerType Type => _customStatusType;
+	// During the first PowerCmd.Apply, the hook chain (Artifact's debuff negation) reads Type
+	// BEFORE BeforeApplied copies the definition onto this instance. Consult the pending payload
+	// so a Debuff-classified custom status is blocked by Artifact on the first application too.
+	public override PowerType Type => string.IsNullOrEmpty(_customStatusId) && _pendingPayload.Value != null
+		? _pendingPayload.Value.Type
+		: _customStatusType;
 
 	public override PowerStackType StackType => PowerStackType.Counter;
 
