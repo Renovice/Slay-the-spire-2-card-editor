@@ -1522,6 +1522,8 @@ public sealed class CardExtraEffect
 	// so a count of 0 means the effect does not run at all. Defaults to false for back-compat.
 	public bool RepeatScalingReplacesBase { get; set; }
 
+	internal CardExtraEffect ShallowCopy() => (CardExtraEffect)MemberwiseClone();
+
 	public bool GrantToCard { get; set; }
 	public CardExtraEffectCardSelectionMode CardSelectionMode { get; set; }
 	public CardExtraEffectCardPile CardSelectionPile { get; set; }
@@ -12212,27 +12214,6 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			&& baseEffect.CostFilterMax == upgradeEffect.CostFilterMax;
 	}
 
-	private static bool IsInverseUpgradeDiff(CardExtraEffect effect)
-	{
-		if (effect == null)
-		{
-			return false;
-		}
-
-		// Mirror vanilla's "inverseDiff" idea for numeric values where lower is "better"/highlight-green.
-		// Keep this conservative: only invert clear self-penalty values.
-		if (effect.Target != CardExtraEffectTarget.Self)
-		{
-			return false;
-		}
-
-		return effect.Kind is CardExtraEffectKind.LoseStrength
-			or CardExtraEffectKind.LoseDexterity
-			or CardExtraEffectKind.LoseFocus
-			or CardExtraEffectKind.LoseHp
-			or CardExtraEffectKind.LoseMaxHp;
-	}
-
 	private static int NormalizeUpgradeDiffAmount(CardExtraEffect effect)
 	{
 		if (effect == null)
@@ -12257,20 +12238,17 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return 0;
 		}
 
+		// Vanilla upgrade previews mark every changed value green regardless of direction
+		// (DynamicVar.WasJustUpgraded forces the diff positive), so changed => green here too.
 		if (upgradedEffect.AmountIsX)
 		{
 			int basePlus = baseEffect?.AmountXPlus ?? 0;
-			int upgradedPlus = upgradedEffect.AmountXPlus;
-			return upgradedPlus.CompareTo(basePlus);
+			return upgradedEffect.AmountXPlus == basePlus ? 0 : 1;
 		}
 
 		int upgradedAmount = NormalizeUpgradeDiffAmount(upgradedEffect);
 		int baseAmount = baseEffect != null ? NormalizeUpgradeDiffAmount(baseEffect) : 0;
-
-		bool inverse = baseEffect != null && IsInverseUpgradeDiff(baseEffect);
-		return inverse
-			? baseAmount.CompareTo(upgradedAmount)
-			: upgradedAmount.CompareTo(baseAmount);
+		return upgradedAmount == baseAmount ? 0 : 1;
 	}
 
 	private static DescriptionUpgradeComparison GetUpgradeComparison(CardExtraEffect? baseEffect, CardExtraEffect? upgradedEffect)
@@ -12293,15 +12271,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 		int baseStep = ResolveHistoryScalingCountStep(baseEffect);
 		int upgradedStep = ResolveHistoryScalingCountStep(upgradedEffect);
-		if (baseStep == upgradedStep)
-		{
-			return 0;
-		}
-
-		// Count step is a divisor/requirement. For beneficial effects, lower is better;
-		// for self-penalties or enemy-helping effects, lower is worse.
-		int comparison = baseStep.CompareTo(upgradedStep);
-		return IsMoreRepeatedEffectHarmfulToOwner(upgradedEffect) ? -comparison : comparison;
+		// Changed => green, matching vanilla upgrade-preview semantics.
+		return baseStep == upgradedStep ? 0 : 1;
 	}
 
 	private static int GetUpgradeRepeatScalingExtraTimesHighlightComparison(CardExtraEffect? baseEffect, CardExtraEffect? upgradedEffect)
@@ -12316,13 +12287,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 		int baseExtraTimes = ResolveRepeatScalingExtraTimes(baseEffect);
 		int upgradedExtraTimes = ResolveRepeatScalingExtraTimes(upgradedEffect);
-		if (baseExtraTimes == upgradedExtraTimes)
-		{
-			return 0;
-		}
-
-		int comparison = upgradedExtraTimes.CompareTo(baseExtraTimes);
-		return IsMoreRepeatedEffectHarmfulToOwner(upgradedEffect) ? -comparison : comparison;
+		// Changed => green, matching vanilla upgrade-preview semantics.
+		return baseExtraTimes == upgradedExtraTimes ? 0 : 1;
 	}
 
 	private static int GetUpgradeRepeatHighlightComparison(CardExtraEffect? baseEffect, CardExtraEffect? upgradedEffect)
@@ -12335,102 +12301,17 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		if (upgradedEffect.RepeatIsX)
 		{
 			int basePlus = baseEffect?.RepeatIsX == true ? baseEffect.RepeatCount : 0;
-			return upgradedEffect.RepeatCount.CompareTo(basePlus);
+			return upgradedEffect.RepeatCount == basePlus ? 0 : 1;
 		}
 
 		int baseRepeat = baseEffect != null && !baseEffect.RepeatIsX
 			? Math.Clamp(baseEffect.RepeatCount <= 0 ? 1 : baseEffect.RepeatCount, 1, 99)
 			: 1;
 		int upgradedRepeat = Math.Clamp(upgradedEffect.RepeatCount <= 0 ? 1 : upgradedEffect.RepeatCount, 1, 99);
-		return upgradedRepeat.CompareTo(baseRepeat);
+		// Changed => green, matching vanilla upgrade-preview semantics.
+		return upgradedRepeat == baseRepeat ? 0 : 1;
 	}
 
-	private static bool IsMoreRepeatedEffectHarmfulToOwner(CardExtraEffect effect)
-	{
-		if (effect == null)
-		{
-			return false;
-		}
-
-		bool friendlyTarget = IsFriendlyEffectTarget(effect.Target);
-		bool hostileTarget = IsHostileEffectTarget(effect.Target);
-		return effect.Kind switch
-		{
-			CardExtraEffectKind.DealDamage
-				or CardExtraEffectKind.CardDealsExtraDamage
-				or CardExtraEffectKind.RemoveBlock
-				or CardExtraEffectKind.LoseHp
-				or CardExtraEffectKind.LoseMaxHp
-				or CardExtraEffectKind.LoseStrength
-				or CardExtraEffectKind.LoseDexterity
-				or CardExtraEffectKind.LoseFocus
-				or CardExtraEffectKind.ApplyWeak
-				or CardExtraEffectKind.ApplyFrail
-				or CardExtraEffectKind.ApplyVulnerable
-				or CardExtraEffectKind.ApplyPoison
-				or CardExtraEffectKind.ApplyDoom
-				or CardExtraEffectKind.ApplyConstrict
-				or CardExtraEffectKind.CleanseBuffs
-				or CardExtraEffectKind.RemoveArtifact
-				or CardExtraEffectKind.RemoveThorns
-				or CardExtraEffectKind.RemoveRegen
-				or CardExtraEffectKind.RemovePlating
-				or CardExtraEffectKind.RemoveIntangible
-				or CardExtraEffectKind.RemoveBuffer
-				or CardExtraEffectKind.RemoveVigor
-				or CardExtraEffectKind.RemoveBlur
-				or CardExtraEffectKind.RemoveRitual => friendlyTarget,
-
-			CardExtraEffectKind.GainBlock
-				or CardExtraEffectKind.Heal
-				or CardExtraEffectKind.GainMaxHp
-				or CardExtraEffectKind.GainStrength
-				or CardExtraEffectKind.GainDexterity
-				or CardExtraEffectKind.GainFocus
-				or CardExtraEffectKind.GainArtifact
-				or CardExtraEffectKind.GainThorns
-				or CardExtraEffectKind.GainRegen
-				or CardExtraEffectKind.GainPlating
-				or CardExtraEffectKind.GainIntangible
-				or CardExtraEffectKind.GainBuffer
-				or CardExtraEffectKind.GainVigor
-				or CardExtraEffectKind.GainBlur
-				or CardExtraEffectKind.GainRitual
-				or CardExtraEffectKind.CleanseDebuffs
-				or CardExtraEffectKind.RemoveWeak
-				or CardExtraEffectKind.RemoveFrail
-				or CardExtraEffectKind.RemoveVulnerable
-				or CardExtraEffectKind.RemovePoison
-				or CardExtraEffectKind.RemoveDoom
-				or CardExtraEffectKind.RemoveConstrict => hostileTarget,
-
-			CardExtraEffectKind.LoseEnergy
-				or CardExtraEffectKind.LoseStars
-				or CardExtraEffectKind.LoseGold
-				or CardExtraEffectKind.LoseOrbSlots
-				or CardExtraEffectKind.DiscardCards
-				or CardExtraEffectKind.ExhaustCards
-				or CardExtraEffectKind.EndTurn => true,
-
-			_ => false
-		};
-	}
-
-	private static bool IsFriendlyEffectTarget(CardExtraEffectTarget target)
-	{
-		return target is CardExtraEffectTarget.Self
-			or CardExtraEffectTarget.AnyAlly
-			or CardExtraEffectTarget.AllAllies
-			or CardExtraEffectTarget.AnyPlayer;
-	}
-
-	private static bool IsHostileEffectTarget(CardExtraEffectTarget target)
-	{
-		return target is CardExtraEffectTarget.Target
-			or CardExtraEffectTarget.RandomEnemy
-			or CardExtraEffectTarget.OtherEnemies
-			or CardExtraEffectTarget.AllEnemies;
-	}
 
 	public static async Task RunAfterCardPlayed(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay)
 	{
@@ -15294,6 +15175,14 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		return ApplyConditionalBranchSuffix(card, target, rendered, effect, upgradeHighlightComparison, isUpgradePreview);
 	}
 
+	// Consistency-audit hook: lets the audit check that a default-configured effect of each kind
+	// actually renders card text, without exposing the private formatter.
+	internal static bool TryFormatLineForAudit(CardModel card, CardExtraEffect effect, out string? line)
+	{
+		line = TryFormatLine(card, effect, target: null, DescriptionUpgradeComparison.None, isUpgradePreview: false);
+		return !string.IsNullOrWhiteSpace(line);
+	}
+
 	private static string? TryFormatLine(CardModel card, CardExtraEffect effect, Creature? target, DescriptionUpgradeComparison upgradeComparison, bool isUpgradePreview)
 	{
 		if (effect.Kind == CardExtraEffectKind.EffectLimit)
@@ -15864,14 +15753,35 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 		try
 		{
-			decimal preview = baseAmount;
+			CardModel modifierCard = CardEditorBorrowedEffectSourceDamageHelper.ResolveRuntimePlayedCard(card) ?? card;
+			ValueProp props = ValueProp.Move;
+
+			decimal enchanted = baseAmount;
+			if (modifierCard.Enchantment != null)
+			{
+				if (effect.Kind == CardExtraEffectKind.DealDamage)
+				{
+					enchanted += modifierCard.Enchantment.EnchantDamageAdditive(enchanted, props);
+					enchanted *= modifierCard.Enchantment.EnchantDamageMultiplicative(enchanted, props);
+				}
+				else if (effect.Kind == CardExtraEffectKind.GainBlock)
+				{
+					enchanted += EnchantBlockAdditiveCompat(modifierCard.Enchantment, enchanted, props);
+					enchanted *= EnchantBlockMultiplicativeCompat(modifierCard.Enchantment, enchanted, props);
+				}
+			}
+
+			// The vanilla hooks re-apply the card's enchantment internally, so they receive the raw base.
+			decimal preview = enchanted;
 			if (TryGetHookedMoveAmountPreview(card, effect, baseAmount, target, out decimal hookedPreview))
 			{
 				preview = hookedPreview;
 			}
 
 			int previewInt = (int)preview;
-			int comparison = upgradeHighlightComparison != 0 ? upgradeHighlightComparison : previewInt.CompareTo(baseAmount);
+			// Same baseline rule as TryGetScaledAmountText: enchanted value is the plain baseline.
+			decimal comparisonBaseline = modifierCard.IsEnchantmentPreview ? baseAmount : enchanted;
+			int comparison = upgradeHighlightComparison != 0 ? upgradeHighlightComparison : previewInt.CompareTo((int)comparisonBaseline);
 			amountText = StsTextUtilities.HighlightChangeText(previewInt.ToString(CultureInfo.InvariantCulture), comparison);
 		}
 		catch
@@ -16877,7 +16787,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 		string unit;
 		string rule;
-		if (effect.RepeatScalingReplacesBase && !UsesCurrentEffectResultRepeat(effect))
+		if (RepeatScalingReplacesBaseEffective(effect))
 		{
 			unit = additionalTimes == 1
 				? CardEditorLoc.T("cardText.repeat.totalTime.singular", "time")
@@ -22242,13 +22152,20 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			}
 
 			decimal preview = enchanted;
+			// The vanilla hooks re-apply the card's enchantment internally, so they must receive the
+			// RAW base amount (vanilla DamageVar feeds BaseValue into Hook.ModifyDamage the same way);
+			// passing the enchanted value would double-count the bonus.
 			if (TryGetHookedMoveAmountPreview(card, effect, baseAmount, target, out decimal hookedPreview))
 			{
 				preview = hookedPreview;
 			}
 
 			int previewInt = (int)preview;
-			int comparison = upgradeHighlightComparison != 0 ? upgradeHighlightComparison : previewInt.CompareTo(baseAmount);
+			// Vanilla compares the live preview against the ENCHANTED value, not the raw base: an
+			// enchanted card's boosted number is its new plain baseline, not permanently green —
+			// except while previewing an enchantment offer, where the boost itself shows green.
+			decimal comparisonBaseline = modifierCard.IsEnchantmentPreview ? baseAmount : enchanted;
+			int comparison = upgradeHighlightComparison != 0 ? upgradeHighlightComparison : previewInt.CompareTo((int)comparisonBaseline);
 			amountText = StsTextUtilities.HighlightChangeText(previewInt.ToString(CultureInfo.InvariantCulture), comparison);
 		}
 		catch
@@ -23617,27 +23534,15 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		int baseRepeat = ResolveBaseRepeatCount(cardPlay, effect);
 		if (effect.ScaleMode == CardExtraEffectScaleMode.RepeatByCount)
 		{
-			// The self-result dynamic repeat loop must keep its bootstrap hit: its count is always 0
-			// before the first hit, so replacing the base would make the effect permanently unable to fire.
-			bool replacesBase = effect.RepeatScalingReplacesBase && !UsesCurrentEffectResultRepeat(effect);
 			CardModel? card = cardPlay?.Card;
 			CombatState? combatState = card.GetConcreteCombatState();
 			Creature? ownerCreature = card?.Owner?.Creature;
 			if (combatState != null && ownerCreature != null)
 			{
 				int rawCount = Math.Max(0, GetHistoryCountMultiplier(combatState, ownerCreature, cardPlay, effect, card));
-				bool countPasses = effect.CountComparison == CardExtraEffectCountComparison.None || DoesCountConditionPass(rawCount, effect);
-				if (!countPasses)
-				{
-					return replacesBase ? 0 : baseRepeat;
-				}
-
-				int rawSteps = rawCount / ResolveHistoryScalingCountStep(effect);
-				int scaledRepeats = rawSteps * ResolveRepeatScalingExtraTimes(effect);
-				long totalRepeats = replacesBase ? scaledRepeats : (long)baseRepeat + scaledRepeats;
-				return totalRepeats >= 99 ? 99 : totalRepeats <= 0 ? 0 : (int)totalRepeats;
+				return ComputeRepeatByCountTotal(effect, baseRepeat, rawCount, out _);
 			}
-			if (replacesBase)
+			if (RepeatScalingReplacesBaseEffective(effect))
 			{
 				// Count source unavailable means a total of zero, not a free base execution.
 				return 0;
@@ -23645,6 +23550,28 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		}
 
 		return baseRepeat;
+	}
+
+	// The self-result dynamic repeat loop must keep its bootstrap hit: its count is always 0
+	// before the first hit, so replacing the base would make the effect permanently unable to fire.
+	private static bool RepeatScalingReplacesBaseEffective(CardExtraEffect effect)
+		=> effect.RepeatScalingReplacesBase && !UsesCurrentEffectResultRepeat(effect);
+
+	// Single source of truth for the Repeat-by-Count total, shared by execution and card text
+	// so the displayed repeat count can never diverge from what actually runs.
+	private static int ComputeRepeatByCountTotal(CardExtraEffect effect, int baseRepeat, int rawCount, out bool countPasses)
+	{
+		bool replacesBase = RepeatScalingReplacesBaseEffective(effect);
+		countPasses = effect.CountComparison == CardExtraEffectCountComparison.None || DoesCountConditionPass(rawCount, effect);
+		if (!countPasses)
+		{
+			return replacesBase ? 0 : baseRepeat;
+		}
+
+		int rawSteps = rawCount / ResolveHistoryScalingCountStep(effect);
+		int scaledRepeats = rawSteps * ResolveRepeatScalingExtraTimes(effect);
+		long totalRepeats = replacesBase ? scaledRepeats : (long)baseRepeat + scaledRepeats;
+		return totalRepeats >= 99 ? 99 : totalRepeats <= 0 ? 0 : (int)totalRepeats;
 	}
 
 	private static int ResolveBaseRepeatCount(CardPlay? cardPlay, CardExtraEffect effect)
@@ -23682,29 +23609,17 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		int? resolvedRepeat = null;
 		CombatState? repeatCombatState = scalesRepeat ? card.GetConcreteCombatState() : null;
 		Creature? repeatOwnerCreature = repeatCombatState != null ? card.TryGetOwnerCreature() : null;
-		bool repeatReplacesBase = effect.RepeatScalingReplacesBase && !UsesCurrentEffectResultRepeat(effect);
 		if (scalesRepeat && repeatCombatState != null && repeatOwnerCreature != null)
 		{
 			int rawCount = Math.Max(0, GetHistoryCountMultiplier(repeatCombatState, repeatOwnerCreature, cardPlay: null, effect, card));
-			bool countPasses = effect.CountComparison == CardExtraEffectCountComparison.None || DoesCountConditionPass(rawCount, effect);
-			if (countPasses)
+			resolvedRepeat = ComputeRepeatByCountTotal(effect, baseRepeat, rawCount, out bool countPasses);
+			if (countPasses && repeatComparison == 0)
 			{
-				int rawSteps = rawCount / ResolveHistoryScalingCountStep(effect);
-				int scaledRepeats = rawSteps * ResolveRepeatScalingExtraTimes(effect);
-				long totalRepeats = repeatReplacesBase ? scaledRepeats : (long)baseRepeat + scaledRepeats;
-				resolvedRepeat = totalRepeats >= 99 ? 99 : totalRepeats <= 0 ? 0 : (int)totalRepeats;
-				if (repeatComparison == 0)
-				{
-					repeatComparison = resolvedRepeat.Value.CompareTo(baseRepeat);
-				}
-			}
-			else
-			{
-				resolvedRepeat = repeatReplacesBase ? 0 : baseRepeat;
+				repeatComparison = resolvedRepeat.Value.CompareTo(baseRepeat);
 			}
 		}
 
-		if (!resolvedRepeat.HasValue && scalesRepeat && repeatReplacesBase)
+		if (!resolvedRepeat.HasValue && scalesRepeat && RepeatScalingReplacesBaseEffective(effect))
 		{
 			// Out of combat there is no count to resolve and no base hit to describe;
 			// the scaling rule line carries the "X times per ..." wording instead.
@@ -37627,262 +37542,14 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 
 	internal static CardExtraEffect CloneEffect(CardExtraEffect source)
 	{
-		return new CardExtraEffect
-		{
-			Kind = source.Kind,
-			Target = source.Target,
-			Amount = source.Amount,
-			PayloadOnly = source.PayloadOnly,
-			AmountIsX = source.AmountIsX,
-			AmountXPlus = source.AmountXPlus,
-			AmountSourceMode = source.AmountSourceMode,
-			AmountSourceEffectId = source.AmountSourceEffectId,
-			AmountSourceMultiplier = source.AmountSourceMultiplier,
-			ValueSourceMode = source.ValueSourceMode,
-			ValueSourceActor = source.ValueSourceActor,
-			ValueSourceAggregation = source.ValueSourceAggregation,
-			ValueSourceKind = source.ValueSourceKind,
-			ValueSourcePowerId = source.ValueSourcePowerId,
-			ConditionalBonusAmount = source.ConditionalBonusAmount,
-			ConditionalBonusConditionType = source.ConditionalBonusConditionType,
-			ConditionalBonusCondition = source.ConditionalBonusCondition,
-			ConditionalBonusEnemyStatus = source.ConditionalBonusEnemyStatus,
-			ConditionalBonusPowerId = source.ConditionalBonusPowerId,
-			ConditionalBonusEnemyIntent = source.ConditionalBonusEnemyIntent,
-			BranchMode = source.BranchMode,
-			BranchConditionType = source.BranchConditionType,
-			BranchCondition = source.BranchCondition,
-			BranchEnemyStatus = source.BranchEnemyStatus,
-			BranchPowerId = source.BranchPowerId,
-			BranchEnemyIntent = source.BranchEnemyIntent,
-			BranchCountEvent = source.BranchCountEvent,
-			BranchCountWindow = source.BranchCountWindow,
-			BranchCountWindowInclusion = source.BranchCountWindowInclusion,
-			BranchBlockLostCountingMode = source.BranchBlockLostCountingMode,
-			BranchCountTurns = source.BranchCountTurns,
-			BranchCountCardPile = source.BranchCountCardPile,
-			BranchCountCardPool = source.BranchCountCardPool,
-			BranchCountCardType = source.BranchCountCardType,
-			BranchCountCardRarity = source.BranchCountCardRarity,
-			BranchCountCardFilter = source.BranchCountCardFilter,
-			BranchCountCardMatchMode = source.BranchCountCardMatchMode,
-			BranchCountMatchCardId = source.BranchCountMatchCardId,
-			BranchCountMatchTagKind = source.BranchCountMatchTagKind,
-			BranchCountMatchVanillaTag = source.BranchCountMatchVanillaTag,
-			BranchCountMatchCustomTag = source.BranchCountMatchCustomTag,
-			BranchCountMatchCustomKeyword = source.BranchCountMatchCustomKeyword,
-			BranchCountAggregationMode = source.BranchCountAggregationMode,
-			BranchCountUsesCardEffectAmount = source.BranchCountUsesCardEffectAmount,
-			BranchCountExcludeSourceCard = source.BranchCountExcludeSourceCard,
-			BranchCountOrbType = source.BranchCountOrbType,
-			BranchCountOrbSelection = source.BranchCountOrbSelection,
-			BranchCountEnemyStatus = source.BranchCountEnemyStatus,
-			BranchCountPowerId = source.BranchCountPowerId,
-			BranchCountEnemyIntent = source.BranchCountEnemyIntent,
-			BranchCountDamageTarget = source.BranchCountDamageTarget,
-			BranchCountDamageDealer = source.BranchCountDamageDealer,
-			BranchCountDamageSource = source.BranchCountDamageSource,
-			BranchCountDamageAggregation = source.BranchCountDamageAggregation,
-			BranchCountDamageCurrentInclusion = source.BranchCountDamageCurrentInclusion,
-			BranchCountResultEffectId = source.BranchCountResultEffectId,
-			BranchCountResultMetric = source.BranchCountResultMetric,
-			BranchCountComparison = source.BranchCountComparison,
-			BranchCountConditionAmount = source.BranchCountConditionAmount,
-			BranchEffect = source.BranchEffect != null ? CloneEffect(source.BranchEffect) : null,
-			TransformMode = source.TransformMode,
-			StatefulTransformMode = source.StatefulTransformMode,
-			StatefulTransformDuration = source.StatefulTransformDuration,
-			StatefulTransformDurationAmount = source.StatefulTransformDurationAmount,
-			DisableOnUpgrade = source.DisableOnUpgrade,
-			RepeatIsX = source.RepeatIsX,
-			RepeatCount = source.RepeatCount,
-			Trigger = source.Trigger,
-			PowerTriggerCountEvent = source.PowerTriggerCountEvent,
-			PowerTriggerEnemyStatus = source.PowerTriggerEnemyStatus,
-			PowerTriggerPowerId = source.PowerTriggerPowerId,
-			PowerTriggerUsesEventAmount = source.PowerTriggerUsesEventAmount,
-			TurnBoundary = source.TurnBoundary,
-			TurnBoundarySide = source.TurnBoundarySide,
-			TurnBoundaryCardLocation = source.TurnBoundaryCardLocation,
-			Timing = source.Timing,
-			Turns = source.Turns,
-			Duration = source.Duration,
-			AsPower = source.AsPower,
-			TriggerCardPool = source.TriggerCardPool,
-			TriggerCardType = source.TriggerCardType,
-			TriggerCardRarity = source.TriggerCardRarity,
-			TriggerCardFilter = source.TriggerCardFilter,
-			TriggerEveryN = source.TriggerEveryN,
-			TriggerMaxFires = source.TriggerMaxFires,
-			TriggerMaxTurns = source.TriggerMaxTurns,
-			AutoPlayAllowSelfTrigger = source.AutoPlayAllowSelfTrigger,
-			AutoPlayLoopLimit = source.AutoPlayLoopLimit,
-			AutoPlayLoopScope = source.AutoPlayLoopScope,
-			UseLimitWindow = source.UseLimitWindow,
-			UseLimitGroupId = source.UseLimitGroupId,
-			PowerStackMode = source.PowerStackMode,
-			PowerPersistenceMode = source.PowerPersistenceMode,
-			DurationTickPolicy = source.DurationTickPolicy,
-			AutoPlayForceExhaust = source.AutoPlayForceExhaust,
-			PlayPreventionBlockMode = source.PlayPreventionBlockMode,
-			PlayPreventionExemption = source.PlayPreventionExemption,
-			GlowColorMode = source.GlowColorMode,
-			GlowCustomColor = source.GlowCustomColor,
-			QuestMode = source.QuestMode,
-			QuestActIndex = source.QuestActIndex,
-			QuestEventId = source.QuestEventId,
-			QuestActiveScope = source.QuestActiveScope,
-			QuestCompletionLimit = source.QuestCompletionLimit,
-			ChooseOneExecutionMode = source.ChooseOneExecutionMode,
-			ChooseOneResolveMode = source.ChooseOneResolveMode,
-			ChooseOneChoiceRule = source.ChooseOneChoiceRule,
-			ChooseOneResolveCount = source.ChooseOneResolveCount,
-			PotionMode = source.PotionMode,
-			PotionPoolFilter = source.PotionPoolFilter,
-			PotionRarityFilter = source.PotionRarityFilter,
-			PotionInCombatOnly = source.PotionInCombatOnly,
-			PotionAllowDuplicates = source.PotionAllowDuplicates,
-			SpecificPotionId = source.SpecificPotionId,
-			CardRewardRarityFilter = source.CardRewardRarityFilter,
-			CardRewardSource = source.CardRewardSource,
-			CardRewardRarityOdds = source.CardRewardRarityOdds,
-			CreatedCardsCostDuration = source.CreatedCardsCostDuration,
-			CreatedCardsCostTurns = source.CreatedCardsCostTurns,
-			CreatedCardsCostResource = source.CreatedCardsCostResource,
-			CardCostsLessDuration = source.CardCostsLessDuration,
-			CardCostsLessTurns = source.CardCostsLessTurns,
-			CardCostsLessMode = source.CardCostsLessMode,
-			CardCostsLessModifier = source.CardCostsLessModifier,
-			MatchingCostUseLimitMode = source.MatchingCostUseLimitMode,
-			MatchingCostUseLimit = source.MatchingCostUseLimit,
-			GeneratedCardPool = source.GeneratedCardPool,
-			GeneratedCardType = source.GeneratedCardType,
-			GeneratedCardCustomTag = source.GeneratedCardCustomTag,
-			GeneratedCardOwnerMode = source.GeneratedCardOwnerMode,
-			ScaleMode = source.ScaleMode,
-			CountEvent = source.CountEvent,
-			CountWindow = source.CountWindow,
-			CountWindowInclusion = source.CountWindowInclusion,
-			BlockLostCountingMode = source.BlockLostCountingMode,
-			CountTurns = source.CountTurns,
-			CountCardPile = source.CountCardPile,
-			CountCardPool = source.CountCardPool,
-			CountCardType = source.CountCardType,
-			CountCardRarity = source.CountCardRarity,
-			CountCardFilter = source.CountCardFilter,
-			CountOnlyBlockCards = source.CountOnlyBlockCards,
-			CountAggregationMode = source.CountAggregationMode,
-			CountUsesCardEffectAmount = source.CountUsesCardEffectAmount,
-			CountExcludeSourceCard = source.CountExcludeSourceCard,
-			CountOrbType = source.CountOrbType,
-			CountOrbSelection = source.CountOrbSelection,
-			CountEnemyStatus = source.CountEnemyStatus,
-			CountPowerId = source.CountPowerId,
-			CountEnemyIntent = source.CountEnemyIntent,
-			CountDamageTarget = source.CountDamageTarget,
-			CountDamageDealer = source.CountDamageDealer,
-			CountDamageSource = source.CountDamageSource,
-			CountDamageAggregation = source.CountDamageAggregation,
-			CountDamageCurrentInclusion = source.CountDamageCurrentInclusion,
-			CountResultEffectId = source.CountResultEffectId,
-			CountResultMetric = source.CountResultMetric,
-			MultiplierStat = source.MultiplierStat,
-			MultiplierSourceMode = source.MultiplierSourceMode,
-			MultiplierPowerId = source.MultiplierPowerId,
-			CountComparison = source.CountComparison,
-			CountConditionAmount = source.CountConditionAmount,
-			ConditionProgressDisplay = source.ConditionProgressDisplay,
-			HistoryScalingIncludesBase = source.HistoryScalingIncludesBase,
-			HistoryScalingBaseAmount = source.HistoryScalingBaseAmount,
-			HistoryScalingCountStep = source.HistoryScalingCountStep,
-			RepeatScalingExtraTimes = source.RepeatScalingExtraTimes,
-			RepeatScalingReplacesBase = source.RepeatScalingReplacesBase,
-			GrantToCard = source.GrantToCard,
-			CardSelectionMode = source.CardSelectionMode,
-			CardSelectionCountIsX = source.CardSelectionCountIsX,
-			CardSelectionCount = source.CardSelectionCount,
-			CardSelectionOfferCountIsX = source.CardSelectionOfferCountIsX,
-			CardSelectionOfferCount = source.CardSelectionOfferCount,
-			CardSelectionPool = source.CardSelectionPool,
-			CardSelectionType = source.CardSelectionType,
-			CardSelectionRarity = source.CardSelectionRarity,
-			CardSelectionFilter = source.CardSelectionFilter,
-			CardSelectionPile = source.CardSelectionPile,
-			CardSelectionSourceEffectId = source.CardSelectionSourceEffectId,
-			CardGrantDuration = source.CardGrantDuration,
-			CardGrantTurns = source.CardGrantTurns,
-			EnchantmentId = source.EnchantmentId,
-			EnchantmentDuration = source.EnchantmentDuration,
-			EnchantmentTurns = source.EnchantmentTurns,
-			MoveToPile = source.MoveToPile,
-			MoveToPosition = source.MoveToPosition,
-			UseMoveDestinationForGeneratedCards = source.UseMoveDestinationForGeneratedCards,
-			AdditionalMoveToPiles = source.AdditionalMoveToPiles,
-			CopyMode = source.CopyMode,
-			DelayedPileAction = source.DelayedPileAction,
-			DelayedPileCounterUnit = source.DelayedPileCounterUnit,
-			DelayedPileCounterScope = source.DelayedPileCounterScope,
-			ConsumedCardAction = source.ConsumedCardAction,
-			ConsumedCardValueSource = source.ConsumedCardValueSource,
-			OrbAction = source.OrbAction,
-			OrbType = source.OrbType,
-			OrbSelection = source.OrbSelection,
-			OrbFollowUp = source.OrbFollowUp,
-			OrbScope = source.OrbScope,
-			OstyAction = source.OstyAction,
-			CreatureCommand = source.CreatureCommand,
-			CreatureCommandId = source.CreatureCommandId,
-			DrawnFromPile = source.DrawnFromPile,
-			SpecificCardId = source.SpecificCardId,
-			CardReferenceDisplayMode = source.CardReferenceDisplayMode,
-			SpecificCardUpgradeMode = source.SpecificCardUpgradeMode,
-			SpecificCardId2 = source.SpecificCardId2,
-			SpecificCardId3 = source.SpecificCardId3,
-			ChooseOneOption1 = CloneChooseOneOption(source.ChooseOneOption1),
-			ChooseOneOption2 = CloneChooseOneOption(source.ChooseOneOption2),
-			ChooseOneOption3 = CloneChooseOneOption(source.ChooseOneOption3),
-			PowerId = source.PowerId,
-			StatusIconMode = source.StatusIconMode,
-			StatusIconPowerId = source.StatusIconPowerId,
-			StatusCustomPackedIconPath = source.StatusCustomPackedIconPath,
-			StatusCustomBigIconPath = source.StatusCustomBigIconPath,
-			CustomPowerName = source.CustomPowerName,
-			CustomPowerDescription = source.CustomPowerDescription,
-			PowerHost = GetEffectivePowerHost(source),
-			PowerTriggerFrom = GetEffectivePowerTriggerFrom(source),
-			PowerTargeting = source.PowerTargeting,
-			GrantedKeyword = source.GrantedKeyword,
-			CardMatchMode = source.CardMatchMode,
-			MatchCardId = source.MatchCardId,
-			MatchTagKind = source.MatchTagKind,
-			MatchVanillaTag = source.MatchVanillaTag,
-			MatchCustomTag = source.MatchCustomTag,
-			MatchCustomKeyword = source.MatchCustomKeyword,
-			CustomKeywordName = source.CustomKeywordName,
-			NameFilterEnabled = source.NameFilterEnabled,
-			NameFilterText = source.NameFilterText,
-			CostFilterEnabled = source.CostFilterEnabled,
-			CostFilterMode = source.CostFilterMode,
-			CostFilterMax = source.CostFilterMax,
-			EffectId = source.EffectId,
-			AutoActionEffectIds = source.AutoActionEffectIds,
-			EffectLimitTargetEffectIds = source.EffectLimitTargetEffectIds,
-			IncludeSourceCardInSelection = source.IncludeSourceCardInSelection,
-			FutureMatchingCards = source.FutureMatchingCards,
-			ResourceConsumptionMode = source.ResourceConsumptionMode,
-			ResourceConsumptionStat = source.ResourceConsumptionStat,
-			StatusToStatusMode = source.StatusToStatusMode,
-			ActivePowerSelection = source.ActivePowerSelection,
-			SelfScalingOperation = source.SelfScalingOperation,
-			SelfScalingTargetType = source.SelfScalingTargetType,
-			SelfScalingField = source.SelfScalingField,
-			SelfScalingRecipientMode = source.SelfScalingRecipientMode,
-			SelfScalingNumberSelectionMode = source.SelfScalingNumberSelectionMode,
-			SelfScalingNumberFilter = source.SelfScalingNumberFilter,
-			SelfScalingTargetEffectId = source.SelfScalingTargetEffectId,
-			SelfScalingDynamicVarKey = source.SelfScalingDynamicVarKey,
-			GrantPackageKey = source.GrantPackageKey
-		};
+		// Memberwise copy so newly added fields can never be silently dropped again; only the
+		// mutable reference-typed members need explicit deep copies.
+		CardExtraEffect clone = source.ShallowCopy();
+		clone.BranchEffect = source.BranchEffect != null ? CloneEffect(source.BranchEffect) : null;
+		clone.ChooseOneOption1 = CloneChooseOneOption(source.ChooseOneOption1);
+		clone.ChooseOneOption2 = CloneChooseOneOption(source.ChooseOneOption2);
+		clone.ChooseOneOption3 = CloneChooseOneOption(source.ChooseOneOption3);
+		return clone;
 	}
 
 	private static bool BranchEffectsMatch(CardExtraEffect? a, CardExtraEffect? b)

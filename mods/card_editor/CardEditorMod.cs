@@ -69,6 +69,7 @@ public static class CardEditorMod
 		CardEditorDefinitionStore.EnsureLoaded();
 		CardEditorRelicOverrides.EnsureLoaded();
 		RegisterCreatedCardsInPools();
+		CardEditorConsistencyAudit.RunStartupAudits();
 
 		Harmony harmony = new Harmony(HarmonyId);
 		PatchPrivateGetDescriptionForPile(harmony);

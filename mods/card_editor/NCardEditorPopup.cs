@@ -339,6 +339,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private KeywordTickbox? _vanillaModifiedBaseTextTickbox;
 	private TextEdit? _vanillaModifiedBaseTextField;
 	private Button? _vanillaModifiedBaseTextLinkNumbersButton;
+	private Label? _vanillaModifiedBaseTextUpgradeHintLabel;
 	private KeywordTickbox? _vanillaModifiedBaseTextUpgradedTickbox;
 	private TextEdit? _vanillaModifiedBaseTextUpgradedField;
 	private Button? _vanillaModifiedBaseTextUpgradedLinkNumbersButton;
@@ -2004,6 +2005,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			_vanillaModifiedBaseTextLinkNumbersButton.Visible = hasModifiedBaseText;
 		}
+		if (_vanillaModifiedBaseTextUpgradeHintLabel != null && GodotObject.IsInstanceValid(_vanillaModifiedBaseTextUpgradeHintLabel))
+		{
+			_vanillaModifiedBaseTextUpgradeHintLabel.Visible = hasModifiedBaseText;
+		}
 	}
 
 	private void BindBaseCostFieldsForCurrentCard()
@@ -3018,6 +3023,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_vanillaModifiedBaseTextTickbox = null;
 		_vanillaModifiedBaseTextField = null;
 		_vanillaModifiedBaseTextLinkNumbersButton = null;
+		_vanillaModifiedBaseTextUpgradeHintLabel = null;
 		_vanillaModifiedBaseTextUpgradedTickbox = null;
 		_vanillaModifiedBaseTextUpgradedField = null;
 		_vanillaModifiedBaseTextUpgradedLinkNumbersButton = null;
@@ -9613,6 +9619,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 			_vanillaModifiedBaseTextLinkNumbersButton = CreateLiveNumberLinkButton(OnVanillaModifiedBaseTextLinkNumbersPressed, hasModifiedBaseText);
 			rightColumn.AddChild(CreateFieldAlignedRow(_vanillaModifiedBaseTextLinkNumbersButton, _cosmeticDropdownWidth));
+
+			Label upgradeHint = new Label
+			{
+				Text = CardEditorLoc.T(
+					"hint.modifiedBaseTextUpgraded",
+					"This edits the BASE card only. To edit the upgraded card's text, open the Upgrade editor and enable 'Modified Base Card Text (Upgraded)'."),
+				AutowrapMode = TextServer.AutowrapMode.WordSmart,
+				Visible = hasModifiedBaseText
+			};
+			StyleHintLabel(upgradeHint);
+			_vanillaModifiedBaseTextUpgradeHintLabel = upgradeHint;
+			rightColumn.AddChild(upgradeHint);
 		}
 
 	}
@@ -9644,6 +9662,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			_vanillaModifiedBaseTextLinkNumbersButton.Visible = enabled;
 		}
+		if (_vanillaModifiedBaseTextUpgradeHintLabel != null && GodotObject.IsInstanceValid(_vanillaModifiedBaseTextUpgradeHintLabel))
+		{
+			_vanillaModifiedBaseTextUpgradeHintLabel.Visible = enabled;
+		}
 
 		QueuePreviewUpdate();
 	}
@@ -9662,7 +9684,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	{
 		return CardEditorLoc.T(
 			"tooltip.liveNumberTokens",
-			"Live numbers: use {{n1}}, {{n2}} for generated numbers, or {{l2n1}} for line 2 number 1.");
+			"Live numbers: use {{n1}}, {{n2}} for generated numbers, or {{l2n1}} for line 2 number 1.\n[[green]]text[[/green]] shows green only in upgrade previews (like vanilla upgrade text).");
 	}
 
 	private Button CreateLiveNumberLinkButton(Action onPressed, bool visible)
@@ -21806,6 +21828,33 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return itemPanel;
 	}
 
+	private readonly List<Label> _effectSummaryGroupHeaders = new();
+
+	private Label EnsureEffectSummaryGroupHeader(int headerIndex)
+	{
+		while (_effectSummaryGroupHeaders.Count <= headerIndex)
+		{
+			_effectSummaryGroupHeaders.Add(CreateEffectSummaryGroupHeader());
+		}
+
+		Label existing = _effectSummaryGroupHeaders[headerIndex];
+		if (existing == null || !GodotObject.IsInstanceValid(existing))
+		{
+			existing = CreateEffectSummaryGroupHeader();
+			_effectSummaryGroupHeaders[headerIndex] = existing;
+		}
+
+		return existing;
+	}
+
+	private Label CreateEffectSummaryGroupHeader()
+	{
+		Label header = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
+		StyleBodyLabel(header);
+		header.AddThemeColorOverride("font_color", StsColors.gold);
+		return header;
+	}
+
 	private void RefreshEffectSummaryList()
 	{
 		if (_effectSummaryContainer == null || !GodotObject.IsInstanceValid(_effectSummaryContainer))
@@ -21840,7 +21889,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			panels.Add(EnsureEffectSummaryPanel(row));
 		}
 
-		HashSet<Node> expectedChildren = new HashSet<Node>(panels.Cast<Node>());
+		// Event-first reading: group consecutive same-trigger rows under a trigger header,
+		// shown only when the card actually uses more than one trigger. Row order is preserved.
+		List<string> rowTriggerTexts = _extraEffectRows
+			.Select(row => GetSelectedItemText(row.TriggerSelect, CardEditorLoc.T("effectList.noTrigger", "No trigger")))
+			.ToList();
+		bool showGroupHeaders = rowTriggerTexts.Distinct(StringComparer.Ordinal).Count() > 1;
+
+		List<Node> desiredChildren = new List<Node>(panels.Count * 2);
+		int headerIndex = 0;
+		for (int i = 0; i < panels.Count; i++)
+		{
+			if (showGroupHeaders
+				&& (i == 0 || !string.Equals(rowTriggerTexts[i], rowTriggerTexts[i - 1], StringComparison.Ordinal)))
+			{
+				Label header = EnsureEffectSummaryGroupHeader(headerIndex++);
+				header.Text = rowTriggerTexts[i];
+				desiredChildren.Add(header);
+			}
+			desiredChildren.Add(panels[i]);
+		}
+
+		HashSet<Node> expectedChildren = new HashSet<Node>(desiredChildren);
 		foreach (Node child in _effectSummaryContainer.GetChildren().Cast<Node>().ToList())
 		{
 			if (expectedChildren.Contains(child))
@@ -21852,18 +21922,22 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			child.QueueFreeSafely();
 		}
 
+		for (int i = 0; i < desiredChildren.Count; i++)
+		{
+			Node desiredChild = desiredChildren[i];
+			if (desiredChild.GetParent() != _effectSummaryContainer)
+			{
+				_effectSummaryContainer.AddChild(desiredChild);
+			}
+			if (_effectSummaryContainer.GetChild(i) != desiredChild)
+			{
+				_effectSummaryContainer.MoveChild(desiredChild, i);
+			}
+		}
+
 		for (int i = 0; i < _extraEffectRows.Count; i++)
 		{
 			ExtraEffectRow row = _extraEffectRows[i];
-			PanelContainer itemPanel = panels[i];
-			if (itemPanel.GetParent() != _effectSummaryContainer)
-			{
-				_effectSummaryContainer.AddChild(itemPanel);
-			}
-			if (_effectSummaryContainer.GetChild(i) != itemPanel)
-			{
-				_effectSummaryContainer.MoveChild(itemPanel, i);
-			}
 
 			string kindText = GetEffectSummaryKindText(row);
 			string amountText = GetEffectSummaryAmountText(row);
@@ -29435,12 +29509,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private static bool SupportsSelectedEventTarget(ExtraEffectRow row)
 	{
-		if (row == null || GetSelectedTrigger(row) != CardExtraEffectTrigger.OnCountEvent)
-		{
-			return false;
-		}
-
-		return GetSelectedPowerTriggerCountEvent(row) is CardExtraEffectCountEvent.DamageDealt or CardExtraEffectCountEvent.DamageTaken;
+		// The runtime carries the event actor (block gainer, status receiver, healed creature, ...)
+		// as the synthetic play's target for every Whenever event, so Event Target is meaningful for
+		// all of them — e.g. "whenever any enemy gains Block, THAT enemy loses 2 HP".
+		return row != null && GetSelectedTrigger(row) == CardExtraEffectTrigger.OnCountEvent;
 	}
 
 	private Control CreateSpinButtons(LineEdit field, decimal step, decimal? minValue, decimal? maxValue, bool isInteger = false)

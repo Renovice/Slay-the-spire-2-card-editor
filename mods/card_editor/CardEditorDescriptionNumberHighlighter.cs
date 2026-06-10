@@ -780,6 +780,12 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return upgradedDescription;
 		}
 
+		// Upgrade-preview green takes precedence over live combat coloring (vanilla forces upgraded
+		// vars green in previews). Strip live [green]/[red] tags before diffing — otherwise numbers
+		// the live sync already tagged are invisible to the comparison and the preview is inconsistent.
+		baseDescription = StripLiveNumberHighlightTags(baseDescription);
+		upgradedDescription = StripLiveNumberHighlightTags(upgradedDescription);
+
 		if (string.Equals(baseDescription, upgradedDescription, StringComparison.Ordinal))
 		{
 			return upgradedDescription;
@@ -794,6 +800,56 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 		List<string> baseTokens = ExtractVisibleNumberTokens(baseDescription, includeHighlightedNumbers: false);
 		return HighlightChangedNumbersInLine(upgradedDescription, baseTokens);
+	}
+
+	// "[[green]]...[[/green]]" in custom text renders green ONLY in upgrade previews and disappears
+	// everywhere else — the custom-text equivalent of vanilla's {IfUpgraded} green. Resolved at the
+	// END of the text pipelines so the preview diff pass cannot strip the converted tags.
+	internal static string ResolvePreviewOnlyHighlightMarkers(string text, bool isUpgradePreview)
+	{
+		if (string.IsNullOrEmpty(text) || !text.Contains("[[", StringComparison.Ordinal))
+		{
+			return text;
+		}
+
+		return isUpgradePreview
+			? text
+				.Replace("[[green]]", "[green]", StringComparison.OrdinalIgnoreCase)
+				.Replace("[[/green]]", "[/green]", StringComparison.OrdinalIgnoreCase)
+			: text
+				.Replace("[[green]]", string.Empty, StringComparison.OrdinalIgnoreCase)
+				.Replace("[[/green]]", string.Empty, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static string StripLiveNumberHighlightTags(string text)
+	{
+		if (string.IsNullOrEmpty(text) || text.IndexOf('[') < 0)
+		{
+			return text;
+		}
+
+		StringBuilder builder = new StringBuilder(text.Length);
+		for (int i = 0; i < text.Length;)
+		{
+			if (text[i] == '[')
+			{
+				int tagEnd = text.IndexOf(']', i);
+				if (tagEnd >= 0)
+				{
+					string tag = text.Substring(i, tagEnd - i + 1);
+					if (IsLiveNumberHighlightTag(tag))
+					{
+						i = tagEnd + 1;
+						continue;
+					}
+				}
+			}
+
+			builder.Append(text[i]);
+			i++;
+		}
+
+		return builder.ToString();
 	}
 
 	private static string HighlightChangedNumbersByLine(string[] baseLines, string[] upgradedLines)
@@ -825,13 +881,15 @@ internal static class CardEditorDescriptionNumberHighlighter
 				}
 			}
 
-			renderedLines.Add(baseTokens == null
-				? upgradedLine
-				: HighlightChangedNumbersInLine(upgradedLine, baseTokens));
+			// An upgraded line with no matching base line is upgrade-added or reworded text:
+			// vanilla renders the whole {IfUpgraded} branch green, so green all of its numbers.
+			renderedLines.Add(HighlightChangedNumbersInLine(upgradedLine, baseTokens ?? _emptyBaseTokens));
 		}
 
 		return string.Join('\n', renderedLines);
 	}
+
+	private static readonly List<string> _emptyBaseTokens = new();
 
 	private static Dictionary<string, List<string>> BuildUniqueBaseNumberTokensByLineKey(string[] baseLines)
 	{
@@ -870,7 +928,9 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 	private static string HighlightChangedNumbersInLine(string upgradedLine, IReadOnlyList<string> baseTokens)
 	{
-		if (string.IsNullOrWhiteSpace(upgradedLine) || baseTokens.Count == 0)
+		// An empty base token list means every number in the line is new: each token compares
+		// against a missing base token and renders green, matching vanilla upgrade-added text.
+		if (string.IsNullOrWhiteSpace(upgradedLine))
 		{
 			return upgradedLine;
 		}
@@ -1338,7 +1398,8 @@ internal static class CardEditorDescriptionNumberHighlighter
 		if (decimal.TryParse(baseToken, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal baseValue)
 			&& decimal.TryParse(upgradedToken, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal upgradedValue))
 		{
-			return upgradedValue.CompareTo(baseValue);
+			// Changed => green, matching vanilla upgrade-preview semantics (no red for buffed downsides).
+			return upgradedValue == baseValue ? 0 : 1;
 		}
 
 		return 1;

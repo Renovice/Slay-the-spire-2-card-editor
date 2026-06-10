@@ -45,6 +45,7 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 		}
 
 		description = CardEditorVanillaKeywordSupport.FormatDescription(description);
+		description = CardEditorDescriptionNumberHighlighter.ResolvePreviewOnlyHighlightMarkers(description, isUpgradePreview);
 	}
 
 	public static string BuildEditableBaseDescription(CardModel card, Creature? target = null)

@@ -526,6 +526,17 @@ internal static class CardEditorPresetStore
 		};
 	}
 
+	// Consistency-audit hook: exercises the REAL wire format (DTO + JSON) so a CardExtraEffect
+	// field that is missing from the DTO mappings shows up as a boot-time warning.
+	internal static bool TryRoundTripEffectForAudit(CardExtraEffect source, out CardExtraEffect roundTripped)
+	{
+		roundTripped = new CardExtraEffect();
+		CardExtraEffectDto dto = CardExtraEffectDto.FromEffect(source);
+		string json = JsonSerializer.Serialize(dto, CreateJsonOptions());
+		CardExtraEffectDto? parsed = JsonSerializer.Deserialize<CardExtraEffectDto>(json, CreateJsonOptions());
+		return parsed != null && parsed.TryToEffect(out roundTripped);
+	}
+
 	private static CardUpgradeOverride BuildUpgradeOverrideFromLegacyAbsolute(ModelId cardId, CardOverride baseOverride, CardOverride desiredUpgradedAbsolute)
 	{
 		bool prevSuppressAll = CardEditorOverrides.SuppressAllOverrides;
