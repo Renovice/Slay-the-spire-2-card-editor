@@ -882,14 +882,24 @@ internal static class CardEditorDescriptionNumberHighlighter
 			}
 
 			// An upgraded line with no matching base line is upgrade-added or reworded text:
-			// vanilla renders the whole {IfUpgraded} branch green, so green all of its numbers.
-			renderedLines.Add(HighlightChangedNumbersInLine(upgradedLine, baseTokens ?? _emptyBaseTokens));
+			// vanilla renders the whole {IfUpgraded} branch green, so green the ENTIRE line.
+			renderedLines.Add(baseTokens == null
+				? WrapLineInUpgradeGreen(upgradedLine)
+				: HighlightChangedNumbersInLine(upgradedLine, baseTokens));
 		}
 
 		return string.Join('\n', renderedLines);
 	}
 
-	private static readonly List<string> _emptyBaseTokens = new();
+	private static string WrapLineInUpgradeGreen(string line)
+	{
+		if (string.IsNullOrWhiteSpace(line))
+		{
+			return line;
+		}
+
+		return "[green]" + line + "[/green]";
+	}
 
 	private static Dictionary<string, List<string>> BuildUniqueBaseNumberTokensByLineKey(string[] baseLines)
 	{
