@@ -22281,7 +22281,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			or CardExtraEffectKind.AutoDrawSelfFromPile
 			or CardExtraEffectKind.ConditionalAutoPlayFromPile
 			or CardExtraEffectKind.ConditionalAutoDrawFromPile
-			or CardExtraEffectKind.ConditionalAutoRunEffects;
+			or CardExtraEffectKind.ConditionalAutoRunEffects
+			// Honest positional pickers for the card-action family too (the engine has always
+			// supported Top/Bottom generically — e.g. "the bottom card of your discard pile",
+			// where vanilla discards land).
+			or CardExtraEffectKind.MoveCardsBetweenPiles
+			or CardExtraEffectKind.UpgradeCardsInPile
+			or CardExtraEffectKind.DiscardCards
+			or CardExtraEffectKind.ExhaustCards
+			or CardExtraEffectKind.TransformCards
+			or CardExtraEffectKind.GrantKeywordToPile
+			or CardExtraEffectKind.SelectCardsFromPile
+			or CardExtraEffectKind.ConsumeCardValue;
 	}
 
 	private static void RefreshMoveSelectionModeOptions(
@@ -22289,7 +22300,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardExtraEffectKind kind,
 		CardExtraEffectCardPile pile,
 		CardExtraEffectCardSelectionMode desired,
-		CardExtraEffectCardSelectionMode fallback)
+		CardExtraEffectCardSelectionMode fallback,
+		bool thisCardIsTriggeringCard = false)
 	{
 		if (select == null || !GodotObject.IsInstanceValid(select))
 		{
@@ -22306,8 +22318,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CardExtraEffectCardSelectionMode.UpTo,
 			CardExtraEffectCardSelectionMode.SelectedByEffect
 		};
-		if (kind is CardExtraEffectKind.DelayedPileAction or CardExtraEffectKind.RemoveCardsFromDeck)
+		if ((kind is CardExtraEffectKind.DelayedPileAction or CardExtraEffectKind.RemoveCardsFromDeck
+				|| CardEditorExtraEffects.SupportsIncludingSourceCardInSelection(kind))
+			// Fetch is an id-based query that ignores selection mode — ThisCard is meaningless there.
+			&& kind != CardExtraEffectKind.FetchSpecificCardToHand)
 		{
+			// The runtime has always resolved ThisCard with no selector UI; on power rows whose
+			// trigger delivers the event card, "this card" IS the triggering card — which makes
+			// "Whenever you discard a card, it gains Sly" a zero-interaction build.
 			modes.Insert(0, CardExtraEffectCardSelectionMode.ThisCard);
 		}
 		if (SupportsOrderedMoveSelection(kind, pile))
@@ -22323,7 +22341,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		select.Clear();
 		foreach (CardExtraEffectCardSelectionMode mode in modes)
 		{
-			select.AddItem(CardEditorExtraEffects.CardSelectionModeLabel(mode), (int)mode);
+			string label = mode == CardExtraEffectCardSelectionMode.ThisCard
+				&& thisCardIsTriggeringCard
+				&& CardEditorExtraEffects.ThisCardSelectionUsesExecutionCard(kind)
+				? CardEditorLoc.T("cardSelectionMode.triggeringCard", "Triggering Card")
+				: CardEditorExtraEffects.CardSelectionModeLabel(mode);
+			select.AddItem(label, (int)mode);
 		}
 
 		CardExtraEffectCardSelectionMode resolvedSelection = modes.Contains(desired) ? desired : fallback;
@@ -25584,7 +25607,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				kind,
 				currentMovePile,
 				currentMoveSelectionMode,
-				kind == CardExtraEffectKind.FetchSpecificCardToHand ? CardExtraEffectCardSelectionMode.UpTo : CardExtraEffectCardSelectionMode.Choose);
+				kind == CardExtraEffectKind.FetchSpecificCardToHand ? CardExtraEffectCardSelectionMode.UpTo : CardExtraEffectCardSelectionMode.Choose,
+				thisCardIsTriggeringCard: asPower && CardEditorExtraEffects.PowerTriggerProvidesTriggeringCard(trigger, selectedPowerCountEvent));
 		}
 
 		if (row.CardSelectionSourceRow != null && GodotObject.IsInstanceValid(row.CardSelectionSourceRow))
@@ -25948,7 +25972,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				if (futureMatchingCards)
 				{
-					row.MoveSelectionModeSelect.Select((int)CardExtraEffectCardSelectionMode.All);
+					// Select takes an INDEX, not an item id — resolve the id first (the option
+					// list shifts as modes are inserted/removed per kind).
+					int allIndex = row.MoveSelectionModeSelect.GetItemIndex((int)CardExtraEffectCardSelectionMode.All);
+					if (allIndex >= 0)
+					{
+						row.MoveSelectionModeSelect.Select(allIndex);
+					}
 				}
 
 				row.MoveSelectionModeSelect.Disabled = futureMatchingCards;
@@ -25958,7 +25988,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				if (futureMatchingCards)
 				{
-					row.GrantModeSelect.Select((int)CardExtraEffectCardSelectionMode.All);
+					int allIndex = row.GrantModeSelect.GetItemIndex((int)CardExtraEffectCardSelectionMode.All);
+					if (allIndex >= 0)
+					{
+						row.GrantModeSelect.Select(allIndex);
+					}
 				}
 
 				row.GrantModeSelect.Disabled = futureMatchingCards;

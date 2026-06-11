@@ -3468,6 +3468,45 @@ public static string ConditionProgressDisplayLabel(CardExtraEffectConditionProgr
 				or CardExtraEffectCountEvent.StatusLost;
 	}
 
+	// Kinds whose executor passes cardPlay.Card as the selection source card — on power rows
+	// that is the TRIGGERING card. Kinds that resolve their source via EffectSourceContext
+	// (DelayedPileAction, TransformCards, PlayCardFromPile, ConsumeCardValue) get the HOST card
+	// on power rows instead and keep the plain "This Card" label.
+	public static bool ThisCardSelectionUsesExecutionCard(CardExtraEffectKind kind)
+	{
+		return kind is CardExtraEffectKind.GrantKeywordToPile
+			or CardExtraEffectKind.MoveCardsBetweenPiles
+			or CardExtraEffectKind.UpgradeCardsInPile
+			or CardExtraEffectKind.DiscardCards
+			or CardExtraEffectKind.ExhaustCards
+			or CardExtraEffectKind.CopyCardsFromPileToDeck
+			or CardExtraEffectKind.CopyExactCardsFromPileToDeck
+			or CardExtraEffectKind.SelectCardsFromPile
+			or CardExtraEffectKind.RemoveCardsFromDeck;
+	}
+
+	// True when a power row's trigger delivers the event's CARD as the execution card (the
+	// Whenever pipeline sets executionPlay.Card = triggeringCard for kinds that don't force the
+	// host), so a "This Card" selection resolves to the TRIGGERING card — e.g. "Whenever you
+	// discard a card, IT gains Sly". For every other trigger "This Card" means the host card.
+	public static bool PowerTriggerProvidesTriggeringCard(CardExtraEffectTrigger trigger, CardExtraEffectCountEvent countEvent)
+	{
+		if (trigger is CardExtraEffectTrigger.OnPlay
+			or CardExtraEffectTrigger.OnDraw
+			or CardExtraEffectTrigger.OnDiscard
+			or CardExtraEffectTrigger.OnExhaust)
+		{
+			return true;
+		}
+
+		return trigger == CardExtraEffectTrigger.OnCountEvent
+			&& countEvent is CardExtraEffectCountEvent.Played
+				or CardExtraEffectCountEvent.Drawn
+				or CardExtraEffectCountEvent.Discarded
+				or CardExtraEffectCountEvent.Exhausted
+				or CardExtraEffectCountEvent.Generated;
+	}
+
 	public static bool CountCardFilterSupportsAmount(CardExtraEffectCountCardFilter filter)
 	{
 		return filter is CardExtraEffectCountCardFilter.DealDamage
@@ -19987,7 +20026,27 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
 
 		string result;
-		if (all)
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			// On power rows whose trigger delivers the event card, "this card" is the
+			// TRIGGERING card; the power prefix supplies the "Whenever you discard a card,"
+			// clause, so the line reads "Whenever you discard a card, it gains Sly." Power rows
+			// on non-card triggers (start of turn, orbs...) resolve ThisCard to the HOST card,
+			// so they keep the "This card" wording.
+			result = IsPowerEffect(effect) && PowerTriggerProvidesTriggeringCard(effect.Trigger, effect.PowerTriggerCountEvent)
+				? CardEditorLoc.F("cardText.grantKeyword.eventCard", $"It gains {keyword} {durationText}.", ("Keyword", keyword), ("Duration", durationText))
+				: CardEditorLoc.F("cardText.grantKeyword.thisCard", $"This card gains {keyword} {durationText}.", ("Keyword", keyword), ("Duration", durationText));
+		}
+		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
+		{
+			string position = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Top
+				? CardEditorLoc.T("cardText.grantKeyword.position.top", "top")
+				: CardEditorLoc.T("cardText.grantKeyword.position.bottom", "bottom");
+			result = amount == 1
+				? CardEditorLoc.F("cardText.grantKeyword.positional.one", $"The {position} card {pile} gains {keyword} {durationText}{futureText}.", ("Position", position), ("Pile", pile), ("Keyword", keyword), ("Duration", durationText), ("Future", futureText))
+				: CardEditorLoc.F("cardText.grantKeyword.positional.many", $"The {position} {amountText} cards {pile} gain {keyword} {durationText}{futureText}.", ("Position", position), ("Amount", amountText), ("Pile", pile), ("Keyword", keyword), ("Duration", durationText), ("Future", futureText));
+		}
+		else if (all)
 		{
 			result = CardEditorLoc.F("cardText.grantKeyword.all", $"All cards {pile} gain {keyword} {durationText}{futureText}.", ("Pile", pile), ("Keyword", keyword), ("Duration", durationText), ("Future", futureText));
 		}

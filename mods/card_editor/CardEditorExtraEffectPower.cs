@@ -1116,7 +1116,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				return Task.CompletedTask;
 			}
 
-			CardEditorExtraEffects.TriggerPowerCountEvent(combatState, owner, CardExtraEffectCountEvent.Generated, amount: 1);
+			// triggeringCard makes "Triggering Card" selection rows act on the generated card.
+			CardEditorExtraEffects.TriggerPowerCountEvent(combatState, owner, CardExtraEffectCountEvent.Generated, triggeringCard: card, amount: 1);
 		}
 		catch
 		{
