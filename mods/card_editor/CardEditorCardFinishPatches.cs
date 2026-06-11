@@ -1310,14 +1310,6 @@ vec3 overlay_blend(vec3 base_col, vec3 over)
 	);
 }
 
-vec2 art_rect_uv(vec2 frag)
-{
-	// FRAGCOORD is a stage built-in: it is only visible inside fragment(), so it must be
-	// passed in as a parameter or the shader fails to compile and the finish renders nothing.
-	vec2 safe_size = max(card_effect_screen_size, vec2(1.0));
-	return clamp((frag - card_effect_screen_origin) / safe_size, vec2(0.0), vec2(1.0));
-}
-
 void fragment()
 {
 	vec4 tex = texture(TEXTURE, UV);
@@ -1330,7 +1322,12 @@ void fragment()
 	float luma = dot(tex.rgb, vec3(0.2126, 0.7152, 0.0722));
 	float lit = clamp(pow(luma, contrast_gamma) * brightness_boost, 0.0, 1.0);
 	float t = TIME * motion_speed + time_offset;
-	vec2 effect_uv = art_rect_uv(FRAGCOORD.xy);
+	// Same UV-space mapping as every other finish shader: the pattern is anchored to the art
+	// rect and tracks the card as it moves/scales. A FRAGCOORD/screen-rect mapping (the old
+	// approach) is wrong here twice over: the rect is snapshotted at sync time (pre-layout it
+	// is a degenerate 300x422 box at the window origin -> tiny top-left effect window) and it
+	// goes stale the moment the card animates.
+	vec2 effect_uv = (card_effect_uv_origin + UV * card_effect_uv_scale);
 	vec2 dir = normalize(gradient_dir);
 	vec2 crossDir = normalize(vec2(-dir.y, dir.x));
 	float phaseA = dot(effect_uv - vec2(0.5), dir) * gradient_scale * hue_spread;
