@@ -19668,6 +19668,27 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		}
 		bool hasSelectionCriteria = HasCardSelectionCriteria(effect);
 
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			string thisTo = GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition);
+			string thisResult = UsesEventCardThisCardWording(effect)
+				? CardEditorLoc.F("cardText.moveCards.eventCard", $"Move it to {thisTo}.", ("To", thisTo))
+				: CardEditorLoc.F("cardText.moveCards.thisCard", $"Move this card to {thisTo}.", ("To", thisTo));
+			return BuildCostFilteredText(card, AppendCardSelectionNote(thisResult, effect), effect);
+		}
+		if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
+		{
+			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
+			string posFrom = effect.CardSelectionPile == CardExtraEffectCardPile.AllPiles
+				? CardEditorLoc.T("cardText.pile.anywhere", "anywhere")
+				: GetCardPilePossessive(effect.CardSelectionPile);
+			string posTo = GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition);
+			string posResult = amount == 1
+				? CardEditorLoc.F("cardText.moveCards.positional.one", $"Move the {position} card of {posFrom} to {posTo}.", ("Position", position), ("From", posFrom), ("To", posTo))
+				: CardEditorLoc.F("cardText.moveCards.positional.many", $"Move the {position} {amountText} cards of {posFrom} to {posTo}.", ("Position", position), ("Amount", amountText), ("From", posFrom), ("To", posTo));
+			return BuildCostFilteredText(card, AppendCardSelectionNote(posResult, effect), effect);
+		}
+
 		// Prefer vanilla wording for common movement patterns (discard/exhaust) so it reads naturally and matches synergies.
 		if (!hasSelectionCriteria && effect.CardSelectionPile == CardExtraEffectCardPile.Hand && effect.MoveToPile == CardExtraEffectCardPile.DiscardPile)
 		{
@@ -19971,7 +19992,20 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
 
 		string result;
-		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.EachPile
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			result = UsesEventCardThisCardWording(effect)
+				? CardEditorLoc.T("cardText.upgradeFromPile.eventCard", "Upgrade it.")
+				: CardEditorLoc.T("cardText.upgradeFromPile.thisCard", "Upgrade this card.");
+		}
+		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
+		{
+			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
+			result = amount == 1
+				? CardEditorLoc.F("cardText.upgradeFromPile.positional.one", $"Upgrade the {position} card {pile}.", ("Position", position), ("Pile", pile))
+				: CardEditorLoc.F("cardText.upgradeFromPile.positional.many", $"Upgrade the {position} {amountText} cards {pile}.", ("Position", position), ("Amount", amountText), ("Pile", pile));
+		}
+		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.EachPile
 			&& effect.CardSelectionPile == CardExtraEffectCardPile.AllPiles)
 		{
 			result = amount == 1
@@ -20013,6 +20047,21 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			("Duration", durationSuffix));
 	}
 
+	// "It ..." wording is used by ThisCard text branches on power rows whose trigger delivers
+	// the event card to this kind's execution (the power prefix supplies the "Whenever you
+	// discard a card," clause); everywhere else ThisCard resolves to the HOST card and keeps
+	// the "this card" wording.
+	private static bool UsesEventCardThisCardWording(CardExtraEffect effect)
+		=> effect != null
+			&& IsPowerEffect(effect)
+			&& PowerTriggerProvidesTriggeringCard(effect.Trigger, effect.PowerTriggerCountEvent)
+			&& ThisCardSelectionUsesExecutionCard(effect.Kind);
+
+	private static string GetPositionalSelectionLabel(CardExtraEffectCardSelectionMode mode)
+		=> mode == CardExtraEffectCardSelectionMode.Top
+			? CardEditorLoc.T("cardText.selection.position.top", "top")
+			: CardEditorLoc.T("cardText.selection.position.bottom", "bottom");
+
 	private static string FormatGrantKeywordToPile(CardExtraEffect effect, int amount, string amountText)
 	{
 		string keyword = GrantedKeywordLabel(effect.GrantedKeyword);
@@ -20028,20 +20077,13 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		string result;
 		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
 		{
-			// On power rows whose trigger delivers the event card, "this card" is the
-			// TRIGGERING card; the power prefix supplies the "Whenever you discard a card,"
-			// clause, so the line reads "Whenever you discard a card, it gains Sly." Power rows
-			// on non-card triggers (start of turn, orbs...) resolve ThisCard to the HOST card,
-			// so they keep the "This card" wording.
-			result = IsPowerEffect(effect) && PowerTriggerProvidesTriggeringCard(effect.Trigger, effect.PowerTriggerCountEvent)
+			result = UsesEventCardThisCardWording(effect)
 				? CardEditorLoc.F("cardText.grantKeyword.eventCard", $"It gains {keyword} {durationText}.", ("Keyword", keyword), ("Duration", durationText))
 				: CardEditorLoc.F("cardText.grantKeyword.thisCard", $"This card gains {keyword} {durationText}.", ("Keyword", keyword), ("Duration", durationText));
 		}
 		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 		{
-			string position = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Top
-				? CardEditorLoc.T("cardText.grantKeyword.position.top", "top")
-				: CardEditorLoc.T("cardText.grantKeyword.position.bottom", "bottom");
+			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
 			result = amount == 1
 				? CardEditorLoc.F("cardText.grantKeyword.positional.one", $"The {position} card {pile} gains {keyword} {durationText}{futureText}.", ("Position", position), ("Pile", pile), ("Keyword", keyword), ("Duration", durationText), ("Future", futureText))
 				: CardEditorLoc.F("cardText.grantKeyword.positional.many", $"The {position} {amountText} cards {pile} gain {keyword} {durationText}{futureText}.", ("Position", position), ("Amount", amountText), ("Pile", pile), ("Keyword", keyword), ("Duration", durationText), ("Future", futureText));
@@ -20132,7 +20174,20 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		}
 
 		string discardResult;
-		if (all)
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			discardResult = UsesEventCardThisCardWording(effect)
+				? CardEditorLoc.T("cardText.discard.eventCard", "Discard it.")
+				: CardEditorLoc.T("cardText.discard.thisCard", "Discard this card.");
+		}
+		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
+		{
+			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
+			discardResult = amount == 1
+				? CardEditorLoc.F("cardText.discard.positional.one", $"Discard the {position} card{suffix}.", ("Position", position), ("Suffix", suffix))
+				: CardEditorLoc.F("cardText.discard.positional.many", $"Discard the {position} {amountText} cards{suffix}.", ("Position", position), ("Amount", amountText), ("Suffix", suffix));
+		}
+		else if (all)
 		{
 			discardResult = CardEditorLoc.F("cardText.discard.all.suffix", $"Discard all cards{suffix}.", ("Suffix", suffix));
 		}
@@ -20174,7 +20229,20 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		}
 
 		string exhaustResult;
-		if (all)
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			exhaustResult = UsesEventCardThisCardWording(effect)
+				? CardEditorLoc.T("cardText.exhaust.eventCard", "Exhaust it.")
+				: CardEditorLoc.T("cardText.exhaust.thisCard", "Exhaust this card.");
+		}
+		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
+		{
+			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
+			exhaustResult = amount == 1
+				? CardEditorLoc.F("cardText.exhaust.positional.one", $"Exhaust the {position} card{suffix}.", ("Position", position), ("Suffix", suffix))
+				: CardEditorLoc.F("cardText.exhaust.positional.many", $"Exhaust the {position} {amountText} cards{suffix}.", ("Position", position), ("Amount", amountText), ("Suffix", suffix));
+		}
+		else if (all)
 		{
 			exhaustResult = CardEditorLoc.F("cardText.exhaust.all.suffix", $"Exhaust all cards{suffix}.", ("Suffix", suffix));
 		}
@@ -20231,7 +20299,16 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		string result;
 		if (thisCard)
 		{
+			// Transform resolves ThisCard via the effect-source context (host card on power
+			// rows too), so the "this card" wording is always accurate here.
 			result = CardEditorLoc.F("cardText.transform.thisCard", $"Transform this card{intoText}.", ("Into", intoText));
+		}
+		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
+		{
+			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
+			result = amount == 1
+				? CardEditorLoc.F("cardText.transform.positional.one", $"Transform the {position} card{pileSuffix}{intoText}.", ("Position", position), ("PileSuffix", pileSuffix), ("Into", intoText))
+				: CardEditorLoc.F("cardText.transform.positional.many", $"Transform the {position} {amountText} cards{pileSuffix}{intoText}.", ("Position", position), ("Amount", amountText), ("PileSuffix", pileSuffix), ("Into", intoText));
 		}
 		else if (all)
 		{
@@ -20542,7 +20619,20 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool copiesPerSelectedCard = effect.CopyMode == CardExtraEffectCopyMode.AmountCopiesPerSelectedCard;
 
 		string result;
-		if (copiesPerSelectedCard)
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			string subject = UsesEventCardThisCardWording(effect)
+				? CardEditorLoc.T("cardText.selection.itSubject", "it")
+				: CardEditorLoc.T("cardText.selection.thisCardSubject", "this card");
+			result = amount == 1
+				? (exact
+					? CardEditorLoc.F("cardText.copyPileToDeck.exact.thisCard.one", $"Add an exact copy of {subject} to {to}.", ("Subject", subject), ("To", to))
+					: CardEditorLoc.F("cardText.copyPileToDeck.thisCard.one", $"Add a copy of {subject} to {to}.", ("Subject", subject), ("To", to)))
+				: (exact
+					? CardEditorLoc.F("cardText.copyPileToDeck.exact.thisCard.many", $"Add {amountText} exact copies of {subject} to {to}.", ("Amount", amountText), ("Subject", subject), ("To", to))
+					: CardEditorLoc.F("cardText.copyPileToDeck.thisCard.many", $"Add {amountText} copies of {subject} to {to}.", ("Amount", amountText), ("Subject", subject), ("To", to)));
+		}
+		else if (copiesPerSelectedCard)
 		{
 			if (all)
 			{
@@ -20638,7 +20728,20 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
 
 		string result;
-		if (all)
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			result = UsesEventCardThisCardWording(effect)
+				? CardEditorLoc.T("cardText.selectPile.eventCard", "Select it.")
+				: CardEditorLoc.T("cardText.selectPile.thisCard", "Select this card.");
+		}
+		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
+		{
+			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
+			result = amount == 1
+				? CardEditorLoc.F("cardText.selectPile.positional.one", $"Select the {position} card of {from}.", ("Position", position), ("From", from))
+				: CardEditorLoc.F("cardText.selectPile.positional.many", $"Select the {position} {amountText} cards of {from}.", ("Position", position), ("Amount", amountText), ("From", from));
+		}
+		else if (all)
 		{
 			result = CardEditorLoc.F("cardText.selectPile.all", $"Select all matching cards from {from}.", ("From", from));
 		}
@@ -20677,7 +20780,13 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
 
 		string result;
-		if (fromDeck)
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			result = UsesEventCardThisCardWording(effect)
+				? CardEditorLoc.T("cardText.removeDeck.eventCard", "Remove it from your deck.")
+				: CardEditorLoc.T("cardText.removeDeck.thisCard", "Remove this card from your deck.");
+		}
+		else if (fromDeck)
 		{
 			if (all)
 			{
@@ -20957,7 +21066,13 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			? FormatXPlusText(effect.CardSelectionOfferCount)
 			: Math.Max(0, effect.CardSelectionOfferCount).ToString(CultureInfo.InvariantCulture);
 		string result;
-		if (all)
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
+		{
+			// PlayCardFromPile resolves ThisCard via the effect-source context (host card on
+			// power rows too), so the wording is always "this card".
+			result = CardEditorLoc.T("cardText.playFromPile.thisCard", "Play this card.");
+		}
+		else if (all)
 		{
 			result = CardEditorLoc.F("cardText.playFromPile.all", $"Play all cards from {pile}.", ("Pile", pile));
 		}
