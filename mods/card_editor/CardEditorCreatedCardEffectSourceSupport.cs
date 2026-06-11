@@ -393,9 +393,16 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			}
 
 			using IDisposable ___ = CardEditorEffectSourceContext.PushScoped(effectSourceCard);
-			if (onPlay.Invoke(effectSourceCard, new object[] { choiceContext, cardPlay }) is Task task)
+			// Suppress the override-OnPlay postfix for this reflective call: it would mark the
+			// CREATED card's real cardPlay and run the SOURCE card's override rows mid-row.
+			Task? invokedTask;
+			using (CardEditorReflectiveOnPlayGuard.PushScoped())
 			{
-				await task;
+				invokedTask = onPlay.Invoke(effectSourceCard, new object[] { choiceContext, cardPlay }) as Task;
+			}
+			if (invokedTask != null)
+			{
+				await invokedTask;
 			}
 		}
 		catch (Exception ex)

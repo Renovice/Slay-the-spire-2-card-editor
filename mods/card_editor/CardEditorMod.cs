@@ -47,7 +47,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 [ModInitializer("Init")]
 public static class CardEditorMod
 {
-	private const string HarmonyId = "slaythespire2.card_editor";
+	internal const string HarmonyId = "slaythespire2.card_editor";
 
 	internal static bool IsVerboseEditorLogging => CardEditorPerformanceSettings.VerboseLogging;
 
@@ -76,6 +76,11 @@ public static class CardEditorMod
 		PatchAssemblySafely(harmony, Assembly.GetExecutingAssembly());
 		EnsureIgnoreDamagePatches(harmony);
 
+		// NOTE: effectively a no-op at boot — mod initializers run before ModelDb.Init, so card
+		// ids resolve to null here (and the store holds only created-card ids at this point,
+		// which are excluded by type anyway). Kept as future-proofing; the real boot sweep runs
+		// at NMainMenu._Ready (TryApplyStartupPresetsOnce), the first post-ModelDb seam.
+		CardEditorOverrideOnPlayPatcher.EnsureForAllStoredOverrides();
 	}
 
 	private static void PatchAssemblySafely(Harmony harmony, Assembly assembly)
@@ -1840,6 +1845,11 @@ public static class MainMenu_Ready_Patch
 		{
 			Log.Warn($"[CardEditor] Failed loading startup creator preset: {ex}");
 		}
+
+		// First point after boot where ModelDb is guaranteed initialized (mod Init runs before
+		// ModelDb.Init, so Init-time patch attempts resolve nothing): sweep all overrides that
+		// entered the store on any path that didn't already trigger the per-id seam.
+		CardEditorOverrideOnPlayPatcher.EnsureForAllStoredOverrides();
 	}
 
 	private static void TryAddEditorButton(NMainMenu menu)
@@ -2770,13 +2780,21 @@ public static class Hook_AfterCardPlayed_Patch
 		// NOTE: Hook.AfterCardPlayed is an async method, so by the time this postfix runs its
 		// listener chain is already a HOT task — work composed here can only run strictly AFTER
 		// it (running anything "before" from a postfix would interleave with suspended listeners
-		// on the shared choice-context model stack). Moving override rows ahead of the after-play
-		// reactions therefore requires per-card OnPlay postfixes (appending to OnPlay's own task),
-		// like created cards already do — not a reorder here.
+		// on the shared choice-context model stack). Override rows that should run WITH the play
+		// are handled by per-card OnPlay postfixes (CardEditorOverrideOnPlayPatcher) appending to
+		// OnPlay's own task, like created cards; marked plays run only the reactions phase here.
+		// Combined remains the fallback for unpatched types (temporary effects on cards without a
+		// stored override, patch failures, plays already in flight when a patch landed).
 		await original;
 		try
 		{
-			await CardEditorExtraEffects.RunAfterCardPlayed(combatState, choiceContext, cardPlay);
+			await CardEditorExtraEffects.RunAfterCardPlayed(
+				combatState,
+				choiceContext,
+				cardPlay,
+				CardEditorExtraEffects.DidImmediateRowsRunDuringOnPlay(cardPlay)
+					? CardEditorExtraEffects.CardPlayHookPhase.AfterPlayReactions
+					: CardEditorExtraEffects.CardPlayHookPhase.Combined);
 			await CardEditorAfflictionEffects.RunAfterCardPlayed(combatState, choiceContext, cardPlay);
 		}
 		catch (Exception ex)

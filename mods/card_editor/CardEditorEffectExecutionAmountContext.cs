@@ -261,6 +261,41 @@ internal static class CardEditorEffectExecutionAmountContext
 		return new RootSessionScope();
 	}
 
+	// Session continuity for the split card-play pipeline (per-card OnPlay postfix runs the
+	// immediate rows, the AfterCardPlayed hook runs the reactions): the immediate phase's ROOT
+	// session is stashed per CardPlay and re-adopted by the reactions phase, so reaction-time
+	// amount sources (AppliedEffect*Damage/Kills/Instances, selected-card chaining) see the
+	// results the play's own rows recorded — exactly like the legacy single-session Combined
+	// pass. Weak-keyed: a play whose reactions never run (owner died mid-play) drops its entry
+	// with the CardPlay. Nested flows (ambient session already present) inherit it in BOTH
+	// phases, so no stash is needed there.
+	private static readonly ConditionalWeakTable<CardPlay, Session> _stashedPlaySessions = new();
+
+	// MUST be called synchronously inline in the consuming method's body — AsyncLocal writes
+	// made inside an awaited call never flow back to the caller.
+	public static IDisposable PushSessionScopedForCardPlayPhase(CardPlay? cardPlay, bool stashForReactions, bool adoptStashed)
+	{
+		if (_currentSession.Value != null)
+		{
+			return NoopScope.Instance;
+		}
+
+		if (adoptStashed && cardPlay != null && _stashedPlaySessions.TryGetValue(cardPlay, out Session? stashed))
+		{
+			_stashedPlaySessions.Remove(cardPlay);
+			_currentSession.Value = stashed;
+			return new RootSessionScope();
+		}
+
+		Session session = new Session();
+		if (stashForReactions && cardPlay != null)
+		{
+			_stashedPlaySessions.AddOrUpdate(cardPlay, session);
+		}
+		_currentSession.Value = session;
+		return new RootSessionScope();
+	}
+
 	public static bool TryMarkFatalTriggered(CardPlay? cardPlay)
 	{
 		if (cardPlay == null)

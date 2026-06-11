@@ -102,10 +102,13 @@ internal static class CardEditorCreatedCardsCostController
 		public required int Amount { get; init; }
 		public required CardExtraEffectCostModifier Modifier { get; init; }
 		public int RemainingTurns { get; set; }
-		// Cards stamped during the turn-start sequence (opening hand draw runs BEFORE
-		// AfterPlayerTurnStart) must not have their first scheduled turn consumed in the same
-		// round — that double-applies the modifier on turn one and ends the span a turn early.
-		public int CreatedRoundNumber { get; init; }
+		// Owner's PlayerCombatState.TurnNumber at creation (-1 = unknown owner, never skip).
+		// Entries stamped during the turn-start sequence (opening-hand draw runs BEFORE
+		// AfterPlayerTurnStart) must not have their first scheduled turn consumed by that same
+		// turn's pass — that double-applies on turn one and ends the span a turn early. The
+		// per-player TurnNumber is used (not RoundNumber) because vanilla increments it for
+		// co-op EXTRA turns too, so extra-turn starts consume normally instead of skipping.
+		public int CreatedTurnNumber { get; init; }
 	}
 
 	private sealed class PendingStarDiscount
@@ -113,6 +116,9 @@ internal static class CardEditorCreatedCardsCostController
 		public required CardExtraEffect.CardCostAdjustment Adjustment { get; init; }
 		public int RemainingTurns { get; set; }
 		public bool ExpireOnPlayed { get; init; }
+		// Same-turn guard as PendingTurnDiscount: a star discount created by an in-flight play
+		// during the turn-start window must not be decremented by that same turn's pass.
+		public int CreatedTurnNumber { get; init; }
 	}
 
 	private sealed class CombatSchedule
@@ -181,7 +187,8 @@ internal static class CardEditorCreatedCardsCostController
 		{
 			Adjustment = adjustment,
 			RemainingTurns = Math.Max(0, remainingTurns),
-			ExpireOnPlayed = expireOnPlayed
+			ExpireOnPlayed = expireOnPlayed,
+			CreatedTurnNumber = card.TryGetOwner()?.PlayerCombatState?.TurnNumber ?? -1
 		});
 		return true;
 	}
@@ -514,7 +521,7 @@ internal static class CardEditorCreatedCardsCostController
 			list = new List<PendingTurnDiscount>();
 			schedule.DiscountsByCard[card] = list;
 		}
-		list.Add(new PendingTurnDiscount { Amount = amount, Modifier = modifier, RemainingTurns = remaining, CreatedRoundNumber = combatState.RoundNumber });
+		list.Add(new PendingTurnDiscount { Amount = amount, Modifier = modifier, RemainingTurns = remaining, CreatedTurnNumber = card.TryGetOwner()?.PlayerCombatState?.TurnNumber ?? -1 });
 	}
 
 	// Enqueue future-turn applications WITHOUT applying anything now — for callers that already
@@ -533,7 +540,7 @@ internal static class CardEditorCreatedCardsCostController
 			list = new List<PendingTurnDiscount>();
 			schedule.DiscountsByCard[card] = list;
 		}
-		list.Add(new PendingTurnDiscount { Amount = amount, Modifier = modifier, RemainingTurns = remainingTurns, CreatedRoundNumber = combatState.RoundNumber });
+		list.Add(new PendingTurnDiscount { Amount = amount, Modifier = modifier, RemainingTurns = remainingTurns, CreatedTurnNumber = card.TryGetOwner()?.PlayerCombatState?.TurnNumber ?? -1 });
 	}
 
 	public static void ApplyThisTurn(CardModel card, int amount, CardExtraEffectCostModifier modifier = CardExtraEffectCostModifier.Reduce, CardCreatedCardsCostResource resource = CardCreatedCardsCostResource.Energy)
@@ -635,10 +642,13 @@ internal static class CardEditorCreatedCardsCostController
 		{
 			return;
 		}
-		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule) || schedule.DiscountsByCard.Count == 0)
+		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule)
+			|| (schedule.DiscountsByCard.Count == 0 && schedule.StarDiscountsByCard.Count == 0))
 		{
 			return;
 		}
+
+		int? playerTurnNumber = player.PlayerCombatState?.TurnNumber;
 
 		foreach ((CardModel card, List<PendingTurnDiscount> discounts) in schedule.DiscountsByCard.ToList())
 		{
@@ -647,9 +657,15 @@ internal static class CardEditorCreatedCardsCostController
 				schedule.DiscountsByCard.Remove(card);
 				continue;
 			}
-			if (card.Owner != player || card.HasBeenRemovedFromState)
+			if (card.HasBeenRemovedFromState || card.Owner == null)
 			{
 				schedule.DiscountsByCard.Remove(card);
+				continue;
+			}
+			// Another co-op player's card: its own turn-start pass will consume it. Removing it
+			// here (the old behavior) deleted every other player's pending discounts each round.
+			if (card.Owner != player)
+			{
 				continue;
 			}
 
@@ -668,13 +684,11 @@ internal static class CardEditorCreatedCardsCostController
 					continue;
 				}
 
-				// Skip entries created earlier in this same round (opening-draw stamps run before
-				// AfterPlayerTurnStart): consuming them now double-applies on turn one and ends
-				// the span a turn early. Known edge: co-op extra turns reuse the round number, so
-				// an entry created on a normal turn also skips a same-round EXTRA turn's start —
-				// the discount then resumes next round. Accepted as the lesser evil vs the
-				// turn-one double-apply this guard exists to prevent.
-				if (pending.CreatedRoundNumber == combatState.RoundNumber)
+				// Skip entries created earlier in this same player turn (opening-draw stamps and
+				// turn-start in-flight plays run before this pass): consuming them now would
+				// double-apply on turn one and end the span a turn early. Per-player TurnNumber
+				// increments for co-op extra turns too, so extra-turn starts consume normally.
+				if (pending.CreatedTurnNumber >= 0 && pending.CreatedTurnNumber == playerTurnNumber)
 				{
 					continue;
 				}
@@ -709,10 +723,16 @@ internal static class CardEditorCreatedCardsCostController
 				schedule.StarDiscountsByCard.Remove(card);
 				continue;
 			}
-			if (card.Owner != player || card.HasBeenRemovedFromState)
+			if (card.HasBeenRemovedFromState || card.Owner == null)
 			{
 				schedule.StarDiscountsByCard.Remove(card);
 				NotifyCostChanged(card, CardCreatedCardsCostResource.Stars);
+				continue;
+			}
+			// Another co-op player's card: skip without removing (and without a cost
+			// notification — nothing changed for it on this player's turn start).
+			if (card.Owner != player)
+			{
 				continue;
 			}
 
@@ -726,6 +746,13 @@ internal static class CardEditorCreatedCardsCostController
 					continue;
 				}
 				if (pending.RemainingTurns <= 0)
+				{
+					continue;
+				}
+
+				// Same-turn guard: don't decrement entries created earlier in this same turn
+				// (turn-start in-flight plays run before this pass).
+				if (pending.CreatedTurnNumber >= 0 && pending.CreatedTurnNumber == playerTurnNumber)
 				{
 					continue;
 				}

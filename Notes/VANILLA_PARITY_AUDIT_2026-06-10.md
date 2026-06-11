@@ -1,6 +1,34 @@
 # Vanilla-Parity Audit (2026-06-10)
 
-> **STATUS UPDATE 2 (2026-06-11, deferred-items wave shipped):**
+> **STATUS UPDATE 3 (2026-06-11, "fix the unfixable" wave shipped):** an 8-agent design study
+> proved all four remaining items fixable; all four implemented, 5-reviewer adversarial pass +
+> focused re-verify, one must-fix found and fixed (cross-phase session continuity).
+> - **#13 override-row timing: FIXED (was "deferred — unachievable").** Per-card OnPlay
+>   postfixes (`CardEditorOverrideOnPlayPatches.cs`): the overridden card type's most-derived
+>   OnPlay declaration is lazily Harmony-patched (boot/preset/editor/draft/sync/instance seams);
+>   the postfix composes the immediate rows onto OnPlay's hot task (appending is legal — the
+>   wrapper awaits OnPlay before Enchantment/Affliction OnPlay, Hook.AfterCardPlayed and pile
+>   routing), the play is marked, and the AfterCardPlayed hook runs only the reactions phase
+>   for marked plays (Combined stays as fallback). Traps closed: reflective OnPlay invocations
+>   suppressed via ThreadStatic guard (auto-action vanilla-OnPlay payloads, borrowed sources);
+>   idempotency keyed by declared MethodBase, NOT Harmony owner (3 OnPlay methods already carry
+>   our discard prefixes); cross-phase session continuity via per-CardPlay stash/adopt of the
+>   execution-amount session (reaction-time amount sources read the rows' recorded results).
+>   Intended parity deltas (created-card-identical): owner-death mid-rows skips reactions;
+>   after-play-granted immediate rows first apply next play.
+> - **Zero-hit Vigor burn: FIXED.** Shared AttackContext now created lazily (holder in the
+>   AsyncLocal; `??=` just-in-time before the first landing hit) — all-fizzle plays never fire
+>   BeforeAttack/AfterAttack, never burn Vigor/Gigantification. Same lazy lease for the three
+>   repeat-damage helpers (plus dead-dealer break guards — phantom synthetic results).
+> - **Fatal joining the play's open context: FIXED.** Down-flowing ambient mask in
+>   RunForCardPlayTrigger (vanilla-verified: Feed/TheHunt/HandOfGreed/KnockoutBlow/Sunder kill
+>   bonuses run after the killing attack closes — Fatal damage is a separate attack). No
+>   restore needed: copy-on-write isolation works FOR us when masking down.
+> - **Discount skips co-op extra turns: FIXED** (CreatedTurnNumber per-player stamp — vanilla
+>   increments per-player TurnNumber for extra turns, RoundNumber stays). **Bonus destructive
+>   co-op bug found & fixed:** the turn-start pass DELETED other players' pending discounts
+>   every round (owner-mismatch Remove → skip). Star discounts: same-turn guard added, and the
+>   star-only early-return bug fixed (star schedules never ticked without energy entries).
 > - **#10 Gigantification one-stack-per-row: FIXED.** One shared AttackContext now spans all
 >   immediate damage rows of a card play (override AND created-card paths), so latched powers
 >   (Gigantification, Vigor) treat the play as a single attack like vanilla loop cards. Hard-won
