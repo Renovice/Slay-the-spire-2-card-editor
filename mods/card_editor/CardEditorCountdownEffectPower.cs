@@ -128,6 +128,14 @@ internal sealed class CardEditorCountdownEffectPower : PowerModel
 			return;
 		}
 
+		// Co-op extra turns end the turn for a subset of creatures only; countdowns on
+		// non-participants must not tick during someone else's extra turn.
+		Creature? owner = Owner;
+		if (owner != null && side == owner.Side && participants != null && !participants.Contains(owner))
+		{
+			return;
+		}
+
 		await TickOrFire(choiceContext);
 	}
 

@@ -2767,6 +2767,12 @@ public static class Hook_AfterCardPlayed_Patch
 
 	private static async Task RunExtraEffectsAfter(Task original, CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay)
 	{
+		// NOTE: Hook.AfterCardPlayed is an async method, so by the time this postfix runs its
+		// listener chain is already a HOT task — work composed here can only run strictly AFTER
+		// it (running anything "before" from a postfix would interleave with suspended listeners
+		// on the shared choice-context model stack). Moving override rows ahead of the after-play
+		// reactions therefore requires per-card OnPlay postfixes (appending to OnPlay's own task),
+		// like created cards already do — not a reorder here.
 		await original;
 		try
 		{
@@ -2839,7 +2845,7 @@ internal static class CardEditorPowerTurnBoundaryRunner
 
 	// Runs power-hosted EndOfTurnInHand/EndOfTurn entries PRE-FLUSH (from Hook.BeforeTurnEnd),
 	// where vanilla end-of-turn powers act — before the hand is discarded and before Burn-style cards.
-	public static async Task RunEndOfTurnTimedWithHookContexts(CombatState combatState, CombatSide side)
+	public static async Task RunEndOfTurnTimedWithHookContexts(CombatState combatState, CombatSide side, HashSet<Creature>? participants = null)
 	{
 		if (combatState == null || side == CombatSide.None)
 		{
@@ -2855,6 +2861,12 @@ internal static class CardEditorPowerTurnBoundaryRunner
 		foreach (Creature creature in SnapshotCreatures(combatState))
 		{
 			if (creature.Side != side)
+			{
+				continue;
+			}
+
+			// Co-op extra turns end the turn for a subset of creatures only.
+			if (participants != null && !participants.Contains(creature))
 			{
 				continue;
 			}
@@ -2884,7 +2896,8 @@ internal static class CardEditorPowerTurnBoundaryRunner
 	public static async Task RunForObservedSideWithHookContexts(
 		CombatState combatState,
 		CardExtraEffectTurnBoundary boundary,
-		CombatSide observedSide)
+		CombatSide observedSide,
+		HashSet<Creature>? participants = null)
 	{
 		if (combatState == null || observedSide == CombatSide.None)
 		{
@@ -2900,6 +2913,13 @@ internal static class CardEditorPowerTurnBoundaryRunner
 		foreach (Creature creature in SnapshotCreatures(combatState))
 		{
 			if (creature.GetPower<CardEditorExtraEffectPower>() == null)
+			{
+				continue;
+			}
+
+			// "Your turn" boundary entries require the OWNER's turn to actually be ending; during
+			// co-op extra turns only participants qualify. Observers of the other side still run.
+			if (participants != null && creature.Side == observedSide && !participants.Contains(creature))
 			{
 				continue;
 			}
@@ -3150,17 +3170,17 @@ public static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryPower_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.BeforeTurnEnd))]
 public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	public static void Postfix(CombatState combatState, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
 	{
 		if (__result == null)
 		{
 			return;
 		}
 
-		__result = RunAfter(__result, combatState, side);
+		__result = RunAfter(__result, combatState, side, participants);
 	}
 
-	private static async Task RunAfter(Task original, CombatState combatState, CombatSide side)
+	private static async Task RunAfter(Task original, CombatState combatState, CombatSide side, IEnumerable<Creature> participants)
 	{
 		await original;
 		try
@@ -3176,8 +3196,15 @@ public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 				return;
 			}
 
-			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.End, side);
-			await CardEditorPowerTurnBoundaryRunner.RunEndOfTurnTimedWithHookContexts(combatState, side);
+			// During co-op extra turns only the participants' turns end; their effects alone fire.
+			HashSet<Creature>? participantSet = participants?.Where(c => c != null).ToHashSet();
+			if (participantSet != null && participantSet.Count == 0)
+			{
+				participantSet = null;
+			}
+
+			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.End, side, participantSet);
+			await CardEditorPowerTurnBoundaryRunner.RunEndOfTurnTimedWithHookContexts(combatState, side, participantSet);
 		}
 		catch (Exception ex)
 		{

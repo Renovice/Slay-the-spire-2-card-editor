@@ -35,6 +35,12 @@ internal abstract class CardEditorTempStatTrackerPower<TUnderlying> : PowerModel
 		{
 			return;
 		}
+		// Co-op extra turns end the turn for a subset of creatures only; "this turn" effects on
+		// non-participants must not expire during someone else's extra turn.
+		if (participants != null && !participants.Contains(owner))
+		{
+			return;
+		}
 
 		int delta = Amount;
 		await PowerCmd.Remove(this);

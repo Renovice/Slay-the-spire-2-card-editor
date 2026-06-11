@@ -411,11 +411,9 @@ internal static class CardEditorDrawnGeneratedCostController
 		}
 		if (modifier == CardExtraEffectCostModifier.HalfCost)
 		{
-			int currentCost;
-			using (CardEditorEnergyCostVisibilityHelper.SuppressCardEditorCostHooksScoped())
-			{
-				currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.All);
-			}
+			// LOCAL cost only: vanilla applies local modifiers first and global hooks after, so
+			// baking a hook discount into the absolute half-stamp would deduct it twice.
+			int currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.Local);
 			if (currentCost < 0)
 			{
 				return;

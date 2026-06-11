@@ -1,5 +1,37 @@
 # Vanilla-Parity Audit (2026-06-10)
 
+> **STATUS UPDATE 2 (2026-06-11, deferred-items wave shipped):**
+> - **#10 Gigantification one-stack-per-row: FIXED.** One shared AttackContext now spans all
+>   immediate damage rows of a card play (override AND created-card paths), so latched powers
+>   (Gigantification, Vigor) treat the play as a single attack like vanilla loop cards. Hard-won
+>   implementation constraints: the AsyncLocal scope must be constructed INLINE in the caller's
+>   body (writes inside an awaited factory never flow back — first attempt was dead code), and
+>   closing is a two-step `Unregister()` + `await DisposeContextAsync()` performed in the caller's
+>   body right after the row loop (a restore inside an awaited dispose doesn't flow back either,
+>   and the scope must close BEFORE Fatal triggers / power adds so a "whenever you attack" power
+>   granted by the play can't fire off the play's own bracketing context). The powered-row count
+>   gates on `GetEffectiveResolvedTarget` + `UsesDamageResultAmountSource`, byte-identical to the
+>   execution paths. Two adversarial passes; verified vs vanilla AttackCommand/AttackContext.
+>   Accepted edges: a play whose counted rows all resolve to 0 at runtime still burns latched
+>   Vigor; nested borrowed-source Fatal rows can join the outer play's still-open context.
+> - **Half-cost aura snapshot: FIXED** (snapshots `GetWithModifiers(CostModifiers.Local)` — no
+>   vanilla-aura double-dip). **Co-op extra-turn filtering: FIXED** (participants guards in the
+>   extra-effect, countdown, and temp-stat-tracker powers; matches vanilla DoubleDamage/Burst).
+> - **Multi-evoke = same orb N times: FIXED** (Dualcast semantics via `OrbCmd.EvokeNext(dequeue:
+>   last)`; card text + eng/zhs/kor loc updated to "Evoke your rightmost Orb N times").
+> - **#13 override-row timing: STILL DEFERRED — attempt REVERTED.** Running rows "with the play"
+>   from a postfix on the AfterCardPlayed hook is unachievable: the hook task is already running
+>   (hot), so composed work can only run strictly after it; pre-pending interleaves with vanilla
+>   on the shared PlayerChoiceContext model stack. Correct future design: per-card postfixes on
+>   each overridden card's OnPlay (appending to OnPlay's own hot task works — that's how created
+>   cards behave). `RunExtraEffectsAfter` stays sequential post-original, documented in code.
+> - Also this wave: AfterAttack triggers skip hit-less commands; echo-damage rows no longer
+>   double-dip Strength (result-derived amounts run Unpowered); RandomEnemy re-roll gained the
+>   vanilla PetOwner RNG fallback; discount round-guard edge documented. Both verification passes
+>   logged in `FINDINGS.md`.
+> - Still deferred: moved-pile triggers during reshuffles; in-hand grid selector for
+>   self-inclusive discards; scheduled (non-power-hosted) end-of-turn effects post-flush.
+
 > **STATUS UPDATE (same day, parity fix wave shipped):** Tier 1 items 1-12 and 14-20 FIXED, plus
 > Tier 2: start-of-turn asymmetry partially (end-of-turn side fully fixed; start-of-turn left as
 > designed), RNG streams, cleanse-by-type, self-debuff tick consistency, Vulnerable persistence,

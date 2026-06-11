@@ -210,11 +210,10 @@ internal static class CardEditorCreatedCardsCostController
 			return false;
 		}
 
-		int currentCost;
-		using (CardEditorEnergyCostVisibilityHelper.SuppressCardEditorCostHooksScoped())
-		{
-			currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.All);
-		}
+		// Snapshot the LOCAL cost only: vanilla applies local modifiers first and global hooks
+		// after, so baking a hook discount (Curious-style aura) into an absolute local modifier
+		// would deduct it twice once the hook re-applies on top.
+		int currentCost = card.EnergyCost.GetWithModifiers(CostModifiers.Local);
 		if (currentCost < 0)
 		{
 			return false;
@@ -671,7 +670,10 @@ internal static class CardEditorCreatedCardsCostController
 
 				// Skip entries created earlier in this same round (opening-draw stamps run before
 				// AfterPlayerTurnStart): consuming them now double-applies on turn one and ends
-				// the span a turn early.
+				// the span a turn early. Known edge: co-op extra turns reuse the round number, so
+				// an entry created on a normal turn also skips a same-round EXTRA turn's start —
+				// the discount then resumes next round. Accepted as the lesser evil vs the
+				// turn-one double-apply this guard exists to prevent.
 				if (pending.CreatedRoundNumber == combatState.RoundNumber)
 				{
 					continue;

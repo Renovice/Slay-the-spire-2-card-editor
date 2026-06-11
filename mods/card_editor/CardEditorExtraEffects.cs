@@ -12373,18 +12373,34 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 	}
 
 
-	public static async Task RunAfterCardPlayed(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay)
+	// How a Hook.AfterCardPlayed invocation should be split around the vanilla listeners.
+	internal enum CardPlayHookPhase
+	{
+		// Everything in one pass (legacy behavior).
+		Combined = 0,
+		// Pre-original: ONLY the plain Immediate OnPlay rows, so an overridden vanilla card's
+		// added rows resolve as part of its own play — before "whenever you play a card"
+		// reactions (Monologue/Tender) — like printed card text would.
+		ImmediateRowsOnly = 1,
+		// Post-original: everything else (power entries, Fatal, scheduling, cleanup).
+		AfterPlayReactions = 2,
+	}
+
+	public static async Task RunAfterCardPlayed(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay, CardPlayHookPhase phase = CardPlayHookPhase.Combined)
 	{
 		CardModel card = cardPlay.Card;
 		if (card == null)
 		{
 			return;
 		}
+		bool immediateRowsPhase = phase != CardPlayHookPhase.AfterPlayReactions;
+		bool reactionsPhase = phase != CardPlayHookPhase.ImmediateRowsOnly;
 		using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
 		using IDisposable __ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
 		List<CardExtraEffect>? triggeredCardCostsLessToApplyAfter = null;
 		List<CardExtraEffect>? deferredSelfScaling = null;
 		bool isCreatedCard = card is CardEditorCreatedCardBase;
+		SharedAttackContextScope? sharedAttack = null;
 		try
 		{
 			IReadOnlyList<CardExtraEffect> effects = GetRuntimeEffectsIncludingBorrowedSources(combatState, card);
@@ -12394,6 +12410,15 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			}
 
 			HashSet<string> autoActionPayloadIds = BuildAutoActionPayloadIdSet(effects);
+			// Overridden vanilla cards share one attack context across their damage rows like
+			// created cards do. The scope MUST be constructed inline here (not inside the async
+			// factory) so the AsyncLocal ambient value flows into the awaited row execution.
+			AttackContext? sharedAttackContext = immediateRowsPhase && !isCreatedCard
+				? await CreateSharedAttackContextIfNeeded(combatState, choiceContext, cardPlay, effects, autoActionPayloadIds)
+				: null;
+			sharedAttack = sharedAttackContext != null
+				? new SharedAttackContextScope(cardPlay, sharedAttackContext)
+				: null;
 			List<CardExtraEffect>? powerEffectsToAdd = null;
 			foreach (CardExtraEffect effect in effects)
 			{
@@ -12406,7 +12431,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 				if (IsPowerEffect(effect))
 				{
-					(powerEffectsToAdd ??= new List<CardExtraEffect>()).Add(effect);
+					if (reactionsPhase)
+					{
+						(powerEffectsToAdd ??= new List<CardExtraEffect>()).Add(effect);
+					}
 					continue;
 				}
 
@@ -12423,7 +12451,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 						// Running self-scaling again in the after-play hook applies the delta twice.
 						continue;
 					}
-					(deferredSelfScaling ??= new List<CardExtraEffect>()).Add(effect);
+					if (reactionsPhase)
+					{
+						(deferredSelfScaling ??= new List<CardExtraEffect>()).Add(effect);
+					}
 					continue;
 				}
 
@@ -12431,7 +12462,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				// AfterCardPlayed powers (e.g. "Whenever you play a card, gain Vigor") trigger.
 				if (isCreatedCard)
 				{
-					if (effect.Kind is (CardExtraEffectKind.CardCostsLess or CardExtraEffectKind.CardStarCostsLess) && !effect.GrantToCard)
+					if (reactionsPhase
+						&& effect.Kind is (CardExtraEffectKind.CardCostsLess or CardExtraEffectKind.CardStarCostsLess) && !effect.GrantToCard)
 					{
 						if (IsTriggeredCardCostsLessDefinition(effect))
 						{
@@ -12443,7 +12475,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 				if (effect.Kind is (CardExtraEffectKind.CardCostsLess or CardExtraEffectKind.CardStarCostsLess) && !effect.GrantToCard)
 				{
-					if (IsTriggeredCardCostsLessDefinition(effect))
+					if (reactionsPhase && IsTriggeredCardCostsLessDefinition(effect))
 					{
 						(triggeredCardCostsLessToApplyAfter ??= new List<CardExtraEffect>()).Add(effect);
 					}
@@ -12452,9 +12484,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 				if (effect.Timing == CardExtraEffectTiming.Immediate)
 				{
-					await ExecuteEffect(combatState, choiceContext, cardPlay, effect);
+					if (immediateRowsPhase)
+					{
+						await ExecuteEffect(combatState, choiceContext, cardPlay, effect);
+					}
 				}
-				else
+				else if (reactionsPhase)
 				{
 					Creature? lockedTarget = null;
 					Player? owner = cardPlay.Card.Owner;
@@ -12464,6 +12499,23 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 					}
 					CardEditorExtraEffectScheduler.Schedule(combatState, cardPlay, effect, lockedTarget);
 				}
+			}
+
+			// Close the play's attack BEFORE the reactions below: Fatal-trigger rows must not
+			// join the play's own context, and an AfterAttack-trigger power granted by this very
+			// play must not fire off the play's bracketing context when it disposes. Unregister
+			// runs here in THIS method's body — a restore inside the awaited dispose would never
+			// flow back up, leaving a stale disposed context visible to the Fatal rows.
+			if (sharedAttack != null)
+			{
+				sharedAttack.Unregister();
+				await sharedAttack.DisposeContextAsync();
+				sharedAttack = null;
+			}
+
+			if (!reactionsPhase)
+			{
+				return;
 			}
 
 			bool didTriggerFatal = DidCardPlayTriggerFatal(cardPlay);
@@ -12524,30 +12576,44 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 		finally
 		{
-			if (cardPlay.IsLastInSeries)
+			// Exception path only: the normal flow closes (and nulls) the scope right after the
+			// row loop above.
+			if (sharedAttack != null)
 			{
-				ClearManualTarget(card);
-				CardEditorTemporaryExtraEffectController.OnAfterCardPlayed(combatState, card);
-				CardEditorTemporaryKeywordController.OnAfterCardPlayed(combatState, card);
-				CardEditorTemporaryEnchantmentController.OnAfterCardPlayed(combatState, card);
-				CardEditorTemporaryReplayController.OnAfterCardPlayed(combatState, card);
-				CardEditorTemporarySelfScalingController.OnAfterCardPlayed(combatState, card);
-				CardEditorMatchingCardAuraController.OnAfterCardPlayed(combatState, card);
-				CardEditorCardTypeCostAuras.OnAfterCardPlayed(combatState, card);
-				RefreshHandCardVisuals(card.Owner);
-				await RunStatefulTransformPostCardPlayed(combatState, cardPlay);
-				await EvaluateStatefulTransformConditionStops(combatState);
-				await EvaluateDynamicTransforms(combatState, choiceContext, card.Owner);
-				if (triggeredCardCostsLessToApplyAfter != null)
-				{
-					foreach (CardExtraEffect effect in triggeredCardCostsLessToApplyAfter)
-					{
-						ApplyTriggeredCardCostsLess(combatState, card, effect, cardPlay);
-					}
-				}
+				sharedAttack.Unregister();
+				await sharedAttack.DisposeContextAsync();
+				sharedAttack = null;
 			}
 
-			RememberLastPlayedCard(combatState, card);
+			// Expiry/bookkeeping belongs to the post-play phase; the pre-play row phase must not
+			// expire "until played" grants or remember the play before the vanilla listeners ran.
+			if (reactionsPhase)
+			{
+				if (cardPlay.IsLastInSeries)
+				{
+					ClearManualTarget(card);
+					CardEditorTemporaryExtraEffectController.OnAfterCardPlayed(combatState, card);
+					CardEditorTemporaryKeywordController.OnAfterCardPlayed(combatState, card);
+					CardEditorTemporaryEnchantmentController.OnAfterCardPlayed(combatState, card);
+					CardEditorTemporaryReplayController.OnAfterCardPlayed(combatState, card);
+					CardEditorTemporarySelfScalingController.OnAfterCardPlayed(combatState, card);
+					CardEditorMatchingCardAuraController.OnAfterCardPlayed(combatState, card);
+					CardEditorCardTypeCostAuras.OnAfterCardPlayed(combatState, card);
+					RefreshHandCardVisuals(card.Owner);
+					await RunStatefulTransformPostCardPlayed(combatState, cardPlay);
+					await EvaluateStatefulTransformConditionStops(combatState);
+					await EvaluateDynamicTransforms(combatState, choiceContext, card.Owner);
+					if (triggeredCardCostsLessToApplyAfter != null)
+					{
+						foreach (CardExtraEffect effect in triggeredCardCostsLessToApplyAfter)
+						{
+							ApplyTriggeredCardCostsLess(combatState, card, effect, cardPlay);
+						}
+					}
+				}
+
+				RememberLastPlayedCard(combatState, card);
+			}
 		}
 	}
 
@@ -12588,7 +12654,15 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<CardExtraEffect>? deferredSelfScaling = null;
 		using IDisposable _ = CardEditorEffectExecutionAmountContext.PushSessionScoped();
 		HashSet<string> autoActionPayloadIds = BuildAutoActionPayloadIdSet(effects);
-		if (ownerCreature != null)
+		// One attack context for all damage rows: latched powers (Gigantification, Vigor) then
+		// treat the whole play as a single attack, which also retires the Vigor restore hack.
+		// The scope MUST be constructed inline here (not inside the async factory) so the
+		// AsyncLocal ambient value flows into the awaited row execution below.
+		AttackContext? sharedAttackContext = await CreateSharedAttackContextIfNeeded(combatState, choiceContext, cardPlay, effects, autoActionPayloadIds);
+		SharedAttackContextScope? sharedAttack = sharedAttackContext != null
+			? new SharedAttackContextScope(cardPlay, sharedAttackContext)
+			: null;
+		if (ownerCreature != null && sharedAttack == null)
 		{
 			remainingImmediateDamageEffects = effects.Count(e =>
 				e != null
@@ -12606,53 +12680,70 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			}
 		}
 
-		foreach (CardExtraEffect effect in effects)
+		try
 		{
-			if (ShouldSkipDirectEffect(effect, autoActionPayloadIds)
-				|| IsPowerEffect(effect)
-				|| CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(card, effect)
-				|| !IsValidEffectAmount(effect.Kind, effect.Amount)
-				|| effect.Trigger != CardExtraEffectTrigger.OnPlay)
+			foreach (CardExtraEffect effect in effects)
 			{
-				continue;
-			}
-
-			// Triggered CardCostsLess definitions intentionally apply after the play finishes.
-			if (effect.Kind is (CardExtraEffectKind.CardCostsLess or CardExtraEffectKind.CardStarCostsLess) && !effect.GrantToCard)
-			{
-				continue;
-			}
-
-			if (IsSelfScalingKind(effect.Kind))
-			{
-				(deferredSelfScaling ??= new List<CardExtraEffect>()).Add(effect);
-				continue;
-			}
-
-			if (effect.Timing == CardExtraEffectTiming.Immediate)
-			{
-				await ExecuteEffect(combatState, choiceContext, cardPlay, effect);
-
-				if (vigor != null
-					&& effect.Kind == CardExtraEffectKind.DealDamage
-					&& effect.Timing == CardExtraEffectTiming.Immediate)
+				if (ShouldSkipDirectEffect(effect, autoActionPayloadIds)
+					|| IsPowerEffect(effect)
+					|| CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(card, effect)
+					|| !IsValidEffectAmount(effect.Kind, effect.Amount)
+					|| effect.Trigger != CardExtraEffectTrigger.OnPlay)
 				{
-					remainingImmediateDamageEffects = Math.Max(0, remainingImmediateDamageEffects - 1);
-					if (remainingImmediateDamageEffects > 0)
+					continue;
+				}
+
+				// Triggered CardCostsLess definitions intentionally apply after the play finishes.
+				if (effect.Kind is (CardExtraEffectKind.CardCostsLess or CardExtraEffectKind.CardStarCostsLess) && !effect.GrantToCard)
+				{
+					continue;
+				}
+
+				if (IsSelfScalingKind(effect.Kind))
+				{
+					(deferredSelfScaling ??= new List<CardExtraEffect>()).Add(effect);
+					continue;
+				}
+
+				if (effect.Timing == CardExtraEffectTiming.Immediate)
+				{
+					await ExecuteEffect(combatState, choiceContext, cardPlay, effect);
+
+					if (vigor != null
+						&& effect.Kind == CardExtraEffectKind.DealDamage
+						&& effect.Timing == CardExtraEffectTiming.Immediate)
 					{
-						await vigor.RestoreIfConsumed();
+						remainingImmediateDamageEffects = Math.Max(0, remainingImmediateDamageEffects - 1);
+						if (remainingImmediateDamageEffects > 0)
+						{
+							await vigor.RestoreIfConsumed();
+						}
 					}
 				}
-			}
-			else
-			{
-				Creature? lockedTarget = null;
-				Player? owner = cardPlay.Card.Owner;
-				if (effect.Target == CardExtraEffectTarget.Target && owner?.Creature != null)
+				else
 				{
-					lockedTarget = ResolveSingleTarget(combatState, owner.Creature, cardPlay);
+					Creature? lockedTarget = null;
+					Player? owner = cardPlay.Card.Owner;
+					if (effect.Target == CardExtraEffectTarget.Target && owner?.Creature != null)
+					{
+						lockedTarget = ResolveSingleTarget(combatState, owner.Creature, cardPlay);
+					}
+					CardEditorExtraEffectScheduler.Schedule(combatState, cardPlay, effect, lockedTarget);
 				}
-				CardEditorExtraEffectScheduler.Schedule(combatState, cardPlay, effect, lockedTarget);
+			}
+		}
+		finally
+		{
+			// Close the play's attack BEFORE deferred self-scaling and the Fatal trigger below:
+			// the play's single Hook.AfterAttack belongs at the end of its damage rows, and
+			// Fatal-trigger damage must not join the play's own (by then closing) context.
+			// Unregister runs here in THIS method's body — a restore inside the awaited dispose
+			// would never flow back up, leaving a stale disposed context visible below.
+			if (sharedAttack != null)
+			{
+				sharedAttack.Unregister();
+				await sharedAttack.DisposeContextAsync();
+				sharedAttack = null;
 			}
 		}
 
@@ -12695,6 +12786,236 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 
 		await RunFatalForCardPlayNow(combatState, choiceContext, cardPlay);
+	}
+
+	// Ambient AttackContext spanning all immediate damage rows of ONE card play, so latched
+	// "next attack" powers (Gigantification, Vigor) treat the whole play as a single attack —
+	// like vanilla loop cards (EchoingSlash) — instead of latching and paying once per row.
+	// Keyed by CardPlay so nested auto-plays never join an outer play's context.
+	private static readonly AsyncLocal<(CardPlay Play, AttackContext Context)?> _sharedAttackContext = new();
+
+	private static AttackContext? GetSharedAttackContext(CardPlay? cardPlay)
+	{
+		(CardPlay Play, AttackContext Context)? current = _sharedAttackContext.Value;
+		return cardPlay != null && current != null && ReferenceEquals(current.Value.Play, cardPlay)
+			? current.Value.Context
+			: null;
+	}
+
+	// Returns the context WITHOUT registering it: AsyncLocal writes made inside an awaited async
+	// method never flow back to the caller (.NET ExecutionContext copy-on-write), so the caller
+	// must construct SharedAttackContextScope INLINE in its own body for the ambient value to be
+	// visible to the row execution it awaits afterwards.
+	private static async Task<AttackContext?> CreateSharedAttackContextIfNeeded(
+		CombatState combatState,
+		PlayerChoiceContext choiceContext,
+		CardPlay cardPlay,
+		IReadOnlyList<CardExtraEffect> effects,
+		HashSet<string> autoActionPayloadIds)
+	{
+		CardModel? card = cardPlay?.Card;
+		if (combatState == null || choiceContext == null || card == null || effects == null)
+		{
+			return null;
+		}
+
+		// Count only rows that will execute POWERED: opening a (powered) context for a play whose
+		// damage rows are all Unpowered (Self-damage, damage-result echoes) would latch and burn
+		// Vigor/Gigantification for zero benefit. The Self check must use the EFFECTIVE target —
+		// on a TargetType.Self card a row authored as "Target" resolves to Self and runs Unpowered.
+		int poweredImmediateDamageRows = effects.Count(e =>
+			e != null
+			&& !ShouldSkipDirectEffect(e, autoActionPayloadIds)
+			&& !IsPowerEffect(e)
+			&& !CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(card, e)
+			&& e.Trigger == CardExtraEffectTrigger.OnPlay
+			&& e.Timing == CardExtraEffectTiming.Immediate
+			&& e.Kind == CardExtraEffectKind.DealDamage
+			&& !e.GrantToCard
+			&& GetEffectiveResolvedTarget(cardPlay, e.Target) != CardExtraEffectTarget.Self
+			&& !UsesDamageResultAmountSource(e)
+			&& IsValidEffectAmount(e.Kind, e.Amount));
+		if (poweredImmediateDamageRows < 2)
+		{
+			return null;
+		}
+
+		return await AttackCommand.CreateContextAsync(combatState, choiceContext, card);
+	}
+
+	// NOT IAsyncDisposable on purpose: closing is a two-step the CALLER must perform inline in
+	// its own method body — Unregister() first (an AsyncLocal restore made inside an awaited
+	// DisposeAsync would never flow back up, leaving a stale, already-disposed context visible
+	// to whatever the caller runs next, e.g. Fatal-trigger damage rows), THEN await
+	// DisposeContextAsync() to fire the play's single Hook.AfterAttack.
+	private sealed class SharedAttackContextScope
+	{
+		private readonly (CardPlay Play, AttackContext Context)? _previous;
+		private readonly AttackContext _context;
+
+		public SharedAttackContextScope(CardPlay cardPlay, AttackContext context)
+		{
+			_previous = _sharedAttackContext.Value;
+			_context = context;
+			_sharedAttackContext.Value = (cardPlay, context);
+		}
+
+		public void Unregister()
+		{
+			_sharedAttackContext.Value = _previous;
+		}
+
+		public ValueTask DisposeContextAsync() => _context.DisposeAsync();
+	}
+
+	// Reuses the play's shared attack context when one is open; otherwise owns a fresh one.
+	private readonly struct AttackContextLease : IAsyncDisposable
+	{
+		private readonly AttackContext _context;
+		private readonly bool _owned;
+
+		public AttackContextLease(AttackContext context, bool owned)
+		{
+			_context = context;
+			_owned = owned;
+		}
+
+		public AttackContext Context => _context;
+
+		public async ValueTask DisposeAsync()
+		{
+			if (_owned)
+			{
+				await _context.DisposeAsync();
+			}
+		}
+	}
+
+	private static async Task<AttackContextLease> LeaseAttackContext(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay)
+	{
+		AttackContext? ambient = GetSharedAttackContext(cardPlay);
+		if (ambient != null)
+		{
+			return new AttackContextLease(ambient, owned: false);
+		}
+
+		return new AttackContextLease(await AttackCommand.CreateContextAsync(combatState, choiceContext, cardPlay.Card), owned: true);
+	}
+
+	// Executes one DealDamage row inside the play's shared attack context, replicating the
+	// AttackCommand semantics (per-hit target re-roll / living re-filter) via CreatureCmd.Damage.
+	private static async Task ExecuteDamageRowInSharedContext(
+		CombatState combatState,
+		PlayerChoiceContext choiceContext,
+		CardPlay cardPlay,
+		CardExtraEffect effect,
+		Creature ownerCreature,
+		int amount,
+		int repeats,
+		CardExtraEffectTarget resolvedTarget,
+		bool preserveSelfHp,
+		AttackContext attackContext)
+	{
+		ValueProp damageProps = ValueProp.Move;
+		if (UsesDamageResultAmountSource(effect) || resolvedTarget == CardExtraEffectTarget.Self)
+		{
+			damageProps |= ValueProp.Unpowered;
+		}
+
+		int safeRepeats = Math.Clamp(repeats <= 0 ? 1 : repeats, 1, 99);
+
+		// Single targets resolve ONCE (like the AttackCommand path this replaces): re-resolving
+		// per repeat would consume a CombatTargets roll per hit and redirect to random enemies
+		// when the locked target dies, instead of simply stopping.
+		Creature? lockedSingleTarget = null;
+		bool usesSingleTarget = resolvedTarget is not (CardExtraEffectTarget.AllEnemies
+			or CardExtraEffectTarget.RandomEnemy
+			or CardExtraEffectTarget.Self);
+		if (usesSingleTarget)
+		{
+			Creature? single = ResolveSingleTarget(combatState, ownerCreature, cardPlay);
+			if (single == null || (preserveSelfHp && ReferenceEquals(single, ownerCreature)))
+			{
+				return;
+			}
+
+			lockedSingleTarget = single;
+		}
+
+		List<DamageResult> allResults = new List<DamageResult>();
+		for (int repeatIndex = 0; repeatIndex < safeRepeats; repeatIndex++)
+		{
+			if (!ownerCreature.IsAlive)
+			{
+				break;
+			}
+
+			if (usesSingleTarget && (lockedSingleTarget == null || !lockedSingleTarget.IsAlive))
+			{
+				break;
+			}
+
+			List<Creature> targets;
+			switch (resolvedTarget)
+			{
+				case CardExtraEffectTarget.AllEnemies:
+					targets = ResolveTargets(combatState, ownerCreature, cardPlay, CardExtraEffectTarget.AllEnemies)
+						.Where(c => c != null && c.IsAlive)
+						.ToList();
+					break;
+				case CardExtraEffectTarget.RandomEnemy:
+				{
+					// Vanilla re-rolls the random target per hit from the CombatTargets stream.
+					// PetOwner fallback matches AttackCommand: pet attackers (Osty) have no Player.
+					List<Creature> living = ResolveTargets(combatState, ownerCreature, cardPlay, CardExtraEffectTarget.AllEnemies)
+						.Where(c => c != null && c.IsAlive)
+						.ToList();
+					Creature? rolled = living.Count > 0
+						? (ownerCreature.Player ?? ownerCreature.PetOwner)?.RunState?.Rng?.CombatTargets?.NextItem(living)
+						: null;
+					targets = rolled != null ? new List<Creature> { rolled } : new List<Creature>();
+					break;
+				}
+				case CardExtraEffectTarget.Self:
+					targets = preserveSelfHp ? new List<Creature>() : new List<Creature> { ownerCreature };
+					break;
+				default:
+					targets = new List<Creature> { lockedSingleTarget! };
+					break;
+			}
+
+			if (targets.Count == 0)
+			{
+				continue;
+			}
+
+			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card);
+			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
+			if (results.Count == 0)
+			{
+				continue;
+			}
+
+			attackContext.AddHit(results);
+			allResults.AddRange(results);
+		}
+
+		if (allResults.Count > 0)
+		{
+			CardEditorEffectExecutionAmountContext.ReportCurrentDamageResults(allResults);
+			int totalDamage = ClampLongToInt(allResults.Sum(r => (long)Math.Max(0, r.TotalDamage)));
+			int blockedDamage = ClampLongToInt(allResults.Sum(r => (long)Math.Max(0, r.BlockedDamage)));
+			int overkillDamage = ClampLongToInt(allResults.Sum(r => (long)Math.Max(0, r.OverkillDamage)));
+			int damageInstances = allResults.Count(r => r.TotalDamage > 0);
+			CardEditorEffectExecutionAmountContext.ReportCurrentDamageTotals(totalDamage, damageInstances, blockedDamage, overkillDamage);
+			await RunFatalImmediatelyForDamageResultsIfNeeded(
+				combatState,
+				choiceContext,
+				cardPlay,
+				GetRuntimeEffectsIncludingBorrowedSources(combatState, cardPlay.Card),
+				ownerCreature,
+				allResults);
+		}
 	}
 
 	private sealed class VigorPreserver
@@ -19855,13 +20176,18 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 
 	private static string FormatEvokeOrbs(int amount, string amountText)
 	{
-		// Vanilla STS2 wording (Dualcast/Multi-Cast): "Evoke your rightmost Orb" — "next" is STS1.
+		// Vanilla STS2 wording (Dualcast/Multi-Cast): "Evoke your rightmost Orb [N times]".
 		if (amount == 1)
 		{
 			return CardEditorLoc.T("cardText.evoke.one", "[gold]Evoke[/gold] your rightmost Orb.");
 		}
 
-		return CardEditorLoc.F("cardText.evoke.many", $"[gold]Evoke[/gold] {amountText} Orbs.", ("Amount", amountText));
+		if (amount == 2)
+		{
+			return CardEditorLoc.T("cardText.evoke.twice", "[gold]Evoke[/gold] your rightmost Orb twice.");
+		}
+
+		return CardEditorLoc.F("cardText.evoke.many", $"[gold]Evoke[/gold] your rightmost Orb {amountText} times.", ("Amount", amountText));
 	}
 
 	private static string FormatOrbAction(CardExtraEffect effect, int amount, string amountText)
@@ -26338,7 +26664,16 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		int executed = 0;
 		bool preserveSelfHp = CardHasRuntimeResourceConsumptionMode(cardPlay.Card, CardExtraEffectResourceConsumptionMode.SelfHpAndSelfDamage);
 
-		await using AttackContext attackContext = await AttackCommand.CreateContextAsync(combatState, choiceContext, cardPlay.Card);
+		// Result-derived amounts already include Strength/Vigor from the source hit — running
+		// them powered double-dips. Self-damage never benefits from the owner's powers either.
+		ValueProp damageProps = ValueProp.Move;
+		if (UsesDamageResultAmountSource(effect) || GetEffectiveResolvedTarget(cardPlay, effect.Target) == CardExtraEffectTarget.Self)
+		{
+			damageProps |= ValueProp.Unpowered;
+		}
+
+		await using AttackContextLease attackContextLease = await LeaseAttackContext(combatState, choiceContext, cardPlay);
+		AttackContext attackContext = attackContextLease.Context;
 		while (pending > 0 && executed < 99)
 		{
 			pending--;
@@ -26356,7 +26691,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				continue;
 			}
 
-			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, ValueProp.Move, ownerCreature, cardPlay.Card);
+			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card);
 			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 			if (results.Count <= 0)
 			{
@@ -26407,7 +26742,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			? ValueProp.Unpowered | ValueProp.Move
 			: ValueProp.Move;
 
-		await using AttackContext attackContext = await AttackCommand.CreateContextAsync(combatState, choiceContext, cardPlay.Card);
+		await using AttackContextLease attackContextLease = await LeaseAttackContext(combatState, choiceContext, cardPlay);
+		AttackContext attackContext = attackContextLease.Context;
 		for (int repeatIndex = 0; repeatIndex < safeRepeats; repeatIndex++)
 		{
 			List<Creature> targets = ResolveTargets(combatState, ownerCreature, cardPlay, CardExtraEffectTarget.OtherEnemies)
@@ -26476,7 +26812,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			? ValueProp.Unpowered | ValueProp.Move
 			: ValueProp.Move;
 
-		await using AttackContext attackContext = await AttackCommand.CreateContextAsync(combatState, choiceContext, cardPlay.Card);
+		await using AttackContextLease attackContextLease = await LeaseAttackContext(combatState, choiceContext, cardPlay);
+		AttackContext attackContext = attackContextLease.Context;
 		for (int repeatIndex = 0; repeatIndex < safeRepeats; repeatIndex++)
 		{
 			List<Creature> targets = ResolveTargets(combatState, ownerCreature, cardPlay, targetMode)
@@ -26799,6 +27136,15 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					repeats,
 					triggerEventAmount,
 					preserveSelfHp);
+				return;
+			}
+
+			AttackContext? sharedAttackContext = GetSharedAttackContext(cardPlay);
+			if (sharedAttackContext != null)
+			{
+				// Multi-damage-row plays share ONE attack context so latched powers
+				// (Gigantification, Vigor) treat the whole card play as a single attack.
+				await ExecuteDamageRowInSharedContext(combatState, choiceContext, cardPlay, effect, ownerCreature, amount, repeats, resolvedDamageTarget, preserveSelfHp, sharedAttackContext);
 				return;
 			}
 
@@ -27470,9 +27816,11 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.EvokeOrbs:
 			{
+				// Vanilla multi-evoke (Dualcast/Multi-Cast/Quadcast) evokes the SAME rightmost orb
+				// N times, dequeuing only on the final evoke — a lone Dark orb pays out N times.
 				for (int i = 0; i < amount; i++)
 				{
-					await OrbCmd.EvokeNext(choiceContext, owner);
+					await OrbCmd.EvokeNext(choiceContext, owner, dequeue: i == amount - 1);
 				}
 				break;
 			}

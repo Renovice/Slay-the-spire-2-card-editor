@@ -1516,6 +1516,14 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			if (choiceContext != null)
 			{
 				List<DamageResult> attackResults = CardEditorExtraEffects.FlattenDamageResults(command.GetResultsCompat());
+				// A command with no hits (bracketing context of an all-fizzle play, no living
+				// targets) is not an attack the player saw happen. Vanilla is mixed here
+				// (PainfulStabs/Suck gate on results; Osty's BoneFlute fires on whiffs) — for
+				// these damage-reactive triggers, gating on results is the sane reading.
+				if (attackResults.Count == 0)
+				{
+					return;
+				}
 				Creature? attackTarget = attackResults.FirstOrDefault()?.Receiver;
 				using IDisposable triggerAttackResults = CardEditorEffectExecutionAmountContext.PushTriggerAttackDamageResultsScoped(attackResults);
 				await RunLifecycleTrigger(
@@ -1621,6 +1629,13 @@ public override async Task AfterSideTurnEnd(PlayerChoiceContext choiceContext, C
 
 		if (side == owner.Side)
 		{
+			// Co-op extra turns end the turn for a subset of creatures; the owner must be one of
+			// them for its "your turn end" bookkeeping (boundary entries, turn counters) to advance.
+			if (participants != null && !participants.Contains(owner))
+			{
+				return;
+			}
+
 			await RunTurnBoundary(choiceContext, CardExtraEffectTurnBoundary.EndAfterDiscard, CardExtraEffectTurnBoundarySide.YourTurn);
 			// EndOfTurnInHand/EndOfTurn entries run PRE-FLUSH from the Hook.BeforeTurnEnd patch
 			// (RunEndOfTurnTimed): vanilla end-of-turn powers act before the hand is discarded

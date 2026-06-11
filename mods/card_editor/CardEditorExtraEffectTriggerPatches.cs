@@ -316,6 +316,14 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 		try
 		{
 			List<DamageResult> attackResults = CardEditorExtraEffects.FlattenDamageResults(command.GetResultsCompat());
+			// An attack command that produced no hits (e.g. the bracketing context of a play whose
+			// rows all fizzled, or an attack with no living targets) is not an attack the player
+			// saw happen. Vanilla is mixed here (PainfulStabs/Suck gate on results; Osty's
+			// BoneFlute fires on whiffs) — for damage-reactive triggers, gating is the sane read.
+			if (attackResults.Count == 0)
+			{
+				return;
+			}
 			Creature? attackTarget = attackResults.FirstOrDefault()?.Receiver;
 			using IDisposable triggerAttackResults = CardEditorEffectExecutionAmountContext.PushTriggerAttackDamageResultsScoped(attackResults);
 			foreach (Player player in combatState.Players)
@@ -410,7 +418,7 @@ internal static class Hook_AfterCardEnteredCombat_CardEditorExtraEffects_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.BeforeTurnEnd))]
 internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	public static void Postfix(CombatState combatState, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
 	{
 		if (__result == null || combatState == null || side != CombatSide.Player)
 		{
@@ -420,10 +428,26 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 		{
 			return;
 		}
-		__result = RunAfter(__result, combatState);
+		__result = RunAfter(__result, combatState, participants);
 	}
 
-	private static async Task RunAfter(Task original, CombatState combatState)
+	// During co-op extra turns vanilla ends the turn only for a SUBSET of players (participants);
+	// firing end-of-turn triggers for everyone would re-run other players' effects each extra turn.
+	internal static HashSet<Player>? BuildParticipatingPlayers(IEnumerable<Creature>? participants)
+	{
+		if (participants == null)
+		{
+			return null;
+		}
+
+		HashSet<Player> players = participants
+			.Where(creature => creature?.Player != null)
+			.Select(creature => creature.Player!)
+			.ToHashSet();
+		return players.Count > 0 ? players : null;
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState, IEnumerable<Creature> participants)
 	{
 		await original;
 
@@ -433,12 +457,19 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 			return;
 		}
 
+		HashSet<Player>? participating = BuildParticipatingPlayers(participants);
+
 		try
 		{
 			CardEditorEndOfTurnInHandTracker.Clear(combatState);
 
 			foreach (Player player in combatState.Players)
 			{
+				if (participating != null && player != null && !participating.Contains(player))
+				{
+					continue;
+				}
+
 				CardPile? hand = player?.PlayerCombatState?.Hand;
 				if (hand == null || hand.Cards.Count == 0)
 				{
@@ -470,7 +501,7 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 			// Turn-boundary triggers for cards in piles other than hand: end of (player's) turn
 			foreach (Player player in combatState.Players)
 			{
-				if (player == null)
+				if (player == null || (participating != null && !participating.Contains(player)))
 				{
 					continue;
 				}
@@ -514,7 +545,7 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 			// AutoPlaySelfFromPile / AutoDrawSelfFromPile: end of (player's) turn
 			foreach (Player player in combatState.Players)
 			{
-				if (player == null)
+				if (player == null || (participating != null && !participating.Contains(player)))
 				{
 					continue;
 				}
