@@ -141,6 +141,10 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		foreach (CardExtraEffect effect in effects)
 		{
 			CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+			// Auto-action rows are stored in their unified-kind form so the loop-guard tokens,
+			// the execution-card mapping and the ExecuteEffect dispatch all share one shape
+			// (legacy kinds rewrite Kind AND Amount — a late normalization would split keys).
+			normalizedEffect = CardEditorExtraEffects.NormalizeSelfPileAutoEffect(normalizedEffect) ?? normalizedEffect;
 			if (normalizedEffect == null
 				|| !normalizedEffect.AsPower
 				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind))
@@ -165,7 +169,15 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			PowerEffectEntry? existingEntry = FindMergeTarget(sourceCard, stored, selectedCardsByEffectId);
 			if (existingEntry != null)
 			{
-				MergeIntoEntry(existingEntry, stored);
+				// Auto-action reactions don't stack: replaying the host refreshes the standing
+				// "whenever X, act on this card" entry instead of multiplying activations.
+				// Stacking compounds — with Allow Self Trigger on, every auto-play re-installs
+				// the row (+1 stack), and runCount = stackCount doubles the stack per trigger
+				// event (exponential growth the per-activation chain guard cannot see).
+				if (!CardEditorExtraEffects.IsSelfPileAutoEffectKind(stored.Kind))
+				{
+					MergeIntoEntry(existingEntry, stored);
+				}
 				continue;
 			}
 
@@ -201,6 +213,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		for (int i = 0; i < effects.Count; i++)
 		{
 			CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effects[i]);
+			// Same unified-kind storage normalization as AddPowerEffects (see comment there).
+			normalizedEffect = CardEditorExtraEffects.NormalizeSelfPileAutoEffect(normalizedEffect) ?? normalizedEffect;
 			if (normalizedEffect == null
 				|| !normalizedEffect.AsPower
 				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind))

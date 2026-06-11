@@ -42,11 +42,13 @@ internal static class CardEditorAutoPlayLoopGuard
 	private sealed class Scope : IDisposable
 	{
 		private readonly LoopToken? _token;
+		private readonly ChainNode? _chainNode;
 		private bool _disposed;
 
-		public Scope(LoopToken? token)
+		public Scope(LoopToken? token, ChainNode? chainNode)
 		{
 			_token = token;
+			_chainNode = chainNode;
 		}
 
 		public void Dispose()
@@ -59,6 +61,14 @@ internal static class CardEditorAutoPlayLoopGuard
 			if (_token != null)
 			{
 				PopToken(_token);
+			}
+			if (_chainNode != null)
+			{
+				// Dispose runs in the same async frame as the TryEnter call, so this write flows
+				// forward in that frame: sequential SIBLING activations see the parent again
+				// instead of inheriting each other's path. (Values written deeper in the awaited
+				// subtree never flowed back up, so _chain.Value here is still our node.)
+				_chain.Value = _chainNode.Parent;
 			}
 		}
 	}
@@ -97,6 +107,83 @@ internal static class CardEditorAutoPlayLoopGuard
 	private static readonly AsyncLocal<Stack<LoopToken>?> _activeTokens = new();
 	private static readonly AsyncLocal<Stack<object>?> _useLimitSourceInstances = new();
 
+	// ----- Chain guard: bounds auto-action recursion (Whenever-driven and otherwise) -----
+	// One ChainNode per auto-effect ACTIVATION (the inner duplicate guard entry of an already-
+	// counted activation passes consumeActivation:false and creates no node). The AsyncLocal
+	// write happens synchronously on the calling async method's ExecutionContext, so it flows
+	// DOWN into the awaited execution subtree (the played card's hooks, its whenever reactions,
+	// their nested auto actions) and never back up — each manual action therefore starts a
+	// fresh chain, and N independent trigger firings are N independent chains (no false
+	// positives for legitimate repeated triggers). The PATH (parent links) is immutable; the
+	// TOTALS holder is shared by reference chain-wide so breadth is bounded too.
+	private sealed class ChainTotals
+	{
+		public int Activations;
+	}
+
+	private sealed class ChainNode
+	{
+		public required ChainTotals Totals { get; init; }
+		public ChainNode? Parent { get; init; }
+		public required string EffectKey { get; init; }
+		public required int Depth { get; init; }
+	}
+
+	private static readonly AsyncLocal<ChainNode?> _chain = new();
+	private static readonly HashSet<string> _warnedChainKeys = new(StringComparer.Ordinal);
+
+	// Same effect at most 3 times on any root-to-leaf activation path (stops "whenever a card
+	// is played, play a card" self-amplification and A->B->A ping-pong); at most 12 nested
+	// activations on one path (cross-effect cycles — generous because domino decks of DISTINCT
+	// chained cards are core mod audience); at most 64 activations total under one root
+	// (breadth-times-depth explosion). Legitimate finite chains stay far below all three.
+	private const int MaxSameEffectPerChainPath = 3;
+	private const int MaxChainDepth = 12;
+	private const int MaxChainActivations = 64;
+
+	private static bool TryCreateChainNode(string chainKey, CardModel? sourceCard, CardExtraEffect sourceEffect, out ChainNode? node)
+	{
+		node = null;
+		ChainNode? parent = _chain.Value;
+		ChainTotals totals = parent?.Totals ?? new ChainTotals();
+		int depth = (parent?.Depth ?? 0) + 1;
+
+		if (depth > MaxChainDepth)
+		{
+			WarnChainStop(chainKey, sourceCard, sourceEffect, $"chain depth would exceed {MaxChainDepth}");
+			return false;
+		}
+
+		if (totals.Activations >= MaxChainActivations)
+		{
+			WarnChainStop(chainKey, sourceCard, sourceEffect, $"chain activation budget {MaxChainActivations} exhausted");
+			return false;
+		}
+
+		int sameKeyOnPath = 0;
+		for (ChainNode? walk = parent; walk != null; walk = walk.Parent)
+		{
+			if (string.Equals(walk.EffectKey, chainKey, StringComparison.Ordinal)
+				&& ++sameKeyOnPath >= MaxSameEffectPerChainPath)
+			{
+				WarnChainStop(chainKey, sourceCard, sourceEffect, $"same effect {MaxSameEffectPerChainPath}+ times on one chain path");
+				return false;
+			}
+		}
+
+		totals.Activations++;
+		node = new ChainNode { Totals = totals, Parent = parent, EffectKey = chainKey, Depth = depth };
+		return true;
+	}
+
+	private static void WarnChainStop(string chainKey, CardModel? sourceCard, CardExtraEffect sourceEffect, string reason)
+	{
+		if (_warnedChainKeys.Add(chainKey + "|" + reason))
+		{
+			Log.Warn($"[CardEditor][LoopGuard] Auto-action chain stopped ({reason}). Source={BuildSourceLabel(sourceCard, sourceEffect)}");
+		}
+	}
+
 	public static string BuildPowerUseLimitInstanceKey(long entryId)
 	{
 		return "power|" + entryId.ToString(CultureInfo.InvariantCulture);
@@ -120,9 +207,10 @@ internal static class CardEditorAutoPlayLoopGuard
 		CardModel? sourceCard,
 		CardExtraEffect? sourceEffect,
 		CardModel? playedCard,
-		out IDisposable scope)
+		out IDisposable scope,
+		bool consumeActivation = true)
 	{
-		if (!TryEnterAutoPlayEffect(combatState, owner ?? playedCard?.Owner ?? sourceCard?.Owner, sourceCard, sourceEffect, out scope))
+		if (!TryEnterAutoPlayEffect(combatState, owner ?? playedCard?.Owner ?? sourceCard?.Owner, sourceCard, sourceEffect, out scope, consumeActivation: consumeActivation))
 		{
 			return false;
 		}
@@ -137,6 +225,10 @@ internal static class CardEditorAutoPlayLoopGuard
 		return true;
 	}
 
+	// consumeActivation:false marks the INNER duplicate guard entry of an activation the caller
+	// already counted (precounted nested batch) — it pushes the suppression token but creates no
+	// chain node, so caps aren't double-counted per activation. Pass it as
+	// !IsAutoPlayEffectPrecounted(...) at inner action sites.
 	public static bool TryEnterAutoPlayEffect(
 		CombatState? combatState,
 		Player? owner,
@@ -156,24 +248,42 @@ internal static class CardEditorAutoPlayLoopGuard
 		Player? effectiveOwner = owner ?? sourceCard?.Owner;
 		string sourceKey = effectiveOwner != null ? BuildSourceKey(effectiveOwner, sourceCard, sourceEffect) : string.Empty;
 
-		bool suppressSelfLoops = !sourceEffect.AutoPlayAllowSelfTrigger;
-		if (!suppressSelfLoops && string.IsNullOrWhiteSpace(sourceKey))
+		ChainNode? chainNode = null;
+		if (consumeActivation)
 		{
-			return true;
+			string chainKey = string.IsNullOrWhiteSpace(sourceKey) ? BuildEffectSignature(sourceEffect) : sourceKey;
+			if (!TryCreateChainNode(chainKey, sourceCard, sourceEffect, out chainNode))
+			{
+				return false;
+			}
 		}
 
-		LoopToken token = new LoopToken
+		bool suppressSelfLoops = !sourceEffect.AutoPlayAllowSelfTrigger;
+		LoopToken? token = null;
+		if (suppressSelfLoops || !string.IsNullOrWhiteSpace(sourceKey))
 		{
-			SourceKey = sourceKey,
-			SourceCardId = GetCardIdText(sourceCard),
-			SourceEffectId = Normalize(sourceEffect.EffectId),
-			SourceEffectSignature = BuildEffectSignature(sourceEffect),
-			SourceLabel = BuildSourceLabel(sourceCard, sourceEffect),
-			SuppressSelfLoops = suppressSelfLoops,
-			PrecountedNestedBatch = markPrecountedNestedBatch
-		};
-		PushToken(token);
-		scope = new Scope(token);
+			token = new LoopToken
+			{
+				SourceKey = sourceKey,
+				SourceCardId = GetCardIdText(sourceCard),
+				SourceEffectId = Normalize(sourceEffect.EffectId),
+				SourceEffectSignature = BuildEffectSignature(sourceEffect),
+				SourceLabel = BuildSourceLabel(sourceCard, sourceEffect),
+				SuppressSelfLoops = suppressSelfLoops,
+				PrecountedNestedBatch = markPrecountedNestedBatch
+			};
+			PushToken(token);
+		}
+
+		if (chainNode != null)
+		{
+			_chain.Value = chainNode;
+		}
+
+		if (token != null || chainNode != null)
+		{
+			scope = new Scope(token, chainNode);
+		}
 		return true;
 	}
 

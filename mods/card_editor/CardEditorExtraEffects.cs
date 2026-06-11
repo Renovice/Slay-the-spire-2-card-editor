@@ -5240,12 +5240,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			and not CardExtraEffectKind.DoesNotConsumeVigor
 			and not CardExtraEffectKind.HitsAllEnemies
 			and not CardExtraEffectKind.CardDealsExtraDamage
-			and not CardExtraEffectKind.AutoPlaySelfFromPile
 			and not CardExtraEffectKind.DrawCardsThatCostLess
-			and not CardExtraEffectKind.AutoDrawSelfFromPile
-			and not CardExtraEffectKind.ConditionalAutoPlayFromPile
-			and not CardExtraEffectKind.ConditionalAutoDrawFromPile
-			and not CardExtraEffectKind.ConditionalAutoRunEffects
 			and not CardExtraEffectKind.EffectLimit
 			and not CardExtraEffectKind.CountdownEffect
 			and not CardExtraEffectKind.ResultPileOverride
@@ -5368,7 +5363,13 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			&& !effect.GrantToCard
 			&& (IsSelfCardCostModifierKind(effect.Kind)
 				|| IsSelfScalingKind(effect.Kind)
-				|| effect.Kind == CardExtraEffectKind.StatefulTransform);
+				|| effect.Kind == CardExtraEffectKind.StatefulTransform
+				// Auto actions act on the HOST card ("Whenever X, play/draw THIS card / run THIS
+				// card's rows"), never on the triggering card. Power entries are normalized to
+				// the unified kinds at AddPowerEffects time, so the legacy two never reach this.
+				|| effect.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile
+					or CardExtraEffectKind.ConditionalAutoDrawFromPile
+					or CardExtraEffectKind.ConditionalAutoRunEffects);
 	}
 
 	internal static CardModel ResolveImmediatePowerExecutionCard(CardModel sourceCard, CardPlay? triggerPlay, CardExtraEffect? effect)
@@ -13714,6 +13715,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<CardExtraEffect> effects = new List<CardExtraEffect>();
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
+			// Power-hosted auto rows (Whenever and other power triggers) execute through the
+			// power pipeline; sweeping them here too would double-fire them.
+			if (IsPowerEffect(e))
+			{
+				continue;
+			}
 			CardExtraEffect? normalized = NormalizeSelfPileAutoEffect(e);
 			if (normalized?.Kind == CardExtraEffectKind.ConditionalAutoPlayFromPile)
 			{
@@ -13774,6 +13781,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<CardExtraEffect> effects = new List<CardExtraEffect>();
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
+			// Power-hosted auto rows execute through the power pipeline (no double-fire).
+			if (IsPowerEffect(e))
+			{
+				continue;
+			}
 			CardExtraEffect? normalized = NormalizeSelfPileAutoEffect(e);
 			if (normalized?.Kind == CardExtraEffectKind.ConditionalAutoRunEffects)
 			{
@@ -13806,6 +13818,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<CardExtraEffect> effects = new List<CardExtraEffect>();
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
+			// Power-hosted auto rows execute through the power pipeline (no double-fire).
+			if (IsPowerEffect(e))
+			{
+				continue;
+			}
 			CardExtraEffect? normalized = NormalizeSelfPileAutoEffect(e);
 			if (normalized?.Kind == CardExtraEffectKind.ConditionalAutoDrawFromPile)
 			{
@@ -13834,7 +13851,13 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		{
 			return false;
 		}
-		if (CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(card, normalized))
+		// Power-hosted activations were already counted (and tokened) by ExecuteOrSchedulePowerEffect
+		// with a precount mark; without the handshake the activation's OWN token would self-suppress
+		// its first execution (Allow Self Trigger unticked) and the inner action would double-count
+		// the chain caps. Nested re-entries from the played card's hooks are NEW activations with
+		// their own precount tokens, so suppression and chain accounting still apply one level down.
+		bool activationPrecounted = CardEditorAutoPlayLoopGuard.IsAutoPlayEffectPrecounted(combatState, card?.Owner, card, normalized);
+		if (!activationPrecounted && CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(card, normalized))
 		{
 			return false;
 		}
@@ -13880,17 +13903,37 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardEditorConditionalFromPileFiredTracker.MarkFired(combatState, card);
 		}
 
+		// SINGLE Use Limit consumption point for auto actions, AFTER every precondition gate so a
+		// non-matching trigger firing never burns a use. Power-hosted rows skip the generic
+		// ExecuteEffect consumption for exactly this reason; the power path's per-entry instance
+		// key still applies because PushUseLimitSourceInstance's ambient value flows down here.
+		// Card-hosted rows previously consumed only via the silent ExecuteEffect no-op pass
+		// (double-fast, never gating) — this consumes once and actually enforces the limit.
+		if (!CardEditorAutoPlayLoopGuard.TryConsumeEffectUseLimit(combatState, card?.Owner, card, normalized))
+		{
+			return false;
+		}
+
 		if (normalized.Kind == CardExtraEffectKind.ConditionalAutoPlayFromPile)
 		{
-			await AutoPlayCardFromEffect(combatState, choiceContext, card.Owner, card, normalized, card);
+			await AutoPlayCardFromEffect(combatState, choiceContext, card.Owner, card, normalized, card, activationPrecounted);
 		}
 		else if (normalized.Kind == CardExtraEffectKind.ConditionalAutoDrawFromPile)
 		{
-			await DrawCardFromPileToHand(choiceContext, card);
+			// The draw variant historically had no guard entry at all; chain-count it like its
+			// siblings (skipped when the power path already counted this activation).
+			if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayEffect(combatState, card.Owner, card, normalized, out IDisposable drawScope, consumeActivation: !activationPrecounted))
+			{
+				return false;
+			}
+			using (drawScope)
+			{
+				await DrawCardFromPileToHand(choiceContext, card);
+			}
 		}
 		else
 		{
-			await RunSelectedAutoActionEffectRows(combatState, choiceContext, card, normalized);
+			await RunSelectedAutoActionEffectRows(combatState, choiceContext, card, normalized, activationPrecounted);
 		}
 
 		return true;
@@ -13925,14 +13968,15 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		Player? owner,
 		CardModel? sourceCard,
 		CardExtraEffect? sourceEffect,
-		CardModel card)
+		CardModel card,
+		bool activationPrecounted = false)
 	{
 		if (choiceContext == null || card == null)
 		{
 			return;
 		}
 
-		if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlay(combatState, owner ?? card.Owner, sourceCard, sourceEffect, card, out IDisposable scope))
+		if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlay(combatState, owner ?? card.Owner, sourceCard, sourceEffect, card, out IDisposable scope, consumeActivation: !activationPrecounted))
 		{
 			return;
 		}
@@ -13943,7 +13987,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 	}
 
-	private static async Task RunSelectedAutoActionEffectRows(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, CardExtraEffect autoEffect)
+	private static async Task RunSelectedAutoActionEffectRows(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, CardExtraEffect autoEffect, bool activationPrecounted = false)
 	{
 		List<string> selectedIds = ParseAutoActionEffectIds(autoEffect);
 		if (combatState == null || choiceContext == null || card == null || selectedIds.Count == 0)
@@ -13951,7 +13995,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return;
 		}
 
-		if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayEffect(combatState, card.Owner, card, autoEffect, out IDisposable autoScope))
+		if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayEffect(combatState, card.Owner, card, autoEffect, out IDisposable autoScope, consumeActivation: !activationPrecounted))
 		{
 			return;
 		}
@@ -13993,6 +14037,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 					|| payload.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile
 						or CardExtraEffectKind.ConditionalAutoDrawFromPile
 						or CardExtraEffectKind.ConditionalAutoRunEffects
+						or CardExtraEffectKind.AutoPlaySelfFromPile
+						or CardExtraEffectKind.AutoDrawSelfFromPile
 						or CardExtraEffectKind.Quest
 					|| !IsValidEffectAmount(payload.Kind, payload.Amount))
 				{
@@ -14102,6 +14148,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		List<CardExtraEffect> effects = new List<CardExtraEffect>();
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
+			// Power-hosted auto rows execute through the power pipeline (no double-fire).
+			if (IsPowerEffect(e))
+			{
+				continue;
+			}
 			if (e?.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects)
 			{
 				effects.Add(e);
@@ -14144,13 +14195,26 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 			CardEditorConditionalFromPileFiredTracker.MarkFired(combatState, card);
 
+			// Same single consumption point semantics as TryRunSelfPileAutoEffect.
+			if (!CardEditorAutoPlayLoopGuard.TryConsumeEffectUseLimit(combatState, card.Owner, card, effect))
+			{
+				continue;
+			}
+
 			if (effect.Kind == CardExtraEffectKind.ConditionalAutoPlayFromPile)
 			{
 				await AutoPlayCardFromEffect(combatState, choiceContext, card.Owner, card, effect, card);
 			}
 			else if (effect.Kind == CardExtraEffectKind.ConditionalAutoDrawFromPile)
 			{
-				await DrawCardFromPileToHand(choiceContext, card);
+				if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayEffect(combatState, card.Owner, card, effect, out IDisposable drawScope))
+				{
+					continue;
+				}
+				using (drawScope)
+				{
+					await DrawCardFromPileToHand(choiceContext, card);
+				}
 			}
 			else
 			{
@@ -16148,6 +16212,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				or CardExtraEffectKind.GeneratedCardsUpgraded or CardExtraEffectKind.CardsInPileUpgradedAura
 				or CardExtraEffectKind.DrawnCardsCostLess or CardExtraEffectKind.GeneratedCardsCostLess
 				or CardExtraEffectKind.AutoPlaySelfFromPile
+				or CardExtraEffectKind.AutoDrawSelfFromPile
 				or CardExtraEffectKind.ConditionalAutoPlayFromPile
 				or CardExtraEffectKind.ConditionalAutoDrawFromPile
 				or CardExtraEffectKind.ConditionalAutoRunEffects
@@ -20955,6 +21020,15 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 	private static string FormatAutoPlaySelfFromPile(CardExtraEffect effect)
 	{
 		string pile = GetCardPileLocationWithSelectionMode(effect.CardSelectionPile, effect.CardSelectionMode);
+		if (IsPowerEffect(effect))
+		{
+			// Power-hosted rows (Whenever and other power triggers) get their trigger wording
+			// from ApplyPowerTriggerPrefix — emit only the action clause (no double prefix).
+			return CardEditorLoc.F(
+				"cardText.autoPlaySelf.powerAction",
+				$"If this is {pile}, play it.",
+				("Pile", pile));
+		}
 		return effect.Trigger switch
 		{
 			CardExtraEffectTrigger.OnDraw => CardEditorLoc.F(
@@ -21141,6 +21215,14 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 	private static string FormatAutoDrawSelfFromPile(CardExtraEffect effect)
 	{
 		string pile = GetCardPileLocationWithSelectionMode(effect.CardSelectionPile, effect.CardSelectionMode);
+		if (IsPowerEffect(effect))
+		{
+			// Power-hosted rows get their trigger wording from ApplyPowerTriggerPrefix.
+			return CardEditorLoc.F(
+				"cardText.autoDrawSelf.powerAction",
+				$"If this is {pile}, draw it.",
+				("Pile", pile));
+		}
 		return effect.Trigger switch
 		{
 			CardExtraEffectTrigger.OnDraw => CardEditorLoc.F(
@@ -21240,6 +21322,15 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		};
 
 		string pile = GetCardPileLocationWithSelectionMode(effect.CardSelectionPile, effect.CardSelectionMode);
+		if (IsPowerEffect(effect))
+		{
+			// Power-hosted rows get their trigger wording from ApplyPowerTriggerPrefix.
+			return CardEditorLoc.F(
+				"cardText.autoRunEffectRows.powerAction",
+				$"If this is {pile}, {payloadText}.",
+				("Pile", pile),
+				("Action", payloadText));
+		}
 		return effect.Trigger == CardExtraEffectTrigger.TurnBoundary
 			? FormatSelfPileAutoTurnBoundary(effect, pile, payloadText, isPlay: false, usePayloadAsAction: true)
 			: FormatSelfPileAutoTrigger(effect, pile, payloadText);
@@ -23303,6 +23394,13 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 		return kind is CardExtraEffectKind.AutoPlaySelfFromPile or CardExtraEffectKind.AutoDrawSelfFromPile;
 	}
 
+	internal static bool IsSelfPileAutoEffectKind(CardExtraEffectKind kind)
+		=> kind is CardExtraEffectKind.AutoPlaySelfFromPile
+			or CardExtraEffectKind.AutoDrawSelfFromPile
+			or CardExtraEffectKind.ConditionalAutoPlayFromPile
+			or CardExtraEffectKind.ConditionalAutoDrawFromPile
+			or CardExtraEffectKind.ConditionalAutoRunEffects;
+
 	internal static CardExtraEffect? NormalizeSelfPileAutoEffect(CardExtraEffect? effect)
 	{
 		if (effect == null)
@@ -23920,7 +24018,9 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			or CardExtraEffectKind.ChooseOneEffectSource
 			or CardExtraEffectKind.PlayCardFromPile
 			or CardExtraEffectKind.AutoPlaySelfFromPile
+			or CardExtraEffectKind.AutoDrawSelfFromPile
 			or CardExtraEffectKind.ConditionalAutoPlayFromPile
+			or CardExtraEffectKind.ConditionalAutoDrawFromPile
 			or CardExtraEffectKind.ConditionalAutoRunEffects
 			or CardExtraEffectKind.EffectLimit;
 	}
@@ -25714,6 +25814,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 				|| payload.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile
 					or CardExtraEffectKind.ConditionalAutoDrawFromPile
 					or CardExtraEffectKind.ConditionalAutoRunEffects
+					or CardExtraEffectKind.AutoPlaySelfFromPile
+					or CardExtraEffectKind.AutoDrawSelfFromPile
 					or CardExtraEffectKind.EffectLimit
 					or CardExtraEffectKind.CountdownEffect
 				|| !IsValidEffectAmount(payload.Kind, payload.Amount))
@@ -26144,13 +26246,25 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		{
 			return;
 		}
+		// Auto-action rows: only POWER-hosted rows execute through this generic path (Whenever
+		// and the other power triggers); non-power rows run via their dedicated card-hosted
+		// runners and reaching here was a silent no-op — return BEFORE the Use Limit consumption
+		// below, which used to double-consume for limit-bearing rows.
+		if (IsSelfPileAutoEffectKind(effect.Kind) && !IsPowerEffect(effect))
+		{
+			return;
+		}
 
 		CardModel? card = cardPlay?.Card;
 		Player? owner = card?.Owner;
 		Creature? ownerCreature = owner?.Creature;
 		CardModel? limitSourceCard = CardEditorEffectSourceContext.Current ?? card;
 		Player? limitOwner = owner ?? limitSourceCard?.Owner;
-		if (!CardEditorAutoPlayLoopGuard.TryConsumeEffectUseLimit(combatState, limitOwner, limitSourceCard, effect))
+		// Auto-action rows consume their Use Limit inside TryRunSelfPileAutoEffect AFTER the
+		// pile/position/condition gates — consuming here would burn a use on every trigger
+		// firing even when the action doesn't match (card in the wrong pile, condition unmet).
+		if (!IsSelfPileAutoEffectKind(effect.Kind)
+			&& !CardEditorAutoPlayLoopGuard.TryConsumeEffectUseLimit(combatState, limitOwner, limitSourceCard, effect))
 		{
 			return;
 		}
@@ -26958,6 +27072,22 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		Creature ownerCreature = CardEditorPowerExecutionHostContext.Current ?? owner.Creature;
 		if (ownerCreature == null)
 		{
+			return;
+		}
+
+		// Power-hosted auto-action rows (Whenever and other power triggers) dispatch to the same
+		// shared runner the card-hosted triggers use — all 3 unified variants identically.
+		// cardPlay.Card is already the HOST card (UsesSourceCardForImmediatePowerExecution); the
+		// EffectSourceContext fallback covers scheduler entries executing against a snapshot
+		// clone (the live host instance is pushed when the scheduled entry runs).
+		if (IsSelfPileAutoEffectKind(effect.Kind))
+		{
+			CardExtraEffect? selfPileAuto = NormalizeSelfPileAutoEffect(effect);
+			if (selfPileAuto != null)
+			{
+				CardModel autoHost = CardEditorEffectSourceContext.Current ?? card;
+				await TryRunSelfPileAutoEffect(combatState, choiceContext, autoHost, selfPileAuto);
+			}
 			return;
 		}
 
