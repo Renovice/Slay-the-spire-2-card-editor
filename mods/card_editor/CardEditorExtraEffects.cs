@@ -1138,7 +1138,9 @@ public enum CardExtraEffectCountCardFilter
 	CreatesCards = 34,
 	EnergyCostModifier = 35,
 	StarCostModifier = 36,
-	CanBePlayed = 37
+	CanBePlayed = 37,
+	HasStarCost = 38,
+	HasEnergyCost = 39
 }
 
 public enum CardExtraEffectCountAggregationMode
@@ -3910,6 +3912,8 @@ public static string ConditionProgressDisplayLabel(CardExtraEffectConditionProgr
 			CardExtraEffectCountCardFilter.EnergyCostModifier => "Energy Cost Effects",
 			CardExtraEffectCountCardFilter.StarCostModifier => "Star Cost Effects",
 			CardExtraEffectCountCardFilter.CanBePlayed => "Can Be Played",
+			CardExtraEffectCountCardFilter.HasStarCost => "Has Star Cost",
+			CardExtraEffectCountCardFilter.HasEnergyCost => "Has Energy Cost",
 			_ => filter.ToString()
 		};
 		return CardEditorLoc.Enum("countFilter", filter, fallback);
@@ -3943,6 +3947,8 @@ public static string ConditionProgressDisplayLabel(CardExtraEffectConditionProgr
 			CardExtraEffectCountCardFilter.Sly => GrantedKeywordLabel(CardKeyword.Sly),
 			CardExtraEffectCountCardFilter.Eternal => GrantedKeywordLabel(CardKeyword.Eternal),
 			CardExtraEffectCountCardFilter.CanBePlayed => CardEditorLoc.T("cardText.value.playable", "playable"),
+			CardExtraEffectCountCardFilter.HasStarCost => CardEditorLoc.T("cardText.value.hasStarCost", "Star-cost"),
+			CardExtraEffectCountCardFilter.HasEnergyCost => CardEditorLoc.T("cardText.value.hasEnergyCost", "Energy-cost"),
 			_ => CountCardFilterLabel(filter)
 		};
 	}
@@ -35300,6 +35306,10 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 				return card.Keywords.Contains(CardKeyword.Eternal);
 			case CardExtraEffectCountCardFilter.CreatesCards:
 				return CardCreatesCards(card);
+			case CardExtraEffectCountCardFilter.HasStarCost:
+				return GetCardStarCostAmount(card, useBaseCost: true) > 0;
+			case CardExtraEffectCountCardFilter.HasEnergyCost:
+				return GetCardEnergyCostAmount(card, useBaseCost: true) > 0;
 			default:
 				return true;
 		}

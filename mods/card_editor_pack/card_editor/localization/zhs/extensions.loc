@@ -446,6 +446,8 @@
   "CARD_EDITOR.countFilter.LoseHp": "失去生命值",
   "CARD_EDITOR.countFilter.CreatesCards": "生成卡牌",
   "CARD_EDITOR.countFilter.CanBePlayed": "可打出",
+  "CARD_EDITOR.countFilter.HasStarCost": "有星星费用",
+  "CARD_EDITOR.countFilter.HasEnergyCost": "有能量费用",
   "CARD_EDITOR.enemyStatus.Weak": "虚弱",
   "CARD_EDITOR.enemyStatus.Frail": "脆弱",
   "CARD_EDITOR.enemyStatus.Vulnerable": "易伤",

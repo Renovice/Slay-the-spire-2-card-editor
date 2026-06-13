@@ -14,11 +14,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\card_editor.csproj",
+      "projectUniqueName": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\REPOS\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\card_editor.csproj",
       "projectName": "card_editor",
-      "projectPath": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\card_editor.csproj",
+      "projectPath": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\REPOS\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\card_editor.csproj",
       "packagesPath": "C:\\Users\\Bartek\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\obj\\",
+      "outputPath": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\REPOS\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

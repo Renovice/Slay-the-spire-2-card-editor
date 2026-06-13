@@ -443,6 +443,8 @@
   "CARD_EDITOR.countFilter.LoseHp": "체력 상실",
   "CARD_EDITOR.countFilter.CreatesCards": "카드 생성",
   "CARD_EDITOR.countFilter.CanBePlayed": "사용 가능",
+  "CARD_EDITOR.countFilter.HasStarCost": "별 비용 있음",
+  "CARD_EDITOR.countFilter.HasEnergyCost": "에너지 비용 있음",
   "CARD_EDITOR.enemyStatus.Weak": "약화",
   "CARD_EDITOR.enemyStatus.Frail": "취약",
   "CARD_EDITOR.enemyStatus.Vulnerable": "취약",

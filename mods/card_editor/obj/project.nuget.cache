@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "0XoIhnY4nww=",
+  "dgSpecHash": "IgR1U9iD3PU=",
   "success": true,
-  "projectFilePath": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\card_editor.csproj",
+  "projectFilePath": "C:\\Users\\Bartek\\OneDrive\\Dokumenter\\REPOS\\slay-the-spire-2\\slay-the-spire-2\\mods\\card_editor\\card_editor.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Bartek\\.nuget\\packages\\microsoft.netcore.app.ref\\9.0.7\\microsoft.netcore.app.ref.9.0.7.nupkg.sha512",
     "C:\\Users\\Bartek\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\9.0.7\\microsoft.windowsdesktop.app.ref.9.0.7.nupkg.sha512",

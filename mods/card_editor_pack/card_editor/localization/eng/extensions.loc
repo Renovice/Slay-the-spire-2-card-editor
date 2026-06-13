@@ -455,6 +455,8 @@
   "CARD_EDITOR.countFilter.LoseHp": "Lose HP",
   "CARD_EDITOR.countFilter.CreatesCards": "Creates Cards",
   "CARD_EDITOR.countFilter.CanBePlayed": "Can Be Played",
+  "CARD_EDITOR.countFilter.HasStarCost": "Has Star Cost",
+  "CARD_EDITOR.countFilter.HasEnergyCost": "Has Energy Cost",
   "CARD_EDITOR.enemyStatus.Weak": "Weak",
   "CARD_EDITOR.enemyStatus.Frail": "Frail",
   "CARD_EDITOR.enemyStatus.Vulnerable": "Vulnerable",
