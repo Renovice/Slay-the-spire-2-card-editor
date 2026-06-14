@@ -1,3 +1,12 @@
+## 2026-06-14 - Implemented Current-resource count events + Non-Attack/Skill/Power type filters
+
+Hypothesis: The requested scaling params + inverse type filters can be added with contained, low-risk changes.
+Finding: True (builds clean, 0 errors). Count events fully done; inverse types functional + labeled + primary text done, with secondary auto-text noted as follow-up.
+Evidence (count events, CardEditorExtraEffects.cs): appended CardExtraEffectCountEvent CurrentStars=49/CurrentEnergy=50/CurrentOrbSlots=51 (serialize by NAME via PresetStore string DTO, so append is safe + UI index==value preserved). Resolver GetHistoryCountMultiplier reads owner.PlayerCombatState.Stars / .Energy / .OrbQueue.Capacity (all verified real in decompiled Source/.../PlayerCombatState.cs:71,90 + OrbQueue.Capacity). Mirrored EmptyOrbSlots at: CountEventLabel (3216), CountEventUsesWindow exclusion (live reads, no turn/combat window), scaling-suffix text (17053-area), condition text (17707-area). Loc countEvent.* added to all 6 files (eng/kor/zhs × card_editor_pack + built cfiles).
+Evidence (inverse types): appended CardGeneratedCardType NonAttack=8/NonSkill=9/NonPower=10. Handled in ALL 5 type-matchers (else default mis-matches — 31479's default returns card==card=always true): CardEditorExtraEffects MatchesGeneratedCardType (31479) + candidate-filter else-if (37184-area), CardEditorCardTypeCostAuras.MatchesType (418), CardEditorDrawnGeneratedCostController.MatchesType (500), CardEditorRewardPools.MatchesType (808). GeneratedCardTypeLabel + count-filter typeAdj (BuildCountCardFilter ~18686) + loc generatedType.* (6 files). Chose explicit enum members over an invert-toggle: auto-handles UI (Enum.GetValues) + serialization (by-name), works universally incl. generation, ~1/2 the sites of the toggle (no 3-bool UI/serialization/equality plumbing).
+Open follow-up: secondary auto-text typeAdj sites (trigger-condition + generation descriptors, ~5 sites) still render the type qualifier as "card" not "non-Attack card" (filter WORKS, only the rules-text adjective is missing). Not yet committed/deployed.
+Next Step: optionally finish secondary typeAdj text; commit+push+Steam-deploy when user asks.
+
 ## 2026-06-13 (CORRECTED) - Power-specific (non-global) created-card discount: use "Created Cards Cost Less" (created-by-this), On Play
 
 Hypothesis (mine, first pass): "Created Cards Cost Less" (CreatedCardsCostLess) can't reach cards made by a power on the same card; must use the Global variant.

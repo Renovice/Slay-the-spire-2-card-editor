@@ -816,6 +816,9 @@ internal static class CardEditorCardRewardSpecs
 			CardGeneratedCardType.Status => card.Type == CardType.Status,
 			CardGeneratedCardType.Curse => card.Type == CardType.Curse,
 			CardGeneratedCardType.Quest => card.Type == CardType.Quest,
+			CardGeneratedCardType.NonAttack => card.Type != CardType.Attack,
+			CardGeneratedCardType.NonSkill => card.Type != CardType.Skill,
+			CardGeneratedCardType.NonPower => card.Type != CardType.Power,
 			_ => true
 		};
 	}

@@ -427,6 +427,21 @@ internal static class CardEditorCardTypeCostAuras
 			return card.Type is CardType.Attack or CardType.Skill or CardType.Power;
 		}
 
+		if (type == CardGeneratedCardType.NonAttack)
+		{
+			return card.Type != CardType.Attack;
+		}
+
+		if (type == CardGeneratedCardType.NonSkill)
+		{
+			return card.Type != CardType.Skill;
+		}
+
+		if (type == CardGeneratedCardType.NonPower)
+		{
+			return card.Type != CardType.Power;
+		}
+
 		CardType desired = type switch
 		{
 			CardGeneratedCardType.Attack => CardType.Attack,

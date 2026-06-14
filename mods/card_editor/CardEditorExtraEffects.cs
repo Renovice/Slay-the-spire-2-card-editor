@@ -960,7 +960,10 @@ public enum CardGeneratedCardType
 	Playable = 4,
 	Status = 5,
 	Curse = 6,
-	Quest = 7
+	Quest = 7,
+	NonAttack = 8,
+	NonSkill = 9,
+	NonPower = 10
 }
 
 public enum CardExtraEffectScaleMode
@@ -1021,7 +1024,10 @@ public enum CardExtraEffectCountEvent
 	RestSiteEntered = 45,
 	PotionUsed = 46,
 	CombatWon = 47,
-	LastCardPlayed = 48
+	LastCardPlayed = 48,
+	CurrentStars = 49,
+	CurrentEnergy = 50,
+	CurrentOrbSlots = 51
 }
 
 public enum CardExtraEffectCountWindow
@@ -3215,6 +3221,9 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectCountEvent.OrbEvoked => "Orb Evoked",
 			CardExtraEffectCountEvent.CurrentOrbs => "Current Orbs",
 			CardExtraEffectCountEvent.EmptyOrbSlots => "Empty Orb Slots",
+			CardExtraEffectCountEvent.CurrentStars => "Current Stars",
+			CardExtraEffectCountEvent.CurrentEnergy => "Current Energy",
+			CardExtraEffectCountEvent.CurrentOrbSlots => "Total Orb Slots",
 			CardExtraEffectCountEvent.OrbInPosition => "Orb In Position",
 			CardExtraEffectCountEvent.EnemyHasStatus => "Enemy Has Status/Power",
 			CardExtraEffectCountEvent.EnemyIntent => "Enemy Intent",
@@ -3437,6 +3446,9 @@ public static string ConditionProgressDisplayLabel(CardExtraEffectConditionProgr
 		return ev is not CardExtraEffectCountEvent.InPile
 			and not CardExtraEffectCountEvent.CurrentOrbs
 			and not CardExtraEffectCountEvent.EmptyOrbSlots
+			and not CardExtraEffectCountEvent.CurrentStars
+			and not CardExtraEffectCountEvent.CurrentEnergy
+			and not CardExtraEffectCountEvent.CurrentOrbSlots
 			and not CardExtraEffectCountEvent.OrbInPosition
 			and not CardExtraEffectCountEvent.EnemyHasStatus
 			and not CardExtraEffectCountEvent.EnemyIntent
@@ -4616,6 +4628,9 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			CardGeneratedCardType.Status => "Status",
 			CardGeneratedCardType.Curse => "Curse",
 			CardGeneratedCardType.Quest => "Quest",
+			CardGeneratedCardType.NonAttack => "Non-Attack",
+			CardGeneratedCardType.NonSkill => "Non-Skill",
+			CardGeneratedCardType.NonPower => "Non-Power",
 			_ => type.ToString()
 		};
 		return CardEditorLoc.Enum("generatedType", type, fallback);
@@ -16879,6 +16894,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardGeneratedCardType.Status when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Status) => GeneratedCardTypeLabel(CardGeneratedCardType.Status),
 			CardGeneratedCardType.Curse when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Curse) => GeneratedCardTypeLabel(CardGeneratedCardType.Curse),
 			CardGeneratedCardType.Quest when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Quest) => GeneratedCardTypeLabel(CardGeneratedCardType.Quest),
+			CardGeneratedCardType.NonAttack => GeneratedCardTypeLabel(CardGeneratedCardType.NonAttack),
+			CardGeneratedCardType.NonSkill => GeneratedCardTypeLabel(CardGeneratedCardType.NonSkill),
+			CardGeneratedCardType.NonPower => GeneratedCardTypeLabel(CardGeneratedCardType.NonPower),
 			_ => string.Empty
 		};
 
@@ -17055,6 +17073,36 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			string slotDescriptor = FormatHistoryScalingUnit(effect, "empty orb slot", "empty orb slots", historyCountStepUpgradeComparison);
 			return CardEditorLoc.F(
 				"cardText.emptyOrbSlotScalingSuffix",
+				$"{trimmed} for each {slotDescriptor} you have.",
+				("Effect", trimmed),
+				("SlotDescriptor", slotDescriptor));
+		}
+
+		if (effect.CountEvent == CardExtraEffectCountEvent.CurrentStars)
+		{
+			string starDescriptor = FormatHistoryScalingUnit(effect, "Star", "Stars", historyCountStepUpgradeComparison);
+			return CardEditorLoc.F(
+				"cardText.currentStarsScalingSuffix",
+				$"{trimmed} for each {starDescriptor} you have.",
+				("Effect", trimmed),
+				("StarDescriptor", starDescriptor));
+		}
+
+		if (effect.CountEvent == CardExtraEffectCountEvent.CurrentEnergy)
+		{
+			string energyDescriptor = FormatHistoryScalingUnit(effect, "Energy", "Energy", historyCountStepUpgradeComparison);
+			return CardEditorLoc.F(
+				"cardText.currentEnergyScalingSuffix",
+				$"{trimmed} for each {energyDescriptor} you have.",
+				("Effect", trimmed),
+				("EnergyDescriptor", energyDescriptor));
+		}
+
+		if (effect.CountEvent == CardExtraEffectCountEvent.CurrentOrbSlots)
+		{
+			string slotDescriptor = FormatHistoryScalingUnit(effect, "orb slot", "orb slots", historyCountStepUpgradeComparison);
+			return CardEditorLoc.F(
+				"cardText.currentOrbSlotScalingSuffix",
 				$"{trimmed} for each {slotDescriptor} you have.",
 				("Effect", trimmed),
 				("SlotDescriptor", slotDescriptor));
@@ -17719,6 +17767,47 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return CardEditorLoc.F(
 				"cardText.condition.emptyOrbSlotsCount",
 				$"you have {FormatComparisonPhrase(effect.CountComparison, threshold)} empty orb slot{(threshold == 1 ? string.Empty : "s")}",
+				("Comparison", FormatComparisonPhrase(effect.CountComparison, threshold)),
+				("Plural", threshold == 1 ? string.Empty : "s"));
+		}
+
+		if (effect.CountEvent == CardExtraEffectCountEvent.CurrentStars)
+		{
+			if (!explicitComparison)
+			{
+				return CardEditorLoc.T("cardText.condition.haveStars", "you have a Star");
+			}
+
+			return CardEditorLoc.F(
+				"cardText.condition.starsCount",
+				$"you have {FormatComparisonPhrase(effect.CountComparison, threshold)} Star{(threshold == 1 ? string.Empty : "s")}",
+				("Comparison", FormatComparisonPhrase(effect.CountComparison, threshold)),
+				("Plural", threshold == 1 ? string.Empty : "s"));
+		}
+
+		if (effect.CountEvent == CardExtraEffectCountEvent.CurrentEnergy)
+		{
+			if (!explicitComparison)
+			{
+				return CardEditorLoc.T("cardText.condition.haveEnergy", "you have Energy");
+			}
+
+			return CardEditorLoc.F(
+				"cardText.condition.energyCount",
+				$"you have {FormatComparisonPhrase(effect.CountComparison, threshold)} Energy",
+				("Comparison", FormatComparisonPhrase(effect.CountComparison, threshold)));
+		}
+
+		if (effect.CountEvent == CardExtraEffectCountEvent.CurrentOrbSlots)
+		{
+			if (!explicitComparison)
+			{
+				return CardEditorLoc.T("cardText.condition.haveOrbSlots", "you have an orb slot");
+			}
+
+			return CardEditorLoc.F(
+				"cardText.condition.orbSlotsCount",
+				$"you have {FormatComparisonPhrase(effect.CountComparison, threshold)} orb slot{(threshold == 1 ? string.Empty : "s")}",
 				("Comparison", FormatComparisonPhrase(effect.CountComparison, threshold)),
 				("Plural", threshold == 1 ? string.Empty : "s"));
 		}
@@ -18606,6 +18695,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardGeneratedCardType.Status when !PoolImpliesGeneratedType(effect.CountCardPool, CardGeneratedCardType.Status) => GeneratedCardTypeLabel(CardGeneratedCardType.Status) + " ",
 			CardGeneratedCardType.Curse when !PoolImpliesGeneratedType(effect.CountCardPool, CardGeneratedCardType.Curse) => GeneratedCardTypeLabel(CardGeneratedCardType.Curse) + " ",
 			CardGeneratedCardType.Quest when !PoolImpliesGeneratedType(effect.CountCardPool, CardGeneratedCardType.Quest) => GeneratedCardTypeLabel(CardGeneratedCardType.Quest) + " ",
+			CardGeneratedCardType.NonAttack => GeneratedCardTypeLabel(CardGeneratedCardType.NonAttack) + " ",
+			CardGeneratedCardType.NonSkill => GeneratedCardTypeLabel(CardGeneratedCardType.NonSkill) + " ",
+			CardGeneratedCardType.NonPower => GeneratedCardTypeLabel(CardGeneratedCardType.NonPower) + " ",
 			_ => string.Empty
 		};
 		string rarityAdj = effect.CountCardRarity == CardExtraEffectCardRarityFilter.Any
@@ -18634,6 +18726,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardGeneratedCardType.Status when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Status) => GeneratedCardTypeLabel(CardGeneratedCardType.Status),
 			CardGeneratedCardType.Curse when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Curse) => GeneratedCardTypeLabel(CardGeneratedCardType.Curse),
 			CardGeneratedCardType.Quest when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Quest) => GeneratedCardTypeLabel(CardGeneratedCardType.Quest),
+			CardGeneratedCardType.NonAttack => GeneratedCardTypeLabel(CardGeneratedCardType.NonAttack),
+			CardGeneratedCardType.NonSkill => GeneratedCardTypeLabel(CardGeneratedCardType.NonSkill),
+			CardGeneratedCardType.NonPower => GeneratedCardTypeLabel(CardGeneratedCardType.NonPower),
 			_ => null
 		};
 		CardExtraEffectCardRarityFilter rarity = GetCreatesCardsOutputRarity(pool, type, effect);
@@ -19119,6 +19214,9 @@ private static string BuildCountAmountMetricLabel(CardExtraEffect effect, bool p
 			CardGeneratedCardType.Status => GeneratedCardTypeLabel(CardGeneratedCardType.Status) + " ",
 			CardGeneratedCardType.Curse => GeneratedCardTypeLabel(CardGeneratedCardType.Curse) + " ",
 			CardGeneratedCardType.Quest => GeneratedCardTypeLabel(CardGeneratedCardType.Quest) + " ",
+			CardGeneratedCardType.NonAttack => GeneratedCardTypeLabel(CardGeneratedCardType.NonAttack) + " ",
+			CardGeneratedCardType.NonSkill => GeneratedCardTypeLabel(CardGeneratedCardType.NonSkill) + " ",
+			CardGeneratedCardType.NonPower => GeneratedCardTypeLabel(CardGeneratedCardType.NonPower) + " ",
 			_ => string.Empty
 		};
 
@@ -22212,6 +22310,9 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			CardGeneratedCardType.Status when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Status) => GeneratedCardTypeLabel(CardGeneratedCardType.Status) + " ",
 			CardGeneratedCardType.Curse when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Curse) => GeneratedCardTypeLabel(CardGeneratedCardType.Curse) + " ",
 			CardGeneratedCardType.Quest when !PoolImpliesGeneratedType(pool, CardGeneratedCardType.Quest) => GeneratedCardTypeLabel(CardGeneratedCardType.Quest) + " ",
+			CardGeneratedCardType.NonAttack => GeneratedCardTypeLabel(CardGeneratedCardType.NonAttack) + " ",
+			CardGeneratedCardType.NonSkill => GeneratedCardTypeLabel(CardGeneratedCardType.NonSkill) + " ",
+			CardGeneratedCardType.NonPower => GeneratedCardTypeLabel(CardGeneratedCardType.NonPower) + " ",
 			_ => string.Empty
 		};
 
@@ -22757,6 +22858,9 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			CardGeneratedCardType.Status when !PoolImpliesGeneratedType(effect.GeneratedCardPool, CardGeneratedCardType.Status) => GeneratedCardTypeLabel(CardGeneratedCardType.Status) + " ",
 			CardGeneratedCardType.Curse when !PoolImpliesGeneratedType(effect.GeneratedCardPool, CardGeneratedCardType.Curse) => GeneratedCardTypeLabel(CardGeneratedCardType.Curse) + " ",
 			CardGeneratedCardType.Quest when !PoolImpliesGeneratedType(effect.GeneratedCardPool, CardGeneratedCardType.Quest) => GeneratedCardTypeLabel(CardGeneratedCardType.Quest) + " ",
+			CardGeneratedCardType.NonAttack => GeneratedCardTypeLabel(CardGeneratedCardType.NonAttack) + " ",
+			CardGeneratedCardType.NonSkill => GeneratedCardTypeLabel(CardGeneratedCardType.NonSkill) + " ",
+			CardGeneratedCardType.NonPower => GeneratedCardTypeLabel(CardGeneratedCardType.NonPower) + " ",
 			_ => string.Empty
 		};
 
@@ -31414,6 +31518,21 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			return effectiveType is CardType.Attack or CardType.Skill or CardType.Power;
 		}
 
+		if (type == CardGeneratedCardType.NonAttack)
+		{
+			return GetEffectiveCardType(card) != CardType.Attack;
+		}
+
+		if (type == CardGeneratedCardType.NonSkill)
+		{
+			return GetEffectiveCardType(card) != CardType.Skill;
+		}
+
+		if (type == CardGeneratedCardType.NonPower)
+		{
+			return GetEffectiveCardType(card) != CardType.Power;
+		}
+
 		CardType desired = type switch
 		{
 			CardGeneratedCardType.Attack => CardType.Attack,
@@ -31817,6 +31936,9 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			CardGeneratedCardType.Status => GeneratedCardTypeLabel(CardGeneratedCardType.Status),
 			CardGeneratedCardType.Curse => GeneratedCardTypeLabel(CardGeneratedCardType.Curse),
 			CardGeneratedCardType.Quest => GeneratedCardTypeLabel(CardGeneratedCardType.Quest),
+			CardGeneratedCardType.NonAttack => GeneratedCardTypeLabel(CardGeneratedCardType.NonAttack),
+			CardGeneratedCardType.NonSkill => GeneratedCardTypeLabel(CardGeneratedCardType.NonSkill),
+			CardGeneratedCardType.NonPower => GeneratedCardTypeLabel(CardGeneratedCardType.NonPower),
 			_ => null
 		};
 		string? rarityPrefix = effect.CardSelectionRarity == CardExtraEffectCardRarityFilter.Any
@@ -33537,6 +33659,21 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			if (effect.CountEvent == CardExtraEffectCountEvent.CurrentOrbs)
 			{
 				return owner.PlayerCombatState?.OrbQueue?.Orbs?.Count(orb => orb != null && OrbMatchesType(orb, effect.CountOrbType)) ?? 0;
+			}
+
+			if (effect.CountEvent == CardExtraEffectCountEvent.CurrentStars)
+			{
+				return owner.PlayerCombatState?.Stars ?? 0;
+			}
+
+			if (effect.CountEvent == CardExtraEffectCountEvent.CurrentEnergy)
+			{
+				return owner.PlayerCombatState?.Energy ?? 0;
+			}
+
+			if (effect.CountEvent == CardExtraEffectCountEvent.CurrentOrbSlots)
+			{
+				return owner.PlayerCombatState?.OrbQueue?.Capacity ?? 0;
 			}
 
 			if (effect.CountEvent == CardExtraEffectCountEvent.EnemyHasStatus)
@@ -37089,6 +37226,18 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 			if (type == CardGeneratedCardType.Playable)
 			{
 				filtered = filtered.Where(c => c.Type is CardType.Attack or CardType.Skill or CardType.Power);
+			}
+			else if (type == CardGeneratedCardType.NonAttack)
+			{
+				filtered = filtered.Where(c => c.Type != CardType.Attack);
+			}
+			else if (type == CardGeneratedCardType.NonSkill)
+			{
+				filtered = filtered.Where(c => c.Type != CardType.Skill);
+			}
+			else if (type == CardGeneratedCardType.NonPower)
+			{
+				filtered = filtered.Where(c => c.Type != CardType.Power);
 			}
 			else
 			{
