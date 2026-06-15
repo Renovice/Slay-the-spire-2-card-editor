@@ -1,3 +1,11 @@
+## 2026-06-14 - Completed Simplified-Chinese (zhs) localization (native-speaker bug report)
+
+Hypothesis: The zhs loc gap is just my recent patches' labels.
+Finding: Partially true — bigger. The new features' DROPDOWN labels were translated, but their CARD-TEXT strings (11 keys: cardText.currentStars/Energy/OrbSlot ScalingSuffix, condition.haveStars/starsCount/haveEnergy/energyCount/haveOrbSlots/orbSlotsCount, value.hasStarCost/hasEnergyCost) were never in ANY loc file — only code fallbacks — so a Chinese user saw English rules text. Plus a pre-existing 16-key zhs backlog (generatedPool.Status/Curse/Quest/Token/Event/AllPools, valueSource.eventActor, poolSuffix/poolDescriptor.allCardPools, powerTrigger.actor + powerTriggerFrom.markedTarget, 5 tooltip.powerTriggerFrom.*).
+Evidence: python eng-vs-zhs key diff (was 16 missing + the 11 not-in-any-file). Translated all 27 via a 3-agent workflow (2 independent translators + adjudicator with back-translation + placeholder verification + glossary enforcement: 星星/能量/充能球槽位/攻击-技能-能力, 生物 for creature, 厄运 for Doom, 友方 for ally). Applied via format-preserving insertion script: zhs +27 (->2520), eng +11 (->2503, English source for the new keys so files stay consistent). Re-diff: 0 keys missing from zhs; all {Effect}/{Comparison}/{Value} placeholders verified present, no {StarDescriptor}/{Plural} leak. LOC-ONLY (no code change/rebuild).
+Note: kor has the same 16+11 gap (NOT done — user asked Chinese only; offer separately). Scaling-suffix zhs bakes the noun (drops the English-carrying {Descriptor} token) so step>1 multiplier isn't shown — minor, common case perfect.
+Next Step: commit+push+Steam-deploy the loc; optionally do kor next.
+
 ## 2026-06-14 - Implemented Current-resource count events + Non-Attack/Skill/Power type filters
 
 Hypothesis: The requested scaling params + inverse type filters can be added with contained, low-risk changes.
