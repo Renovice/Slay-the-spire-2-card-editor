@@ -54,9 +54,21 @@ public abstract class CardEditorCreatedCardBase : CardModel, KnowledgeDemon.ICho
 		? identitySource.Rarity
 		: CardEditorCreatedCardsStore.GetRarityForCard(base.Id);
 
-	public override TargetType TargetType => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
-		? identitySource.TargetType
-		: CardEditorCreatedCardsStore.GetTargetTypeForCard(base.Id);
+	public override TargetType TargetType
+	{
+		get
+		{
+			TargetType resolved = CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)
+				? identitySource.TargetType
+				: CardEditorCreatedCardsStore.GetTargetTypeForCard(base.Id);
+			// AnyPlayer is only half-wired for combat-card targeting in the base game: NTargetManager handles
+			// it, but IsValidTarget / NCardPlay / NControllerCardPlay / the mod targeting patches only special
+			// case AnyEnemy and AnyAlly, so a PLAYED AnyPlayer card has no valid targets and crashes. Fall back
+			// to AnyAlly, which is fully supported end to end; the effect-level target (CardExtraEffectTarget)
+			// still restricts grants/effects to player allies, so "grant to an ally" keeps working correctly.
+			return resolved == TargetType.AnyPlayer ? TargetType.AnyAlly : resolved;
+		}
+	}
 
 	public override IEnumerable<CardKeyword> CanonicalKeywords
 	{

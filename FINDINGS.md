@@ -300,3 +300,12 @@ Finding: True for 3 fully + B partially (B's AnyPlayer CARD-target crash is a ga
 - D (osty attack damage not updating on enemy hover): TRUE -> FIXED. FormatLineForAmount condition (~15943) now includes OstyAction -> routes through TryGetScaledAmountText -> TryGetHookedMoveAmountPreview (already handles Osty: effectiveDealer = owner.Osty), recomputing Vulnerable/Lethality on hover.
 Files: CardEditorExtraEffects.cs (B,C,D), CardEditorRelicOverrides.cs (A). Build 0 errors. Deployed live + staging; committed to main.
 Next: user retest; for B's AnyPlayer crash, provide the exception/log so the game-level targeting gap can be patched.
+
+## 2026-06-19 - Fixed Any-Player card-target crash (B#2)
+
+Hypothesis: the 'any player' card-target crash is fixable safely.
+Finding: True -> FIXED (via mapping, not a risky core patch).
+Root cause: TargetType.AnyPlayer is only half-wired for COMBAT card targeting in the base game - NTargetManager.AllowedToTargetNode handles it (case at ~282) but CardModel.IsValidTarget falls through to 'return false' for any non-null AnyPlayer target (no AnyPlayer branch), and NCardPlay/NControllerCardPlay/NMouseCardPlay + the mod's CardEditorExtraEffectTargetingPatches only special-case AnyEnemy/AnyAlly. So a PLAYED AnyPlayer card has zero valid targets -> crash. AnyPlayer is only used by rest-site/special contexts via direct StartTargeting, never as a played combat card.
+Fix: map AnyPlayer -> AnyAlly at the single source of a created card's target (CardEditorCreatedCards.TargetType getter), covering both the dynamic-identity and store paths, new and existing cards. AnyAlly is fully supported end to end; the effect-level target (CardExtraEffectTarget, fixed earlier via ResolveTargetPlayers) still restricts grants to player allies, so grant-to-ally keeps working. Chose this over patching ~5 core game UI methods (high risk to all cards).
+Tradeoff: an AnyPlayer card target now behaves like AnyAlly (Osty hoverable in the targeting cursor), but clicking Osty grants nothing (effect filters to players). Build 0 errors; deployed live + staging; committed to main.
+Next: user retest the grant-to-ally card with the AnyAlly (or formerly-AnyPlayer) target.
