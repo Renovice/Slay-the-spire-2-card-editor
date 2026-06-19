@@ -16,6 +16,7 @@ internal sealed class CardEditorMultiplayerSettingsData
 {
 	public bool MultiplayerSyncEnabled { get; set; } = true;
 	public CardEditorMultiplayerAuthorityMode AuthorityMode { get; set; } = CardEditorMultiplayerAuthorityMode.HostOnly;
+	public bool DisableDesyncProtection { get; set; } = false;
 }
 
 internal static class CardEditorMultiplayerSettings
@@ -66,6 +67,28 @@ internal static class CardEditorMultiplayerSettings
 
 			_data.AuthorityMode = value;
 			Revision++;
+			Save();
+		}
+	}
+
+	public static bool DisableDesyncProtection
+	{
+		get
+		{
+			EnsureLoaded();
+			return _data.DisableDesyncProtection;
+		}
+		set
+		{
+			EnsureLoaded();
+			if (_data.DisableDesyncProtection == value)
+			{
+				return;
+			}
+
+			// Not part of the synced state DTO, so it must NOT bump Revision (would force a redundant
+			// host snapshot re-broadcast). Just persist it locally.
+			_data.DisableDesyncProtection = value;
 			Save();
 		}
 	}

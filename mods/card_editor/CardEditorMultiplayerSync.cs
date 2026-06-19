@@ -39,190 +39,6 @@ internal sealed class CardEditorMultiplayerStateDto
 	public Dictionary<string, CardEditorRelicOverrideStore.RelicOverrideDto> RelicOverrides { get; set; } = new(StringComparer.Ordinal);
 }
 
-internal sealed class CardEditorMultiplayerCreatedCardDto
-{
-	public bool Enabled { get; set; }
-	public string? Title { get; set; }
-	public string? Pool { get; set; }
-	public string? PoolTitle { get; set; }
-	public string? Rarity { get; set; }
-	public string? Type { get; set; }
-	public string? TargetType { get; set; }
-	public bool FullArt { get; set; }
-	public string? Finish { get; set; }
-	public Dictionary<string, decimal>? FinishParams { get; set; }
-	public string? BorderFinish { get; set; }
-	public Dictionary<string, decimal>? BorderFinishParams { get; set; }
-	public List<string>? EffectSourceCardIds { get; set; }
-	public string? EffectSourcePlacement { get; set; }
-	public string? PortraitSourceCardId { get; set; }
-	public string? CustomPortraitFile { get; set; }
-	public bool? CustomTextEnabled { get; set; }
-	public string? CustomText { get; set; }
-	public bool? CustomTextUpgradedEnabled { get; set; }
-	public string? CustomTextUpgraded { get; set; }
-	public CardEditorPresetStore.CardOverrideDto? Override { get; set; }
-
-	public static CardEditorMultiplayerCreatedCardDto FromDefinition(CardEditorCreatedCardDefinition definition)
-	{
-		return new CardEditorMultiplayerCreatedCardDto
-		{
-			Enabled = definition.Enabled,
-			Title = definition.Title,
-			Pool = definition.Pool.ToString(),
-			PoolTitle = definition.PoolTitle,
-			Rarity = definition.Rarity.ToString(),
-			Type = definition.Type.ToString(),
-			TargetType = definition.TargetType.ToString(),
-			FullArt = definition.FullArt,
-			Finish = definition.Finish.ToString(),
-			FinishParams = definition.FinishParams != null && definition.FinishParams.Count > 0
-				? definition.FinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value, StringComparer.Ordinal)
-				: null,
-			BorderFinish = definition.BorderFinish != CardEditorVisualFinish.None ? definition.BorderFinish.ToString() : null,
-			BorderFinishParams = definition.BorderFinishParams != null && definition.BorderFinishParams.Count > 0
-				? definition.BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (decimal)kvp.Value, StringComparer.Ordinal)
-				: null,
-			EffectSourceCardIds = definition.EffectSourceCardIds?
-				.Select(id => id?.ToString())
-				.Where(text => !string.IsNullOrWhiteSpace(text))
-				.Select(text => text!)
-				.ToList(),
-			EffectSourcePlacement = definition.EffectSourcePlacement.ToString(),
-			PortraitSourceCardId = definition.PortraitSourceCardId?.ToString(),
-			CustomPortraitFile = definition.CustomPortraitFile,
-			CustomTextEnabled = definition.CustomTextEnabled,
-			CustomText = definition.CustomText,
-			CustomTextUpgradedEnabled = definition.CustomTextUpgradedEnabled,
-			CustomTextUpgraded = definition.CustomTextUpgraded,
-			Override = CardEditorPresetStore.CardOverrideDto.FromOverride(definition.Override ?? new CardOverride())
-		};
-	}
-
-	public CardEditorCreatedCardDefinition ToDefinitionSafe(ModelId cardId)
-	{
-		CardEditorCreatedCardDefinition definition = new CardEditorCreatedCardDefinition
-		{
-			Enabled = Enabled,
-			Title = Title?.Trim() ?? string.Empty,
-			PoolTitle = string.IsNullOrWhiteSpace(PoolTitle) ? null : PoolTitle.Trim(),
-			FullArt = FullArt,
-			Finish = CardEditorVisualFinish.None,
-			Override = new CardOverride()
-		};
-
-		if (!string.IsNullOrWhiteSpace(Pool) && Enum.TryParse(Pool, out CardEditorCreatedCardPool parsedPool))
-		{
-			definition.Pool = parsedPool;
-		}
-
-		if (!string.IsNullOrWhiteSpace(Rarity) && Enum.TryParse(Rarity, out CardRarity parsedRarity))
-		{
-			definition.Rarity = parsedRarity;
-		}
-
-		if (!string.IsNullOrWhiteSpace(Type) && Enum.TryParse(Type, out CardType parsedType) && parsedType != CardType.None)
-		{
-			definition.Type = parsedType;
-		}
-
-		if (!string.IsNullOrWhiteSpace(TargetType) && Enum.TryParse(TargetType, out TargetType parsedTargetType))
-		{
-			definition.TargetType = parsedTargetType;
-		}
-
-		if (!string.IsNullOrWhiteSpace(Finish)
-			&& Enum.TryParse(Finish, ignoreCase: true, out CardEditorVisualFinish parsedFinish))
-		{
-			definition.Finish = parsedFinish;
-		}
-
-		if (FinishParams != null && FinishParams.Count > 0)
-		{
-			definition.FinishParams = FinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value, StringComparer.Ordinal);
-		}
-
-		if (!string.IsNullOrWhiteSpace(BorderFinish)
-			&& Enum.TryParse(BorderFinish, ignoreCase: true, out CardEditorVisualFinish parsedBorderFinish))
-		{
-			definition.BorderFinish = parsedBorderFinish;
-		}
-
-		if (BorderFinishParams != null && BorderFinishParams.Count > 0)
-		{
-			definition.BorderFinishParams = BorderFinishParams.ToDictionary(kvp => kvp.Key, kvp => (float)kvp.Value, StringComparer.Ordinal);
-		}
-
-		if (EffectSourceCardIds != null)
-		{
-			foreach (string rawId in EffectSourceCardIds)
-			{
-				if (TryParseModelId(rawId, out ModelId parsedEffectSourceId))
-				{
-					definition.EffectSourceCardIds.Add(parsedEffectSourceId);
-				}
-			}
-		}
-
-		if (!string.IsNullOrWhiteSpace(EffectSourcePlacement)
-			&& Enum.TryParse(EffectSourcePlacement, ignoreCase: true, out CardEditorEffectSourcePlacement parsedPlacement))
-		{
-			definition.EffectSourcePlacement = parsedPlacement;
-		}
-
-		if (!string.IsNullOrWhiteSpace(PortraitSourceCardId) && TryParseModelId(PortraitSourceCardId, out ModelId portraitId))
-		{
-			definition.PortraitSourceCardId = portraitId;
-		}
-
-		if (!string.IsNullOrWhiteSpace(CustomPortraitFile))
-		{
-			definition.CustomPortraitFile = CustomPortraitFile.Trim();
-		}
-
-		definition.CustomTextEnabled = CustomTextEnabled ?? (CustomText != null);
-		definition.CustomTextUpgradedEnabled = CustomTextUpgradedEnabled ?? (CustomTextUpgraded != null);
-
-		if (CustomText != null)
-		{
-			definition.CustomText = string.IsNullOrWhiteSpace(CustomText) ? string.Empty : CustomText;
-		}
-
-		if (CustomTextUpgraded != null)
-		{
-			definition.CustomTextUpgraded = string.IsNullOrWhiteSpace(CustomTextUpgraded) ? string.Empty : CustomTextUpgraded;
-		}
-
-		if (Override != null)
-		{
-			try
-			{
-				definition.Override = Override.ToOverrideSafe(cardId, fileVersion: 8) ?? new CardOverride();
-			}
-			catch
-			{
-				definition.Override = new CardOverride();
-			}
-		}
-
-		return definition;
-	}
-
-	private static bool TryParseModelId(string text, out ModelId modelId)
-	{
-		try
-		{
-			modelId = ModelId.Deserialize(text);
-			return true;
-		}
-		catch
-		{
-			modelId = ModelId.none;
-			return false;
-		}
-	}
-}
-
 internal sealed class CardEditorMultiplayerSyncRequestMessage : INetMessage, IPacketSerializable
 {
 	public bool ShouldBroadcast => false;
@@ -335,6 +151,12 @@ internal static class CardEditorMultiplayerSync
 	private const string SyncDescriptionLocKey = "CARD_EDITOR_MULTIPLAYER_SYNC_DESCRIPTION";
 	private const string AuthorityHeaderLocKey = "CARD_EDITOR_MULTIPLAYER_AUTHORITY_HEADER";
 	private const string AuthorityDescriptionLocKey = "CARD_EDITOR_MULTIPLAYER_AUTHORITY_DESCRIPTION";
+	private const string DesyncLineName = "CardEditorMultiplayerDesyncLine";
+	private const string DesyncDividerName = "CardEditorMultiplayerDesyncRowDivider";
+	private const string DesyncLabelName = "CardEditorMultiplayerDesyncLabel";
+	private const string DesyncTickboxName = "CardEditorMultiplayerDesyncTickbox";
+	private const string DesyncHeaderLocKey = "CARD_EDITOR_MULTIPLAYER_DESYNC_HEADER";
+	private const string DesyncDescriptionLocKey = "CARD_EDITOR_MULTIPLAYER_DESYNC_DESCRIPTION";
 
 	private static readonly JsonSerializerOptions _jsonOptions = new()
 	{
@@ -363,6 +185,15 @@ internal static class CardEditorMultiplayerSync
 	private static bool _isRefreshingSettingsUi;
 	private static bool _settingsLocInjected;
 
+	// L1/L4: client lobby-ready gate + snapshot request retry.
+	private static bool _pendingClientReady;
+	private static Action? _pendingReadyAction;
+	private static ulong _pendingReadyStartMs;
+	private static bool _bypassReadyGate;
+	private static ulong _lastSyncRequestMs;
+	private const double ReadyGateTimeoutSeconds = 8.0;
+	private const double SyncRequestRetrySeconds = 2.0;
+
 	public static bool IsBoundToMultiplayerSession => _netService != null && _netService.Type.IsMultiplayer();
 
 	public static bool IsHostSession => _netService?.Type == NetGameType.Host;
@@ -389,12 +220,157 @@ internal static class CardEditorMultiplayerSync
 			return true;
 		}
 
+		// L2: freeze the shared definition set for the duration of an active multiplayer run so a
+		// mid-run edit cannot desync peers (the deck/effects are locked in at run start). Editing is
+		// allowed again in the lobby and between runs.
+		if (IsRunActive())
+		{
+			return false;
+		}
+
 		return _netService!.Type switch
 		{
 			NetGameType.Host => true,
 			NetGameType.Client => _remoteAuthorityMode == CardEditorMultiplayerAuthorityMode.AnyPlayer,
 			_ => true
 		};
+	}
+
+	// Returns a human-readable reason that shared-state editing is currently blocked, or null if it
+	// is allowed. Used by the editors to grey out Apply/Reset and explain why instead of silently
+	// no-opping.
+	internal static string? GetSharedStateLockReason()
+	{
+		if (CanEditSharedState())
+		{
+			return null;
+		}
+
+		if (IsRunActive())
+		{
+			return "Card Editor is locked during a multiplayer run. Edit in the lobby or between runs.";
+		}
+
+		return "Only the host can change shared Card Editor cards in this multiplayer session.";
+	}
+
+	// True while a run is in progress (from run start through cleanup). Used to freeze shared
+	// definition edits/snapshots for the run so peers stay byte-identical under lockstep.
+	internal static bool IsRunActive()
+	{
+		try
+		{
+			return RunManager.Instance != null && RunManager.Instance.IsInProgress;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static bool IsClientSnapshotApplied()
+	{
+		return _lastAppliedSequence > 0;
+	}
+
+	// L1: hold a client's lobby "ready" until the host snapshot has been applied. Returns false to
+	// block the original SetReady; FirePendingReadyIfNeeded re-fires `fireReadyTrue` once synced (or
+	// on timeout). Works for any lobby type (the caller supplies how to re-ready).
+	internal static bool AllowClientReady(Action fireReadyTrue, bool ready)
+	{
+		// An explicit un-ready always passes through, and cancels any deferred ready so the player is
+		// never silently re-readied after backing out.
+		if (!ready)
+		{
+			ClearPendingReady();
+			return true;
+		}
+
+		if (_bypassReadyGate || _netService == null || _netService.Type != NetGameType.Client)
+		{
+			return true;
+		}
+
+		// If sync is off locally there is nothing to wait for - don't stall the lobby.
+		if (!CardEditorMultiplayerSettings.MultiplayerSyncEnabled)
+		{
+			return true;
+		}
+
+		if (IsClientSnapshotApplied())
+		{
+			// Snapshot already synced: the gate is satisfied. Drop any still-held ready so a manual
+			// re-click cannot also trigger a deferred re-fire (duplicate ready message).
+			ClearPendingReady();
+			return true;
+		}
+
+		_pendingClientReady = true;
+		_pendingReadyAction = fireReadyTrue;
+		if (_pendingReadyStartMs == 0)
+		{
+			_pendingReadyStartMs = Time.GetTicksMsec();
+			CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Holding lobby ready until the card-editor snapshot is applied.");
+		}
+		_requestedInitialSync = false;
+		return false;
+	}
+
+	private static void ClearPendingReady()
+	{
+		_pendingClientReady = false;
+		_pendingReadyAction = null;
+		_pendingReadyStartMs = 0;
+	}
+
+	private static void FirePendingReadyIfNeeded()
+	{
+		if (!_pendingClientReady)
+		{
+			return;
+		}
+
+		// Drop a pending ready that belongs to a session we are no longer a connected client of.
+		if (_netService == null || _netService.Type != NetGameType.Client)
+		{
+			ClearPendingReady();
+			return;
+		}
+
+		bool applied = IsClientSnapshotApplied();
+		bool timedOut = _pendingReadyStartMs != 0
+			&& (Time.GetTicksMsec() - _pendingReadyStartMs) >= (ulong)(ReadyGateTimeoutSeconds * 1000.0);
+		if (!applied && !timedOut)
+		{
+			return;
+		}
+
+		if (!applied)
+		{
+			Log.Warn("[CardEditor][MultiplayerSync] Readying WITHOUT a confirmed card-editor sync "
+				+ "(host may have sync disabled or lack the mod). Card/relic mismatches may still desync.");
+		}
+
+		Action? fire = _pendingReadyAction;
+		ClearPendingReady();
+		if (fire == null)
+		{
+			return;
+		}
+
+		_bypassReadyGate = true;
+		try
+		{
+			fire();
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][MultiplayerSync] Failed firing deferred lobby ready: {ex}");
+		}
+		finally
+		{
+			_bypassReadyGate = false;
+		}
 	}
 
 	public static void BindToNetService(INetGameService? netService)
@@ -424,6 +400,9 @@ internal static class CardEditorMultiplayerSync
 		_lastAppliedSequence = 0;
 		_remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
 		_remoteSyncActive = false;
+		ClearPendingReady();
+		_bypassReadyGate = false;
+		_lastSyncRequestMs = 0;
 		CaptureRevisionCheckpoint();
 		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Bound to {_netService.Type} service netId={_netService.NetId}");
 	}
@@ -489,17 +468,31 @@ internal static class CardEditorMultiplayerSync
 
 		if (_netService.Type == NetGameType.Client)
 		{
-			if (!_requestedInitialSync)
+			// Request the host snapshot, retrying until one is applied (covers a dropped request or a
+			// host that enables sync after we first asked).
+			if (!IsClientSnapshotApplied())
 			{
-				_requestedInitialSync = true;
-				_netService.SendMessage(new CardEditorMultiplayerSyncRequestMessage());
-				CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Requested authoritative host snapshot.");
+				ulong now = Time.GetTicksMsec();
+				if (!_requestedInitialSync || (now - _lastSyncRequestMs) >= (ulong)(SyncRequestRetrySeconds * 1000.0))
+				{
+					_requestedInitialSync = true;
+					_lastSyncRequestMs = now;
+					_netService.SendMessage(new CardEditorMultiplayerSyncRequestMessage());
+					CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Requested authoritative host snapshot.");
+				}
 			}
 
+			FirePendingReadyIfNeeded();
 			return;
 		}
 
 		if (_netService.Type != NetGameType.Host || !CardEditorMultiplayerSettings.MultiplayerSyncEnabled)
+		{
+			return;
+		}
+
+		// L2: never broadcast definition changes mid-run; the definition set is frozen for the run.
+		if (IsRunActive())
 		{
 			return;
 		}
@@ -619,10 +612,28 @@ internal static class CardEditorMultiplayerSync
 				RefreshSettingsUi(content);
 			});
 
+		EnsureSettingsTickboxLine(
+			content,
+			DesyncLineName,
+			DesyncLabelName,
+			DesyncTickboxName,
+			GetSettingsUiText(DesyncHeaderLocKey, "Disable Desync Protection"),
+			ticked =>
+			{
+				if (_isRefreshingSettingsUi)
+				{
+					return;
+				}
+
+				CardEditorMultiplayerSettings.DisableDesyncProtection = ticked;
+				RefreshSettingsUi(content);
+			});
+
 		EnsureSettingsDivider(content, PreloadDividerName);
 		EnsureSettingsDivider(content, LegacyPreloadDividerName);
 		EnsureSettingsDivider(content, SyncDividerName);
 		EnsureSettingsDivider(content, AuthorityDividerName);
+		EnsureSettingsDivider(content, DesyncDividerName);
 
 		PositionSettingsLines(content);
 		RefreshSettingsUi(content);
@@ -637,6 +648,7 @@ internal static class CardEditorMultiplayerSync
 			NSettingsTickbox? legacyPreloadTickbox = FindSettingsTickbox(content, LegacyPreloadLineName);
 			NSettingsTickbox? syncTickbox = FindSettingsTickbox(content, SyncLineName);
 			NSettingsTickbox? authorityTickbox = FindSettingsTickbox(content, AuthorityLineName);
+			NSettingsTickbox? desyncTickbox = FindSettingsTickbox(content, DesyncLineName);
 			RichTextLabel? legacyPreloadLabel = FindNamedDescendant<RichTextLabel>(content.GetNodeOrNull(LegacyPreloadLineName), LegacyPreloadLabelName);
 			RichTextLabel? authorityLabel = FindNamedDescendant<RichTextLabel>(content.GetNodeOrNull(AuthorityLineName), AuthorityLabelName);
 
@@ -669,6 +681,15 @@ internal static class CardEditorMultiplayerSync
 			{
 				authorityTickbox.IsTicked = displayedAuthorityMode == CardEditorMultiplayerAuthorityMode.AnyPlayer;
 				SetSettingsLineInteractive(authorityTickbox, authorityLabel, authorityInteractive);
+			}
+
+			if (desyncTickbox != null)
+			{
+				// Desync protection is suppressed by the HOST's checksum comparison, so a client's
+				// toggle is a no-op; grey it out on clients to avoid a misleading control.
+				RichTextLabel? desyncLabel = FindNamedDescendant<RichTextLabel>(content.GetNodeOrNull(DesyncLineName), DesyncLabelName);
+				desyncTickbox.IsTicked = CardEditorMultiplayerSettings.DisableDesyncProtection;
+				SetSettingsLineInteractive(desyncTickbox, desyncLabel, CanChangeAuthorityModeSetting());
 			}
 
 			LogSettingsUiState(content, "RefreshSettingsUi:end");
@@ -825,6 +846,8 @@ internal static class CardEditorMultiplayerSync
 		Node? syncDivider = content.GetNodeOrNull(SyncDividerName);
 		Node? authorityLine = content.GetNodeOrNull(AuthorityLineName);
 		Node? authorityDivider = content.GetNodeOrNull(AuthorityDividerName);
+		Node? desyncLine = content.GetNodeOrNull(DesyncLineName);
+		Node? desyncDivider = content.GetNodeOrNull(DesyncDividerName);
 		Node? sendFeedbackLine = content.GetNodeOrNull(SendFeedbackLineName);
 		if (sendFeedbackLine == null)
 		{
@@ -870,6 +893,16 @@ internal static class CardEditorMultiplayerSync
 		{
 			content.MoveChild(authorityDivider, sendFeedbackLine.GetIndex());
 		}
+
+		if (desyncLine != null)
+		{
+			content.MoveChild(desyncLine, sendFeedbackLine.GetIndex());
+		}
+
+		if (desyncDivider != null)
+		{
+			content.MoveChild(desyncDivider, sendFeedbackLine.GetIndex());
+		}
 	}
 
 	private static void EnsureSettingsLocEntriesInjected()
@@ -891,7 +924,9 @@ internal static class CardEditorMultiplayerSync
 				{ SyncHeaderLocKey, "Multiplayer Sync" },
 				{ SyncDescriptionLocKey, "Automatically syncs the host's Card Editor changes for the current multiplayer session without overwriting your own local preset files." },
 				{ AuthorityHeaderLocKey, "Any Player Control" },
-				{ AuthorityDescriptionLocKey, "Lets any player push Card Editor changes to the shared multiplayer session. When disabled, only the host can sync live edits." }
+				{ AuthorityDescriptionLocKey, "Lets any player push Card Editor changes to the shared multiplayer session. When disabled, only the host can sync live edits." },
+				{ DesyncHeaderLocKey, "Disable Desync Protection" },
+				{ DesyncDescriptionLocKey, "UNSAFE: the host stops kicking players when game states diverge. Use only if Card Editor mismatches keep ending your run - players may silently end up in slightly different game states. Set on the HOST." }
 			});
 			_settingsLocInjected = true;
 		}
@@ -1109,6 +1144,9 @@ internal static class CardEditorMultiplayerSync
 		_lastAppliedSequence = 0;
 		_remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
 		_remoteSyncActive = false;
+		ClearPendingReady();
+		_bypassReadyGate = false;
+		_lastSyncRequestMs = 0;
 	}
 
 	private static void OnServiceDisconnected(NetErrorInfo info)
@@ -1139,6 +1177,15 @@ internal static class CardEditorMultiplayerSync
 			return;
 		}
 
+		// L2: never apply a host snapshot mid-run; definitions are frozen once the run begins.
+		// (Editing is also frozen for everyone during a run, so the host should not be broadcasting
+		// here anyway - this is a defensive guard against mutating live state on only one peer.)
+		if (IsRunActive())
+		{
+			CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Ignoring host snapshot received during an active run (definitions are frozen for the run).");
+			return;
+		}
+
 		if (!TryDeserializeState(message.StateJson, out CardEditorMultiplayerStateDto? state) || state == null)
 		{
 			Log.Warn($"[CardEditor][MultiplayerSync] Failed deserializing snapshot from {senderId}.");
@@ -1158,6 +1205,15 @@ internal static class CardEditorMultiplayerSync
 			|| !CardEditorMultiplayerSettings.MultiplayerSyncEnabled
 			|| CardEditorMultiplayerSettings.AuthorityMode != CardEditorMultiplayerAuthorityMode.AnyPlayer)
 		{
+			return;
+		}
+
+		// L2: never apply a client edit request mid-run; definitions are frozen once the run begins
+		// (mirrors OnSnapshotReceived and the host broadcast skip). A stale or racing client edit must
+		// not mutate shared definitions on the host and rebroadcast to ready peers during a run.
+		if (IsRunActive())
+		{
+			CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Ignoring client edit request from {senderId} during an active run (definitions are frozen for the run).");
 			return;
 		}
 
@@ -1309,6 +1365,16 @@ internal static class CardEditorMultiplayerSync
 			CardEditorDefinitionStore.ReplaceDefinitions(keywords, statuses);
 			if (state.CreatedCardSlotCount > 0)
 			{
+				// The host's created-card slots only become ACTIVE on this client after a restart
+				// (the slot card types are registered into pools at launch, clamped to the local
+				// count). If the host uses more slots than this client currently has active, any
+				// created card the host placed in a higher slot will NOT appear here and will desync
+				// the shared card/reward pools. Warn loudly + queue the count for next launch.
+				if (state.CreatedCardSlotCount > CardEditorCreatedCardsStore.SlotCount)
+				{
+					Log.Warn($"[CardEditor][MultiplayerSync] Host uses {state.CreatedCardSlotCount} custom-card slots but this client only has {CardEditorCreatedCardsStore.SlotCount} active. " +
+						"Cards in higher slots won't appear here and may cause a desync. Raise 'Max Custom Cards' to at least the host's value and RESTART before playing together.");
+				}
 				CardEditorCreatedCardsStore.SetSlotCountForNextRun(state.CreatedCardSlotCount);
 			}
 			CardEditorCreatedCardsStore.ImportSnapshot(createdCards);
@@ -1649,45 +1715,15 @@ internal static class CardEditorMultiplayerSync
 				lineKind = CardEditorMultiplayerSettingsLineKind.Authority;
 				return true;
 			}
+
+			if (current.Name == DesyncLineName)
+			{
+				lineKind = CardEditorMultiplayerSettingsLineKind.DesyncProtection;
+				return true;
+			}
 		}
 
 		return false;
-	}
-
-	internal static void ApplyMultiplayerSettingsTick(CardEditorMultiplayerSettingsLineKind lineKind, bool ticked)
-	{
-		switch (lineKind)
-		{
-			case CardEditorMultiplayerSettingsLineKind.PreloadOnLaunch:
-				CardEditorPerformanceSettings.SetPreloadEditorPopupsOnLaunch(ticked);
-				break;
-			case CardEditorMultiplayerSettingsLineKind.LegacyPreload:
-				CardEditorPerformanceSettings.SetLegacyPreloadEveryEditorPopupOnLaunch(ticked);
-				break;
-			case CardEditorMultiplayerSettingsLineKind.Sync:
-				CardEditorMultiplayerSettings.MultiplayerSyncEnabled = ticked;
-				if (IsBoundToMultiplayerSession)
-				{
-					if (IsHostSession)
-					{
-						MarkSettingsDirtyForBroadcast();
-					}
-					else
-					{
-						ResetInitialSyncRequest();
-					}
-				}
-				break;
-			case CardEditorMultiplayerSettingsLineKind.Authority:
-				CardEditorMultiplayerSettings.AuthorityMode = ticked
-					? CardEditorMultiplayerAuthorityMode.AnyPlayer
-					: CardEditorMultiplayerAuthorityMode.HostOnly;
-				if (IsHostSession && CardEditorMultiplayerSettings.MultiplayerSyncEnabled)
-				{
-					MarkSettingsDirtyForBroadcast();
-				}
-				break;
-		}
 	}
 
 	internal static bool TryShowSettingsHoverTip(Control owner)
@@ -1735,6 +1771,9 @@ internal static class CardEditorMultiplayerSync
 			CardEditorMultiplayerSettingsLineKind.Authority => new HoverTip(
 				new LocString("settings_ui", AuthorityHeaderLocKey),
 				GetSettingsUiText(AuthorityDescriptionLocKey, "Lets any player push Card Editor changes to the shared multiplayer session. When disabled, only the host can sync live edits.")),
+			CardEditorMultiplayerSettingsLineKind.DesyncProtection => new HoverTip(
+				new LocString("settings_ui", DesyncHeaderLocKey),
+				GetSettingsUiText(DesyncDescriptionLocKey, "UNSAFE: the host stops kicking players when game states diverge. Use only if Card Editor mismatches keep ending your run - players may silently end up in slightly different game states. Set on the HOST.")),
 			_ => default
 		};
 		return lineKind != CardEditorMultiplayerSettingsLineKind.None;
@@ -1746,13 +1785,10 @@ internal static class CardEditorMultiplayerSettingsTickboxTickPatch
 {
 	private static bool Prefix(NBackgroundModeTickbox __instance)
 	{
-		if (!CardEditorMultiplayerSync.TryGetMultiplayerSettingsLineKind(__instance, out CardEditorMultiplayerSettingsLineKind lineKind))
-		{
-			return true;
-		}
-
-		CardEditorMultiplayerSync.ApplyMultiplayerSettingsTick(lineKind, ticked: true);
-		return false;
+		// Suppress the vanilla LimitFpsInBackground write for our duplicated settings lines.
+		// The single apply path is the tickbox's Toggled signal handler (EnsureSettingsTickboxLine),
+		// which fires immediately after OnTick; applying here too would double-apply.
+		return !CardEditorMultiplayerSync.TryGetMultiplayerSettingsLineKind(__instance, out _);
 	}
 }
 
@@ -1761,13 +1797,8 @@ internal static class CardEditorMultiplayerSettingsTickboxUntickPatch
 {
 	private static bool Prefix(NBackgroundModeTickbox __instance)
 	{
-		if (!CardEditorMultiplayerSync.TryGetMultiplayerSettingsLineKind(__instance, out CardEditorMultiplayerSettingsLineKind lineKind))
-		{
-			return true;
-		}
-
-		CardEditorMultiplayerSync.ApplyMultiplayerSettingsTick(lineKind, ticked: false);
-		return false;
+		// See the OnTick patch: suppress the vanilla write; the Toggled handler is the single apply path.
+		return !CardEditorMultiplayerSync.TryGetMultiplayerSettingsLineKind(__instance, out _);
 	}
 }
 
@@ -1787,6 +1818,7 @@ internal static class CardEditorMultiplayerSettingsTickboxSetFromSettingsPatch
 			CardEditorMultiplayerSettingsLineKind.LegacyPreload => CardEditorPerformanceSettings.LegacyPreloadEveryEditorPopupOnLaunch,
 			CardEditorMultiplayerSettingsLineKind.Sync => CardEditorMultiplayerSettings.MultiplayerSyncEnabled,
 			CardEditorMultiplayerSettingsLineKind.Authority => CardEditorMultiplayerSettings.AuthorityMode == CardEditorMultiplayerAuthorityMode.AnyPlayer,
+			CardEditorMultiplayerSettingsLineKind.DesyncProtection => CardEditorMultiplayerSettings.DisableDesyncProtection,
 			_ => __instance.IsTicked
 		};
 		return false;
@@ -1835,7 +1867,8 @@ internal enum CardEditorMultiplayerSettingsLineKind
 	PreloadOnLaunch = 1,
 	LegacyPreload = 2,
 	Sync = 3,
-	Authority = 4
+	Authority = 4,
+	DesyncProtection = 5
 }
 
 [HarmonyPatch(typeof(StartRunLobby), MethodType.Constructor, typeof(GameMode), typeof(INetGameService), typeof(IStartRunLobbyListener), typeof(int))]
@@ -1899,5 +1932,41 @@ internal static class CardEditorMultiplayerSettingsScreenPatch
 	{
 		CardEditorMultiplayerSettings.EnsureLoaded();
 		CardEditorMultiplayerSync.EnsureSettingsUi(__instance);
+	}
+}
+
+// L5 (escape hatch): when the local player enables "Disable Desync Protection", suppress the
+// host-side checksum comparison so a modded state divergence does not hard-kick the client.
+// Only the host runs CompareChecksums, so the host's toggle is what matters. WARNING: this turns
+// off the game's only desync safety net - peers can silently diverge into different game states.
+[HarmonyPatch(typeof(ChecksumTracker), "CompareChecksums")]
+internal static class CardEditorChecksumTrackerCompareChecksumsPatch
+{
+	private static bool Prefix()
+	{
+		// Returning false skips CompareChecksums, so no StateDivergenceMessage is sent and no kick occurs.
+		return !CardEditorMultiplayerSettings.DisableDesyncProtection;
+	}
+}
+
+// L1: hold a client's lobby "ready" until the card-editor snapshot has been applied (or a timeout
+// elapses), so the run never begins on mismatched definitions. The run only starts when ALL players
+// are ready, so gating the client's ready gates run start without any host-side coordination.
+[HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SetReady))]
+internal static class CardEditorStartRunLobbySetReadyPatch
+{
+	private static bool Prefix(StartRunLobby __instance, bool ready)
+	{
+		return CardEditorMultiplayerSync.AllowClientReady(() => __instance.SetReady(true), ready);
+	}
+}
+
+// Same ready-gate for resumed/loaded multiplayer runs (LoadRunLobby is a separate type).
+[HarmonyPatch(typeof(LoadRunLobby), nameof(LoadRunLobby.SetReady))]
+internal static class CardEditorLoadRunLobbySetReadyPatch
+{
+	private static bool Prefix(LoadRunLobby __instance, bool ready)
+	{
+		return CardEditorMultiplayerSync.AllowClientReady(() => __instance.SetReady(true), ready);
 	}
 }

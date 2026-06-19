@@ -3054,6 +3054,26 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 	}
 
+	private Button? _applyButton;
+	private Button? _resetButton;
+
+	// Re-applies the shared-state lock greying to the (persistent/cached) popup's Apply/Reset buttons.
+	// Called on every open so a cached popup never shows a stale enabled/disabled state.
+	private void RefreshSharedStateLockUi()
+	{
+		string? reason = CardEditorMultiplayerSync.GetSharedStateLockReason();
+		if (_applyButton != null && GodotObject.IsInstanceValid(_applyButton))
+		{
+			_applyButton.Disabled = reason != null;
+			_applyButton.TooltipText = reason ?? string.Empty;
+		}
+		if (_resetButton != null && GodotObject.IsInstanceValid(_resetButton))
+		{
+			_resetButton.Disabled = reason != null;
+			_resetButton.TooltipText = reason ?? string.Empty;
+		}
+	}
+
 	private void PreparePersistentPopupForOpen(Action onApplied, Vector2? preferredPanelSize)
 	{
 		ulong startMs = Time.GetTicksMsec();
@@ -3068,6 +3088,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_allowPersistentPopupReuseOnClose = true;
 		_uiDirtySinceOpen = false;
 		Visible = true;
+		RefreshSharedStateLockUi();
 		if (GetParent() is Node parent)
 		{
 			parent.MoveChild(this, parent.GetChildCount() - 1);
@@ -3129,6 +3150,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	public override void _Ready()
 	{
+		// Embedded effect-list hosts never build the full popup; the host menu drives the
+		// effect subsystem directly via the InitializeAsEmbeddedEffectHost API below.
+		if (_isEmbeddedEffectHost)
+		{
+			return;
+		}
 		EnsureUiBuilt();
 		ConnectWindowSizeSignal();
 		QueuePopupLayout();
@@ -3165,6 +3192,88 @@ public partial class NCardEditorPopup : Control, IScreenContext
 			SceneTreeTimer t1 = tree.CreateTimer(0.05);
 			t1.Timeout += StabilizePopupLayout;
 		}
+	}
+
+	// ---- Embedded effect-list host API -------------------------------------------------
+	// Lets another menu (e.g. the relic editor) reuse the full card-effect editing UI on a
+	// hidden proxy card, without ever showing the popup. The host node stays in the tree
+	// (so deferred calls work) but builds no popup chrome of its own. Usage:
+	//   var host = new NCardEditorPopup();
+	//   host.InitializeAsEmbeddedEffectHost(proxyCard);
+	//   parentMenu.AddChild(host);                 // _Ready early-returns for embedded hosts
+	//   host.BuildEmbeddedEffectsUi(targetContainer);
+	//   foreach (CardExtraEffect e in existing) host.LoadEmbeddedEffect(e);
+	//   ... later, on apply ...
+	//   List<CardExtraEffect> edited = host.ReadEmbeddedEffects();
+	internal void InitializeAsEmbeddedEffectHost(CardModel hostCard)
+	{
+		_isEmbeddedEffectHost = true;
+		Initialize(hostCard, static () => { }, useModalContainer: false, isUpgradeEditor: false, preferredPanelSize: null);
+		Name = "CardEditorEmbeddedEffectHost";
+		Visible = false;
+	}
+
+	internal void BuildEmbeddedEffectsUi(VBoxContainer parent)
+	{
+		if (parent == null || !GodotObject.IsInstanceValid(parent))
+		{
+			return;
+		}
+		BuildExtraEffectsUi(parent);
+	}
+
+	internal void LoadEmbeddedEffect(CardExtraEffect? effect)
+	{
+		if (effect == null)
+		{
+			return;
+		}
+		AddExtraEffectRow(effect);
+	}
+
+	internal List<CardExtraEffect> ReadEmbeddedEffects()
+	{
+		if (!_isEmbeddedEffectHost)
+		{
+			return new List<CardExtraEffect>();
+		}
+		CardOverride built = BuildOverrideFromUi();
+		List<CardExtraEffect> effects = (built.ExtraEffects ?? new List<CardExtraEffect>()).Where(e => e != null).ToList();
+		foreach (CardExtraEffect e in effects)
+		{
+			// The relic engine runs effects immediately; it never installs a persistent power.
+			// The "As Power" control is hidden in embedded mode, so force it off to avoid a
+			// stored relic effect that would silently behave as a one-shot.
+			e.AsPower = false;
+		}
+		return effects;
+	}
+
+	// Full-screen modal overlays (card/potion pickers, keyword/definition editors) are normally
+	// parented to this popup. When this is an embedded (invisible) effect host, that would make the
+	// overlay invisible and non-interactive (Godot inherits is_visible_in_tree from the hidden
+	// parent), so route it to the visible menu hosting us instead.
+	private const string EmbeddedOverlayMetaKey = "card_editor_embedded_overlay";
+
+	private void AddOverlayChild(Node overlay)
+	{
+		if (_isEmbeddedEffectHost && GetParent() is Node visibleParent && GodotObject.IsInstanceValid(visibleParent))
+		{
+			// All embedded group hosts share one parent (the relic editor), so guard the picker at
+			// the parent level: drop any already-open effect-editor overlay before adding the new one
+			// (a freed sibling's per-host field is handled by its IsInstanceValid checks).
+			foreach (Node child in visibleParent.GetChildren())
+			{
+				if (child != overlay && child.HasMeta(EmbeddedOverlayMetaKey))
+				{
+					child.QueueFreeSafely();
+				}
+			}
+			overlay.SetMeta(EmbeddedOverlayMetaKey, true);
+			visibleParent.AddChild(overlay);
+			return;
+		}
+		AddChild(overlay);
 	}
 
 	private void QueuePopupLayout()
@@ -4117,13 +4226,21 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		TrackExtraEffectHydrationButton(apply);
 		cancel.Pressed += Close;
 		buttons.AddChild(apply);
+		_applyButton = apply;
+
 		if (!_isBatchEdit)
 		{
 			Button reset = new Button { Text = CardEditorLoc.T("button.reset", "Reset") };
 			StyleActionButton(reset, minWidth: 120f);
 			reset.Pressed += OnResetPressed;
+			_resetButton = reset;
 			buttons.AddChild(reset);
 		}
+
+		// Grey out Apply/Reset (with a why-tooltip) while shared-state editing is locked (e.g. during
+		// an active multiplayer run). Re-evaluated on every (re)open via PreparePersistentPopupForOpen
+		// so cached/persistent popups never show a stale state.
+		RefreshSharedStateLockUi();
 		buttons.AddChild(cancel);
 		if (_isBatchEdit)
 		{
@@ -10419,7 +10536,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 
 		overlay.AddChild(panel);
-		AddChild(overlay);
+		AddOverlayChild(overlay);
 		_rewardPoolPickerOverlay = overlay;
 	}
 
@@ -11867,9 +11984,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void BuildExtraEffectsUi(VBoxContainer rightColumn)
 	{
-		Label label = new Label { Text = CardEditorLoc.T("section.extraEffects", "Extra Effects") };
-		StyleSectionLabel(label);
-		rightColumn.AddChild(label);
+		// Embedded relic hosts already sit under the relic editor's "Custom Effects" heading plus a
+		// per-group "When:" row, so this duplicate section heading is suppressed there.
+		if (!_isEmbeddedEffectHost)
+		{
+			Label label = new Label { Text = CardEditorLoc.T("section.extraEffects", "Extra Effects") };
+			StyleSectionLabel(label);
+			rightColumn.AddChild(label);
+		}
 
 		_extraEffectsContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		_extraEffectsContainer.AddThemeConstantOverride("separation", 8);
@@ -11888,39 +12010,45 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 		TrackExtraEffectHydrationButton(add);
 
-		Button addEffectSource = new Button
-		{
-			Text = CardEditorLoc.T("button.addEffectSourceInline", "Add Effect Source"),
-			CustomMinimumSize = new Vector2(0, 42),
-			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
-		};
-		StyleActionButton(addEffectSource, minWidth: 220f);
-		addEffectSource.Pressed += () =>
-		{
-			EnsurePendingPopupHydrationCompleted();
-			OpenSpecificCardPicker(selectedId =>
-			{
-				if (selectedId == ModelId.none || selectedId == _cardId)
-				{
-					return;
-				}
-
-				CardExtraEffect effect = new CardExtraEffect
-				{
-					Kind = CardExtraEffectKind.RunEffectSourceCard,
-					SpecificCardId = selectedId.ToString(),
-					Trigger = CardExtraEffectTrigger.OnPlay,
-					Target = CardExtraEffectTarget.Self
-				};
-				AddExtraEffectRow(effect);
-				QueuePreviewUpdate();
-			});
-		};
-		TrackExtraEffectHydrationButton(addEffectSource);
 		HBoxContainer addButtonsRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		addButtonsRow.AddThemeConstantOverride("separation", 10);
 		addButtonsRow.AddChild(add);
-		addButtonsRow.AddChild(addEffectSource);
+
+		// "Add Effect Source" builds a card-only RunEffectSourceCard effect via a card picker and has
+		// no relic meaning, so it is omitted for embedded relic hosts (leaving "Add Effect" to fill).
+		if (!_isEmbeddedEffectHost)
+		{
+			Button addEffectSource = new Button
+			{
+				Text = CardEditorLoc.T("button.addEffectSourceInline", "Add Effect Source"),
+				CustomMinimumSize = new Vector2(0, 42),
+				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+			};
+			StyleActionButton(addEffectSource, minWidth: 220f);
+			addEffectSource.Pressed += () =>
+			{
+				EnsurePendingPopupHydrationCompleted();
+				OpenSpecificCardPicker(selectedId =>
+				{
+					if (selectedId == ModelId.none || selectedId == _cardId)
+					{
+						return;
+					}
+
+					CardExtraEffect effect = new CardExtraEffect
+					{
+						Kind = CardExtraEffectKind.RunEffectSourceCard,
+						SpecificCardId = selectedId.ToString(),
+						Trigger = CardExtraEffectTrigger.OnPlay,
+						Target = CardExtraEffectTarget.Self
+					};
+					AddExtraEffectRow(effect);
+					QueuePreviewUpdate();
+				});
+			};
+			TrackExtraEffectHydrationButton(addEffectSource);
+			addButtonsRow.AddChild(addEffectSource);
+		}
 
 		VBoxContainer effectSection = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
 		effectSection.AddThemeConstantOverride("separation", 8);
@@ -14129,6 +14257,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return isDeltaRow ? value : Math.Clamp(value, minAbsolute, maxAbsolute);
 	}
 
+	// Effect kinds that operate on "this card" / the source card, so they are inert (or unsafe)
+	// when the host is a relic (whose effect source is a throwaway blank proxy card). These are
+	// hidden from the relic effect dropdown. Ambiguous-but-harmless kinds are intentionally kept.
+	private static readonly HashSet<CardExtraEffectKind> RelicUnsupportedEffectKinds = new()
+	{
+		CardExtraEffectKind.AddCopyOfThisCard,
+		CardExtraEffectKind.AddExactCopyOfThisCardToDeck,
+		CardExtraEffectKind.CardCostsLess,
+		CardExtraEffectKind.CardStarCostsLess,
+		CardExtraEffectKind.SelfScaling,
+		CardExtraEffectKind.PersistentSelfScaling,
+		CardExtraEffectKind.AutoPlaySelfFromPile,
+		CardExtraEffectKind.RunEffectSourceCard,
+	};
+
 	private void AddExtraEffectRow(CardExtraEffect? effect, bool isUpgradeDeltaRow = false)
 	{
 		ulong rowBuildStartMs = Time.GetTicksMsec();
@@ -14176,7 +14319,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				|| IsHiddenUnifiedCardActionKind(def.Kind)
 				|| IsHiddenUnifiedUpgradeKind(def.Kind)
 				|| IsHiddenUnifiedSelfScalingKind(def.Kind)
-				|| def.Kind == CardExtraEffectKind.DynamicIdentity)
+				|| def.Kind == CardExtraEffectKind.DynamicIdentity
+				|| (_isEmbeddedEffectHost && RelicUnsupportedEffectKinds.Contains(def.Kind)))
 			{
 				continue;
 			}
@@ -14247,6 +14391,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			triggerIndex = 0;
 		}
 		triggerSelect.Select(triggerIndex);
+
+		// Embedded relic hosts choose "when" at the trigger-group level, so the per-row card
+		// trigger dropdown (OnPlay/OnDraw/...) is meaningless here and is hidden.
+		if (_isEmbeddedEffectHost)
+		{
+			triggerSelect.Visible = false;
+		}
 
 		OptionButton targetSelect = new OptionButton
 		{
@@ -24521,7 +24672,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			|| kind is CardExtraEffectKind.CreatedCardsUpgraded
 				or CardExtraEffectKind.GeneratedCardsUpgraded
 				or CardExtraEffectKind.CardsInPileUpgradedAura;
-		bool supportsAsPower = CardEditorExtraEffects.SupportsAsPower(kind) && trigger != CardExtraEffectTrigger.Fatal;
+		// Relic effects run immediately (never as a persistent power) and ReadEmbeddedEffects forces
+		// AsPower off, so the toggle would silently discard input on a relic - hide it when embedded.
+		bool supportsAsPower = !_isEmbeddedEffectHost && CardEditorExtraEffects.SupportsAsPower(kind) && trigger != CardExtraEffectTrigger.Fatal;
 		row.PowerTickbox.Visible = supportsAsPower;
 		bool asPower = supportsAsPower && row.PowerTickbox.IsTicked;
 		UpdateExtraEffectAmountControls(row, definition, kind);
@@ -27983,6 +28136,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return null;
 		}
 
+		EnsureEnchantmentIdsLoaded();
 		int selected = row.EnchantmentSelect.Selected;
 		if (selected < 0 || selected >= _enchantmentIds.Count)
 		{
@@ -29508,6 +29662,17 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		}
 
+		if (_isEmbeddedEffectHost)
+		{
+			// Relic effects have no played-card / hovered / event target context, so the card-play
+			// "Target" and "Event Target" options would silently resolve to a fallback - drop them.
+			allowed = allowed.Where(t => t != CardExtraEffectTarget.Target && t != CardExtraEffectTarget.EventTarget).ToArray();
+			if (allowed.Count == 0)
+			{
+				allowed = new[] { CardExtraEffectTarget.Self };
+			}
+		}
+
 		row.AllowedTargets.AddRange(allowed);
 
 		row.TargetSelect.Clear();
@@ -29517,7 +29682,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		CardExtraEffectTarget wanted = desiredTarget ?? def.DefaultTarget;
-		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay && wanted == CardExtraEffectTarget.Target)
+		if ((GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay || _isEmbeddedEffectHost) && wanted == CardExtraEffectTarget.Target)
 		{
 			wanted = row.AllowedTargets.Contains(CardExtraEffectTarget.EventTarget)
 				? CardExtraEffectTarget.EventTarget
@@ -29905,6 +30070,23 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 	}
 
+	// Builds _enchantmentIds without the full popup's _enchantmentSelect. The embedded relic host
+	// skips the full build (and thus PopulateEnchantments), so effect rows that show an enchantment
+	// dropdown need this to populate the list lazily (mirrors how powers lazy-load).
+	private void EnsureEnchantmentIdsLoaded()
+	{
+		if (_enchantmentIds.Count > 0)
+		{
+			return;
+		}
+		_enchantmentIds.Add(null);
+		_enchantmentIds.Add(ModelId.none);
+		foreach (EnchantmentModel enchantment in ModelDb.DebugEnchantments.OrderBy(e => e.Title.GetFormattedText()))
+		{
+			_enchantmentIds.Add(enchantment.Id);
+		}
+	}
+
 	private void PopulateEnchantments()
 	{
 		_enchantmentSelect.Clear();
@@ -29960,6 +30142,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		select.Clear();
+		EnsureEnchantmentIdsLoaded();
 		foreach (ModelId? enchantmentId in _enchantmentIds)
 		{
 			if (enchantmentId == null || enchantmentId == ModelId.none)
@@ -30731,6 +30914,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		SetSpinEnabled(amountField, enableAmount);
 	}
 
+	// When true, this popup instance is used purely as an embedded effect-list editor
+	// (hosted inside another menu, e.g. the relic editor). Card-preview work is skipped and
+	// the host supplies its own trigger set / kind filter / read-back target.
+	private bool _isEmbeddedEffectHost;
+
 	private void QueuePreviewUpdate()
 	{
 		if (_suppressPreviewUpdate)
@@ -30757,6 +30945,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void QueuePreviewRefresh()
 	{
+		// Embedded effect-list hosts (e.g. the relic editor) have no card preview to refresh.
+		if (_isEmbeddedEffectHost)
+		{
+			return;
+		}
 		if (_previewUpdateQueued)
 		{
 			return;
@@ -31287,10 +31480,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CompleteDeferredCreatedEffectValueRowsNow();
 		CardOverride overrideData = new CardOverride
 		{
-			Keywords = _keywordChecks.Where(kvp => kvp.Value.IsTicked).Select(kvp => kvp.Key).ToHashSet(),
 			DynamicVarBaseValues = new Dictionary<string, decimal>()
 		};
 
+		// Embedded effect-list hosts (e.g. the relic editor) only build ExtraEffects; every
+		// card-only override field below is skipped because its backing UI was never created.
+		if (!_isEmbeddedEffectHost)
+		{
+		overrideData.Keywords = _keywordChecks.Where(kvp => kvp.Value.IsTicked).Select(kvp => kvp.Key).ToHashSet();
 		if (!_isUpgradeEditor && _tagChecks.Count > 0)
 		{
 			HashSet<CardTag> desiredTags = _tagChecks
@@ -31723,6 +31920,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				overrideData.AfflictionAmount = amount;
 			}
+		}
 		}
 
 		if (_extraEffectRows.Count > 0)
@@ -32802,6 +33000,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		}
 
+		if (!_isEmbeddedEffectHost)
+		{
 		if (_slyGrantDurationSelect != null)
 		{
 			int selected = _slyGrantDurationSelect.Selected;
@@ -32892,6 +33092,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				overrideData.HideCosmeticAncientInnerBorder = true;
 			}
+		}
 		}
 
 		return overrideData;
@@ -34577,7 +34778,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		PopupLagLog($"Apply start card={_cardId} mode={(_isUpgradeEditor ? "upgrade" : "base")} dirty={_uiDirtySinceOpen} batch={_isBatchEdit} pendingRows={_pendingExistingExtraEffectRows.Count} createdPending={_createdEffectValueRowsPending} persistent={_isPersistentPopupCacheEntry}");
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked popup apply because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Popup apply blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 
@@ -34794,7 +34995,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		EnsurePendingPopupHydrationCompleted();
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked popup reset because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Popup reset blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 
@@ -36016,7 +36217,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		sortSelect.ItemSelected += _ => RebuildResults();
 
 		overlay.AddChild(panel);
-		AddChild(overlay);
+		AddOverlayChild(overlay);
 		_keywordPickerOverlay = overlay;
 
 		Callable.From(RebuildResults).CallDeferred();
@@ -36333,7 +36534,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		};
 
-		AddChild(overlay);
+		AddOverlayChild(overlay);
 		_definitionEditorOverlay = overlay;
 
 		ReloadDefinitions();
@@ -36987,7 +37188,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		};
 
-		AddChild(overlay);
+		AddOverlayChild(overlay);
 		_definitionEditorOverlay = overlay;
 
 		ReloadDefinitions();
@@ -37521,7 +37722,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		};
 
-		AddChild(overlay);
+		AddOverlayChild(overlay);
 		_definitionBehaviorEditorOverlay = overlay;
 	}
 
@@ -37897,7 +38098,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		};
 
 		overlay.AddChild(panel);
-		AddChild(overlay);
+		AddOverlayChild(overlay);
 		_specificCardPickerOverlay = overlay;
 
 		Callable.From(ApplyFilter).CallDeferred();
@@ -38178,7 +38379,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		poolSelect.ItemSelected += _ => RebuildResults();
 
 		overlay.AddChild(panel);
-		AddChild(overlay);
+		AddOverlayChild(overlay);
 		_specificPotionPickerOverlay = overlay;
 
 		Callable.From(RebuildResults).CallDeferred();

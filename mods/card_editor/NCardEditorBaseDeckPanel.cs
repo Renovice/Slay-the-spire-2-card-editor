@@ -173,7 +173,7 @@ public partial class NCardEditorBaseDeckPanel : Control
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked base-deck add because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Base-deck add blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 
@@ -185,7 +185,7 @@ public partial class NCardEditorBaseDeckPanel : Control
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked base-deck delete because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Base-deck delete blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 
@@ -208,7 +208,7 @@ public partial class NCardEditorBaseDeckPanel : Control
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked base-deck reset because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Base-deck reset blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 

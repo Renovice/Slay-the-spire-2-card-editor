@@ -15940,7 +15940,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			int grammarAmount = grammarAmountForLine;
 			string amountText = amountTextForLine;
 
-			if (allowDamageBlockPreview && !amountIsX && effect.Kind is CardExtraEffectKind.DealDamage or CardExtraEffectKind.GainBlock)
+			if (allowDamageBlockPreview && !amountIsX && effect.Kind is CardExtraEffectKind.DealDamage or CardExtraEffectKind.GainBlock or CardExtraEffectKind.OstyAction)
 			{
 				TryGetScaledAmountText(card, effect, baseAmount, target, upgradeHighlightComparison, out amountText);
 			}
@@ -20169,7 +20169,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 	private static string FormatGrantKeywordToPile(CardExtraEffect effect, int amount, string amountText)
 	{
 		string keyword = GrantedKeywordLabel(effect.GrantedKeyword);
-		string pile = GetCardPileLocation(effect.CardSelectionPile);
+		string pile = GetCardPileLocationForTarget(effect.CardSelectionPile, effect.Target);
 		string durationText = GetCardGrantDurationText(effect);
 		string futureText = effect.FutureMatchingCards
 			? CardEditorLoc.T("cardText.grant.futureMatching", ", including future matching cards")
@@ -22939,6 +22939,32 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 		};
 	}
 
+	// Target-aware pile wording for grant effects: a grant aimed at an ally/other player reads
+	// "in an ally's hand" rather than the default "in your hand". Non-friendly targets fall back to
+	// the shared (self) wording so unrelated callers and self-grants are unchanged.
+	private static string GetCardPileLocationForTarget(CardExtraEffectCardPile pile, CardExtraEffectTarget target)
+	{
+		if (target is not (CardExtraEffectTarget.AnyAlly or CardExtraEffectTarget.AllAllies or CardExtraEffectTarget.AnyPlayer))
+		{
+			return GetCardPileLocation(pile);
+		}
+
+		string owner = target == CardExtraEffectTarget.AnyPlayer
+			? CardEditorLoc.T("cardText.pile.owner.player", "a player's")
+			: CardEditorLoc.T("cardText.pile.owner.ally", "an ally's");
+
+		return pile switch
+		{
+			CardExtraEffectCardPile.Hand => CardEditorLoc.F("cardText.pile.inHandOf", $"in {owner} hand", ("Owner", owner)),
+			CardExtraEffectCardPile.DrawPile => CardEditorLoc.F("cardText.pile.inDrawPileOf", $"in {owner} draw pile", ("Owner", owner)),
+			CardExtraEffectCardPile.DiscardPile => CardEditorLoc.F("cardText.pile.inDiscardPileOf", $"in {owner} discard pile", ("Owner", owner)),
+			CardExtraEffectCardPile.ExhaustPile => CardEditorLoc.F("cardText.pile.inExhaustPileOf", $"in {owner} exhaust pile", ("Owner", owner)),
+			CardExtraEffectCardPile.Deck => CardEditorLoc.F("cardText.pile.inDeckOf", $"in {owner} deck", ("Owner", owner)),
+			CardExtraEffectCardPile.AllPiles => CardEditorLoc.T("cardText.pile.inAnyPile", "in any pile"),
+			_ => CardEditorLoc.F("cardText.pile.inHandOf", $"in {owner} hand", ("Owner", owner))
+		};
+	}
+
 	private static string GetCardPileLocation(CardExtraEffectCardPile pile)
 	{
 		return pile switch
@@ -23218,6 +23244,15 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 
 		if (effect.Kind == CardExtraEffectKind.DealDamage || isOstyAttack)
 		{
+			// Self/ally-directed damage is not an attack: the runtime deals it flat, so the preview must
+			// not pick up Strength/Vulnerable/Weak. Skip the damage hook and let the enchanted base show.
+			if (!isOstyAttack
+				&& GetEffectivePreviewTarget(modifierCard, effect.Target) is CardExtraEffectTarget.Self
+					or CardExtraEffectTarget.AnyPlayer or CardExtraEffectTarget.AnyAlly or CardExtraEffectTarget.AllAllies)
+			{
+				return false;
+			}
+
 			if (owner?.RunState == null)
 			{
 				return false;
@@ -28471,7 +28506,14 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 			case CardExtraEffectKind.GrantKeywordToPile:
 			{
-				await GrantKeywordToCards(choiceContext, combatState, owner, amount, effect, sourceCard: cardPlay?.Card);
+				// Honor the effect target instead of always using the caster's own hand. ResolveTargetPlayers
+				// returns [owner] for Self, the chosen ally for AnyAlly/AnyPlayer/AllAllies, and no players for
+				// enemy targets (grant becomes a no-op - you cannot grant a keyword into an enemy's pile). The
+				// card selection uses the shared RunState RNG / synced player choice, so this stays MP-safe.
+				foreach (Player targetPlayer in ResolveTargetPlayers(combatState, owner, ownerCreature, cardPlay, effect))
+				{
+					await GrantKeywordToCards(choiceContext, combatState, targetPlayer, amount, effect, sourceCard: cardPlay?.Card);
+				}
 				break;
 			}
 			case CardExtraEffectKind.GainGold:
@@ -30453,6 +30495,11 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 	private static async Task AddExactCopiesOfThisCardToDeck(CardPlay cardPlay, int amount)
 	{
+		if (cardPlay?.Card is CardEditorRelicProxyCard)
+		{
+			// Relic-hosted effects run against a blank proxy card; never clone it into the run deck.
+			return;
+		}
 		if (cardPlay?.Card?.Owner == null || amount <= 0)
 		{
 			return;
@@ -30821,6 +30868,11 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 	private static async Task AddCopiesOfThisCard(CardPlay cardPlay, int amount, CardExtraEffect effect)
 	{
+		if (cardPlay?.Card is CardEditorRelicProxyCard)
+		{
+			// Relic-hosted effects run against a blank proxy card; never clone it.
+			return;
+		}
 		if (cardPlay?.Card?.Owner == null || effect == null)
 		{
 			return;

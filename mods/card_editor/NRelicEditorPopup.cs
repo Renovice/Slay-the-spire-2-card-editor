@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Godot;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Logging;
@@ -17,7 +18,9 @@ namespace SlayTheSpire2Mod.CardEditor;
 public partial class NRelicEditorPopup : Control
 {
 	private const string PopupName = "CardEditorRelicEditorPopup";
-	private static readonly Vector2 PanelSize = new(980f, 660f);
+	// Wide enough that the full embedded card-effect rows (kind + amount + reorder/remove columns,
+	// ~670px) fit in the settings column without a horizontal scrollbar.
+	private static readonly Vector2 PanelSize = new(1180f, 720f);
 	private static readonly Vector2 NumericFieldMinSize = new(150f, 44f);
 	private static readonly Vector2 SpinButtonMinSize = new(34f, 20f);
 	private static readonly Vector2 SpinContainerMinSize = new(34f, 44f);
@@ -58,6 +61,32 @@ public partial class NRelicEditorPopup : Control
 	private Control? _defaultFocus;
 	private HoldSpinState? _holdSpinState;
 	private bool _built;
+
+	// Custom relic effects. Each "group" pairs a relic trigger with an embedded card-effect
+	// editor (a hidden NCardEditorPopup driven via its embedded-host API) that builds the full
+	// effect UI directly into this relic menu. Committed in ApplyCurrentRelicEditsToStore.
+	private sealed class RelicEffectGroup
+	{
+		public RelicTriggerKind Trigger;
+		public OptionButton TriggerSelect = null!;
+		public NCardEditorPopup Host = null!;
+		public Control Root = null!;
+	}
+
+	private readonly List<RelicEffectGroup> _effectGroups = new();
+	private VBoxContainer? _effectGroupsContainer;
+	private Button? _addEffectTriggerButton;
+	private CardModel? _relicProxyCard;
+
+	private static readonly RelicTriggerKind[] ActiveRelicTriggers =
+	{
+		RelicTriggerKind.OnCombatStart,
+		RelicTriggerKind.OnTurnStart,
+		RelicTriggerKind.OnTurnEnd,
+		RelicTriggerKind.OnCardPlayed,
+		RelicTriggerKind.OnDamageTaken,
+		RelicTriggerKind.OnCombatEnd,
+	};
 
 	public static void Open(RelicModel relic)
 	{
@@ -298,6 +327,7 @@ public partial class NRelicEditorPopup : Control
 		AddNumberSection(settings);
 		AddTextSection(settings);
 		AddPoolSection(settings);
+		AddEffectsSection(settings);
 
 		HBoxContainer buttons = new()
 		{
@@ -318,6 +348,18 @@ public partial class NRelicEditorPopup : Control
 		apply.Pressed += ApplyAndClose;
 		buttons.AddChild(apply);
 		_defaultFocus = apply;
+
+		// If shared-state editing is locked (e.g. during an active multiplayer run), grey out the
+		// mutating buttons and explain why on hover, instead of letting them silently no-op.
+		string? lockReason = CardEditorMultiplayerSync.GetSharedStateLockReason();
+		if (lockReason != null)
+		{
+			apply.Disabled = true;
+			apply.TooltipText = lockReason;
+			reset.Disabled = true;
+			reset.TooltipText = lockReason;
+			_defaultFocus = cancel;
+		}
 
 		RefreshPreviewFromUi();
 		ForceLayoutRefreshNow();
@@ -657,11 +699,294 @@ public partial class NRelicEditorPopup : Control
 		}
 	}
 
+	private void AddEffectsSection(VBoxContainer parent)
+	{
+		parent.AddChild(CreateHeading("Custom Effects", 30));
+		parent.AddChild(CreateMutedLabel(
+			"Give this relic card-editor effects. Add a trigger for each moment in combat the relic should act, " +
+			"then build its effects with the full effect editor below. Every effect type works exactly as it does on cards."));
+
+		_effectGroupsContainer = new VBoxContainer();
+		_effectGroupsContainer.AddThemeConstantOverride("separation", 16);
+		_effectGroupsContainer.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		parent.AddChild(_effectGroupsContainer);
+
+		_addEffectTriggerButton = CreateButton("Add Effect Trigger");
+		_addEffectTriggerButton.Pressed += () =>
+		{
+			RelicTriggerKind? next = FirstUnusedTrigger();
+			if (next.HasValue)
+			{
+				AddEffectGroup(next.Value, null);
+			}
+		};
+		parent.AddChild(_addEffectTriggerButton);
+
+		LoadExistingEffectGroups();
+		RefreshGroupTriggerOptions();
+	}
+
+	private void LoadExistingEffectGroups()
+	{
+		RelicModel? canonical = GetCanonicalRelic();
+		RelicOverride? existing = canonical != null ? CardEditorRelicOverrides.Get(canonical.Id) : null;
+		if (existing == null)
+		{
+			return;
+		}
+
+		// Group saved effects by trigger, preserving first-seen order.
+		List<RelicTriggerKind> effectOrder = new();
+		Dictionary<RelicTriggerKind, List<CardExtraEffect>> byTrigger = new();
+		if (existing.ExtraEffects != null)
+		{
+			foreach (RelicEffectEntry entry in existing.ExtraEffects)
+			{
+				if (entry?.Effect == null)
+				{
+					continue;
+				}
+				if (!byTrigger.TryGetValue(entry.Trigger, out List<CardExtraEffect>? list))
+				{
+					list = new List<CardExtraEffect>();
+					byTrigger[entry.Trigger] = list;
+					effectOrder.Add(entry.Trigger);
+				}
+				list.Add(CardEditorExtraEffects.CloneEffect(entry.Effect));
+			}
+		}
+
+		// EffectTriggers (when present) is the authoritative group list, so empty groups reload.
+		// Legacy overrides saved before EffectTriggers fall back to the effect-derived order.
+		List<RelicTriggerKind> groupOrder = new();
+		if (existing.EffectTriggers != null)
+		{
+			foreach (RelicTriggerKind t in existing.EffectTriggers)
+			{
+				if (!groupOrder.Contains(t))
+				{
+					groupOrder.Add(t);
+				}
+			}
+		}
+		foreach (RelicTriggerKind t in effectOrder)
+		{
+			if (!groupOrder.Contains(t))
+			{
+				groupOrder.Add(t);
+			}
+		}
+
+		foreach (RelicTriggerKind trigger in groupOrder)
+		{
+			byTrigger.TryGetValue(trigger, out List<CardExtraEffect>? effects);
+			AddEffectGroup(trigger, effects);
+		}
+	}
+
+	private RelicTriggerKind? FirstUnusedTrigger()
+	{
+		foreach (RelicTriggerKind trigger in ActiveRelicTriggers)
+		{
+			if (!_effectGroups.Any(g => g.Trigger == trigger))
+			{
+				return trigger;
+			}
+		}
+		return null;
+	}
+
+	// Keeps the trigger model set-shaped: each trigger belongs to at most one group. Disables
+	// already-used triggers in every group's dropdown and disables "Add Effect Trigger" when full,
+	// so duplicate-trigger groups (which silently merge on save/reload) can never be created.
+	private void RefreshGroupTriggerOptions()
+	{
+		HashSet<RelicTriggerKind> used = new(_effectGroups.Select(g => g.Trigger));
+		foreach (RelicEffectGroup g in _effectGroups)
+		{
+			if (g.TriggerSelect == null || !GodotObject.IsInstanceValid(g.TriggerSelect))
+			{
+				continue;
+			}
+			for (int i = 0; i < ActiveRelicTriggers.Length; i++)
+			{
+				RelicTriggerKind t = ActiveRelicTriggers[i];
+				g.TriggerSelect.SetItemDisabled(i, t != g.Trigger && used.Contains(t));
+			}
+		}
+		if (_addEffectTriggerButton != null && GodotObject.IsInstanceValid(_addEffectTriggerButton))
+		{
+			_addEffectTriggerButton.Disabled = _effectGroups.Count >= ActiveRelicTriggers.Length;
+		}
+	}
+
+	private void AddEffectGroup(RelicTriggerKind trigger, List<CardExtraEffect>? effects)
+	{
+		if (_effectGroupsContainer == null || !GodotObject.IsInstanceValid(_effectGroupsContainer))
+		{
+			return;
+		}
+
+		CardModel? proxy = _relicProxyCard ??= TryGetRelicProxyCard();
+		if (proxy == null)
+		{
+			Log.Warn("[CardEditor][RelicEditor] Relic proxy card is not registered; cannot add an effect trigger.");
+			return;
+		}
+
+		PanelContainer groupPanel = new();
+		groupPanel.AddThemeStyleboxOverride("panel", CreateInnerStyle());
+		VBoxContainer groupRoot = new();
+		groupRoot.AddThemeConstantOverride("separation", 8);
+		groupRoot.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		groupPanel.AddChild(groupRoot);
+
+		Label groupTitle = CreateHeading(string.Empty, 24);
+		groupRoot.AddChild(groupTitle);
+
+		HBoxContainer headerRow = new();
+		headerRow.AddThemeConstantOverride("separation", 10);
+		Label whenLabel = CreateBodyLabel("When:");
+		whenLabel.CustomMinimumSize = new Vector2(70f, 0f);
+		headerRow.AddChild(whenLabel);
+
+		OptionButton triggerSelect = new()
+		{
+			CustomMinimumSize = new Vector2(300f, 44f),
+			SizeFlagsHorizontal = SizeFlags.ShrinkBegin
+		};
+		StyleInput(triggerSelect);
+		foreach (RelicTriggerKind t in ActiveRelicTriggers)
+		{
+			triggerSelect.AddItem(RelicTriggerLabel(t), (int)t);
+		}
+		int selIndex = Array.IndexOf(ActiveRelicTriggers, trigger);
+		if (selIndex < 0)
+		{
+			// An unsupported/legacy trigger (e.g. hand-edited JSON) cannot be shown or dispatched;
+			// normalize it to the first supported trigger so label and stored value never diverge.
+			trigger = ActiveRelicTriggers[0];
+			selIndex = 0;
+		}
+		triggerSelect.Select(selIndex);
+		groupTitle.Text = RelicTriggerLabel(trigger);
+		headerRow.AddChild(triggerSelect);
+
+		Button removeButton = CreateButton("Remove");
+		headerRow.AddChild(removeButton);
+		groupRoot.AddChild(headerRow);
+
+		VBoxContainer effectsContainer = new() { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+		groupRoot.AddChild(effectsContainer);
+
+		_effectGroupsContainer.AddChild(groupPanel);
+
+		// Hidden host node: lives in this menu's tree so deferred calls work, but only builds
+		// its effect-list UI into effectsContainer (no popup chrome).
+		NCardEditorPopup host = new();
+		host.InitializeAsEmbeddedEffectHost(proxy);
+		host.Name = "RelicEffectHost_" + _effectGroups.Count;
+		AddChild(host);
+		host.BuildEmbeddedEffectsUi(effectsContainer);
+		if (effects != null)
+		{
+			foreach (CardExtraEffect e in effects)
+			{
+				host.LoadEmbeddedEffect(e);
+			}
+		}
+
+		RelicEffectGroup group = new()
+		{
+			Trigger = trigger,
+			TriggerSelect = triggerSelect,
+			Host = host,
+			Root = groupPanel
+		};
+		triggerSelect.ItemSelected += idx =>
+		{
+			group.Trigger = (RelicTriggerKind)triggerSelect.GetItemId((int)idx);
+			groupTitle.Text = RelicTriggerLabel(group.Trigger);
+			RefreshGroupTriggerOptions();
+		};
+		removeButton.Pressed += () => RemoveEffectGroup(group);
+
+		_effectGroups.Add(group);
+		RefreshGroupTriggerOptions();
+	}
+
+	private void RemoveEffectGroup(RelicEffectGroup group)
+	{
+		_effectGroups.Remove(group);
+		if (group.Host != null && GodotObject.IsInstanceValid(group.Host))
+		{
+			group.Host.QueueFreeSafely();
+		}
+		if (group.Root != null && GodotObject.IsInstanceValid(group.Root))
+		{
+			group.Root.QueueFreeSafely();
+		}
+		RefreshGroupTriggerOptions();
+	}
+
+	private CardModel? TryGetRelicProxyCard()
+	{
+		try
+		{
+			return ModelDb.GetByIdOrNull<CardModel>(ModelDb.GetId<CardEditorRelicProxyCard>());
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RelicEditor] Failed resolving relic proxy card: {ex.Message}");
+			return null;
+		}
+	}
+
+	private static string RelicTriggerLabel(RelicTriggerKind trigger)
+	{
+		return trigger switch
+		{
+			RelicTriggerKind.OnCombatStart => "At combat start",
+			RelicTriggerKind.OnTurnStart => "At the start of your turn",
+			RelicTriggerKind.OnTurnEnd => "At the end of your turn",
+			RelicTriggerKind.OnCardPlayed => "When you play a card",
+			RelicTriggerKind.OnDamageTaken => "When you take damage",
+			RelicTriggerKind.OnCombatEnd => "At combat end",
+			_ => trigger.ToString()
+		};
+	}
+
+	// Reads every group's embedded effect editor back into a flat list of (trigger, effect) entries.
+	private List<RelicEffectEntry> CollectEffectGroupEntries()
+	{
+		List<RelicEffectEntry> entries = new();
+		foreach (RelicEffectGroup group in _effectGroups)
+		{
+			if (group.Host == null || !GodotObject.IsInstanceValid(group.Host))
+			{
+				continue;
+			}
+			foreach (CardExtraEffect effect in group.Host.ReadEmbeddedEffects())
+			{
+				if (effect == null)
+				{
+					continue;
+				}
+				entries.Add(new RelicEffectEntry
+				{
+					Trigger = group.Trigger,
+					Effect = effect
+				});
+			}
+		}
+		return entries;
+	}
+
 	private void ApplyAndClose()
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked relic editor apply because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Relic editor apply blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 
@@ -721,6 +1046,19 @@ public partial class NRelicEditorPopup : Control
 			overrideData.FixedSourceKeys = selectedFixedSources;
 		}
 
+		List<RelicEffectEntry> effects = CollectEffectGroupEntries();
+		if (effects.Count > 0)
+		{
+			overrideData.ExtraEffects = effects;
+		}
+
+		// Persist the trigger of every group (even empty ones) so a parked trigger survives reopen.
+		List<RelicTriggerKind> groupTriggers = _effectGroups.Select(g => g.Trigger).Distinct().ToList();
+		if (groupTriggers.Count > 0)
+		{
+			overrideData.EffectTriggers = groupTriggers;
+		}
+
 		CardEditorRelicOverrides.SetAndSave(canonical.Id, overrideData);
 		return true;
 	}
@@ -729,7 +1067,7 @@ public partial class NRelicEditorPopup : Control
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked relic editor reset because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Relic editor reset blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 
@@ -831,6 +1169,8 @@ public partial class NRelicEditorPopup : Control
 		Label label = CreateBodyLabel(text);
 		label.AddThemeColorOverride("font_color", StsColors.gray);
 		label.AddThemeConstantOverride("outline_size", 8);
+		// Muted labels are always help/explanatory text; wrap so long strings never overflow the column.
+		label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		return label;
 	}
 

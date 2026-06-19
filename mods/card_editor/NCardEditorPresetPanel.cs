@@ -1109,7 +1109,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked preset load because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Preset load blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 
@@ -1185,7 +1185,7 @@ public partial class NCardEditorPresetPanel : PanelContainer
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
-			Log.Info("[CardEditor][MultiplayerSync] Blocked revert-to-vanilla because shared-state editing is host-controlled.");
+			Log.Info($"[CardEditor][MultiplayerSync] Revert-to-vanilla blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
 			return;
 		}
 

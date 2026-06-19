@@ -23,6 +23,27 @@ using MegaCrit.Sts2.Core.Unlocks;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
+// Relic effect triggers. Phase 1 starter set; expanded to the full AbstractModel hook
+// surface in Phase 2 (see Notes/RELIC_EFFECTS_PLAN.md).
+public enum RelicTriggerKind
+{
+	OnCombatStart = 0,
+	OnTurnStart = 1,
+	OnTurnEnd = 2,
+	OnCardPlayed = 3,
+	OnPickup = 4,
+	OnCombatEnd = 5,
+	OnEnemyKilled = 6,
+	OnDamageTaken = 7,
+}
+
+// One configured relic effect: a card-editor effect plus the relic trigger that fires it.
+public sealed class RelicEffectEntry
+{
+	public RelicTriggerKind Trigger { get; set; }
+	public CardExtraEffect Effect { get; set; } = null!;
+}
+
 public sealed class RelicOverride
 {
 	public Dictionary<string, decimal>? DynamicVarBaseValues { get; set; }
@@ -30,6 +51,11 @@ public sealed class RelicOverride
 	public string? CustomDescription { get; set; }
 	public HashSet<string>? PoolKeys { get; set; }
 	public HashSet<string>? FixedSourceKeys { get; set; }
+	public List<RelicEffectEntry>? ExtraEffects { get; set; }
+
+	// Every trigger group the user created, even ones with no effects yet, so an intentionally
+	// parked (empty) trigger group survives a reopen instead of silently vanishing.
+	public List<RelicTriggerKind>? EffectTriggers { get; set; }
 
 	public bool IsEmpty()
 	{
@@ -37,7 +63,9 @@ public sealed class RelicOverride
 			&& CustomDescriptionEnabled == null
 			&& string.IsNullOrWhiteSpace(CustomDescription)
 			&& PoolKeys == null
-			&& FixedSourceKeys == null;
+			&& FixedSourceKeys == null
+			&& (ExtraEffects == null || ExtraEffects.Count == 0)
+			&& (EffectTriggers == null || EffectTriggers.Count == 0);
 	}
 }
 
@@ -131,6 +159,15 @@ internal static class CardEditorRelicOverrides
 				: null,
 			FixedSourceKeys = source.FixedSourceKeys != null
 				? new HashSet<string>(source.FixedSourceKeys, StringComparer.Ordinal)
+				: null,
+			ExtraEffects = source.ExtraEffects != null
+				? source.ExtraEffects
+					.Where(e => e?.Effect != null)
+					.Select(e => new RelicEffectEntry { Trigger = e.Trigger, Effect = CardEditorExtraEffects.CloneEffect(e.Effect) })
+					.ToList()
+				: null,
+			EffectTriggers = source.EffectTriggers != null
+				? new List<RelicTriggerKind>(source.EffectTriggers)
 				: null
 		};
 	}
@@ -307,6 +344,17 @@ internal static class CardEditorRelicOverrides
 		}
 
 		return GetVanillaPoolKeys(relic);
+	}
+
+	// True only when the user EXPLICITLY emptied a relic's pool membership (an override exists with zero
+	// pool keys). The editor only writes PoolKeys when it differs from vanilla (NRelicEditorPopup), so an
+	// empty set means "removed from every pool it used to be in" - not a relic that was simply never pooled.
+	internal static bool IsRemovedFromAllPools(RelicModel relic)
+	{
+		return relic != null
+			&& _overrides.TryGetValue(relic.Id, out RelicOverride? overrideData)
+			&& overrideData.PoolKeys != null
+			&& overrideData.PoolKeys.Count == 0;
 	}
 
 	internal static IEnumerable<RelicModel> ApplyPoolOverrides(RelicPoolModel pool, IEnumerable<RelicModel> result)
@@ -753,7 +801,7 @@ internal sealed class RelicSourceSummary
 
 internal static class CardEditorRelicOverrideStore
 {
-	private const int CurrentVersion = 1;
+	private const int CurrentVersion = 2;
 	private const string StorePath = "user://card_editor/relic_overrides.json";
 	private static bool _loaded;
 
@@ -864,6 +912,12 @@ internal static class CardEditorRelicOverrideStore
 		public Dictionary<string, RelicOverrideDto>? Overrides { get; set; }
 	}
 
+	internal sealed class RelicEffectEntryDto
+	{
+		public string? Trigger { get; set; }
+		public CardEditorPresetStore.CardExtraEffectDto? Effect { get; set; }
+	}
+
 	internal sealed class RelicOverrideDto
 	{
 		public Dictionary<string, decimal>? DynamicVarBaseValues { get; set; }
@@ -871,11 +925,14 @@ internal static class CardEditorRelicOverrideStore
 		public string? CustomDescription { get; set; }
 		public List<string>? PoolKeys { get; set; }
 		public List<string>? FixedSourceKeys { get; set; }
+		public List<RelicEffectEntryDto>? ExtraEffects { get; set; }
+		public List<string>? EffectTriggers { get; set; }
 
 		public RelicOverride ToOverride()
 		{
 			return new RelicOverride
 			{
+				EffectTriggers = ParseTriggers(EffectTriggers),
 				DynamicVarBaseValues = DynamicVarBaseValues != null
 					? new Dictionary<string, decimal>(DynamicVarBaseValues, StringComparer.Ordinal)
 					: null,
@@ -886,14 +943,59 @@ internal static class CardEditorRelicOverrideStore
 					: null,
 				FixedSourceKeys = FixedSourceKeys != null
 					? new HashSet<string>(FixedSourceKeys.Where(p => !string.IsNullOrWhiteSpace(p)), StringComparer.Ordinal)
-					: null
+					: null,
+				ExtraEffects = ParseEffectEntries(ExtraEffects)
 			};
+		}
+
+		private static List<RelicEffectEntry>? ParseEffectEntries(List<RelicEffectEntryDto>? dtos)
+		{
+			if (dtos == null)
+			{
+				return null;
+			}
+			List<RelicEffectEntry> result = new();
+			foreach (RelicEffectEntryDto? dto in dtos)
+			{
+				if (dto?.Effect == null || !dto.Effect.TryToEffect(out CardExtraEffect effect))
+				{
+					continue;
+				}
+				RelicTriggerKind trigger = (Enum.TryParse(dto.Trigger, ignoreCase: true, out RelicTriggerKind parsed)
+						&& Enum.IsDefined(typeof(RelicTriggerKind), parsed))
+					? parsed
+					: RelicTriggerKind.OnCombatStart;
+				result.Add(new RelicEffectEntry { Trigger = trigger, Effect = effect });
+			}
+			return result.Count > 0 ? result : null;
+		}
+
+		private static List<RelicTriggerKind>? ParseTriggers(List<string>? names)
+		{
+			if (names == null)
+			{
+				return null;
+			}
+			List<RelicTriggerKind> result = new();
+			foreach (string name in names)
+			{
+				if (Enum.TryParse(name, ignoreCase: true, out RelicTriggerKind parsed)
+					&& Enum.IsDefined(typeof(RelicTriggerKind), parsed)
+					&& !result.Contains(parsed))
+				{
+					result.Add(parsed);
+				}
+			}
+			return result.Count > 0 ? result : null;
 		}
 
 		public static RelicOverrideDto FromOverride(RelicOverride overrideData)
 		{
 			return new RelicOverrideDto
 			{
+				EffectTriggers = overrideData.EffectTriggers != null
+					? overrideData.EffectTriggers.Select(t => t.ToString()).ToList()
+					: null,
 				DynamicVarBaseValues = overrideData.DynamicVarBaseValues != null
 					? new Dictionary<string, decimal>(overrideData.DynamicVarBaseValues, StringComparer.Ordinal)
 					: null,
@@ -904,6 +1006,12 @@ internal static class CardEditorRelicOverrideStore
 					: null,
 				FixedSourceKeys = overrideData.FixedSourceKeys != null
 					? overrideData.FixedSourceKeys.OrderBy(p => p, StringComparer.Ordinal).ToList()
+					: null,
+				ExtraEffects = overrideData.ExtraEffects != null
+					? overrideData.ExtraEffects
+						.Where(e => e?.Effect != null)
+						.Select(e => new RelicEffectEntryDto { Trigger = e.Trigger.ToString(), Effect = CardEditorPresetStore.CardExtraEffectDto.FromEffect(e.Effect) })
+						.ToList()
 					: null
 			};
 		}
@@ -1278,6 +1386,43 @@ internal static class RelicModel_get_Pool_CardEditorRelicPools_Patch
 		if (pool != null)
 		{
 			__result = pool;
+		}
+	}
+}
+
+// Neow's event offers relics from a HARDCODED list (Neow.GenerateInitialOptions), bypassing the relic
+// pools entirely, so removing a relic from the pools never reaches it. Every Neow offering - both option
+// lists and NeowsBones' random grant - gates on RelicModel.IsAllowedAtNeow, so force that false for any
+// relic the user removed from all pools. TargetMethods patches the base plus per-relic overrides
+// (Kaleidoscope/ScrollBoxes) so none slip through their own IsAllowedAtNeow logic.
+[HarmonyPatch]
+internal static class RelicModel_IsAllowedAtNeow_CardEditorRelicPools_Patch
+{
+	public static IEnumerable<MethodBase> TargetMethods()
+	{
+		HashSet<MethodBase> targets = new();
+		foreach (Type type in typeof(RelicModel).Assembly.GetTypes())
+		{
+			if (!typeof(RelicModel).IsAssignableFrom(type))
+			{
+				continue;
+			}
+
+			MethodInfo? method = type.GetMethod(
+				nameof(RelicModel.IsAllowedAtNeow),
+				BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+			if (method != null && !method.IsAbstract && targets.Add(method))
+			{
+				yield return method;
+			}
+		}
+	}
+
+	public static void Postfix(RelicModel __instance, ref bool __result)
+	{
+		if (__result && CardEditorRelicOverrides.IsRemovedFromAllPools(__instance))
+		{
+			__result = false;
 		}
 	}
 }
