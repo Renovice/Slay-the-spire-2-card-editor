@@ -35,6 +35,23 @@ public enum RelicTriggerKind
 	OnCombatEnd = 5,
 	OnEnemyKilled = 6,
 	OnDamageTaken = 7,
+	// Phase 2 expansion (2026-06-19): reactive in-combat hooks bringing relic triggers closer to the
+	// card editor's surface. New values are appended (never renumbered) so saved overrides stay valid.
+	OnCombatVictory = 8,
+	OnEnemyTurnStart = 9,
+	OnEnemyTurnEnd = 10,
+	OnCardDrawn = 11,
+	OnCardDiscarded = 12,
+	OnCardExhausted = 13,
+	OnShuffle = 14,
+	OnDamageDealt = 15,
+	OnBlockGained = 16,
+	OnHpLost = 17,
+	OnHeal = 18,
+	OnEnergyReset = 19,
+	OnOrbChanneled = 20,
+	OnStarsGained = 21,
+	OnHandDraw = 22,
 }
 
 // One configured relic effect: a card-editor effect plus the relic trigger that fires it.

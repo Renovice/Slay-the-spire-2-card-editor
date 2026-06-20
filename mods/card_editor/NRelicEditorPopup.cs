@@ -81,11 +81,27 @@ public partial class NRelicEditorPopup : Control
 	private static readonly RelicTriggerKind[] ActiveRelicTriggers =
 	{
 		RelicTriggerKind.OnCombatStart,
+		RelicTriggerKind.OnCombatEnd,
+		RelicTriggerKind.OnCombatVictory,
 		RelicTriggerKind.OnTurnStart,
 		RelicTriggerKind.OnTurnEnd,
+		RelicTriggerKind.OnEnemyTurnStart,
+		RelicTriggerKind.OnEnemyTurnEnd,
+		RelicTriggerKind.OnHandDraw,
 		RelicTriggerKind.OnCardPlayed,
+		RelicTriggerKind.OnCardDrawn,
+		RelicTriggerKind.OnCardDiscarded,
+		RelicTriggerKind.OnCardExhausted,
+		RelicTriggerKind.OnShuffle,
+		RelicTriggerKind.OnDamageDealt,
 		RelicTriggerKind.OnDamageTaken,
-		RelicTriggerKind.OnCombatEnd,
+		RelicTriggerKind.OnEnemyKilled,
+		RelicTriggerKind.OnBlockGained,
+		RelicTriggerKind.OnHpLost,
+		RelicTriggerKind.OnHeal,
+		RelicTriggerKind.OnEnergyReset,
+		RelicTriggerKind.OnStarsGained,
+		RelicTriggerKind.OnOrbChanneled,
 	};
 
 	public static void Open(RelicModel relic)
@@ -876,8 +892,18 @@ public partial class NRelicEditorPopup : Control
 		headerRow.AddChild(removeButton);
 		groupRoot.AddChild(headerRow);
 
+		// The embedded effect editor can grow past 1000px with many rows; cap it in its own scroll box
+		// so a trigger group stays a manageable height inside the relic editor window instead of
+		// stretching below the visible area (the bug where the bottom half of the effects was cut off).
+		ScrollContainer effectsScroll = new()
+		{
+			CustomMinimumSize = new Vector2(0f, 360f),
+			SizeFlagsHorizontal = SizeFlags.ExpandFill,
+			HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+		};
 		VBoxContainer effectsContainer = new() { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-		groupRoot.AddChild(effectsContainer);
+		effectsScroll.AddChild(effectsContainer);
+		groupRoot.AddChild(effectsScroll);
 
 		_effectGroupsContainer.AddChild(groupPanel);
 
@@ -947,11 +973,27 @@ public partial class NRelicEditorPopup : Control
 		return trigger switch
 		{
 			RelicTriggerKind.OnCombatStart => "At combat start",
+			RelicTriggerKind.OnCombatEnd => "At combat end",
+			RelicTriggerKind.OnCombatVictory => "On combat victory",
 			RelicTriggerKind.OnTurnStart => "At the start of your turn",
 			RelicTriggerKind.OnTurnEnd => "At the end of your turn",
+			RelicTriggerKind.OnEnemyTurnStart => "At the start of the enemy turn",
+			RelicTriggerKind.OnEnemyTurnEnd => "At the end of the enemy turn",
+			RelicTriggerKind.OnHandDraw => "Before you draw your hand",
 			RelicTriggerKind.OnCardPlayed => "When you play a card",
+			RelicTriggerKind.OnCardDrawn => "When you draw a card",
+			RelicTriggerKind.OnCardDiscarded => "When you discard a card",
+			RelicTriggerKind.OnCardExhausted => "When you exhaust a card",
+			RelicTriggerKind.OnShuffle => "When you shuffle your deck",
+			RelicTriggerKind.OnDamageDealt => "When you deal damage",
 			RelicTriggerKind.OnDamageTaken => "When you take damage",
-			RelicTriggerKind.OnCombatEnd => "At combat end",
+			RelicTriggerKind.OnEnemyKilled => "When you kill an enemy",
+			RelicTriggerKind.OnBlockGained => "When you gain Block",
+			RelicTriggerKind.OnHpLost => "When you lose HP",
+			RelicTriggerKind.OnHeal => "When you heal",
+			RelicTriggerKind.OnEnergyReset => "When your energy resets",
+			RelicTriggerKind.OnStarsGained => "When you gain Stars",
+			RelicTriggerKind.OnOrbChanneled => "When you channel an Orb",
 			_ => trigger.ToString()
 		};
 	}

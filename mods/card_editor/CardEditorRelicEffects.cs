@@ -292,11 +292,18 @@ internal static class Hook_AfterTurnEnd_CardEditorRelicEffects_Patch
 {
 	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
 	{
-		if (__result == null || combatState == null || side != CombatSide.Player || !CardEditorRelicOverrides.HasAnyOverrides)
+		if (__result == null || combatState == null || !CardEditorRelicOverrides.HasAnyOverrides)
 		{
 			return;
 		}
-		__result = CardEditorRelicEffects.Wrap(__result, combatState, RelicTriggerKind.OnTurnEnd);
+		if (side == CombatSide.Player)
+		{
+			__result = CardEditorRelicEffects.Wrap(__result, combatState, RelicTriggerKind.OnTurnEnd);
+		}
+		else if (side == CombatSide.Enemy)
+		{
+			__result = CardEditorRelicEffects.Wrap(__result, combatState, RelicTriggerKind.OnEnemyTurnEnd);
+		}
 	}
 }
 
@@ -338,5 +345,165 @@ internal static class Hook_AfterDamageReceived_CardEditorRelicEffects_Patch
 			return;
 		}
 		__result = CardEditorRelicEffects.WrapForTarget(__result, combatState, target, RelicTriggerKind.OnDamageTaken);
+	}
+}
+
+// ===== Phase 2 reactive in-combat triggers (2026-06-19) =====
+// All follow the existing pattern: postfix a game Hook, then wrap the returned Task so relic effects fire
+// after the original. Scope: Wrap = every player; WrapForOnePlayer = a specific player; WrapForTarget =
+// the player whose creature is the event subject (enemy subjects resolve to no player = no dispatch).
+// These hooks pass the combat state as ICombatState; the concrete CombatState pattern-cast guards null too.
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCombatVictory))]
+internal static class Hook_AfterCombatVictory_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState? combatState, ref Task __result)
+	{
+		if (__result == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.Wrap(__result, cs, RelicTriggerKind.OnCombatVictory);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterSideTurnStart))]
+internal static class Hook_AfterSideTurnStart_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, CombatSide side, ref Task __result)
+	{
+		// Player-side turn start is already handled (scoped) by the AfterPlayerTurnStart patch; here we
+		// only add the ENEMY side so "at the start of the enemy turn" works.
+		if (__result == null || side != CombatSide.Enemy || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.Wrap(__result, cs, RelicTriggerKind.OnEnemyTurnStart);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardDrawn))]
+internal static class Hook_AfterCardDrawn_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, CardModel card, ref Task __result)
+	{
+		Player? owner = card?.Owner;
+		if (__result == null || owner == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, owner, RelicTriggerKind.OnCardDrawn);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardDiscarded))]
+internal static class Hook_AfterCardDiscarded_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, CardModel card, ref Task __result)
+	{
+		Player? owner = card?.Owner;
+		if (__result == null || owner == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, owner, RelicTriggerKind.OnCardDiscarded);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardExhausted))]
+internal static class Hook_AfterCardExhausted_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, CardModel card, ref Task __result)
+	{
+		Player? owner = card?.Owner;
+		if (__result == null || owner == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, owner, RelicTriggerKind.OnCardExhausted);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterShuffle))]
+internal static class Hook_AfterShuffle_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, Player shuffler, ref Task __result)
+	{
+		if (__result == null || shuffler == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, shuffler, RelicTriggerKind.OnShuffle);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterDamageGiven))]
+internal static class Hook_AfterDamageGiven_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, Creature? dealer, ref Task __result)
+	{
+		// dealer is the attacker; scope to its player (enemy dealers resolve to no player).
+		if (__result == null || dealer == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForTarget(__result, cs, dealer, RelicTriggerKind.OnDamageDealt);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterBlockGained))]
+internal static class Hook_AfterBlockGained_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, Creature creature, ref Task __result)
+	{
+		if (__result == null || creature == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForTarget(__result, cs, creature, RelicTriggerKind.OnBlockGained);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterCurrentHpChanged))]
+internal static class Hook_AfterCurrentHpChanged_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState? combatState, Creature creature, decimal delta, ref Task __result)
+	{
+		if (__result == null || creature == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		if (delta < 0m)
+		{
+			__result = CardEditorRelicEffects.WrapForTarget(__result, cs, creature, RelicTriggerKind.OnHpLost);
+		}
+		else if (delta > 0m)
+		{
+			__result = CardEditorRelicEffects.WrapForTarget(__result, cs, creature, RelicTriggerKind.OnHeal);
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterDeath))]
+internal static class Hook_AfterDeath_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState? combatState, Creature creature, ref Task __result)
+	{
+		// "When you kill an enemy": fire for all players when a non-player creature dies.
+		if (__result == null || creature == null || creature.IsPlayer || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.Wrap(__result, cs, RelicTriggerKind.OnEnemyKilled);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterEnergyReset))]
+internal static class Hook_AfterEnergyReset_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, Player player, ref Task __result)
+	{
+		if (__result == null || player == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, player, RelicTriggerKind.OnEnergyReset);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterOrbChanneled))]
+internal static class Hook_AfterOrbChanneled_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, Player player, ref Task __result)
+	{
+		if (__result == null || player == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, player, RelicTriggerKind.OnOrbChanneled);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterStarsGained))]
+internal static class Hook_AfterStarsGained_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, Player gainer, ref Task __result)
+	{
+		if (__result == null || gainer == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, gainer, RelicTriggerKind.OnStarsGained);
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeHandDraw))]
+internal static class Hook_BeforeHandDraw_CardEditorRelicEffects_Patch
+{
+	public static void Postfix(ICombatState combatState, Player player, ref Task __result)
+	{
+		if (__result == null || player == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		__result = CardEditorRelicEffects.WrapForOnePlayer(__result, cs, player, RelicTriggerKind.OnHandDraw);
 	}
 }
