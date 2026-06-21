@@ -294,6 +294,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private KeywordTickbox? _createdCustomTextUpgradedTickbox;
 	private TextEdit? _createdCustomTextUpgradedField;
 	private Button? _createdCustomTextUpgradedLinkNumbersButton;
+	private KeywordTickbox? _createdCustomUpgradePreviewTextTickbox;
+	private TextEdit? _createdCustomUpgradePreviewTextField;
 	private KeywordTickbox? _createdCustomRewardPoolsTickbox;
 	private OptionButton? _createdRewardBucketSelect;
 	private readonly List<CardEditorRewardPoolBucket> _createdRewardBucketOptions = new();
@@ -1727,6 +1729,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		if (_createdCustomTextUpgradedLinkNumbersButton != null && GodotObject.IsInstanceValid(_createdCustomTextUpgradedLinkNumbersButton))
 		{
 			_createdCustomTextUpgradedLinkNumbersButton.Visible = hasCustomText;
+		}
+
+		bool hasCustomPreviewText = CardEditorCreatedCardsStore.IsCustomUpgradePreviewTextEnabled(_cardId);
+		SetTickboxSilent(_createdCustomUpgradePreviewTextTickbox, hasCustomPreviewText);
+		if (_createdCustomUpgradePreviewTextField != null && GodotObject.IsInstanceValid(_createdCustomUpgradePreviewTextField))
+		{
+			_createdCustomUpgradePreviewTextField.Text = CardEditorCreatedCardsStore.GetStoredCustomUpgradePreviewText(_cardId) ?? string.Empty;
+			_createdCustomUpgradePreviewTextField.Visible = hasCustomPreviewText;
 		}
 
 		BindEnchantmentUiForCurrentCard();
@@ -10608,6 +10618,54 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		_createdCustomTextUpgradedLinkNumbersButton = CreateLiveNumberLinkButton(OnCreatedCustomTextUpgradedLinkNumbersPressed, hasCustomText);
 		rightColumn.AddChild(CreateFieldAlignedRow(_createdCustomTextUpgradedLinkNumbersButton, _cosmeticDropdownWidth));
+
+		// Preview-only upgrade text: shown ONLY on the upgrade screen, overriding the auto green-diff.
+		string? existingPreview = CardEditorCreatedCardsStore.GetStoredCustomUpgradePreviewText(_cardId);
+		bool hasCustomPreview = CardEditorCreatedCardsStore.IsCustomUpgradePreviewTextEnabled(_cardId);
+
+		rightColumn.AddChild(CreateTickboxRow(
+			CardEditorLoc.T("field.customUpgradePreviewText", "Custom Upgrade-Screen Text (preview only)"),
+			hasCustomPreview,
+			out KeywordTickbox customPreviewTickbox,
+			OnUpgradePreviewTextTickboxChanged));
+		_createdCustomUpgradePreviewTextTickbox = customPreviewTickbox;
+
+		_createdCustomUpgradePreviewTextField = new TextEdit
+		{
+			Text = existingPreview ?? string.Empty,
+			CustomMinimumSize = new Vector2(0, 100),
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			PlaceholderText = CardEditorLoc.T("field.customUpgradePreviewTextPlaceholder", "Shown ONLY on the upgrade screen. Type the upgraded text and wrap your changes in [green]...[/green] - the auto-diff is skipped here."),
+			TooltipText = GetLiveNumberTokenTooltip(),
+			WrapMode = TextEdit.LineWrappingMode.Boundary,
+			Visible = hasCustomPreview
+		};
+		StyleInput(_createdCustomUpgradePreviewTextField);
+		_createdCustomUpgradePreviewTextField.TextChanged += OnUpgradePreviewTextChanged;
+		rightColumn.AddChild(_createdCustomUpgradePreviewTextField);
+	}
+
+	private void OnUpgradePreviewTextTickboxChanged()
+	{
+		if (!_isCreatedCard || !_isUpgradeEditor)
+		{
+			return;
+		}
+
+		bool enabled = _createdCustomUpgradePreviewTextTickbox?.IsTicked ?? false;
+		if (_createdCustomUpgradePreviewTextField != null)
+		{
+			_createdCustomUpgradePreviewTextField.Visible = enabled;
+		}
+
+		CardEditorCreatedCardsStore.SetDraftCustomUpgradePreviewText(_cardId, _createdCustomUpgradePreviewTextField?.Text, enabled);
+		QueuePreviewUpdate();
+	}
+
+	private void OnUpgradePreviewTextChanged()
+	{
+		CardEditorCreatedCardsStore.SetDraftCustomUpgradePreviewText(_cardId, _createdCustomUpgradePreviewTextField?.Text, _createdCustomUpgradePreviewTextTickbox?.IsTicked ?? false);
+		QueuePreviewUpdate();
 	}
 
 	private void OnUpgradeCustomTextTickboxChanged()
@@ -34809,6 +34867,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (_isCreatedCard)
 			{
 				CardEditorCreatedCardsStore.SetCustomTextUpgraded(_cardId, _createdCustomTextUpgradedField?.Text, _createdCustomTextUpgradedTickbox?.IsTicked ?? false);
+				CardEditorCreatedCardsStore.SetCustomUpgradePreviewText(_cardId, _createdCustomUpgradePreviewTextField?.Text, _createdCustomUpgradePreviewTextTickbox?.IsTicked ?? false);
 			}
 
 			UpgradeBaseline baseline = GetUpgradeBaseline();

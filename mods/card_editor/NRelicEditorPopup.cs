@@ -20,7 +20,7 @@ public partial class NRelicEditorPopup : Control
 	private const string PopupName = "CardEditorRelicEditorPopup";
 	// Wide enough that the full embedded card-effect rows (kind + amount + reorder/remove columns,
 	// ~670px) fit in the settings column without a horizontal scrollbar.
-	private static readonly Vector2 PanelSize = new(1180f, 720f);
+	private static readonly Vector2 PanelSize = new(1340f, 980f);
 	private static readonly Vector2 NumericFieldMinSize = new(150f, 44f);
 	private static readonly Vector2 SpinButtonMinSize = new(34f, 20f);
 	private static readonly Vector2 SpinContainerMinSize = new(34f, 44f);
@@ -897,7 +897,7 @@ public partial class NRelicEditorPopup : Control
 		// stretching below the visible area (the bug where the bottom half of the effects was cut off).
 		ScrollContainer effectsScroll = new()
 		{
-			CustomMinimumSize = new Vector2(0f, 360f),
+			CustomMinimumSize = new Vector2(0f, 560f),
 			SizeFlagsHorizontal = SizeFlags.ExpandFill,
 			HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
 		};

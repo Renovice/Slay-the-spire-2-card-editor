@@ -74,6 +74,8 @@ internal sealed class CardEditorCreatedCardDefinition
 	public string? CustomText { get; set; }
 	public bool CustomTextUpgradedEnabled { get; set; }
 	public string? CustomTextUpgraded { get; set; }
+	public bool CustomUpgradePreviewTextEnabled { get; set; }
+	public string? CustomUpgradePreviewText { get; set; }
 	public bool CustomRewardPoolsEnabled { get; set; }
 	public List<string> CustomRewardPoolIds { get; set; } = new();
 	public CardEditorRewardPoolBucket RewardPoolBucket { get; set; } = CardEditorRewardPoolBucket.SameAsCard;
@@ -133,6 +135,8 @@ internal static class CardEditorCreatedCardsStore
 				CustomText = persistent.CustomText,
 				CustomTextUpgradedEnabled = persistent.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = persistent.CustomTextUpgraded,
+				CustomUpgradePreviewTextEnabled = persistent.CustomUpgradePreviewTextEnabled,
+				CustomUpgradePreviewText = persistent.CustomUpgradePreviewText,
 				CustomRewardPoolsEnabled = persistent.CustomRewardPoolsEnabled,
 				CustomRewardPoolIds = new List<string>(persistent.CustomRewardPoolIds),
 				RewardPoolBucket = persistent.RewardPoolBucket,
@@ -655,6 +659,34 @@ internal static class CardEditorCreatedCardsStore
 		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) && def.CustomTextUpgradedEnabled;
 	}
 
+	// Preview-only upgrade text: shown ONLY on the upgrade screen (bypasses the auto green-diff so the
+	// user controls the markup); never appears on the played upgraded card.
+	public static string? GetCustomUpgradePreviewText(ModelId cardId)
+	{
+		EnsureLoaded();
+		if (TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def))
+		{
+			return def.CustomUpgradePreviewTextEnabled ? def.CustomUpgradePreviewText : null;
+		}
+		return null;
+	}
+
+	public static string? GetStoredCustomUpgradePreviewText(ModelId cardId)
+	{
+		EnsureLoaded();
+		if (TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def))
+		{
+			return def.CustomUpgradePreviewText;
+		}
+		return null;
+	}
+
+	public static bool IsCustomUpgradePreviewTextEnabled(ModelId cardId)
+	{
+		EnsureLoaded();
+		return TryGetEffectiveDefinition(cardId, out CardEditorCreatedCardDefinition? def) && def.CustomUpgradePreviewTextEnabled;
+	}
+
 	public static void SetDraftCustomTextUpgraded(ModelId cardId, string? customTextUpgraded, bool enabled)
 	{
 		EnsureLoaded();
@@ -689,6 +721,8 @@ internal static class CardEditorCreatedCardsStore
 				CustomText = persistent.CustomText,
 				CustomTextUpgradedEnabled = persistent.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = persistent.CustomTextUpgraded,
+				CustomUpgradePreviewTextEnabled = persistent.CustomUpgradePreviewTextEnabled,
+				CustomUpgradePreviewText = persistent.CustomUpgradePreviewText,
 				CustomRewardPoolsEnabled = persistent.CustomRewardPoolsEnabled,
 				CustomRewardPoolIds = new List<string>(persistent.CustomRewardPoolIds),
 				RewardPoolBucket = persistent.RewardPoolBucket,
@@ -713,6 +747,35 @@ internal static class CardEditorCreatedCardsStore
 
 		def.CustomTextUpgradedEnabled = enabled;
 		def.CustomTextUpgraded = customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded);
+		Revision++;
+		Save();
+	}
+
+	public static void SetDraftCustomUpgradePreviewText(ModelId cardId, string? text, bool enabled)
+	{
+		EnsureLoaded();
+		if (!_draftDefinitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? draft))
+		{
+			_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? persistent);
+			draft = CloneDefinition(persistent);
+			_draftDefinitions[cardId] = draft;
+		}
+
+		draft.CustomUpgradePreviewTextEnabled = enabled;
+		draft.CustomUpgradePreviewText = text == null ? null : (string.IsNullOrWhiteSpace(text) ? string.Empty : text);
+	}
+
+	public static void SetCustomUpgradePreviewText(ModelId cardId, string? text, bool enabled)
+	{
+		EnsureLoaded();
+		if (!_definitions.TryGetValue(cardId, out CardEditorCreatedCardDefinition? def))
+		{
+			def = new CardEditorCreatedCardDefinition();
+			_definitions[cardId] = def;
+		}
+
+		def.CustomUpgradePreviewTextEnabled = enabled;
+		def.CustomUpgradePreviewText = text == null ? null : (string.IsNullOrWhiteSpace(text) ? string.Empty : text);
 		Revision++;
 		Save();
 	}
@@ -1270,6 +1333,8 @@ internal static class CardEditorCreatedCardsStore
 			CustomText = source.CustomText,
 			CustomTextUpgradedEnabled = source.CustomTextUpgradedEnabled,
 			CustomTextUpgraded = source.CustomTextUpgraded,
+			CustomUpgradePreviewTextEnabled = source.CustomUpgradePreviewTextEnabled,
+			CustomUpgradePreviewText = source.CustomUpgradePreviewText,
 			CustomRewardPoolsEnabled = source.CustomRewardPoolsEnabled,
 			CustomRewardPoolIds = new List<string>(source.CustomRewardPoolIds),
 			RewardPoolBucket = source.RewardPoolBucket,
@@ -1303,6 +1368,8 @@ internal static class CardEditorCreatedCardsStore
 		public string? CustomText { get; set; }
 		public bool? CustomTextUpgradedEnabled { get; set; }
 		public string? CustomTextUpgraded { get; set; }
+		public bool? CustomUpgradePreviewTextEnabled { get; set; }
+		public string? CustomUpgradePreviewText { get; set; }
 		public bool? CustomRewardPoolsEnabled { get; set; }
 		public List<string>? CustomRewardPoolIds { get; set; }
 		public string? RewardPoolBucket { get; set; }
@@ -1341,6 +1408,8 @@ internal static class CardEditorCreatedCardsStore
 				CustomText = def.CustomText,
 				CustomTextUpgradedEnabled = def.CustomTextUpgradedEnabled,
 				CustomTextUpgraded = def.CustomTextUpgraded,
+				CustomUpgradePreviewTextEnabled = def.CustomUpgradePreviewTextEnabled,
+				CustomUpgradePreviewText = def.CustomUpgradePreviewText,
 				CustomRewardPoolsEnabled = def.CustomRewardPoolsEnabled,
 				CustomRewardPoolIds = def.CustomRewardPoolIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
 				RewardPoolBucket = def.RewardPoolBucket.ToString(),
@@ -1463,6 +1532,12 @@ internal static class CardEditorCreatedCardsStore
 			if (CustomTextUpgraded != null)
 			{
 				def.CustomTextUpgraded = string.IsNullOrWhiteSpace(CustomTextUpgraded) ? string.Empty : CustomTextUpgraded;
+			}
+
+			def.CustomUpgradePreviewTextEnabled = CustomUpgradePreviewTextEnabled ?? (CustomUpgradePreviewText != null);
+			if (CustomUpgradePreviewText != null)
+			{
+				def.CustomUpgradePreviewText = string.IsNullOrWhiteSpace(CustomUpgradePreviewText) ? string.Empty : CustomUpgradePreviewText;
 			}
 
 			def.CustomRewardPoolsEnabled = CustomRewardPoolsEnabled ?? false;

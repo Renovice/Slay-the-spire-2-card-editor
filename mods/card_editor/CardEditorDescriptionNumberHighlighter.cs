@@ -798,8 +798,10 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return HighlightChangedNumbersByLine(baseLines, upgradedLines);
 		}
 
-		List<string> baseTokens = ExtractVisibleNumberTokens(baseDescription, includeHighlightedNumbers: false);
-		return HighlightChangedNumbersInLine(upgradedDescription, baseTokens);
+		// Single line: word-level diff so non-numeric keyword changes ("Anger" -> "Anger+") are greened
+		// too, not just numbers (the old single-line path only compared numeric tokens, so a one-line
+		// description with a keyword change showed no green at all).
+		return HighlightChangedWordsInLine(baseDescription, upgradedDescription);
 	}
 
 	// "[[green]]...[[/green]]" in custom text renders green ONLY in upgrade previews and disappears
@@ -859,36 +861,313 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return string.Empty;
 		}
 
-		Dictionary<string, List<string>> baseTokensByLineKey = BuildUniqueBaseNumberTokensByLineKey(baseLines);
+		// Pair each upgraded line with the most-similar UNUSED base line (exact visible-key first, then
+		// best word overlap), then word-diff that pair. This means a line whose keyword changed
+		// ("Anger" -> "Anger+") still pairs with its base and only the changed WORD is greened, while a
+		// genuinely new line (e.g. a prepended "Innate"/"固有") has no similar base line and is greened
+		// whole, matching vanilla {IfUpgraded}. Decoupling from line index also fixes the old bug where a
+		// prepended line shifted every following line and turned them all green.
+		bool[] baseUsed = new bool[baseLines.Length];
 		List<string> renderedLines = new List<string>(upgradedLines.Length);
-		for (int i = 0; i < upgradedLines.Length; i++)
+		foreach (string upgradedLine in upgradedLines)
 		{
-			string upgradedLine = upgradedLines[i];
-			List<string>? baseTokens = null;
-			string upgradedKey = NormalizeVisibleLineWithoutNumbers(upgradedLine);
-			if (!string.IsNullOrWhiteSpace(upgradedKey))
+			int matchIndex = FindBestBaseLineMatch(upgradedLine, baseLines, baseUsed);
+			if (matchIndex >= 0)
 			{
-				baseTokensByLineKey.TryGetValue(upgradedKey, out baseTokens);
+				baseUsed[matchIndex] = true;
+				renderedLines.Add(HighlightChangedWordsInLine(baseLines[matchIndex], upgradedLine));
 			}
-
-			if (baseTokens == null && i < baseLines.Length)
+			else
 			{
-				string baseKeyAtSameIndex = NormalizeVisibleLineWithoutNumbers(baseLines[i]);
-				if (!string.IsNullOrWhiteSpace(upgradedKey)
-					&& string.Equals(baseKeyAtSameIndex, upgradedKey, StringComparison.OrdinalIgnoreCase))
-				{
-					baseTokens = ExtractVisibleNumberTokens(baseLines[i], includeHighlightedNumbers: false);
-				}
+				renderedLines.Add(WrapLineInUpgradeGreen(upgradedLine));
 			}
-
-			// An upgraded line with no matching base line is upgrade-added or reworded text:
-			// vanilla renders the whole {IfUpgraded} branch green, so green the ENTIRE line.
-			renderedLines.Add(baseTokens == null
-				? WrapLineInUpgradeGreen(upgradedLine)
-				: HighlightChangedNumbersInLine(upgradedLine, baseTokens));
 		}
 
 		return string.Join('\n', renderedLines);
+	}
+
+	// Picks the unused base line that best corresponds to upgradedLine: an exact visible-key match wins;
+	// otherwise the unused base line with the highest word overlap above a majority threshold. Returns -1
+	// when the upgraded line is blank or has no comparable base line (caller greens it whole as new text).
+	private static int FindBestBaseLineMatch(string upgradedLine, string[] baseLines, bool[] baseUsed)
+	{
+		string upgradedKey = NormalizeVisibleLineWithoutNumbers(upgradedLine);
+		if (string.IsNullOrWhiteSpace(upgradedKey))
+		{
+			return -1;
+		}
+
+		for (int i = 0; i < baseLines.Length; i++)
+		{
+			if (baseUsed[i])
+			{
+				continue;
+			}
+
+			if (string.Equals(NormalizeVisibleLineWithoutNumbers(baseLines[i]), upgradedKey, StringComparison.OrdinalIgnoreCase))
+			{
+				return i;
+			}
+		}
+
+		int bestIndex = -1;
+		double bestSimilarity = 0.5; // require a majority of words in common to treat as the same line
+		for (int i = 0; i < baseLines.Length; i++)
+		{
+			if (baseUsed[i])
+			{
+				continue;
+			}
+
+			double similarity = LineWordSimilarity(baseLines[i], upgradedLine);
+			if (similarity > bestSimilarity)
+			{
+				bestSimilarity = similarity;
+				bestIndex = i;
+			}
+		}
+
+		return bestIndex;
+	}
+
+	// Word/keyword-level diff: greens only the upgraded tokens that are NOT on the longest common word
+	// subsequence with the base line. A bracketed color span like "[gold]Minion Strike[/gold]" is ONE
+	// token, so the whole keyword greens as a unit and an existing tag is never split. Changed tokens are
+	// greened on their VISIBLE text (the renderer shows the innermost color, so wrapping the bare visible
+	// text forces green); unchanged tokens are emitted verbatim, preserving their [gold]/[blue] markup.
+	private static string HighlightChangedWordsInLine(string baseLine, string upgradedLine)
+	{
+		if (string.IsNullOrWhiteSpace(upgradedLine))
+		{
+			return upgradedLine;
+		}
+
+		List<DiffToken> upgradedTokens = TokenizeLineForDiff(upgradedLine);
+		List<DiffToken> baseTokens = TokenizeLineForDiff(baseLine);
+
+		List<string> baseWords = new List<string>();
+		foreach (DiffToken token in baseTokens)
+		{
+			if (token.IsWord)
+			{
+				baseWords.Add(token.Key);
+			}
+		}
+
+		List<string> upgradedWords = new List<string>();
+		foreach (DiffToken token in upgradedTokens)
+		{
+			if (token.IsWord)
+			{
+				upgradedWords.Add(token.Key);
+			}
+		}
+
+		bool[] upgradedWordMatched = ComputeLcsMatched(baseWords, upgradedWords);
+
+		StringBuilder builder = new StringBuilder(upgradedLine.Length + 24);
+		int wordIndex = 0;
+		foreach (DiffToken token in upgradedTokens)
+		{
+			if (!token.IsWord)
+			{
+				builder.Append(token.Raw);
+				continue;
+			}
+
+			bool unchanged = wordIndex < upgradedWordMatched.Length && upgradedWordMatched[wordIndex];
+			wordIndex++;
+			builder.Append(unchanged ? token.Raw : StsTextUtilities.HighlightChangeText(token.Key, 1));
+		}
+
+		return builder.ToString();
+	}
+
+	// Fraction (0..1) of words common to the two lines via LCS; used only to decide line pairing.
+	private static double LineWordSimilarity(string baseLine, string upgradedLine)
+	{
+		List<string> baseWords = new List<string>();
+		foreach (DiffToken token in TokenizeLineForDiff(baseLine))
+		{
+			if (token.IsWord)
+			{
+				baseWords.Add(token.Key);
+			}
+		}
+
+		List<string> upgradedWords = new List<string>();
+		foreach (DiffToken token in TokenizeLineForDiff(upgradedLine))
+		{
+			if (token.IsWord)
+			{
+				upgradedWords.Add(token.Key);
+			}
+		}
+
+		if (baseWords.Count == 0 || upgradedWords.Count == 0)
+		{
+			return 0.0;
+		}
+
+		bool[] matched = ComputeLcsMatched(baseWords, upgradedWords);
+		int common = 0;
+		foreach (bool isMatched in matched)
+		{
+			if (isMatched)
+			{
+				common++;
+			}
+		}
+
+		return (double)common / Math.Max(baseWords.Count, upgradedWords.Count);
+	}
+
+	// Standard LCS over word keys. Returns, per upgraded word, whether it lies on the common subsequence
+	// (= UNCHANGED). Words not on it are insertions/substitutions, i.e. the upgrade's changes.
+	private static bool[] ComputeLcsMatched(List<string> baseWords, List<string> upgradedWords)
+	{
+		int baseCount = baseWords.Count;
+		int upgradedCount = upgradedWords.Count;
+		bool[] matched = new bool[upgradedCount];
+		if (baseCount == 0 || upgradedCount == 0)
+		{
+			return matched;
+		}
+
+		int[,] lengths = new int[baseCount + 1, upgradedCount + 1];
+		for (int a = baseCount - 1; a >= 0; a--)
+		{
+			for (int b = upgradedCount - 1; b >= 0; b--)
+			{
+				lengths[a, b] = string.Equals(baseWords[a], upgradedWords[b], StringComparison.Ordinal)
+					? lengths[a + 1, b + 1] + 1
+					: Math.Max(lengths[a + 1, b], lengths[a, b + 1]);
+			}
+		}
+
+		int baseIndex = 0;
+		int upgradedIndex = 0;
+		while (baseIndex < baseCount && upgradedIndex < upgradedCount)
+		{
+			if (string.Equals(baseWords[baseIndex], upgradedWords[upgradedIndex], StringComparison.Ordinal))
+			{
+				matched[upgradedIndex] = true;
+				baseIndex++;
+				upgradedIndex++;
+			}
+			else if (lengths[baseIndex + 1, upgradedIndex] >= lengths[baseIndex, upgradedIndex + 1])
+			{
+				baseIndex++;
+			}
+			else
+			{
+				upgradedIndex++;
+			}
+		}
+
+		return matched;
+	}
+
+	// Splits a line into word/keyword tokens (Key = visible text, used for comparison) and whitespace
+	// tokens (Key empty). A bracketed color/keyword tag group stays ONE token: only whitespace at group
+	// depth 0 separates tokens, so the space inside "[gold]Minion Strike[/gold]" does not split it. Image
+	// tags are neutral inline units. Tags go into Raw but never into Key, so output preserves markup while
+	// comparison is on visible text only.
+	private static List<DiffToken> TokenizeLineForDiff(string line)
+	{
+		List<DiffToken> tokens = new List<DiffToken>();
+		if (string.IsNullOrEmpty(line))
+		{
+			return tokens;
+		}
+
+		StringBuilder raw = new StringBuilder();
+		StringBuilder key = new StringBuilder();
+		int groupDepth = 0;
+
+		void FlushWord()
+		{
+			if (raw.Length > 0)
+			{
+				tokens.Add(new DiffToken(raw.ToString(), key.ToString()));
+				raw.Clear();
+				key.Clear();
+			}
+		}
+
+		int i = 0;
+		while (i < line.Length)
+		{
+			if (line[i] == '[' && TryReadTag(line, i, out string tag, out int tagEnd))
+			{
+				bool isImage = tag.StartsWith("[img", StringComparison.OrdinalIgnoreCase)
+					|| tag.StartsWith("[/img", StringComparison.OrdinalIgnoreCase);
+				bool isClose = tag.StartsWith("[/", StringComparison.Ordinal);
+
+				// A color/keyword tag group is its OWN token: flush any preceding plain word when a group
+				// opens, and flush the group itself when it closes, so adjacent text/punctuation (e.g. the
+				// "." in "[gold]Minion Strike[/gold].") is not pulled inside the keyword's green wrap.
+				if (!isImage && !isClose && groupDepth == 0)
+				{
+					FlushWord();
+				}
+
+				raw.Append(tag);
+				if (!isImage)
+				{
+					if (isClose)
+					{
+						if (groupDepth > 0)
+						{
+							groupDepth--;
+						}
+					}
+					else
+					{
+						groupDepth++;
+					}
+				}
+
+				if (!isImage && isClose && groupDepth == 0)
+				{
+					FlushWord();
+				}
+
+				i = tagEnd;
+				continue;
+			}
+
+			char c = line[i];
+			if (char.IsWhiteSpace(c) && groupDepth == 0)
+			{
+				FlushWord();
+				tokens.Add(new DiffToken(c.ToString(), string.Empty));
+				i++;
+				continue;
+			}
+
+			raw.Append(c);
+			key.Append(c);
+			i++;
+		}
+
+		FlushWord();
+		return tokens;
+	}
+
+	private readonly struct DiffToken
+	{
+		public DiffToken(string raw, string key)
+		{
+			Raw = raw;
+			Key = key;
+		}
+
+		public string Raw { get; }
+
+		public string Key { get; }
+
+		public bool IsWord => Key.Length > 0;
 	}
 
 	private static string WrapLineInUpgradeGreen(string line)
@@ -913,11 +1192,11 @@ internal static class CardEditorDescriptionNumberHighlighter
 				continue;
 			}
 
+			// Include number-FREE lines too (empty token list): they still need to be MATCHABLE by key so
+			// an identical, number-free line is recognized as unchanged instead of being greened whole when
+			// a sibling line is inserted/removed above it (e.g. "Innate"/"固有" prepended on upgrade, which
+			// shifts indices and previously left the unchanged line unmatched -> wrongly all green).
 			List<string> tokens = ExtractVisibleNumberTokens(baseLine, includeHighlightedNumbers: false);
-			if (tokens.Count == 0)
-			{
-				continue;
-			}
 
 			if (tokensByKey.ContainsKey(key))
 			{
