@@ -16892,6 +16892,20 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			result = CardEditorLoc.F("cardText.powerTrigger.forNTurnsDuration", $"For the next {nStr} turns, {LowercaseFirst(result)}", ("N", effect.TriggerMaxTurns), ("Payload", result));
 		}
 
+		// Host voice (P1): a power hosted on the trigger target / affected creatures previously read
+		// exactly like one on yourself ("At the start of your turn, ..."). Frame the whole clause so
+		// the text says WHERE the power lives; the inner actor wording (whose actions trigger it) is
+		// a separate axis and stays as configured.
+		CardExtraEffectPowerHost host = GetEffectivePowerHost(effect);
+		if (host == CardExtraEffectPowerHost.TriggerTarget)
+		{
+			result = CardEditorLoc.F("cardText.powerTrigger.hostTarget", $"On the target: {LowercaseFirst(result)}", ("Payload", result));
+		}
+		else if (host == CardExtraEffectPowerHost.EffectTargets)
+		{
+			result = CardEditorLoc.F("cardText.powerTrigger.hostEffectTargets", $"On each affected creature: {LowercaseFirst(result)}", ("Payload", result));
+		}
+
 		return result;
 	}
 

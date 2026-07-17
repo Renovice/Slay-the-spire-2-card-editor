@@ -1,3 +1,9 @@
+## 2026-07-17 - Card Engine P1: PowerHost voice - hosted powers finally say where they live
+
+The last audited wording gap: a power hosted on the trigger target or on each affected creature rendered EXACTLY like one on yourself ("At the start of your turn, gain 2 Strength." even when the power sits on an enemy). ApplyPowerTriggerPrefix now frames the whole trigger clause as the outermost wrap: "On the target: at the start of your turn, ..." (TriggerTarget host) / "On each affected creature: ..." (EffectTargets host). CardOwner/CardOwnerWatchOpponents hosts unchanged (the watch-opponents actor voice was already handled via the AnyEnemy trigger-from mapping). New loc keys cardText.powerTrigger.hostTarget/.hostEffectTargets.
+With this, EVERY user-facing gap from the text audit is closed: 13 partial sites, 9 target-blind resource sites, creature commands, power-trigger actor, host voice. P1's remaining items are pure hygiene (PhraseComposer consolidation of the ~20 complete switches, custom-text line-key alias pass) - tracked as P1.5.
+Build: 0 errors / 278 warnings (baseline). NOT deployed (undeployed: creature-command text + host voice).
+
 ## 2026-07-17 - Card Engine P1: creature commands now name their target (Stun/Kill/Escape/Heal/HP/Set)
 
 FormatCreatureCommand was binary (AllEnemies or nothing): "Stun." for every non-AllEnemies target, "Heal X HP." with zero target wording. Now full 8-target switches: "[gold]Stun[/gold] a random enemy.", "Kill other enemies.", "Another player escapes.", "ALL players heal X HP.", "Set a random enemy's Max HP to X." - vanilla frames throughout; the historical Target/Self imperatives ("Stun.", "Heal X HP.") preserved so existing card text does not drift. GainBlock keeps delegating to the full FormatGainBlock.
