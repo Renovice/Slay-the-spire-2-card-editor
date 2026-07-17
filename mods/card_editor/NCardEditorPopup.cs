@@ -5096,6 +5096,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public OptionButton BranchCountEnemyIntentSelect { get; init; } = null!;
 		public Control BranchEffectRow { get; init; } = null!;
 		public LineEdit BranchEffectSourceIdField { get; init; } = null!;
+		public Control? BranchStyleRow { get; init; }
+		public Control? BranchInlineRow { get; init; }
+		public OptionButton? BranchPayloadStyleSelect { get; init; }
+		public OptionButton? BranchInlineKindSelect { get; init; }
+		public LineEdit? BranchInlineAmountField { get; init; }
+		public OptionButton? BranchInlineTargetSelect { get; init; }
 		public Button BranchEffectSourcePickButton { get; init; } = null!;
 		public KeywordTickbox BranchEffectSourceFullTextTickbox { get; init; } = null!;
 
@@ -14577,6 +14583,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	// Effect kinds that operate on "this card" / the source card, so they are inert (or unsafe)
 	// when the host is a relic (whose effect source is a throwaway blank proxy card). These are
 	// hidden from the relic effect dropdown. Ambiguous-but-harmless kinds are intentionally kept.
+	// Card Engine P3: the inline-branch starter set - simple amount+target kinds whose executors
+	// need no extra required fields. Widened per release as configurations get verified in-game.
+	private static readonly CardExtraEffectKind[] _inlineBranchKinds =
+	{
+		CardExtraEffectKind.DealDamage,
+		CardExtraEffectKind.GainBlock,
+		CardExtraEffectKind.DrawCards,
+		CardExtraEffectKind.Heal,
+		CardExtraEffectKind.LoseHp,
+		CardExtraEffectKind.GainEnergy,
+		CardExtraEffectKind.GainStars,
+		CardExtraEffectKind.GainGold,
+		CardExtraEffectKind.ApplyWeak,
+		CardExtraEffectKind.ApplyFrail,
+		CardExtraEffectKind.ApplyVulnerable,
+		CardExtraEffectKind.ApplyPoison,
+		CardExtraEffectKind.ApplyDoom,
+		CardExtraEffectKind.GainStrength,
+		CardExtraEffectKind.GainDexterity,
+		CardExtraEffectKind.GainThorns,
+	};
+
 	private static readonly HashSet<CardExtraEffectKind> RelicUnsupportedEffectKinds = new()
 	{
 		CardExtraEffectKind.AddCopyOfThisCard,
@@ -19063,6 +19091,89 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			branchEffectSourceFullTextCell);
 		branchEffectRow.Visible = false;
 
+		// Card Engine P3: inline branch payloads. The runtime/save format always supported an
+		// arbitrary BranchEffect; only this editor forced a helper card. "Inline Effect" authors a
+		// simple amount+target effect right here ("If Fatal: instead draw 2" on ONE card).
+		OptionButton branchPayloadStyleSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(220, _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(branchPayloadStyleSelect);
+		ConstrainOptionButtonPopup(branchPayloadStyleSelect);
+		branchPayloadStyleSelect.TooltipText = CardEditorLoc.T(
+			"tooltip.branchPayloadStyle",
+			"Run another effect-source card, or author a simple effect right here (no helper card needed).");
+		branchPayloadStyleSelect.AddItem(CardEditorLoc.T("branchPayload.effectSource", "Effect-Source Card"), 0);
+		branchPayloadStyleSelect.AddItem(CardEditorLoc.T("branchPayload.inline", "Inline Effect"), 1);
+		bool initialBranchInline = effect?.BranchEffect != null
+			&& effect.BranchEffect.Kind != CardExtraEffectKind.RunEffectSourceCard;
+		branchPayloadStyleSelect.Select(initialBranchInline ? 1 : 0);
+
+		OptionButton branchInlineKindSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(220, _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(branchInlineKindSelect);
+		ConstrainOptionButtonPopup(branchInlineKindSelect);
+		branchInlineKindSelect.TooltipText = CardEditorLoc.T("tooltip.branchInlineKind", "What the branch does when it passes.");
+		foreach (CardExtraEffectKind inlineKind in _inlineBranchKinds)
+		{
+			branchInlineKindSelect.AddItem(GetEffectKindLabel(inlineKind), (int)inlineKind);
+		}
+		int initialInlineKindIdx = initialBranchInline
+			? branchInlineKindSelect.GetItemIndex((int)effect!.BranchEffect!.Kind)
+			: branchInlineKindSelect.GetItemIndex((int)CardExtraEffectKind.DealDamage);
+		branchInlineKindSelect.Select(initialInlineKindIdx >= 0 ? initialInlineKindIdx : 0);
+		branchInlineKindSelect.ItemSelected += _ => QueuePreviewUpdate();
+
+		NMegaLineEdit branchInlineAmountField = new NMegaLineEdit
+		{
+			Text = (initialBranchInline ? effect!.BranchEffect!.Amount : 1).ToString(CultureInfo.InvariantCulture),
+			CustomMinimumSize = new Vector2(90, _fieldMinSize.Y)
+		};
+		StyleInput(branchInlineAmountField);
+		branchInlineAmountField.TooltipText = CardEditorLoc.T("tooltip.branchInlineAmount", "Amount for the inline branch effect.");
+		branchInlineAmountField.TextChanged += _ => QueuePreviewUpdate();
+
+		OptionButton branchInlineTargetSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(180, _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(branchInlineTargetSelect);
+		ConstrainOptionButtonPopup(branchInlineTargetSelect);
+		branchInlineTargetSelect.TooltipText = CardEditorLoc.T("tooltip.branchInlineTarget", "Who the inline branch effect hits.");
+		foreach (CardExtraEffectTarget inlineTarget in Enum.GetValues<CardExtraEffectTarget>())
+		{
+			branchInlineTargetSelect.AddItem(CardEditorExtraEffects.TargetLabel(inlineTarget), (int)inlineTarget);
+		}
+		int initialInlineTargetIdx = branchInlineTargetSelect.GetItemIndex(
+			(int)(initialBranchInline ? effect!.BranchEffect!.Target : CardExtraEffectTarget.Target));
+		branchInlineTargetSelect.Select(initialInlineTargetIdx >= 0 ? initialInlineTargetIdx : 0);
+		branchInlineTargetSelect.ItemSelected += _ => QueuePreviewUpdate();
+
+		HBoxContainer branchStyleRow = CreateEffectFormRow(
+			CardEditorLoc.T("branch.payloadStyle", "Branch Payload"),
+			branchPayloadStyleSelect);
+		branchStyleRow.Visible = false;
+
+		HBoxContainer branchInlineRow = CreateEffectFormRow(
+			CardEditorLoc.T("branch.inline", "Inline Effect"),
+			branchInlineKindSelect,
+			branchInlineAmountField,
+			branchInlineTargetSelect);
+		branchInlineRow.Visible = false;
+
+		branchPayloadStyleSelect.ItemSelected += _ =>
+		{
+			bool inlineStyle = branchPayloadStyleSelect.Selected == 1;
+			branchEffectRow.Visible = branchStyleRow.Visible && !inlineStyle;
+			branchInlineRow.Visible = branchStyleRow.Visible && inlineStyle;
+			QueuePreviewUpdate();
+		};
+
 		OptionButton unifiedEffectVariantSelect = new OptionButton
 		{
 			CustomMinimumSize = new Vector2(260, _fieldMinSize.Y),
@@ -20561,7 +20672,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		advancedPropertyGrid.AddChild(branchCountTurnsRow);
 		advancedPropertyGrid.AddChild(branchCountWindowInclusionRow);
 		advancedPropertyGrid.AddChild(branchBlockLostCountingModeRow);
+		advancedPropertyGrid.AddChild(branchStyleRow);
 		advancedPropertyGrid.AddChild(branchEffectRow);
+		advancedPropertyGrid.AddChild(branchInlineRow);
 		advancedPropertyGrid.AddChild(unifiedEffectModeRow);
 		advancedPropertyGrid.AddChild(unifiedEffectVariantRow);
 		advancedPropertyGrid.AddChild(cardMatchRow);
@@ -21024,6 +21137,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			BranchCountEnemyIntentRow = branchCountEnemyIntentRow,
 			BranchCountEnemyIntentSelect = branchCountEnemyIntentSelect,
 			BranchEffectRow = branchEffectRow,
+			BranchStyleRow = branchStyleRow,
+			BranchInlineRow = branchInlineRow,
+			BranchPayloadStyleSelect = branchPayloadStyleSelect,
+			BranchInlineKindSelect = branchInlineKindSelect,
+			BranchInlineAmountField = branchInlineAmountField,
+			BranchInlineTargetSelect = branchInlineTargetSelect,
 			BranchEffectSourceIdField = branchEffectSourceIdField,
 			BranchEffectSourcePickButton = branchEffectSourcePickButton,
 			BranchEffectSourceFullTextTickbox = branchEffectSourceFullTextTickbox,
@@ -25801,6 +25920,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				row.BranchEffectRow.Visible = false;
 			}
+			if (row.BranchStyleRow != null && GodotObject.IsInstanceValid(row.BranchStyleRow))
+			{
+				row.BranchStyleRow.Visible = false;
+			}
+			if (row.BranchInlineRow != null && GodotObject.IsInstanceValid(row.BranchInlineRow))
+			{
+				row.BranchInlineRow.Visible = false;
+			}
 		}
 		else
 		{
@@ -25826,6 +25953,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (row.BranchEffectRow != null && GodotObject.IsInstanceValid(row.BranchEffectRow))
 			{
 				row.BranchEffectRow.Visible = false;
+			}
+			if (row.BranchStyleRow != null && GodotObject.IsInstanceValid(row.BranchStyleRow))
+			{
+				row.BranchStyleRow.Visible = false;
+			}
+			if (row.BranchInlineRow != null && GodotObject.IsInstanceValid(row.BranchInlineRow))
+			{
+				row.BranchInlineRow.Visible = false;
 			}
 		}
 		row.OrbRow.Visible = isOrbAction;
@@ -27286,7 +27421,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		if (row.BranchEffectRow != null && GodotObject.IsInstanceValid(row.BranchEffectRow))
 		{
-			row.BranchEffectRow.Visible = showBranchRows;
+			bool branchInlineStyle = row.BranchPayloadStyleSelect != null
+				&& GodotObject.IsInstanceValid(row.BranchPayloadStyleSelect)
+				&& row.BranchPayloadStyleSelect.Selected == 1;
+			if (row.BranchStyleRow != null && GodotObject.IsInstanceValid(row.BranchStyleRow))
+			{
+				row.BranchStyleRow.Visible = showBranchRows;
+			}
+			row.BranchEffectRow.Visible = showBranchRows && !branchInlineStyle;
+			if (row.BranchInlineRow != null && GodotObject.IsInstanceValid(row.BranchInlineRow))
+			{
+				row.BranchInlineRow.Visible = showBranchRows && branchInlineStyle;
+			}
 		}
 
 		EnsureVisibleExtraEffectPowerSelectsPopulated(row);
@@ -32851,21 +32997,46 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				{
 					branchMode = CardExtraEffectBranchMode.None;
 				}
-				CardExtraEffect? branchEffect = !branchIsConditionOnly
-					&& branchMode != CardExtraEffectBranchMode.None
-					&& hasUsableBranchCondition
-					&& !string.IsNullOrWhiteSpace(branchSourceId)
-					? new CardExtraEffect
+				CardExtraEffect? branchEffect = null;
+				if (!branchIsConditionOnly && branchMode != CardExtraEffectBranchMode.None && hasUsableBranchCondition)
+				{
+					bool branchInlineStyle = row.BranchPayloadStyleSelect != null
+						&& GodotObject.IsInstanceValid(row.BranchPayloadStyleSelect)
+						&& row.BranchPayloadStyleSelect.Selected == 1;
+					if (branchInlineStyle
+						&& row.BranchInlineKindSelect != null
+						&& GodotObject.IsInstanceValid(row.BranchInlineKindSelect)
+						&& row.BranchInlineKindSelect.Selected >= 0)
 					{
-						Kind = CardExtraEffectKind.RunEffectSourceCard,
-						SpecificCardId = branchSourceId,
-						CardReferenceDisplayMode = row.BranchEffectSourceFullTextTickbox != null
-							&& GodotObject.IsInstanceValid(row.BranchEffectSourceFullTextTickbox)
-							&& row.BranchEffectSourceFullTextTickbox.IsTicked
-								? CardExtraEffectCardReferenceDisplayMode.FullText
-								: CardExtraEffectCardReferenceDisplayMode.NameOnly
+						// P3 inline branch payload: authored right here, no helper card. Runtime,
+						// DTO and MP wire have always executed arbitrary BranchEffect kinds.
+						branchEffect = new CardExtraEffect
+						{
+							Kind = (CardExtraEffectKind)row.BranchInlineKindSelect.GetItemId(row.BranchInlineKindSelect.Selected),
+							Amount = Math.Max(0, ParseIntOrDefault(row.BranchInlineAmountField?.Text, 1)),
+							Target = row.BranchInlineTargetSelect != null
+								&& GodotObject.IsInstanceValid(row.BranchInlineTargetSelect)
+								&& row.BranchInlineTargetSelect.Selected >= 0
+									? (CardExtraEffectTarget)row.BranchInlineTargetSelect.GetItemId(row.BranchInlineTargetSelect.Selected)
+									: CardExtraEffectTarget.Target,
+							Trigger = CardExtraEffectTrigger.OnPlay,
+							Timing = CardExtraEffectTiming.Immediate
+						};
 					}
-					: null;
+					else if (!branchInlineStyle && !string.IsNullOrWhiteSpace(branchSourceId))
+					{
+						branchEffect = new CardExtraEffect
+						{
+							Kind = CardExtraEffectKind.RunEffectSourceCard,
+							SpecificCardId = branchSourceId,
+							CardReferenceDisplayMode = row.BranchEffectSourceFullTextTickbox != null
+								&& GodotObject.IsInstanceValid(row.BranchEffectSourceFullTextTickbox)
+								&& row.BranchEffectSourceFullTextTickbox.IsTicked
+									? CardExtraEffectCardReferenceDisplayMode.FullText
+									: CardExtraEffectCardReferenceDisplayMode.NameOnly
+						};
+					}
+				}
 				if (branchIsConditionOnly)
 				{
 					if (!hasUsableBranchCondition)
@@ -34301,21 +34472,46 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				{
 					branchMode = CardExtraEffectBranchMode.None;
 				}
-				CardExtraEffect? branchEffect = !branchIsConditionOnly
-					&& branchMode != CardExtraEffectBranchMode.None
-					&& hasUsableBranchCondition
-					&& !string.IsNullOrWhiteSpace(branchSourceId)
-					? new CardExtraEffect
+				CardExtraEffect? branchEffect = null;
+				if (!branchIsConditionOnly && branchMode != CardExtraEffectBranchMode.None && hasUsableBranchCondition)
+				{
+					bool branchInlineStyle = row.BranchPayloadStyleSelect != null
+						&& GodotObject.IsInstanceValid(row.BranchPayloadStyleSelect)
+						&& row.BranchPayloadStyleSelect.Selected == 1;
+					if (branchInlineStyle
+						&& row.BranchInlineKindSelect != null
+						&& GodotObject.IsInstanceValid(row.BranchInlineKindSelect)
+						&& row.BranchInlineKindSelect.Selected >= 0)
 					{
-						Kind = CardExtraEffectKind.RunEffectSourceCard,
-						SpecificCardId = branchSourceId,
-						CardReferenceDisplayMode = row.BranchEffectSourceFullTextTickbox != null
-							&& GodotObject.IsInstanceValid(row.BranchEffectSourceFullTextTickbox)
-							&& row.BranchEffectSourceFullTextTickbox.IsTicked
-								? CardExtraEffectCardReferenceDisplayMode.FullText
-								: CardExtraEffectCardReferenceDisplayMode.NameOnly
+						// P3 inline branch payload: authored right here, no helper card. Runtime,
+						// DTO and MP wire have always executed arbitrary BranchEffect kinds.
+						branchEffect = new CardExtraEffect
+						{
+							Kind = (CardExtraEffectKind)row.BranchInlineKindSelect.GetItemId(row.BranchInlineKindSelect.Selected),
+							Amount = Math.Max(0, ParseIntOrDefault(row.BranchInlineAmountField?.Text, 1)),
+							Target = row.BranchInlineTargetSelect != null
+								&& GodotObject.IsInstanceValid(row.BranchInlineTargetSelect)
+								&& row.BranchInlineTargetSelect.Selected >= 0
+									? (CardExtraEffectTarget)row.BranchInlineTargetSelect.GetItemId(row.BranchInlineTargetSelect.Selected)
+									: CardExtraEffectTarget.Target,
+							Trigger = CardExtraEffectTrigger.OnPlay,
+							Timing = CardExtraEffectTiming.Immediate
+						};
 					}
-					: null;
+					else if (!branchInlineStyle && !string.IsNullOrWhiteSpace(branchSourceId))
+					{
+						branchEffect = new CardExtraEffect
+						{
+							Kind = CardExtraEffectKind.RunEffectSourceCard,
+							SpecificCardId = branchSourceId,
+							CardReferenceDisplayMode = row.BranchEffectSourceFullTextTickbox != null
+								&& GodotObject.IsInstanceValid(row.BranchEffectSourceFullTextTickbox)
+								&& row.BranchEffectSourceFullTextTickbox.IsTicked
+									? CardExtraEffectCardReferenceDisplayMode.FullText
+									: CardExtraEffectCardReferenceDisplayMode.NameOnly
+						};
+					}
+				}
 				if (branchIsConditionOnly)
 				{
 					if (!hasUsableBranchCondition)

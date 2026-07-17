@@ -1,3 +1,15 @@
+## 2026-07-17 - Card Engine P3 SHIPPED (code): inline branch payloads - no more helper cards
+
+Hypothesis: branch payloads are UI-locked only; an inline editor writing effect.BranchEffect directly needs zero runtime/DTO/wire changes.
+Finding: True (verified: GetUsableBranchEffect passes any non-RunEffectSourceCard BranchEffect; DTO recurses; branch TEXT already re-enters TryFormatLine so inline payloads self-describe).
+What shipped (NCardEditorPopup.cs only):
+- "Branch Payload" style dropdown on every branch section: [Effect-Source Card | Inline Effect]. Effect-Source path byte-identical to before. Style inferred on load (existing saves with a RunEffectSourceCard branch open as Effect-Source; hand-edited inline JSON opens as Inline).
+- Inline editor row: kind (starter whitelist of 16 amount-only kinds: damage/block/draw/heal/lose HP/energy/stars/gold/5 debuffs/strength/dex/thorns), amount, target (all 8, vanilla labels). Saved as BranchEffect { Kind, Amount, Target, OnPlay, Immediate } by BOTH builders (base + upgrade).
+- RECIPE: any effect row -> tick Branch -> condition (e.g. Fatal) -> Branch Payload = Inline Effect -> Draw Cards, 2 => "If Fatal: draw 2." on ONE card. Card text renders automatically (branch suffix re-enters the line formatter).
+- Whitelist widens per release as configurations get verified; UI nesting stays 1 level (wire cap 8, runtime cap 16 untouched).
+Build: 0 errors / 278 warnings (baseline). NOT deployed (undeployed batch: P2 selection bus + protocol v2 + P3 inline branches - both players must update together when this deploys).
+Next Step: in-game test branch recipes; P4 (grantable pile ops + target routing) after.
+
 ## 2026-07-17 - Card Engine P2 SHIPPED (code): selection bus - "create X, then act on X"
 
 Hypothesis: the selection-bus walls are a missing publish call, a too-narrow UI list, a stripped chain, and a missing consume path - all fixable without touching persistence.
