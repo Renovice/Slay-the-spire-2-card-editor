@@ -64,6 +64,44 @@ shown inside the expanded box. Rule of thumb: *a box per action; chips per setti
 5. Deleting a step that others reference: downstream steps show a broken-link chip and fall back
    to their kind's default selection (never silently deleted).
 
+## Chain grammar & robustness (chains are N-deep, not 2-deep)
+
+The bus is **transitive**: every consuming step re-publishes the cards it acted on under its own
+EffectId (`SelectCardsFromCandidates` reports SelectedByEffect resolutions too), so step 3 chains
+off step 2 chains off step 1, indefinitely. A fully legal 6-box chain on TODAY'S runtime:
+
+    [ Select 3 cards from Discard ] ──▶ [ Upgrade them ] ──▶ [ Give them Pierce this combat ]
+      ──▶ [ They cost 1 less ] ──▶ [ Draw them ] ─ ─▶ [ Deal damage = cards drawn ]
+
+(last connector dashed = an AMOUNT link, not a card link.)
+
+The full box vocabulary the panel exposes:
+
+| Box type | Backed by | Connector |
+|---|---|---|
+| **Trigger head** ("Whenever you discard…", "At turn start") | the rows' Trigger/AsPower/Timing | chain prefix, applies to the whole strip |
+| **Action box** (one per effect) | one CardExtraEffect row | `──▶` card link · `─ ─▶` amount link · `—` plain sequence |
+| **IF box** | the following step's condition/branch fields (incl. P3 inline payloads) | `▶` into its step |
+| **Chips** (keyword, filter, pile, duration, target, repeat, X) | that row's fields | inside the expanded box |
+
+Robustness rules the panel must honor:
+
+- **Any earlier step, not just the previous one**: references are backward-any. Non-adjacent links
+  render with a numbered connector ("from ➊") instead of forcing adjacency.
+- **Forks**: two steps consuming the same producer are legal (both reference ➊). Rendered as a
+  numbered link on the second consumer; no 2D canvas needed.
+- **Multiple chains per card**: independent strips, stacked. Unlinked classic rows are singleton
+  boxes.
+- **Mixed links**: a step can take cards from ➊ and its amount from ➋ simultaneously.
+- **Triggered chains**: rows sharing a power trigger fire as one chain per trigger event (each
+  firing gets its own session, so the links resolve per-event).
+- **Granted chains** (P4): a chain granted to a card runs on the recipient's play with links
+  intact (EffectIds survive the grant clone).
+- **Honest boundaries, surfaced in the UI**: links resolve within ONE resolution (a play / one
+  trigger firing). Crossing turns = a Countdown/timed box, which snapshots its selection at
+  schedule time (existing behavior); the panel labels that connector "(saved cards)". Branch
+  nesting is capped (UI 4 / wire 8 / runtime 16); linear chains have no such cap.
+
 ## Prerequisite fixes (C0) — found during design verification
 
 - **TransformCards must re-publish the REPLACEMENT cards** after transforming (today it publishes
