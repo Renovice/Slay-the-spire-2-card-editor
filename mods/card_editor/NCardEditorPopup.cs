@@ -32673,7 +32673,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					or CardExtraEffectKind.ConditionalAutoPlayFromPile
 					or CardExtraEffectKind.ConditionalAutoDrawFromPile
 					or CardExtraEffectKind.ConditionalAutoRunEffects
-					or CardExtraEffectKind.LinkedCardAction)
+					or CardExtraEffectKind.LinkedCardAction
+					or CardExtraEffectKind.DrawCards
+					or CardExtraEffectKind.DrawCardsThatCostLess)
 				{
 					if (resolvedKind is CardExtraEffectKind.MoveCardsBetweenPiles
 						or CardExtraEffectKind.DelayedPileAction
@@ -32735,6 +32737,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					else if (resolvedKind is CardExtraEffectKind.DrawCards or CardExtraEffectKind.DrawCardsThatCostLess)
 					{
 						selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.DrawPile);
+						// P2 fix-up: "draw THOSE cards" - persist the chain when the user picks
+						// Selected By Effect. Every other mode keeps the classic draw default
+						// (mode is otherwise meaningless for draws; the runtime filter-matches).
+						if (GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose) == CardExtraEffectCardSelectionMode.SelectedByEffect)
+						{
+							selectionMode = CardExtraEffectCardSelectionMode.SelectedByEffect;
+						}
 					}
 				}
 				else if (usesGrantSelectionControls)
@@ -34160,7 +34169,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					or CardExtraEffectKind.ConditionalAutoPlayFromPile
 					or CardExtraEffectKind.ConditionalAutoDrawFromPile
 					or CardExtraEffectKind.ConditionalAutoRunEffects
-					or CardExtraEffectKind.LinkedCardAction)
+					or CardExtraEffectKind.LinkedCardAction
+					or CardExtraEffectKind.DrawCards
+					or CardExtraEffectKind.DrawCardsThatCostLess)
 				{
 					if (resolvedKind is CardExtraEffectKind.MoveCardsBetweenPiles
 						or CardExtraEffectKind.DelayedPileAction
@@ -34222,6 +34233,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					else if (resolvedKind is CardExtraEffectKind.DrawCards or CardExtraEffectKind.DrawCardsThatCostLess)
 					{
 						selectionPile = GetSelectedCardPile(row.MoveFromPileSelect, CardExtraEffectCardPile.DrawPile);
+						// P2 fix-up: "draw THOSE cards" - persist the chain when the user picks
+						// Selected By Effect. Every other mode keeps the classic draw default
+						// (mode is otherwise meaningless for draws; the runtime filter-matches).
+						if (GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose) == CardExtraEffectCardSelectionMode.SelectedByEffect)
+						{
+							selectionMode = CardExtraEffectCardSelectionMode.SelectedByEffect;
+						}
 					}
 				}
 				else if (usesGrantSelectionControls)

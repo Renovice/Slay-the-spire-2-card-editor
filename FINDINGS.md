@@ -1,3 +1,10 @@
+## 2026-07-17 - P2 fix-up (user repro): "draw those cards" mode never SAVED for Draw rows
+
+User in-game: no way to wire "add 10 random cards, draw those". Root cause: P2 made the selection-Mode dropdown VISIBLE for DrawCards and the runtime consume path exists, but the SAVE builders' kind list (NCardEditorPopup ~:32656) excluded DrawCards - its "else if" branch (:32738) only persisted the pile, so Mode=Selected By Effect and the source row id were silently dropped on Apply (mode saved as Choose, source null, runtime never consumed).
+Fix (both base + upgrade builders): DrawCards/DrawCardsThatCostLess added to the enclosing kind list; the draw branch persists SelectedByEffect (only that mode - other modes keep the classic draw default so nothing else changes). With this, the source-picker row also appears (its visibility keys off the mode) and the chain round-trips.
+WORKING RECIPE (after deploy): Row 1 = Card Generation, Amount 10, Destination = Draw Pile; Row 2 = Draw Cards, Amount 10, Mode = Selected By Effect, Selected Row = Row 1.
+Build: 0 errors / 278 warnings (baseline). NOT deployed yet.
+
 ## 2026-07-17 - Card Engine P5 SHIPPED (code): value bus, honestly scoped
 
 Per the critique's rescoping (the original "remove the metric frame gate" idea was proven near-worthless and double-count-prone):
