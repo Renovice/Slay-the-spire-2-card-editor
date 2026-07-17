@@ -1,3 +1,12 @@
+## 2026-07-17 - Card Engine P5 SHIPPED (code): value bus, honestly scoped
+
+Per the critique's rescoping (the original "remove the metric frame gate" idea was proven near-worthless and double-count-prone):
+- DYNAMIC AMOUNTS widened (whitelist + registry D flags, parity-audited): all orb effects (Channel x6, Gain/LoseOrbSlots, EvokeOrbs - "Channel Lightning equal to the damage dealt") plus the three flagged whitelist oversights: ApplyMarked, DrawUntilHandSize, DrawAndCheck. OrbAction stays excluded (per-action amount semantics vary).
+- LOSEHP JOINS THE METRIC BUS: its executor now captures and reports DamageResults (totals/instances/blocked/overkill/kills), and the two frame gates (ReportCurrentDamageTotals, ReportCurrentKillCount) allowlist LoseHp - "draw cards equal to Kills from row 1" works off an HP-loss row. Exact-kind allowlist extension, NOT a gate removal, so nested wrappers still cannot double-count.
+- DEFERRED with reasons: dynamic amounts for cost-modifier rows (they are PASSIVE - read by the cost pipeline outside any play session, so per-play dynamic sources do not exist at evaluation time; needs a different design); DoT/turn-end kill attribution (needs a combat-scoped metric store - separate project).
+Build: 0 errors / 278 warnings (baseline). NOT deployed (wave: P2+P3+P4+P5+protocol v2).
+Next Step: deploy the wave + in-game checklists; then P1.5 (composer hygiene) or P6 (step UI) per user pick.
+
 ## 2026-07-17 - Card Engine P4 SHIPPED (code): 16 pile/deck actions grantable + truthful target dropdowns
 
 Hypothesis (verified by a 2-agent adversarial pass first): the 16 pile-op grant exclusions were blanket conservatism (only HitsAllEnemies had a stated reason); granted rows execute through the recipient's REAL play pipeline identically to native rows; the one universal hazard is the grant normalizer stripping selection filters ("remove all Curses" would become "remove your whole deck").

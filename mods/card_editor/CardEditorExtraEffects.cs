@@ -5831,7 +5831,22 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			or CardExtraEffectKind.ConditionalAutoRunEffects
 			or CardExtraEffectKind.RemoveBlock
 			or CardExtraEffectKind.GainGold
-			or CardExtraEffectKind.LoseGold;
+			or CardExtraEffectKind.LoseGold
+			// Card Engine P5 value bus: orb effects take dynamic amounts ("Channel Lightning equal
+			// to the damage dealt") - their executors already loop/scale on the resolved amount.
+			or CardExtraEffectKind.ChannelLightning
+			or CardExtraEffectKind.ChannelFrost
+			or CardExtraEffectKind.ChannelDark
+			or CardExtraEffectKind.ChannelPlasma
+			or CardExtraEffectKind.ChannelGlass
+			or CardExtraEffectKind.ChannelRandomOrb
+			or CardExtraEffectKind.GainOrbSlots
+			or CardExtraEffectKind.LoseOrbSlots
+			or CardExtraEffectKind.EvokeOrbs
+			// P5: flagged whitelist oversights - plain amount effects that were arbitrarily missing.
+			or CardExtraEffectKind.ApplyMarked
+			or CardExtraEffectKind.DrawUntilHandSize
+			or CardExtraEffectKind.DrawAndCheck;
 	}
 
 	internal static bool SupportsValueSourceAmountSource(CardExtraEffectKind kind)
@@ -28661,7 +28676,19 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				}
 				if (targets.Count > 0)
 				{
-					await CreatureCmd.Damage(choiceContext, targets, amount, DamageProps.cardHpLoss, ownerCreature, cardPlay.Card, cardPlay);
+					// P5 value bus: LoseHp results feed the chain metrics like DealDamage's do -
+					// "draw cards equal to Kills from row 1" now works off an HP-loss row.
+					IEnumerable<DamageResult> loseHpRawResults = await CreatureCmd.Damage(choiceContext, targets, amount, DamageProps.cardHpLoss, ownerCreature, cardPlay.Card, cardPlay);
+					List<DamageResult> loseHpResults = loseHpRawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
+					if (loseHpResults.Count > 0)
+					{
+						CardEditorEffectExecutionAmountContext.ReportCurrentDamageResults(loseHpResults);
+						CardEditorEffectExecutionAmountContext.ReportCurrentDamageTotals(
+							ClampLongToInt(loseHpResults.Sum(r => (long)Math.Max(0, r.TotalDamage))),
+							loseHpResults.Count(r => r.TotalDamage > 0),
+							ClampLongToInt(loseHpResults.Sum(r => (long)Math.Max(0, r.BlockedDamage))),
+							ClampLongToInt(loseHpResults.Sum(r => (long)Math.Max(0, r.OverkillDamage))));
+					}
 				}
 				break;
 			}

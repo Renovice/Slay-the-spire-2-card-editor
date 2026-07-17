@@ -637,8 +637,12 @@ internal static class CardEditorEffectExecutionAmountContext
 			return;
 		}
 
+		// P5 value bus: LoseHp joined the allowlist so chains can read HP damage/blocked/overkill
+		// off an HP-loss row. Exact-kind allowlist (not a gate removal) - ancestor wrappers other
+		// than RunEffectSourceCard still never accumulate, so nested totals cannot double-count.
 		if (frame.Effect.Kind != CardExtraEffectKind.DealDamage
-			&& frame.Effect.Kind != CardExtraEffectKind.RunEffectSourceCard)
+			&& frame.Effect.Kind != CardExtraEffectKind.RunEffectSourceCard
+			&& frame.Effect.Kind != CardExtraEffectKind.LoseHp)
 		{
 			return;
 		}
@@ -711,7 +715,8 @@ internal static class CardEditorEffectExecutionAmountContext
 		}
 
 		if (frame.Effect.Kind != CardExtraEffectKind.DealDamage
-			&& frame.Effect.Kind != CardExtraEffectKind.RunEffectSourceCard)
+			&& frame.Effect.Kind != CardExtraEffectKind.RunEffectSourceCard
+			&& frame.Effect.Kind != CardExtraEffectKind.LoseHp)
 		{
 			return;
 		}

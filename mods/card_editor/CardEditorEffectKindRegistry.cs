@@ -142,15 +142,15 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.CopyBuffs, G | P | R | H, Creatures);
 		// ApplyMarked: DynamicAmount missing from the live whitelist (flagged oversight; registry
 		// mirrors CURRENT truth - widening it later is a deliberate one-line change here + there).
-		Add(CardExtraEffectKind.ApplyMarked, G | P | R | H, Creatures);
+		Add(CardExtraEffectKind.ApplyMarked, G | P | R | D | H, Creatures);
 		Add(CardExtraEffectKind.CreatureCommand, G | P | R | H, Creatures);
 		Add(CardExtraEffectKind.OstyAction, G | P | R | H, Creatures);
 
 		// Player-resolved resource/draw effects.
 		Add(CardExtraEffectKind.DrawCards, G | P | R | D | H | S | s, Players);
 		Add(CardExtraEffectKind.DrawCardsThatCostLess, G | D | S | s, Players);
-		Add(CardExtraEffectKind.DrawUntilHandSize, G | P | R | H | s, Players);
-		Add(CardExtraEffectKind.DrawAndCheck, G | P | R | H | s, Players);
+		Add(CardExtraEffectKind.DrawUntilHandSize, G | P | R | D | H | s, Players);
+		Add(CardExtraEffectKind.DrawAndCheck, G | P | R | D | H | s, Players);
 		Add(CardExtraEffectKind.GainEnergy, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.LoseEnergy, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.GainStars, G | P | R | D | H, Players);
@@ -170,16 +170,17 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.EndTurn, G, Ignores);
 
 		// Orb effects (owner orb queue; OrbAction TriggerPassive+Target is the one exception).
-		Add(CardExtraEffectKind.ChannelLightning, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.ChannelFrost, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.ChannelDark, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.ChannelPlasma, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.ChannelGlass, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.ChannelRandomOrb, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.GainOrbSlots, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.LoseOrbSlots, G | P | R | H, Ignores);
+		// DynamicAmount since P5 ("Channel Lightning equal to the damage dealt").
+		Add(CardExtraEffectKind.ChannelLightning, G | P | R | D | H, Ignores);
+		Add(CardExtraEffectKind.ChannelFrost, G | P | R | D | H, Ignores);
+		Add(CardExtraEffectKind.ChannelDark, G | P | R | D | H, Ignores);
+		Add(CardExtraEffectKind.ChannelPlasma, G | P | R | D | H, Ignores);
+		Add(CardExtraEffectKind.ChannelGlass, G | P | R | D | H, Ignores);
+		Add(CardExtraEffectKind.ChannelRandomOrb, G | P | R | D | H, Ignores);
+		Add(CardExtraEffectKind.GainOrbSlots, G | P | R | D | H, Ignores);
+		Add(CardExtraEffectKind.LoseOrbSlots, G | P | R | D | H, Ignores);
 		Add(CardExtraEffectKind.OrbAction, G | P | R | H, Ignores);
-		Add(CardExtraEffectKind.EvokeOrbs, G | P | R | H, Ignores);
+		Add(CardExtraEffectKind.EvokeOrbs, G | P | R | D | H, Ignores);
 
 		// Card generation (runtime publishers - the UI does not offer them as sources yet; P2).
 		Add(CardExtraEffectKind.AddRandomCardToHand, G | P | D | H | s, Ignores);
