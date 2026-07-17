@@ -1,3 +1,9 @@
+## 2026-07-17 - Card Engine P1: creature commands now name their target (Stun/Kill/Escape/Heal/HP/Set)
+
+FormatCreatureCommand was binary (AllEnemies or nothing): "Stun." for every non-AllEnemies target, "Heal X HP." with zero target wording. Now full 8-target switches: "[gold]Stun[/gold] a random enemy.", "Kill other enemies.", "Another player escapes.", "ALL players heal X HP.", "Set a random enemy's Max HP to X." - vanilla frames throughout; the historical Target/Self imperatives ("Stun.", "Heal X HP.") preserved so existing card text does not drift. GainBlock keeps delegating to the full FormatGainBlock.
+Build: 0 errors / 278 warnings (baseline).
+P1 part 2 remaining (next session, fresh context): PhraseComposer consolidation of the now-complete sites, PowerHost voice ("hosted on enemies" phrasing in trigger clauses), custom-text line-key alias pass for the intentionally changed lines (snapshot diff on next launch lists them).
+
 ## 2026-07-17 - Card Engine P1 part 1 SHIPPED: vanilla-verbiage target text at every audited gap
 
 Hypothesis: all 13 partial + 9 target-blind formatter sites from the text audit can gain vanilla-corpus ally/player wording without touching Self/enemy lines (snapshot-locked).

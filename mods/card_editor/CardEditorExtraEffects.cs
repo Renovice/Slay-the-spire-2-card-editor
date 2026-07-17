@@ -21252,19 +21252,63 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		string commandId = GetEffectiveCreatureCommandId(effect);
 		CreatureCommandRuntimeSpec? spec = FindCreatureCommandRuntimeSpec(commandId);
 		string label = spec?.Label ?? FormatCreatureCommandMethodLabel(commandId);
+		// Target/Self keep the historical imperative lines; every other target gets an explicit
+		// vanilla-verbiage subject so the text always says who the command hits.
+		string ObjectLine(string verb) => effect.Target switch
+		{
+			CardExtraEffectTarget.AllEnemies => $"{verb} ALL enemies.",
+			CardExtraEffectTarget.OtherEnemies => $"{verb} other enemies.",
+			CardExtraEffectTarget.RandomEnemy => $"{verb} a random enemy.",
+			CardExtraEffectTarget.AllAllies => $"{verb} ALL players.",
+			CardExtraEffectTarget.AnyAlly => $"{verb} another player.",
+			CardExtraEffectTarget.AnyPlayer => $"{verb} any player.",
+			CardExtraEffectTarget.Self => $"{verb} yourself.",
+			_ => $"{verb}."
+		};
+		string SubjectLine(string selfImperative, string thirdSingular, string thirdPlural) => effect.Target switch
+		{
+			CardExtraEffectTarget.AllEnemies => $"ALL enemies {thirdPlural}.",
+			CardExtraEffectTarget.OtherEnemies => $"Other enemies {thirdPlural}.",
+			CardExtraEffectTarget.RandomEnemy => $"A random enemy {thirdSingular}.",
+			CardExtraEffectTarget.AllAllies => $"ALL players {thirdPlural}.",
+			CardExtraEffectTarget.AnyAlly => $"Another player {thirdSingular}.",
+			CardExtraEffectTarget.AnyPlayer => $"Any player {thirdSingular}.",
+			_ => $"{selfImperative}."
+		};
+		string SetLine(string what) => effect.Target switch
+		{
+			CardExtraEffectTarget.AllEnemies => $"Set ALL enemies' {what} to {amountText}.",
+			CardExtraEffectTarget.OtherEnemies => $"Set other enemies' {what} to {amountText}.",
+			CardExtraEffectTarget.RandomEnemy => $"Set a random enemy's {what} to {amountText}.",
+			CardExtraEffectTarget.AllAllies => $"Set ALL players' {what} to {amountText}.",
+			CardExtraEffectTarget.AnyAlly => $"Set another player's {what} to {amountText}.",
+			CardExtraEffectTarget.AnyPlayer => $"Set any player's {what} to {amountText}.",
+			_ => $"Set {what} to {amountText}."
+		};
+
 		return commandId switch
 		{
-			nameof(CreatureCmd.Stun) => effect.Target == CardExtraEffectTarget.AllEnemies ? "Stun ALL enemies." : "Stun.",
-			nameof(CreatureCmd.Kill) => effect.Target == CardExtraEffectTarget.AllEnemies ? "Kill ALL enemies." : "Kill.",
-			nameof(CreatureCmd.Escape) => effect.Target == CardExtraEffectTarget.AllEnemies ? "ALL enemies escape." : "Target escapes.",
+			nameof(CreatureCmd.Stun) => effect.Target is CardExtraEffectTarget.Target or CardExtraEffectTarget.EventTarget ? "Stun." : ObjectLine("[gold]Stun[/gold]"),
+			nameof(CreatureCmd.Kill) => effect.Target is CardExtraEffectTarget.Target or CardExtraEffectTarget.EventTarget ? "Kill." : ObjectLine("Kill"),
+			nameof(CreatureCmd.Escape) => effect.Target switch
+			{
+				CardExtraEffectTarget.AllEnemies => "ALL enemies escape.",
+				CardExtraEffectTarget.OtherEnemies => "Other enemies escape.",
+				CardExtraEffectTarget.RandomEnemy => "A random enemy escapes.",
+				CardExtraEffectTarget.AllAllies => "ALL players escape.",
+				CardExtraEffectTarget.AnyAlly => "Another player escapes.",
+				CardExtraEffectTarget.AnyPlayer => "Any player escapes.",
+				CardExtraEffectTarget.Self => "You escape.",
+				_ => "Target escapes."
+			},
 			nameof(CreatureCmd.GainBlock) => FormatGainBlock(effect.Target, amountText),
-			nameof(CreatureCmd.LoseBlock) => $"Remove {amountText} [gold]Block[/gold].",
-			nameof(CreatureCmd.Heal) => $"Heal {amountText} HP.",
-			nameof(CreatureCmd.GainMaxHp) => $"Gain {amountText} Max HP.",
-			nameof(CreatureCmd.LoseMaxHp) => $"Lose {amountText} Max HP.",
-			nameof(CreatureCmd.SetCurrentHp) => $"Set current HP to {amountText}.",
-			nameof(CreatureCmd.SetMaxHp) => $"Set Max HP to {amountText}.",
-			nameof(CreatureCmd.SetMaxAndCurrentHp) => $"Set Max and current HP to {amountText}.",
+			nameof(CreatureCmd.LoseBlock) => SubjectLine($"Remove {amountText} [gold]Block[/gold]", $"loses {amountText} [gold]Block[/gold]", $"lose {amountText} [gold]Block[/gold]"),
+			nameof(CreatureCmd.Heal) => SubjectLine($"Heal {amountText} HP", $"heals {amountText} HP", $"heal {amountText} HP"),
+			nameof(CreatureCmd.GainMaxHp) => SubjectLine($"Gain {amountText} Max HP", $"gains {amountText} Max HP", $"gain {amountText} Max HP"),
+			nameof(CreatureCmd.LoseMaxHp) => SubjectLine($"Lose {amountText} Max HP", $"loses {amountText} Max HP", $"lose {amountText} Max HP"),
+			nameof(CreatureCmd.SetCurrentHp) => SetLine("current HP"),
+			nameof(CreatureCmd.SetMaxHp) => SetLine("Max HP"),
+			nameof(CreatureCmd.SetMaxAndCurrentHp) => SetLine("Max and current HP"),
 			_ => spec?.UsesAmount == true ? $"{label} {amountText}." : $"{label}."
 		};
 	}
