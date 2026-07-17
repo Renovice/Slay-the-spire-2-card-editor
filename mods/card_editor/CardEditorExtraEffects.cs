@@ -15642,6 +15642,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectTarget.OtherEnemies => $"Deal damage equal to {referenceText} to other enemies.",
 				CardExtraEffectTarget.RandomEnemy => $"Deal damage equal to {referenceText} to a random enemy.",
 				CardExtraEffectTarget.Self => $"Take damage equal to {referenceText}.",
+				CardExtraEffectTarget.AllAllies => $"Deal damage equal to {referenceText} to ALL players.",
+				CardExtraEffectTarget.AnyAlly => $"Deal damage equal to {referenceText} to another player.",
+				CardExtraEffectTarget.AnyPlayer => $"Deal damage equal to {referenceText} to any player.",
 				_ => $"Deal damage equal to {referenceText}."
 			},
 				CardExtraEffectKind.CardDealsExtraDamage => $"This card deals bonus damage equal to {referenceText}.",
@@ -15651,6 +15654,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectTarget.OtherEnemies => $"Other enemies gain [gold]Block[/gold] equal to {referenceText}.",
 				CardExtraEffectTarget.RandomEnemy => $"A random enemy gains [gold]Block[/gold] equal to {referenceText}.",
 				CardExtraEffectTarget.Self => $"Gain [gold]Block[/gold] equal to {referenceText}.",
+				CardExtraEffectTarget.AllAllies => $"ALL players gain [gold]Block[/gold] equal to {referenceText}.",
+				CardExtraEffectTarget.AnyAlly => $"Another player gains [gold]Block[/gold] equal to {referenceText}.",
+				CardExtraEffectTarget.AnyPlayer => $"Any player gains [gold]Block[/gold] equal to {referenceText}.",
 				_ => $"The target gains [gold]Block[/gold] equal to {referenceText}."
 			},
 			CardExtraEffectKind.RemoveBlock => effect.Target switch
@@ -15659,6 +15665,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectTarget.OtherEnemies => $"Other enemies lose [gold]Block[/gold] equal to {referenceText}.",
 				CardExtraEffectTarget.RandomEnemy => $"A random enemy loses [gold]Block[/gold] equal to {referenceText}.",
 				CardExtraEffectTarget.Self => $"Lose [gold]Block[/gold] equal to {referenceText}.",
+				CardExtraEffectTarget.AllAllies => $"ALL players lose [gold]Block[/gold] equal to {referenceText}.",
+				CardExtraEffectTarget.AnyAlly => $"Another player loses [gold]Block[/gold] equal to {referenceText}.",
+				CardExtraEffectTarget.AnyPlayer => $"Any player loses [gold]Block[/gold] equal to {referenceText}.",
 				_ => $"The target loses [gold]Block[/gold] equal to {referenceText}."
 			},
 			CardExtraEffectKind.Heal => effect.Target switch
@@ -15667,6 +15676,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectTarget.OtherEnemies => $"Other enemies heal HP equal to {referenceText}.",
 				CardExtraEffectTarget.RandomEnemy => $"A random enemy heals HP equal to {referenceText}.",
 				CardExtraEffectTarget.Self => $"Heal HP equal to {referenceText}.",
+				CardExtraEffectTarget.AllAllies => $"ALL players heal HP equal to {referenceText}.",
+				CardExtraEffectTarget.AnyAlly => $"Another player heals HP equal to {referenceText}.",
+				CardExtraEffectTarget.AnyPlayer => $"Any player heals HP equal to {referenceText}.",
 				_ => $"The target heals HP equal to {referenceText}."
 			},
 			CardExtraEffectKind.LoseHp => effect.Target switch
@@ -15675,16 +15687,19 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectTarget.OtherEnemies => $"Other enemies lose HP equal to {referenceText}.",
 				CardExtraEffectTarget.RandomEnemy => $"A random enemy loses HP equal to {referenceText}.",
 				CardExtraEffectTarget.Self => $"Lose HP equal to {referenceText}.",
+				CardExtraEffectTarget.AllAllies => $"ALL players lose HP equal to {referenceText}.",
+				CardExtraEffectTarget.AnyAlly => $"Another player loses HP equal to {referenceText}.",
+				CardExtraEffectTarget.AnyPlayer => $"Any player loses HP equal to {referenceText}.",
 				_ => $"The target loses HP equal to {referenceText}."
 			},
 			CardExtraEffectKind.GainMaxHp => $"Gain Max HP equal to {referenceText}.",
 			CardExtraEffectKind.LoseMaxHp => $"Lose Max HP equal to {referenceText}.",
-				CardExtraEffectKind.GainEnergy => $"Gain Energy equal to {referenceText}.",
-				CardExtraEffectKind.LoseEnergy => $"Lose Energy equal to {referenceText}.",
-				CardExtraEffectKind.GainStars => $"Gain Stars equal to {referenceText}.",
-				CardExtraEffectKind.LoseStars => $"Lose Stars equal to {referenceText}.",
-			CardExtraEffectKind.GainGold => $"Gain Gold equal to {referenceText}.",
-			CardExtraEffectKind.LoseGold => $"Lose Gold equal to {referenceText}.",
+				CardExtraEffectKind.GainEnergy => FormatEqualToPlayerResourceText(effect.Target, gain: true, "Energy", referenceText),
+				CardExtraEffectKind.LoseEnergy => FormatEqualToPlayerResourceText(effect.Target, gain: false, "Energy", referenceText),
+				CardExtraEffectKind.GainStars => FormatEqualToPlayerResourceText(effect.Target, gain: true, "Stars", referenceText),
+				CardExtraEffectKind.LoseStars => FormatEqualToPlayerResourceText(effect.Target, gain: false, "Stars", referenceText),
+			CardExtraEffectKind.GainGold => FormatEqualToPlayerResourceText(effect.Target, gain: true, "Gold", referenceText),
+			CardExtraEffectKind.LoseGold => FormatEqualToPlayerResourceText(effect.Target, gain: false, "Gold", referenceText),
 			CardExtraEffectKind.GainStrength => FormatEqualToSignedPowerText(effect.Target, gain: true, "Strength", referenceText, powerDurationSuffix),
 			CardExtraEffectKind.LoseStrength => FormatEqualToSignedPowerText(effect.Target, gain: false, "Strength", referenceText, powerDurationSuffix),
 			CardExtraEffectKind.GainDexterity => FormatEqualToSignedPowerText(effect.Target, gain: true, "Dexterity", referenceText, powerDurationSuffix),
@@ -15747,7 +15762,27 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectTarget.OtherEnemies => $"Apply {payload} equal to {referenceText} to other enemies{suffixPart}",
 			CardExtraEffectTarget.RandomEnemy => $"Apply {payload} equal to {referenceText} to a random enemy{suffixPart}",
 			CardExtraEffectTarget.Self => $"Gain {payload} equal to {referenceText}{suffixPart}",
+			CardExtraEffectTarget.AllAllies => $"Apply {payload} equal to {referenceText} to ALL players{suffixPart}",
+			CardExtraEffectTarget.AnyAlly => $"Apply {payload} equal to {referenceText} to another player{suffixPart}",
+			CardExtraEffectTarget.AnyPlayer => $"Apply {payload} equal to {referenceText} to any player{suffixPart}",
 			_ => $"Apply {payload} equal to {referenceText}{suffixPart}"
+		};
+	}
+
+	// Vanilla frames for player-resolved resources ("Another player gains ...", "ALL players gain ...",
+	// per Believe in You / Energy Surge). Self keeps the imperative; enemy targets are not resolvable
+	// for these kinds at runtime, so they keep the imperative default too.
+	private static string FormatEqualToPlayerResourceText(CardExtraEffectTarget target, bool gain, string resourceName, string referenceText)
+	{
+		string selfVerb = gain ? "Gain" : "Lose";
+		string singularVerb = gain ? "gains" : "loses";
+		string pluralVerb = gain ? "gain" : "lose";
+		return target switch
+		{
+			CardExtraEffectTarget.AllAllies => $"ALL players {pluralVerb} {resourceName} equal to {referenceText}.",
+			CardExtraEffectTarget.AnyAlly => $"Another player {singularVerb} {resourceName} equal to {referenceText}.",
+			CardExtraEffectTarget.AnyPlayer => $"Any player {singularVerb} {resourceName} equal to {referenceText}.",
+			_ => $"{selfVerb} {resourceName} equal to {referenceText}."
 		};
 	}
 
@@ -15758,6 +15793,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectTarget.AllEnemies => CardEditorLoc.T("cardText.copyDebuffs.allEnemies", "Copy the target's debuffs to all other enemies."),
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.T("cardText.copyDebuffs.otherEnemies", "Copy the target's debuffs to other enemies."),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.T("cardText.copyDebuffs.randomEnemy", "Copy the target's debuffs to a random other enemy."),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.T("cardText.copyDebuffs.allAllies", "Copy the target's debuffs to ALL players."),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.T("cardText.copyDebuffs.anyAlly", "Copy the target's debuffs to another player."),
+			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.T("cardText.copyDebuffs.anyPlayer", "Copy the target's debuffs to any player."),
 			_ => CardEditorLoc.T("cardText.copyDebuffs.target", "Copy the target's debuffs.")
 		};
 	}
@@ -15770,6 +15808,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectTarget.RandomEnemy => "Mark a random enemy. Marked targets take 50% more attack damage per stack this combat.",
 			CardExtraEffectTarget.OtherEnemies => "Mark other enemies. Marked targets take 50% more attack damage per stack this combat.",
 			CardExtraEffectTarget.Self => "Mark yourself. You take 50% more attack damage per stack this combat.",
+			CardExtraEffectTarget.AllAllies => "Mark ALL players. Marked targets take 50% more attack damage per stack this combat.",
+			CardExtraEffectTarget.AnyAlly => "Mark another player. Marked targets take 50% more attack damage per stack this combat.",
+			CardExtraEffectTarget.AnyPlayer => "Mark any player. Marked targets take 50% more attack damage per stack this combat.",
 			_ => "Mark the target. Marked targets take 50% more attack damage per stack this combat."
 		};
 	}
@@ -15778,9 +15819,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 	{
 		return target switch
 		{
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.T("cardText.copyBuffs.allAllies", "Copy the target's buffs to all allies."),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.T("cardText.copyBuffs.allAllies", "Copy the target's buffs to ALL players."),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.T("cardText.copyBuffs.anyAlly", "Copy the target's buffs to another player."),
+			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.T("cardText.copyBuffs.anyPlayer", "Copy the target's buffs to any player."),
 			CardExtraEffectTarget.Self => CardEditorLoc.T("cardText.copyBuffs.self", "Copy the target's buffs to yourself."),
-			CardExtraEffectTarget.AllEnemies => CardEditorLoc.T("cardText.copyBuffs.allEnemies", "Copy the target's buffs to all enemies."),
+			CardExtraEffectTarget.AllEnemies => CardEditorLoc.T("cardText.copyBuffs.allEnemies", "Copy the target's buffs to ALL enemies."),
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.T("cardText.copyBuffs.otherEnemies", "Copy the target's buffs to other enemies."),
 			_ => CardEditorLoc.T("cardText.copyBuffs.target", "Copy the target's buffs.")
 		};
@@ -15806,8 +15849,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		return effect?.Target switch
 		{
 			CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.activePower.allEnemies", $"For ALL enemies, {LowerFirst(action)}", ("Action", LowerFirst(action))),
+			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.activePower.otherEnemies", $"For other enemies, {LowerFirst(action)}", ("Action", LowerFirst(action))),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.activePower.randomEnemy", $"For a random enemy, {LowerFirst(action)}", ("Action", LowerFirst(action))),
 			CardExtraEffectTarget.Self => action,
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.activePower.allAllies", $"For ALL players, {LowerFirst(action)}", ("Action", LowerFirst(action))),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.activePower.anyAlly", $"For another player, {LowerFirst(action)}", ("Action", LowerFirst(action))),
+			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.activePower.anyPlayer", $"For any player, {LowerFirst(action)}", ("Action", LowerFirst(action))),
 			_ => CardEditorLoc.F("cardText.activePower.target", $"For the target, {LowerFirst(action)}", ("Action", LowerFirst(action)))
 		};
 	}
@@ -16056,6 +16103,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectTarget.OtherEnemies => $"Other enemies {pluralVerb} {payload} equal to {referenceText}{suffixPart}",
 			CardExtraEffectTarget.RandomEnemy => $"A random enemy {singularVerb} {payload} equal to {referenceText}{suffixPart}",
 			CardExtraEffectTarget.Self => $"{selfVerb} {payload} equal to {referenceText}{suffixPart}",
+			CardExtraEffectTarget.AllAllies => $"ALL players {pluralVerb} {payload} equal to {referenceText}{suffixPart}",
+			CardExtraEffectTarget.AnyAlly => $"Another player {singularVerb} {payload} equal to {referenceText}{suffixPart}",
+			CardExtraEffectTarget.AnyPlayer => $"Any player {singularVerb} {payload} equal to {referenceText}{suffixPart}",
 			_ => $"The target {singularVerb} {payload} equal to {referenceText}{suffixPart}"
 		};
 	}
@@ -16081,6 +16131,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectTarget.OtherEnemies => $"Apply {payload} equal to {referenceText} to other enemies{suffixPart}",
 			CardExtraEffectTarget.RandomEnemy => $"Apply {payload} equal to {referenceText} to a random enemy{suffixPart}",
 			CardExtraEffectTarget.Self => $"Gain {payload} equal to {referenceText}{suffixPart}",
+			CardExtraEffectTarget.AllAllies => $"Apply {payload} equal to {referenceText} to ALL players{suffixPart}",
+			CardExtraEffectTarget.AnyAlly => $"Apply {payload} equal to {referenceText} to another player{suffixPart}",
+			CardExtraEffectTarget.AnyPlayer => $"Apply {payload} equal to {referenceText} to any player{suffixPart}",
 			_ => $"Apply {payload} equal to {referenceText}{suffixPart}"
 		};
 	}
@@ -16364,13 +16417,13 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.GainBlock => FormatGainBlock(effect.Target, amountText),
 				CardExtraEffectKind.DealDamage => FormatDealDamage(effect.Target, amountText),
 				CardExtraEffectKind.CardDealsExtraDamage => FormatCardDealsExtraDamage(amountText),
-				CardExtraEffectKind.DrawCards => FormatDrawCards(effect, grammarAmount, amountText),
-				CardExtraEffectKind.DrawUntilHandSize => $"Draw until your hand holds {amountText} cards.",
-				CardExtraEffectKind.DrawAndCheck => $"Draw {amountText} card(s), then run the branch if a drawn card matches the branch card type.",
-				CardExtraEffectKind.GainEnergy => CardEditorLoc.F("cardText.gainEnergy", $"Gain {FormatEnergyText()}.", ("Amount", FormatEnergyText())),
-				CardExtraEffectKind.LoseEnergy => CardEditorLoc.F("cardText.loseEnergy", $"Lose {FormatEnergyText()}.", ("Amount", FormatEnergyText())),
-				CardExtraEffectKind.GainStars => CardEditorLoc.F("cardText.gainStars", $"Gain {FormatStarText()}.", ("Amount", FormatStarText())),
-				CardExtraEffectKind.LoseStars => CardEditorLoc.F("cardText.loseStars", $"Lose {FormatStarText()}.", ("Amount", FormatStarText())),
+				CardExtraEffectKind.DrawCards => ApplyPlayerDrawSubject(FormatDrawCards(effect, grammarAmount, amountText), effect.Target),
+				CardExtraEffectKind.DrawUntilHandSize => ApplyPlayerDrawSubject($"Draw until your hand holds {amountText} cards.", effect.Target),
+				CardExtraEffectKind.DrawAndCheck => ApplyPlayerDrawSubject($"Draw {amountText} card(s), then run the branch if a drawn card matches the branch card type.", effect.Target),
+				CardExtraEffectKind.GainEnergy => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.gainEnergy", $"Gain {FormatEnergyText()}.", ("Amount", FormatEnergyText())), $"gains {FormatEnergyText()}.", $"gain {FormatEnergyText()}."),
+				CardExtraEffectKind.LoseEnergy => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.loseEnergy", $"Lose {FormatEnergyText()}.", ("Amount", FormatEnergyText())), $"loses {FormatEnergyText()}.", $"lose {FormatEnergyText()}."),
+				CardExtraEffectKind.GainStars => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.gainStars", $"Gain {FormatStarText()}.", ("Amount", FormatStarText())), $"gains {FormatStarText()}.", $"gain {FormatStarText()}."),
+				CardExtraEffectKind.LoseStars => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.loseStars", $"Lose {FormatStarText()}.", ("Amount", FormatStarText())), $"loses {FormatStarText()}.", $"lose {FormatStarText()}."),
 				CardExtraEffectKind.Heal => effect.Target switch
 				{
 					CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.heal.allEnemies", $"ALL enemies heal {amountText} HP.", ("Amount", amountText)),
@@ -16544,14 +16597,14 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.ConsumeCardValue => FormatConsumeCardValue(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.SelectCardsFromPile => FormatSelectCardsFromPile(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.AutoPlaySelfFromPile => FormatAutoPlaySelfFromPile(effect),
-				CardExtraEffectKind.DrawCardsThatCostLess => FormatDrawCardsThatCostLess(card, effect, grammarAmount, amountText, cardCostsLessDurationSuffix),
+				CardExtraEffectKind.DrawCardsThatCostLess => ApplyPlayerDrawSubject(FormatDrawCardsThatCostLess(card, effect, grammarAmount, amountText, cardCostsLessDurationSuffix), effect.Target),
 				CardExtraEffectKind.AutoDrawSelfFromPile => FormatAutoDrawSelfFromPile(effect),
 				CardExtraEffectKind.ConditionalAutoPlayFromPile => FormatAutoPlaySelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
 				CardExtraEffectKind.ConditionalAutoDrawFromPile => FormatAutoDrawSelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
 				CardExtraEffectKind.ConditionalAutoRunEffects => FormatAutoRunEffectRows(card, NormalizeSelfPileAutoEffect(effect) ?? effect, target, isUpgradePreview),
 				CardExtraEffectKind.GrantKeywordToPile => FormatGrantKeywordToPile(effect, grammarAmount, amountText),
-				CardExtraEffectKind.GainGold => $"Gain {amountText} [gold]Gold[/gold].",
-				CardExtraEffectKind.LoseGold => $"Lose {amountText} [gold]Gold[/gold].",
+				CardExtraEffectKind.GainGold => FormatPlayerResourceArm(effect.Target, $"Gain {amountText} [gold]Gold[/gold].", $"gains {amountText} [gold]Gold[/gold].", $"gain {amountText} [gold]Gold[/gold]."),
+				CardExtraEffectKind.LoseGold => FormatPlayerResourceArm(effect.Target, $"Lose {amountText} [gold]Gold[/gold].", $"loses {amountText} [gold]Gold[/gold].", $"lose {amountText} [gold]Gold[/gold]."),
 				CardExtraEffectKind.UpgradeDeckCards => FormatUpgradeDeckCards(effect, grammarAmount, amountText),
 				CardExtraEffectKind.FetchSpecificCardToHand => FormatFetchSpecificCardToHand(effect, grammarAmount, amountText),
 				_ => null
@@ -17139,7 +17192,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		return GetEffectivePowerTriggerFrom(effect) switch
 		{
 			CardExtraEffectPowerTriggerFrom.AnyEnemy => CardEditorLoc.T("cardText.powerTrigger.actor.anyEnemy", "an enemy"),
-			CardExtraEffectPowerTriggerFrom.AnyAlly => CardEditorLoc.T("cardText.powerTrigger.actor.anyAlly", "an ally"),
+			CardExtraEffectPowerTriggerFrom.AnyAlly => CardEditorLoc.T("cardText.powerTrigger.actor.anyAlly", "another player"),
 			CardExtraEffectPowerTriggerFrom.Anyone => CardEditorLoc.T("cardText.powerTrigger.actor.anyone", "anyone"),
 			CardExtraEffectPowerTriggerFrom.MarkedTarget => CardEditorLoc.T("cardText.powerTrigger.actor.markedTarget", "the marked target"),
 			_ => CardEditorLoc.T("cardText.powerTrigger.actor.self", "you")
@@ -21934,6 +21987,38 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		};
 	}
 
+	// Vanilla ally frames for player-resolved lines. Draw-style imperatives ("Draw 2 cards from your
+	// [gold]Discard Pile[/gold].") become "Another player draws 2 cards from their ..." (Constellation/
+	// Tutor wording); resource arms become "Another player gains {payload}" / "ALL players gain ..."
+	// (Believe in You / Energy Surge). Self keeps the untouched imperative line.
+	private static string ApplyPlayerDrawSubject(string line, CardExtraEffectTarget target)
+	{
+		string? subject = target switch
+		{
+			CardExtraEffectTarget.AnyAlly => "Another player draws",
+			CardExtraEffectTarget.AllAllies => "ALL players draw",
+			CardExtraEffectTarget.AnyPlayer => "Any player draws",
+			_ => null
+		};
+		if (subject == null || string.IsNullOrEmpty(line) || !line.StartsWith("Draw ", StringComparison.Ordinal))
+		{
+			return line;
+		}
+
+		return subject + line.Substring("Draw".Length).Replace(" your ", " their ");
+	}
+
+	private static string FormatPlayerResourceArm(CardExtraEffectTarget target, string selfLine, string singularVerbPhrase, string pluralVerbPhrase)
+	{
+		return target switch
+		{
+			CardExtraEffectTarget.AnyAlly => $"Another player {singularVerbPhrase}",
+			CardExtraEffectTarget.AllAllies => $"ALL players {pluralVerbPhrase}",
+			CardExtraEffectTarget.AnyPlayer => $"Any player {singularVerbPhrase}",
+			_ => selfLine
+		};
+	}
+
 	private static string FormatDrawCards(CardExtraEffect effect, int grammarAmount, string amountText)
 	{
 		CardExtraEffect displayEffect = GetGrantPayloadViewEffect(effect);
@@ -24389,6 +24474,33 @@ private static string FormatStatusToStatus(CardExtraEffect effect, string amount
 			lose,
 			referenceSelf: true,
 			referencePlural: false),
+		CardExtraEffectTarget.AllAllies => FormatStatusToStatusLine(
+			lose ? "cardText.loseStatusEqual.allAllies" : "cardText.gainStatusEqual.allAllies",
+			lose ? "ALL players lose {Payload} equal to {Factor}." : "ALL players gain {Payload} equal to {Factor}.",
+			payload,
+			amountText,
+			source,
+			lose,
+			referenceSelf: false,
+			referencePlural: true),
+		CardExtraEffectTarget.AnyAlly => FormatStatusToStatusLine(
+			lose ? "cardText.loseStatusEqual.anyAlly" : "cardText.gainStatusEqual.anyAlly",
+			lose ? "Another player loses {Payload} equal to {Factor}." : "Another player gains {Payload} equal to {Factor}.",
+			payload,
+			amountText,
+			source,
+			lose,
+			referenceSelf: false,
+			referencePlural: true),
+		CardExtraEffectTarget.AnyPlayer => FormatStatusToStatusLine(
+			lose ? "cardText.loseStatusEqual.anyPlayer" : "cardText.gainStatusEqual.anyPlayer",
+			lose ? "Any player loses {Payload} equal to {Factor}." : "Any player gains {Payload} equal to {Factor}.",
+			payload,
+			amountText,
+			source,
+			lose,
+			referenceSelf: false,
+			referencePlural: true),
 		_ => FormatStatusToStatusLine(
 			lose ? "cardText.loseStatusEqual.target" : "cardText.gainStatusEqual.target",
 			lose ? "The target loses {Payload} equal to {Factor}." : "The target gains {Payload} equal to {Factor}.",

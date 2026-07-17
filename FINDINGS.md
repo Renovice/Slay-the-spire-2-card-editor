@@ -1,3 +1,17 @@
+## 2026-07-17 - Card Engine P1 part 1 SHIPPED: vanilla-verbiage target text at every audited gap
+
+Hypothesis: all 13 partial + 9 target-blind formatter sites from the text audit can gain vanilla-corpus ally/player wording without touching Self/enemy lines (snapshot-locked).
+Finding: True - every audited site now covered.
+What changed (CardEditorExtraEffects.cs, all Self/enemy wording byte-identical):
+- "Equal to {reference}" family COMPLETE: the 5 inline switches (DealDamage/GainBlock/RemoveBlock/Heal/LoseHp), FormatEqualToDebuffText, FormatEqualToSignedPowerText (one edit covers ~30 stat/power kinds), FormatEqualToApplyPowerText - all gained AllAllies="ALL players", AnyAlly="Another player/another player", AnyPlayer="Any player/any player" branches.
+- Resource equal-to one-liners (Energy/Stars/Gold x gain/lose) -> new FormatEqualToPlayerResourceText with vanilla frames ("Another player gains Gold equal to X.").
+- Plain player-resolved arms: GainEnergy/LoseEnergy/GainStars/LoseStars/GainGold/LoseGold -> FormatPlayerResourceArm ("Another player gains {energy}." per Believe in You; "ALL players gain ..." per Energy Surge). Draw family (DrawCards, DrawUntilHandSize, DrawAndCheck, DrawCardsThatCostLess) -> ApplyPlayerDrawSubject wrapper ("Another player draws 2 cards from their [gold]Discard Pile[/gold]." - Constellation/Tutor wording, your->their swap).
+- FormatCopyDebuffs/FormatCopyBuffs/FormatMarked/FormatModifyActivePower: player branches added; ModifyActivePower also gained its MISSING OtherEnemies branch; CopyBuffs "to all allies" vanilla-ized to "to ALL players".
+- FormatStatusToStatus: 3 player branches with singular-they possessive ("their {Source}").
+- Power-trigger actor "an ally" -> "another player" (vanilla Sneaky wording).
+Remaining P1 part 2 (hygiene, not user-facing gaps): consolidate the now-19 full sites onto one PhraseComposer, PowerHost voice ("Enemies with this power: ..."), FormatCreatureCommand subjects, custom-text line-key alias pass for the changed wording (snapshot harness will list exactly which lines moved on next launch).
+Build: 0 errors / 278 warnings (baseline). NOT deployed.
+
 ## 2026-07-17 - Card Engine P0 SHIPPED (safety rails) + vanilla verbiage corpus mined
 
 Hypothesis: P0 (snapshot harness, MP guard, capability registry) can land with zero behavior change, and vanilla has explicit ally-target phrasing to copy.
