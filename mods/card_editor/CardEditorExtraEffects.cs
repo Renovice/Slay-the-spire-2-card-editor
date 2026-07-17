@@ -30210,6 +30210,18 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 		if (effect.Kind is CardExtraEffectKind.DrawCards or CardExtraEffectKind.DrawCardsThatCostLess)
 		{
+			// P2 selection bus: a granted draw payload that consumes "the cards selected by row N"
+			// keeps its chain (the source row executes in the same recipient play session); only
+			// interactive/random selections are normalized to the classic granted-draw shape.
+			if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect
+				&& !string.IsNullOrWhiteSpace(effect.CardSelectionSourceEffectId))
+			{
+				effect.CardSelectionPile = CardExtraEffectCardPile.DrawPile;
+				effect.IncludeSourceCardInSelection = false;
+				effect.FutureMatchingCards = false;
+				return;
+			}
+
 			effect.CardSelectionPile = CardExtraEffectCardPile.DrawPile;
 			effect.CardSelectionMode = CardExtraEffectCardSelectionMode.Choose;
 			effect.CardSelectionSourceEffectId = null;
@@ -30538,12 +30550,25 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		}
 
 		CardExtraEffectCardPile sourcePile = GetEffectiveDrawSourcePile(effect);
-		bool useCustomDrawRouting = HasCardSelectionCriteria(effect) || sourcePile != CardExtraEffectCardPile.DrawPile;
+		bool consumesSelection = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect
+			&& !string.IsNullOrWhiteSpace(effect.CardSelectionSourceEffectId);
+		bool useCustomDrawRouting = consumesSelection || HasCardSelectionCriteria(effect) || sourcePile != CardExtraEffectCardPile.DrawPile;
 		if (!useCustomDrawRouting)
 		{
 			List<CardModel> drawn = (await CardPileCmd.Draw(choiceContext, amount, owner)).Where(c => c != null).ToList();
 			CardEditorEffectExecutionAmountContext.ReportCurrentSelectedCards(drawn);
 			return drawn;
+		}
+
+		// P2 selection bus: "draw THOSE cards" - consume a prior row's published selection instead
+		// of filter-matching. The same manual-draw pipeline below runs (ShouldDraw gate, history,
+		// AfterCardDrawn, InvokeDrawn), so a consumed draw is a real draw.
+		Queue<CardModel>? selectedQueue = null;
+		if (consumesSelection)
+		{
+			selectedQueue = new Queue<CardModel>(
+				GetCandidatesFromSelectedEffectSource(owner, effect, sourceCard: null, includeDeck: false, requireDeckVersion: false, includeCostFilter: false)
+					.Where(card => card?.Pile != null && card.Pile.Type is PileType.Draw or PileType.Discard or PileType.Exhaust));
 		}
 
 		List<CardModel> drawnCards = new List<CardModel>();
@@ -30579,32 +30604,55 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				break;
 			}
 
-			if (sourcePile == CardExtraEffectCardPile.DrawPile)
+			if (selectedQueue == null && sourcePile == CardExtraEffectCardPile.DrawPile)
 			{
 				await CardPileCmd.ShuffleIfNecessary(choiceContext, owner);
 			}
 
-			CardModel? matchingCard = sourcePile switch
+			CardModel? matchingCard;
+			if (selectedQueue != null)
 			{
-				CardExtraEffectCardPile.DrawPile => drawPile.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
-				CardExtraEffectCardPile.DiscardPile => discardPile?.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
-				CardExtraEffectCardPile.ExhaustPile => exhaustPile?.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
-				CardExtraEffectCardPile.Deck => deckPile?.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
-				CardExtraEffectCardPile.AllPiles => new[] { drawPile, discardPile, exhaustPile, deckPile }
-					.Where(pile => pile != null)
-					.SelectMany(pile => pile!.Cards)
-					.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
-				_ => drawPile.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect))
-			};
+				// A selected card may have moved (played/drawn by an earlier iteration's hooks);
+				// skip anything no longer in a draw-able pile.
+				matchingCard = null;
+				while (selectedQueue.Count > 0)
+				{
+					CardModel candidate = selectedQueue.Dequeue();
+					if (candidate?.Pile != null && candidate.Pile.Type is PileType.Draw or PileType.Discard or PileType.Exhaust)
+					{
+						matchingCard = candidate;
+						break;
+					}
+				}
+			}
+			else
+			{
+				matchingCard = sourcePile switch
+				{
+					CardExtraEffectCardPile.DrawPile => drawPile.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
+					CardExtraEffectCardPile.DiscardPile => discardPile?.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
+					CardExtraEffectCardPile.ExhaustPile => exhaustPile?.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
+					CardExtraEffectCardPile.Deck => deckPile?.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
+					CardExtraEffectCardPile.AllPiles => new[] { drawPile, discardPile, exhaustPile, deckPile }
+						.Where(pile => pile != null)
+						.SelectMany(pile => pile!.Cards)
+						.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect)),
+					_ => drawPile.Cards.FirstOrDefault(card => card != null && MatchesCardSelectionFilters(owner, card, effect))
+				};
+			}
 			if (matchingCard == null)
 			{
-				bool anyCardsRemaining = new[] { drawPile, discardPile, exhaustPile, deckPile }
-					.Where(pile => pile != null)
-					.SelectMany(pile => pile!.Cards)
-					.Any();
-				if (!anyCardsRemaining)
+				// An exhausted selection chain ends quietly; only filter-draws warn on empty piles.
+				if (selectedQueue == null)
 				{
-					ThinkCmd.Play(new LocString("combat_messages", "NO_DRAW"), owner.Creature, 2.0);
+					bool anyCardsRemaining = new[] { drawPile, discardPile, exhaustPile, deckPile }
+						.Where(pile => pile != null)
+						.SelectMany(pile => pile!.Cards)
+						.Any();
+					if (!anyCardsRemaining)
+					{
+						ThinkCmd.Play(new LocString("combat_messages", "NO_DRAW"), owner.Creature, 2.0);
+					}
 				}
 				break;
 			}
@@ -31965,6 +32013,9 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		{
 			await CardPileCmd.Add(card, toPileType, position);
 		}
+		// P2 selection bus: Fetch was advertised as a "Selected Row" source but never published its
+		// cards, so downstream SelectedByEffect consumers silently received zero candidates.
+		CardEditorEffectExecutionAmountContext.ReportCurrentSelectedCards(candidates);
 		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(candidates.Count);
 	}
 

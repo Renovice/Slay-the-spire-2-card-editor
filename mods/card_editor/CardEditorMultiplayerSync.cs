@@ -32,7 +32,10 @@ internal sealed class CardEditorMultiplayerStateDto
 	// field combinations BEHAVE (new composition capabilities, executor semantics). Old peers parse
 	// new snapshots cleanly but would execute them with old semantics - a silent mid-run desync.
 	// The version gate turns that into a loud, actionable join-time error instead.
-	public const int SyncProtocolVersion = 1;
+	// v2: Card Engine P2 (selection bus) - DrawCards consumes SelectedByEffect chains, Fetch
+	// publishes selections, generators offered as chain sources. An older DLL parses these rows
+	// cleanly but executes them with old semantics, so mixed builds must refuse to sync.
+	public const int SyncProtocolVersion = 2;
 
 	public int Version { get; set; } = SyncProtocolVersion;
 	public string? ModVersion { get; set; }

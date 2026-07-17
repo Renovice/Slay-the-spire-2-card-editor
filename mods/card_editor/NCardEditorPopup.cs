@@ -24111,13 +24111,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private static bool CanPublishCardSelection(CardExtraEffectKind kind)
 	{
-		return UsesCardSelectionFilterControls(kind)
-			|| CardEditorExtraEffects.IsTargetCardMutationKind(kind)
-			|| kind is CardExtraEffectKind.GrantReplay
-				or CardExtraEffectKind.EnchantCard
-				or CardExtraEffectKind.FetchSpecificCardToHand
-				or CardExtraEffectKind.ConsumeCardValue
-				or CardExtraEffectKind.RunEffectSourceCard;
+		// P2 selection bus: registry-driven. This adds the runtime publishers the old hand list
+		// missed - card GENERATORS (add random/specific/copy, play generated, choose-one, linked
+		// action), self-scaling recipients, and the draw variants - so "create X, then act on X"
+		// can finally be wired directly in the editor.
+		return CardEditorEffectKindRegistry.Has(kind, EffectCaps.PublishesCardsUi)
+			|| CardEditorEffectKindRegistry.Has(kind, EffectCaps.PublishesCardsRuntime);
 	}
 
 	private void RefreshCountResultOptions(ExtraEffectRow targetRow, bool branch)
@@ -26094,7 +26093,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			row.MoveCardsRowBottom.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || isLinkedCardAction || usesPileCopyDestination || isResultPileOverride || delayedPileUsesDestination || consumeCardUsesDestination;
 
 			row.MoveFromPileSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isDelayedPileAction || isConsumeCardValue || isSelectCardsFromPile || isMovedPileTrigger;
-			row.MoveSelectionModeSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isDelayedPileAction || isConsumeCardValue || isSelectCardsFromPile || (kind == CardExtraEffectKind.FetchSpecificCardToHand);
+			row.MoveSelectionModeSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isDelayedPileAction || isConsumeCardValue || isSelectCardsFromPile || isDrawCards || (kind == CardExtraEffectKind.FetchSpecificCardToHand);
 			row.MoveToPileSelect.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || isLinkedCardAction || usesPileCopyDestination || isResultPileOverride || delayedPileUsesDestination || consumeCardUsesDestination;
 			row.MoveToPositionSelect.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || isLinkedCardAction || usesPileCopyDestination || isResultPileOverride || delayedPileUsesDestination || consumeCardUsesDestination;
 			if (row.AdditionalMoveToRow != null && GodotObject.IsInstanceValid(row.AdditionalMoveToRow))
