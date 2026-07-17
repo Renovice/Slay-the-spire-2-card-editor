@@ -14299,7 +14299,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardExtraEffectDefinition def = defs[kindIndex];
 
 		row.AllowedTargets.Clear();
-		IReadOnlyList<CardExtraEffectTarget> allowed = ExpandMultiplayerTargets(def.AllowedTargets);
+		IReadOnlyList<CardExtraEffectTarget> allowed = CardEditorEffectKindRegistry.TargetSemanticsOf(def.Kind) == EffectTargetSemantics.IgnoresTarget
+			? def.AllowedTargets
+			: ExpandMultiplayerTargets(def.AllowedTargets);
 		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay)
 		{
 			allowed = allowed.Where(t => t != CardExtraEffectTarget.Target).ToArray();
@@ -21581,6 +21583,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		timingOffsetSelect.ItemSelected += _ => updateTimingFromUnifiedControls();
 		powerTickbox.Toggled += () =>
 		{
+			// P4: the multiplayer-target gate exempts As-Power rows (power hosting resolves ally
+			// targets), so toggling Power must rebuild the target list, keeping the current pick.
+			CardExtraEffectTarget? currentTarget = effectRow.AllowedTargets.Count > 0
+				&& effectRow.TargetSelect.Selected >= 0
+				&& effectRow.TargetSelect.Selected < effectRow.AllowedTargets.Count
+					? effectRow.AllowedTargets[effectRow.TargetSelect.Selected]
+					: null;
+			ConfigureExtraEffectTargets(effectRow, currentTarget);
 			UpdateExtraEffectCustomRows(effectRow);
 			UpdateExtraEffectDurationEnabled(effectRow, desiredDuration: null);
 			QueuePreviewUpdate();
@@ -25285,29 +25295,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			: CardExtraEffectSelfScalingRecipientMode.ThisCard;
 		bool selfScalingUsesRecipientSelection = isTargetCardMutation && SelfScalingRecipientUsesSelection(selfScalingRecipientMode);
 
+		// P4: the redundant per-kind blocks for pile/deck actions are gone - SupportsGrantToCard
+		// (registry-audited) is the single truth for what can be granted.
 		bool canGrantToCard = CardEditorExtraEffects.SupportsGrantToCard(kind)
 			&& !isCreatedCardModifier
-			&& !isMoveCards
-			&& !isUpgradeCardsInPile
-			&& !isPlayFromPile
 			&& !isAutoPlaySelfFromPile
 			&& !isAutoDrawSelfFromPile
 			&& !isConditionalAutoFromPile
-			&& !isExactCopyThisCardToDeck
-			&& !isCopyPileToDeck
-			&& !isExactCopyPileToDeck
-			&& !isRemoveCardsFromDeck
-			&& !isDelayedPileAction
-			&& !isConsumeCardValue
-			&& !isSelectCardsFromPile
-			&& !isShuffleDrawPile
 			&& !isResultPileOverride
 			&& !isPassiveBehavior
-			&& !isDrawCardsThatCostLess
-			&& !isDiscardCards
-			&& !isExhaustCards
-			&& !isGrantKeywordToPile
-			&& !isUpgradeDeckCards
 			&& !isGrantExtraEffect;
 		row.GrantTickbox.Visible = canGrantToCard;
 		if (!canGrantToCard)
@@ -30153,7 +30149,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		CardExtraEffectDefinition def = GetEffectDefinition(resolvedKind);
 
 		row.AllowedTargets.Clear();
-		IReadOnlyList<CardExtraEffectTarget> allowed = ExpandMultiplayerTargets(def.AllowedTargets);
+		// P4 target truthfulness: kinds whose runtime ignores Target stop offering ally/player
+		// options that silently behave as Self. As-Power rows keep the expansion - power hosting
+		// legitimately resolves ally/player targets (ResolvePowerHostCreatures).
+		bool rowAsPower = row.PowerTickbox != null
+			&& GodotObject.IsInstanceValid(row.PowerTickbox)
+			&& row.PowerTickbox.Visible
+			&& row.PowerTickbox.IsTicked;
+		bool gateMultiplayerTargets = !rowAsPower
+			&& CardEditorEffectKindRegistry.TargetSemanticsOf(resolvedKind) == EffectTargetSemantics.IgnoresTarget;
+		IReadOnlyList<CardExtraEffectTarget> allowed = gateMultiplayerTargets
+			? def.AllowedTargets
+			: ExpandMultiplayerTargets(def.AllowedTargets);
 		bool supportsEventTarget = SupportsSelectedEventTarget(row) && allowed.Contains(CardExtraEffectTarget.Target);
 		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay)
 		{
@@ -30192,6 +30199,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				allowed = new[] { CardExtraEffectTarget.Self };
 			}
+		}
+
+		// Preservation: a SAVED row whose Target is a now-gated value keeps that value as an extra
+		// item (same append shape as the EventTarget case above) so the OptionButton never silently
+		// rewrites persisted state; once the user picks a listed option and saves, it self-heals.
+		if (gateMultiplayerTargets
+			&& desiredTarget.HasValue
+			&& !allowed.Contains(desiredTarget.Value)
+			&& (desiredTarget.Value is CardExtraEffectTarget.AnyPlayer
+				or CardExtraEffectTarget.AnyAlly
+				or CardExtraEffectTarget.AllAllies
+				or CardExtraEffectTarget.OtherEnemies
+				|| (desiredTarget.Value == CardExtraEffectTarget.Target && resolvedKind == CardExtraEffectKind.OrbAction)))
+		{
+			allowed = allowed.Concat(new[] { desiredTarget.Value }).ToArray();
 		}
 
 		row.AllowedTargets.AddRange(allowed);

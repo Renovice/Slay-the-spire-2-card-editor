@@ -148,7 +148,7 @@ internal static class CardEditorEffectKindRegistry
 
 		// Player-resolved resource/draw effects.
 		Add(CardExtraEffectKind.DrawCards, G | P | R | D | H | S | s, Players);
-		Add(CardExtraEffectKind.DrawCardsThatCostLess, D | S | s, Players);
+		Add(CardExtraEffectKind.DrawCardsThatCostLess, G | D | S | s, Players);
 		Add(CardExtraEffectKind.DrawUntilHandSize, G | P | R | H | s, Players);
 		Add(CardExtraEffectKind.DrawAndCheck, G | P | R | H | s, Players);
 		Add(CardExtraEffectKind.GainEnergy, G | P | R | D | H, Players);
@@ -157,7 +157,7 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.LoseStars, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.GainGold, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.LoseGold, G | P | R | D | H, Players);
-		Add(CardExtraEffectKind.GrantKeywordToPile, D | H | S | C, Players);
+		Add(CardExtraEffectKind.GrantKeywordToPile, G | D | H | S | C, Players);
 		Add(CardExtraEffectKind.GeneratedCardsUpgraded, H, Players);
 		Add(CardExtraEffectKind.CardsInPileUpgradedAura, H, Players);
 
@@ -186,28 +186,28 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.ChooseOneOfThreeCardsToHand, G | P | D | H | s, Ignores);
 		Add(CardExtraEffectKind.AddSpecificCardToHand, G | P | D | H | s, Ignores);
 		Add(CardExtraEffectKind.AddCopyOfThisCard, G | P | D | H | s, Ignores);
-		Add(CardExtraEffectKind.AddExactCopyOfThisCardToDeck, P | R | D | H | s, Ignores);
+		Add(CardExtraEffectKind.AddExactCopyOfThisCardToDeck, G | P | R | D | H | s, Ignores);
 		Add(CardExtraEffectKind.PlayRandomGeneratedCard, G | P | D | H | s, Ignores);
 		Add(CardExtraEffectKind.FetchSpecificCardToHand, G | P | D | H | S, Ignores);
 		Add(CardExtraEffectKind.LinkedCardAction, P | D | H | s, Ignores);
 
-		// Pile / card actions (selection publishers + consumers; not grantable today).
-		Add(CardExtraEffectKind.MoveCardsBetweenPiles, P | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.PlayCardFromPile, P | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.DiscardCards, P | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.ExhaustCards, P | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.UpgradeCardsInPile, P | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.SelectCardsFromPile, P | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.ConsumeCardValue, P | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.DelayedPileAction, P | R | D | H | S | C, Ignores);
+		// Pile / card actions (selection publishers + consumers; grantable since P4).
+		Add(CardExtraEffectKind.MoveCardsBetweenPiles, G | P | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.PlayCardFromPile, G | P | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.DiscardCards, G | P | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.ExhaustCards, G | P | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.UpgradeCardsInPile, G | P | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.SelectCardsFromPile, G | P | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.ConsumeCardValue, G | P | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.DelayedPileAction, G | P | R | D | H | S | C, Ignores);
 		Add(CardExtraEffectKind.TransformCards, G | P | R | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.CopyCardsFromPileToDeck, P | R | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.CopyExactCardsFromPileToDeck, P | R | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.RemoveCardsFromDeck, P | R | D | H | S | C, Ignores);
-		Add(CardExtraEffectKind.UpgradeDeckCards, P | D | H | S, Ignores);
+		Add(CardExtraEffectKind.CopyCardsFromPileToDeck, G | P | R | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.CopyExactCardsFromPileToDeck, G | P | R | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.RemoveCardsFromDeck, G | P | R | D | H | S | C, Ignores);
+		Add(CardExtraEffectKind.UpgradeDeckCards, G | P | D | H | S, Ignores);
 		Add(CardExtraEffectKind.GrantReplay, G | P | R | H | S | C, Ignores);
 		Add(CardExtraEffectKind.EnchantCard, G | P | H | S, Ignores);
-		Add(CardExtraEffectKind.ShuffleDrawPile, P, Ignores);
+		Add(CardExtraEffectKind.ShuffleDrawPile, G | P, Ignores);
 
 		// Cost modifiers (owner/host-scoped).
 		Add(CardExtraEffectKind.CardCostsLess, G | P | R | H, Ignores);

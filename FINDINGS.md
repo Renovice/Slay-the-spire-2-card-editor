@@ -1,3 +1,20 @@
+## 2026-07-17 - Card Engine P4 SHIPPED (code): 16 pile/deck actions grantable + truthful target dropdowns
+
+Hypothesis (verified by a 2-agent adversarial pass first): the 16 pile-op grant exclusions were blanket conservatism (only HitsAllEnemies had a stated reason); granted rows execute through the recipient's REAL play pipeline identically to native rows; the one universal hazard is the grant normalizer stripping selection filters ("remove all Curses" would become "remove your whole deck").
+Finding: True - all 16 enabled WITH the normalizer fix.
+GRANTS ("give this card: when played, discard 1" - no helper cards):
+- SupportsGrantToCard exclusion list shrunk by 16: Discard/Exhaust/Move/UpgradeInPile/SelectFromPile/PlayFromPile/GrantKeyword/Consume/DrawThatCostLess/Delayed/CopyToDeck x2/RemoveFromDeck/UpgradeDeck/AddExactCopy/Shuffle. Still excluded: created-card modifiers/auras, self-pile auto-actions, meta wrappers, passives, LinkedCardAction, HitsAllEnemies (documented soft-lock).
+- Editor gate: the redundant per-kind !isX chain in canGrantToCard deleted - SupportsGrantToCard (registry-audited) is the single truth.
+- Registry: G flag added to all 16 (boot parity audit keeps predicate and registry honest).
+- NORMALIZER FIX (the load-bearing piece): NormalizeGrantedPayloadSelection no longer strips selection filters for pile/deck-action payloads (GrantPayloadKeepsSelectionFilters set). Also fixes the GrantKeywordToPile future-aura overreach. Draw kinds keep their dedicated reshaping; simple payloads still clear stale filters.
+- Verified safety per kind: real choiceContext/cardPlay in granted execution; auto-play loop guard caps PlayCardFromPile chains; AddExactCopyOfThisCardToDeck retargets "this card" to the RECIPIENT (sensible, documented); deck copies do NOT inherit granted rows (no self-replication).
+TARGET TRUTHFULNESS:
+- ConfigureExtraEffectTargets + ConfigureCardSmithTargets skip the multiplayer expansion for registry IgnoresTarget kinds - Gain Max HP/Summon/Forge/Channel/etc. no longer offer "Any Ally" that silently behaves as Self.
+- AS-POWER EXEMPT: power rows keep the expansion (ResolvePowerHostCreatures genuinely resolves ally/player hosts; the advertised "attach to an ally" configs keep working). Toggling Power rebuilds the target list preserving the current pick.
+- PRESERVATION: a saved row with a now-gated target gets its value appended as an extra dropdown item (EventTarget-append pattern) - persisted state is never silently rewritten; self-heals when the user re-picks. OrbAction's hand-edited Target=Target (TriggerPassive) preserved too.
+Build: 0 errors / 278 warnings (baseline). NOT deployed (undeployed: P2+P3+P4+protocol v2).
+Next Step: in-game checklist for newly-granted kinds (one combat each per the plan discipline); P5 (value bus, honest scope) after.
+
 ## 2026-07-17 - Card Engine P3 SHIPPED (code): inline branch payloads - no more helper cards
 
 Hypothesis: branch payloads are UI-locked only; an inline editor writing effect.BranchEffect directly needs zero runtime/DTO/wire changes.

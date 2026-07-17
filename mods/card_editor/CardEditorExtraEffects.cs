@@ -5590,22 +5590,24 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 	public static bool SupportsGrantToCard(CardExtraEffectKind kind)
 	{
+		// Card Engine P4: pile/deck card-action kinds are now grantable ("give this card: when
+		// played, discard 1"). Their granted rows execute through the recipient's real play
+		// pipeline exactly like native rows (verified per kind); their authored selection filters
+		// are preserved by NormalizeGrantedPayloadSelection. Still excluded: created-card
+		// modifiers and auras (patch-driven, no play execution), self-pile auto-actions and meta
+		// wrappers (run through dedicated trigger machinery, inert as plain rows), passives
+		// (hook/render-evaluated), LinkedCardAction, and HitsAllEnemies (see comment below).
 		return kind is not CardExtraEffectKind.CreatedCardsCostLess
 			and not CardExtraEffectKind.CreatedCardsUpgraded
 			and not CardExtraEffectKind.GeneratedCardsUpgraded
 			and not CardExtraEffectKind.CardsInPileUpgradedAura
-			and not CardExtraEffectKind.MoveCardsBetweenPiles
-			and not CardExtraEffectKind.UpgradeCardsInPile
-			and not CardExtraEffectKind.PlayCardFromPile
 			and not CardExtraEffectKind.AutoPlaySelfFromPile
 			and not CardExtraEffectKind.AutoDrawSelfFromPile
 			and not CardExtraEffectKind.ConditionalAutoPlayFromPile
 			and not CardExtraEffectKind.ConditionalAutoDrawFromPile
 			and not CardExtraEffectKind.ConditionalAutoRunEffects
-			and not CardExtraEffectKind.DelayedPileAction
 			and not CardExtraEffectKind.EffectLimit
 			and not CardExtraEffectKind.CountdownEffect
-			and not CardExtraEffectKind.ShuffleDrawPile
 			and not CardExtraEffectKind.ResultPileOverride
 			and not CardExtraEffectKind.PlayPermission
 			and not CardExtraEffectKind.PlayPrevention
@@ -5615,17 +5617,6 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			and not CardExtraEffectKind.DisplayNumber
 			and not CardExtraEffectKind.HoverPreview
 			and not CardExtraEffectKind.DynamicIdentity
-			and not CardExtraEffectKind.AddExactCopyOfThisCardToDeck
-			and not CardExtraEffectKind.CopyCardsFromPileToDeck
-			and not CardExtraEffectKind.CopyExactCardsFromPileToDeck
-			and not CardExtraEffectKind.RemoveCardsFromDeck
-			and not CardExtraEffectKind.ConsumeCardValue
-			and not CardExtraEffectKind.SelectCardsFromPile
-			and not CardExtraEffectKind.DrawCardsThatCostLess
-			and not CardExtraEffectKind.DiscardCards
-			and not CardExtraEffectKind.ExhaustCards
-			and not CardExtraEffectKind.GrantKeywordToPile
-			and not CardExtraEffectKind.UpgradeDeckCards
 			// HitsAllEnemies retargets the HOST card to AllEnemies. Granted onto a vanilla single-target card
 			// (Strike/Bash), that card's OnPlay then runs with cardPlay.Target == null and aborts, leaving the
 			// played card stuck centered (soft-lock). Custom cards should use native AllEnemies targeting.
@@ -30199,6 +30190,26 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		return payload;
 	}
 
+	// P4: pile/deck-action payloads KEEP their authored selection filters when granted - the old
+	// unconditional strip turned "discard a Skill" into "discard any card" and, for removals,
+	// "remove all Curses" into "remove your whole deck". Simple payload kinds still clear stale
+	// filter state; draw kinds keep their dedicated reshaping below.
+	private static bool GrantPayloadKeepsSelectionFilters(CardExtraEffectKind kind)
+		=> kind is CardExtraEffectKind.MoveCardsBetweenPiles
+			or CardExtraEffectKind.PlayCardFromPile
+			or CardExtraEffectKind.DiscardCards
+			or CardExtraEffectKind.ExhaustCards
+			or CardExtraEffectKind.UpgradeCardsInPile
+			or CardExtraEffectKind.SelectCardsFromPile
+			or CardExtraEffectKind.ConsumeCardValue
+			or CardExtraEffectKind.DelayedPileAction
+			or CardExtraEffectKind.TransformCards
+			or CardExtraEffectKind.CopyCardsFromPileToDeck
+			or CardExtraEffectKind.CopyExactCardsFromPileToDeck
+			or CardExtraEffectKind.RemoveCardsFromDeck
+			or CardExtraEffectKind.UpgradeDeckCards
+			or CardExtraEffectKind.GrantKeywordToPile;
+
 	private static void NormalizeGrantedPayloadSelection(CardExtraEffect effect)
 	{
 		if (effect == null)
@@ -30206,7 +30217,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return;
 		}
 
-		ClearCardSelectionFilters(effect);
+		if (!GrantPayloadKeepsSelectionFilters(effect.Kind))
+		{
+			ClearCardSelectionFilters(effect);
+		}
 
 		if (effect.Kind is CardExtraEffectKind.DrawCards or CardExtraEffectKind.DrawCardsThatCostLess)
 		{
