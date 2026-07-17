@@ -61,6 +61,24 @@ internal static class CardEditorRelicEffects
 				continue;
 			}
 
+			bool hasTriggerMatch = false;
+			foreach (RelicEffectEntry candidate in overrideData.ExtraEffects)
+			{
+				if (candidate?.Effect != null && candidate.Trigger == trigger)
+				{
+					hasTriggerMatch = true;
+					break;
+				}
+			}
+			if (!hasTriggerMatch)
+			{
+				continue;
+			}
+			if (!ShouldFireRelicTriggerThisTime(combatState, relic.CanonicalInstance?.Id ?? relic.Id, trigger, overrideData))
+			{
+				continue;
+			}
+
 			foreach (RelicEffectEntry entry in overrideData.ExtraEffects)
 			{
 				if (entry?.Effect == null || entry.Trigger != trigger)
@@ -93,6 +111,54 @@ internal static class CardEditorRelicEffects
 		}
 	}
 
+	// Per-combat occurrence counter for each (relic, trigger), used by the Kunai-style every-N gate.
+	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CombatState, Dictionary<string, int>> _relicTriggerCounts = new();
+
+	// Last creature to land a LETHAL hit on each target, captured in AfterDamageGiven (which fires for the
+	// killing hit BEFORE Kill()/AfterDeath) so OnEnemyKilled can attribute the kill to the right player -
+	// the AfterDeath hook itself carries no dealer/killer argument.
+	private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Creature, Creature> _lastLethalDealer = new();
+
+	internal static void RecordLethalDealer(Creature target, Creature dealer)
+	{
+		if (target == null || dealer == null)
+		{
+			return;
+		}
+		_lastLethalDealer.Remove(target);
+		_lastLethalDealer.Add(target, dealer);
+	}
+
+	internal static Creature? ConsumeLethalDealer(Creature target)
+	{
+		if (target == null || !_lastLethalDealer.TryGetValue(target, out Creature? dealer))
+		{
+			return null;
+		}
+		_lastLethalDealer.Remove(target);
+		return dealer;
+	}
+
+	private static bool ShouldFireRelicTriggerThisTime(CombatState combatState, ModelId relicId, RelicTriggerKind trigger, RelicOverride overrideData)
+	{
+		int everyN = 1;
+		if (overrideData.TriggerEveryN != null && overrideData.TriggerEveryN.TryGetValue(trigger, out int configured) && configured > 1)
+		{
+			everyN = configured;
+		}
+		if (everyN <= 1)
+		{
+			return true;
+		}
+
+		Dictionary<string, int> counts = _relicTriggerCounts.GetOrCreateValue(combatState);
+		string key = relicId.ToString() + ":" + (int)trigger;
+		counts.TryGetValue(key, out int count);
+		count++;
+		counts[key] = count;
+		return count % everyN == 0;
+	}
+
 	private static CardModel? TryCreateProxyCard(CombatState combatState, Player player)
 	{
 		try
@@ -114,6 +180,7 @@ internal static class CardEditorRelicEffects
 			CardPlay play = new CardPlay
 			{
 				Card = proxy,
+				Player = proxy.Owner,
 				Target = null,
 				ResultPile = PileType.None,
 				Resources = new ResourceInfo
@@ -287,10 +354,10 @@ internal static class Hook_AfterPlayerTurnStart_CardEditorRelicEffects_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.AfterTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterSideTurnEnd))]
 internal static class Hook_AfterTurnEnd_CardEditorRelicEffects_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	public static void Postfix(CombatState combatState, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
 	{
 		if (__result == null || combatState == null || !CardEditorRelicOverrides.HasAnyOverrides)
 		{
@@ -298,7 +365,18 @@ internal static class Hook_AfterTurnEnd_CardEditorRelicEffects_Patch
 		}
 		if (side == CombatSide.Player)
 		{
-			__result = CardEditorRelicEffects.Wrap(__result, combatState, RelicTriggerKind.OnTurnEnd);
+			// Scope "at the end of your turn" to the players who actually ended the turn (extra-turn flows
+			// can end only a subset), instead of firing for every player in combat.
+			if (participants != null)
+			{
+				foreach (Creature participant in participants)
+				{
+					if (participant?.Player != null)
+					{
+						__result = CardEditorRelicEffects.WrapForTarget(__result, combatState, participant, RelicTriggerKind.OnTurnEnd);
+					}
+				}
+			}
 		}
 		else if (side == CombatSide.Enemy)
 		{
@@ -338,9 +416,11 @@ internal static class Hook_AfterCombatEnd_CardEditorRelicEffects_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterDamageReceived))]
 internal static class Hook_AfterDamageReceived_CardEditorRelicEffects_Patch
 {
-	public static void Postfix(CombatState? combatState, Creature target, ref Task __result)
+	public static void Postfix(CombatState? combatState, Creature target, DamageResult result, ref Task __result)
 	{
-		if (__result == null || combatState == null || target == null || !CardEditorRelicOverrides.HasAnyOverrides)
+		// Only fire when HP was actually lost (skip fully-blocked hits). Note: vanilla skips this hook for
+		// lethal damage, so an effect on "When you take damage" still cannot react to a killing blow.
+		if (__result == null || combatState == null || target == null || result == null || result.UnblockedDamage <= 0 || !CardEditorRelicOverrides.HasAnyOverrides)
 		{
 			return;
 		}
@@ -422,20 +502,34 @@ internal static class Hook_AfterShuffle_CardEditorRelicEffects_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterDamageGiven))]
 internal static class Hook_AfterDamageGiven_CardEditorRelicEffects_Patch
 {
-	public static void Postfix(ICombatState combatState, Creature? dealer, ref Task __result)
+	public static void Postfix(ICombatState combatState, Creature? dealer, DamageResult results, Creature target, ref Task __result)
 	{
-		// dealer is the attacker; scope to its player (enemy dealers resolve to no player).
-		if (__result == null || dealer == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
-		__result = CardEditorRelicEffects.WrapForTarget(__result, cs, dealer, RelicTriggerKind.OnDamageDealt);
+		if (dealer == null || results == null)
+		{
+			return;
+		}
+		// AfterDamageGiven fires for the lethal hit BEFORE Kill()/AfterDeath, so capture the killer here for
+		// OnEnemyKilled to attribute the kill (the AfterDeath hook carries no dealer argument).
+		if (results.WasTargetKilled && target != null)
+		{
+			CardEditorRelicEffects.RecordLethalDealer(target, dealer);
+		}
+		// OnDamageDealt: only on damage that actually landed (UnblockedDamage > 0), matching the count-event
+		// path; "When you deal damage" no longer triggers on fully-blocked hits.
+		if (__result != null && results.UnblockedDamage > 0 && combatState is CombatState cs && CardEditorRelicOverrides.HasAnyOverrides)
+		{
+			__result = CardEditorRelicEffects.WrapForTarget(__result, cs, dealer, RelicTriggerKind.OnDamageDealt);
+		}
 	}
 }
 
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterBlockGained))]
 internal static class Hook_AfterBlockGained_CardEditorRelicEffects_Patch
 {
-	public static void Postfix(ICombatState combatState, Creature creature, ref Task __result)
+	public static void Postfix(ICombatState combatState, Creature creature, decimal amount, ref Task __result)
 	{
-		if (__result == null || creature == null || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		// Vanilla calls AfterBlockGained even when the resolved block is 0; only fire for real block gains.
+		if (__result == null || creature == null || amount <= 0m || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
 		__result = CardEditorRelicEffects.WrapForTarget(__result, cs, creature, RelicTriggerKind.OnBlockGained);
 	}
 }
@@ -464,7 +558,11 @@ internal static class Hook_AfterDeath_CardEditorRelicEffects_Patch
 	{
 		// "When you kill an enemy": fire for all players when a non-player creature dies.
 		if (__result == null || creature == null || creature.IsPlayer || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
-		__result = CardEditorRelicEffects.Wrap(__result, cs, RelicTriggerKind.OnEnemyKilled);
+		// Attribute the kill to the player whose lethal hit was captured in AfterDamageGiven; unattributed
+		// deaths (poison/scripted/another enemy) no longer fire, and only the killer's player fires (not all).
+		Creature? killer = CardEditorRelicEffects.ConsumeLethalDealer(creature);
+		if (killer?.Player == null) return;
+		__result = CardEditorRelicEffects.WrapForTarget(__result, cs, killer, RelicTriggerKind.OnEnemyKilled);
 	}
 }
 

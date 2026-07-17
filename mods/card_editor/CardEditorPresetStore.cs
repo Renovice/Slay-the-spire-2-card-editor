@@ -1353,7 +1353,7 @@ internal static class CardEditorPresetStore
 					{
 						continue;
 					}
-					if (!effect.AmountIsX && !CardEditorExtraEffects.IsValidEffectAmount(effect.Kind, effect.Amount))
+					if (!CardEditorExtraEffects.IsPersistableEffect(effect))
 					{
 						continue;
 					}
@@ -1772,6 +1772,7 @@ internal static class CardEditorPresetStore
 		public string? MultiplierSourceMode { get; set; }
 		public string? MultiplierPowerId { get; set; }
 		public string? GrantedKeyword { get; set; }
+		public bool GrantedKeywordRemove { get; set; }
 		public string? StatusIconMode { get; set; }
 		public string? StatusIconPowerId { get; set; }
 		public string? StatusCustomPackedIconPath { get; set; }
@@ -2135,6 +2136,7 @@ internal static class CardEditorPresetStore
 				MultiplierSourceMode = effect.MultiplierSourceMode.ToString(),
 				MultiplierPowerId = effect.MultiplierPowerId,
 				GrantedKeyword = effect.GrantedKeyword.ToString(),
+				GrantedKeywordRemove = effect.GrantedKeywordRemove,
 				StatusIconMode = effect.StatusIconMode.ToString(),
 				StatusIconPowerId = effect.StatusIconPowerId,
 				StatusCustomPackedIconPath = effect.StatusCustomPackedIconPath,
@@ -3283,6 +3285,7 @@ internal static class CardEditorPresetStore
 				grantedKeyword = parsedGrantedKeyword;
 			}
 			effect.GrantedKeyword = grantedKeyword;
+			effect.GrantedKeywordRemove = GrantedKeywordRemove;
 			if (!string.IsNullOrWhiteSpace(StatusIconMode) && Enum.TryParse(StatusIconMode, out CardExtraEffectStatusIconMode parsedStatusIconMode))
 			{
 				effect.StatusIconMode = parsedStatusIconMode;

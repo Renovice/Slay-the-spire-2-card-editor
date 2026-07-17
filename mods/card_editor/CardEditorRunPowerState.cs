@@ -114,10 +114,23 @@ internal static class CardEditorRunPowerState
 				continue;
 			}
 
+			bool prunedStaleEntries = false;
 			foreach (RunPowerEntryDto entry in playerPowers.Powers.ToList())
 			{
 				if (entry == null || string.IsNullOrWhiteSpace(entry.PowerId) || entry.Amount <= 0)
 				{
+					continue;
+				}
+
+				// The defining card/definition was deleted since this run entry was written - stop
+				// resurrecting the orphaned power every combat and drop the stale entry (bug list #4:
+				// "the power remains stored internally and can still be invoked").
+				if (CardEditorCustomStatusRegistry.IsCustomStatusId(entry.PowerId)
+					&& !CardEditorCustomStatusRegistry.DefinitionExists(entry.PowerId))
+				{
+					playerPowers.Powers.Remove(entry);
+					prunedStaleEntries = true;
+					Log.Info($"[CardEditor][RunPowerState] Pruned orphaned power entry '{entry.PowerId}' (definition no longer exists).");
 					continue;
 				}
 
@@ -131,6 +144,11 @@ internal static class CardEditorRunPowerState
 
 				CardEditorPowerPersistenceTrackerPower? persistenceTracker = await PowerCmd.Apply<CardEditorPowerPersistenceTrackerPower>(creature, 1, creature, null, silent: true);
 				persistenceTracker?.Track(entry.PowerId, entry.Amount, entry.Duration, combatState);
+			}
+
+			if (prunedStaleEntries)
+			{
+				Save(file);
 			}
 		}
 	}

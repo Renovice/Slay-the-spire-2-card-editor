@@ -733,7 +733,8 @@ internal static class CardEditorCardRewardSpecs
 			CardRarityOddsType odds = spec.Rarity != CardExtraEffectCardRewardRarityFilter.Any || candidates.Select(card => card.Rarity).Distinct().Count() <= 1
 				? CardRarityOddsType.Uniform
 				: options.RarityOdds;
-			CardCreationOptions filteredOptions = new CardCreationOptions(candidates, options.Source, odds)
+			HashSet<ModelId> candidateIds = candidates.Select(card => card.Id).ToHashSet();
+			CardCreationOptions filteredOptions = new CardCreationOptions(options.CardPools, options.Source, odds, card => candidateIds.Contains(card.Id))
 				.WithFlags(CardCreationFlags.NoCardPoolModifications);
 			if (options.RngOverride != null)
 			{

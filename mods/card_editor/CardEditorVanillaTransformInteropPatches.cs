@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Cards;
 using MegaCrit.Sts2.Core.Random;
 
 namespace SlayTheSpire2Mod.CardEditor;
@@ -190,18 +191,33 @@ internal static class NCardPlayQueue_UpdateCardBeforeExecution_CardEditorTransfo
 }
 
 [HarmonyPatch]
-internal static class NCardTransformVfx_PlayAnimOnCardInHand_CardEditorTransformInterop_Patch
+internal static class NCardTransformShineVfx_PlayAnimation_CardEditorTransformInterop_Patch
 {
-	private static MethodBase? TargetMethod()
+	// v0.108.0 removed NCardTransformVfx.PlayAnimOnCardInHand; the on-card transform animation
+	// now runs through NCardTransformShineVfx (created with the live NCard + end card).
+	private static readonly FieldInfo? CardNodeField = AccessTools.Field(typeof(NCardTransformShineVfx), "_cardNode");
+	private static readonly FieldInfo? EndCardField = AccessTools.Field(typeof(NCardTransformShineVfx), "_endCard");
+
+	public static bool Prepare()
 	{
-		return AccessTools.Method(
-			typeof(NCardTransformVfx),
-			"PlayAnimOnCardInHand",
-			new[] { typeof(NCard), typeof(CardModel) });
+		return AccessTools.Method(typeof(NCardTransformShineVfx), "PlayAnimation") != null
+			&& CardNodeField != null
+			&& EndCardField != null;
 	}
 
-	public static void Postfix(NCard cardNode, CardModel endCard, ref Task __result)
+	private static MethodBase? TargetMethod()
 	{
+		return AccessTools.Method(typeof(NCardTransformShineVfx), "PlayAnimation");
+	}
+
+	public static void Postfix(NCardTransformShineVfx __instance, ref Task __result)
+	{
+		if (CardNodeField?.GetValue(__instance) is not NCard cardNode
+			|| EndCardField?.GetValue(__instance) is not CardModel endCard)
+		{
+			return;
+		}
+
 		CardModel? startCard = TryGetModel(cardNode);
 		if (!CardEditorVanillaTransformInterop.IsManaged(startCard)
 			&& !CardEditorVanillaTransformInterop.IsManaged(endCard))

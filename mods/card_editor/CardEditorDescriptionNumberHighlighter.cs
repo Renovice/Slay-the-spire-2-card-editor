@@ -601,6 +601,16 @@ internal static class CardEditorDescriptionNumberHighlighter
 			return false;
 		}
 
+		// {{=50}} is a LITERAL number: rendered as "50", never auto-linked to an effect value and
+		// never consuming a positional slot (IsSemanticLiveNumberToken stays false for '='). This is
+		// the opt-out for descriptions that mention a number that is NOT in the effect list
+		// ("Reduces damage by 50%" backed by a 1-stack buff kept auto-linking 50 -> 1).
+		if (token[0] == '=')
+		{
+			replacement = token.Substring(1).Trim();
+			return replacement.Length > 0;
+		}
+
 		if (stableTokenValues != null && stableTokenValues.TryGetValue(token, out string? stableReplacement))
 		{
 			replacement = stableReplacement;
@@ -741,6 +751,19 @@ internal static class CardEditorDescriptionNumberHighlighter
 
 		for (int i = 0; i < template.Length;)
 		{
+			// {{...}} blobs are live/literal tokens ({{n1}}, {{=50}}), not positional numbers:
+			// their inner digits must never be consumed or replaced by the positional pass.
+			if (i + 3 < template.Length && template[i] == '{' && template[i + 1] == '{')
+			{
+				int tokenEnd = template.IndexOf("}}", i + 2, StringComparison.Ordinal);
+				if (tokenEnd >= 0)
+				{
+					builder.Append(template.AsSpan(i, tokenEnd + 2 - i));
+					i = tokenEnd + 2;
+					continue;
+				}
+			}
+
 			if (TryAppendTag(template, ref i, builder, ref highlightDepth, ref imageDepth))
 			{
 				continue;

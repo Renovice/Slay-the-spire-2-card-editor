@@ -197,7 +197,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		await SyncVisibleMirrorPowers();
 	}
 
-	public async Task AddCustomStatusBehaviorEffects(CardModel sourceCard, string? customStatusId, IReadOnlyList<CardExtraEffect> effects)
+	public async Task AddCustomStatusBehaviorEffects(CardModel sourceCard, string? customStatusId, IReadOnlyList<CardExtraEffect> effects, int stacks = 1)
 	{
 		AssertMutable();
 		string normalizedStatusId = customStatusId?.Trim() ?? string.Empty;
@@ -243,7 +243,9 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				existingEntry.SourceCard = sourceCard;
 				existingEntry.Effect = stored;
 				existingEntry.MergeTemplate = CardEditorExtraEffects.CloneEffect(stored);
-				existingEntry.StackCount = 1;
+				// Vanilla parity (bug list #4): the behavior fires once PER STACK of the owning
+				// custom status, so "apply 5 stacks" triggers 5x like playing the source 5 times.
+				existingEntry.StackCount = Math.Clamp(stacks, 1, 999);
 				existingEntry.LastTurnBoundaryExecutionKey = null;
 				continue;
 			}
@@ -256,7 +258,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				MergeTemplate = CardEditorExtraEffects.CloneEffect(stored),
 				CustomStatusBehaviorId = normalizedStatusId,
 				CustomStatusBehaviorKey = behaviorKey,
-				StackCount = 1
+				StackCount = Math.Clamp(stacks, 1, 999)
 			});
 		}
 
@@ -267,6 +269,28 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			&& !desiredKeys.Contains(entry.CustomStatusBehaviorKey));
 
 		await SyncVisibleMirrorPowers();
+	}
+
+	// Keeps the behavior entries' per-stack multiplier in step with the owning custom status power's
+	// current Amount (apply-power stacks, later reductions, cleanses of part of the stack).
+	public void SyncCustomStatusBehaviorStacks(string? customStatusId, int stacks)
+	{
+		AssertMutable();
+		string normalizedStatusId = customStatusId?.Trim() ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(normalizedStatusId))
+		{
+			return;
+		}
+
+		int clamped = Math.Clamp(stacks, 1, 999);
+		foreach (PowerEffectEntry entry in Entries)
+		{
+			if (entry != null
+				&& string.Equals(entry.CustomStatusBehaviorId ?? string.Empty, normalizedStatusId, StringComparison.OrdinalIgnoreCase))
+			{
+				entry.StackCount = clamped;
+			}
+		}
 	}
 
 	public async Task RemoveCustomStatusBehaviorEffects(string? customStatusId)
@@ -312,7 +336,18 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			return null;
 		}
 
-		return sourcePlay.Target;
+		if (sourcePlay.Target != null)
+		{
+			return sourcePlay.Target;
+		}
+
+		// No-target cards clear CardPlay.Target. RequiresManualEnemyTarget now forces a pick for MarkedTarget
+		// power effects, so fall back to that player-chosen enemy as the watched (marked) target.
+		return CardEditorExtraEffects.TryGetManualTarget(sourcePlay.Card, out Creature? manualTarget)
+			&& manualTarget != null
+			&& manualTarget.IsAlive
+			? manualTarget
+			: null;
 	}
 
 	private static bool CanMergeIntoEntry(PowerEffectEntry? entry, CardModel sourceCard, CardExtraEffect stored, IReadOnlyDictionary<string, List<CardModel>> selectedCardsByEffectId)
@@ -857,6 +892,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay fatalPlay = new CardPlay
 				{
 					Card = fatalEntry.SourceCard,
+					Player = fatalEntry.SourceCard.Owner,
 					Target = killedTarget,
 					ResultPile = triggerPlay.ResultPile,
 					Resources = triggerPlay.Resources,
@@ -988,6 +1024,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					executionPlay = new CardPlay
 					{
 						Card = executionCard,
+						Player = executionCard.Owner,
 						Target = executionTarget,
 						ResultPile = triggerPlay.ResultPile,
 						Resources = triggerPlay.Resources,
@@ -1021,6 +1058,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		CardPlay schedulingPlay = new CardPlay
 		{
 			Card = sourceCard,
+			Player = sourceCard.Owner,
 			Target = lockedTarget,
 			ResultPile = triggerPlay.ResultPile,
 			Resources = triggerPlay.Resources,
@@ -1214,6 +1252,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					basePlay = new CardPlay
 					{
 						Card = playCard,
+						Player = playCard.Owner,
 						Target = eventActor,
 						ResultPile = playCard.Pile?.Type ?? PileType.None,
 						Resources = new ResourceInfo
@@ -1304,6 +1343,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
+					Player = sourceCard.Owner,
 					Target = eventActor,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
@@ -1436,6 +1476,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
+					Player = sourceCard.Owner,
 					Target = target,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
@@ -1595,6 +1636,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
+					Player = sourceCard.Owner,
 					Target = null,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
@@ -1746,6 +1788,7 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -1864,6 +1907,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -1918,6 +1962,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 				basePlay = new CardPlay
 				{
 					Card = triggeringCard,
+					Player = triggeringCard.Owner,
 					Target = eventActor,
 					ResultPile = triggeringCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo

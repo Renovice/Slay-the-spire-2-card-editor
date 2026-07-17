@@ -109,6 +109,7 @@ internal static class CardEditorQuestEffects
 			or CardExtraEffectCountEvent.EnergyGained
 			or CardExtraEffectCountEvent.EnergyLost
 			or CardExtraEffectCountEvent.EnergyUsed
+			or CardExtraEffectCountEvent.StarsSpent
 			or CardExtraEffectCountEvent.BlockGained
 			or CardExtraEffectCountEvent.BlockLost
 			or CardExtraEffectCountEvent.StatusGained
@@ -449,6 +450,7 @@ internal static class CardEditorQuestEffects
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = questCard,
+				Player = questCard.Owner,
 				Target = null,
 				ResultPile = questCard.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo

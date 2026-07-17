@@ -85,6 +85,21 @@ internal static class CardEditorCustomStatusRegistry
 			.ToList();
 	}
 
+	// True when the id still resolves to a live definition (explicit status-maker definition or a
+	// power discovered on a card override). False once the defining card/definition was deleted -
+	// used to stop persistence stores from resurrecting orphaned powers (bug list #4).
+	public static bool DefinitionExists(string? powerId)
+	{
+		if (!TryDecodeId(powerId, out string name))
+		{
+			return false;
+		}
+
+		string id = BuildId(name) ?? string.Empty;
+		return !string.IsNullOrWhiteSpace(id)
+			&& GetDefinitions().Any(def => string.Equals(def.Id, id, StringComparison.OrdinalIgnoreCase));
+	}
+
 	public static CardEditorCustomStatusDefinition Resolve(string? powerId)
 	{
 		if (TryDecodeId(powerId, out string name))
@@ -236,10 +251,21 @@ internal static class CardEditorCustomStatusRegistry
 			return iconType.Value;
 		}
 
-		PowerType? appliedType = TryResolveBaseGamePowerType(effect.PowerId);
-		if (appliedType.HasValue)
+		// Classify by who the behavior lands on, not just what it applies (bug list #4): a status
+		// whose behavior debuffs ENEMIES is a buff on its holder - "when you lose Block, apply 1
+		// Poison to enemies" used to render with a red debuff number because Poison is a debuff.
+		bool selfFacing = effect.Target is CardExtraEffectTarget.Self
+			or CardExtraEffectTarget.AnyPlayer
+			or CardExtraEffectTarget.AnyAlly
+			or CardExtraEffectTarget.AllAllies;
+
+		if (selfFacing)
 		{
-			return appliedType.Value;
+			PowerType? appliedType = TryResolveBaseGamePowerType(effect.PowerId);
+			if (appliedType.HasValue)
+			{
+				return appliedType.Value;
+			}
 		}
 
 		return effect.Kind switch
@@ -252,7 +278,7 @@ internal static class CardEditorCustomStatusRegistry
 				or CardExtraEffectKind.ApplyConstrict
 				or CardExtraEffectKind.LoseStrength
 				or CardExtraEffectKind.LoseDexterity
-				or CardExtraEffectKind.LoseFocus => PowerType.Debuff,
+				or CardExtraEffectKind.LoseFocus => selfFacing ? PowerType.Debuff : PowerType.Buff,
 			_ => PowerType.Buff
 		};
 	}

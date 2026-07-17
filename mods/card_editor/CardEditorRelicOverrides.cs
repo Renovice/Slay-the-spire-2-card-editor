@@ -74,6 +74,9 @@ public sealed class RelicOverride
 	// parked (empty) trigger group survives a reopen instead of silently vanishing.
 	public List<RelicTriggerKind>? EffectTriggers { get; set; }
 
+	// Kunai-style fire-every-N gate per trigger; absent or value <= 1 means the trigger fires every time.
+	public Dictionary<RelicTriggerKind, int>? TriggerEveryN { get; set; }
+
 	public bool IsEmpty()
 	{
 		return (DynamicVarBaseValues == null || DynamicVarBaseValues.Count == 0)
@@ -82,7 +85,8 @@ public sealed class RelicOverride
 			&& PoolKeys == null
 			&& FixedSourceKeys == null
 			&& (ExtraEffects == null || ExtraEffects.Count == 0)
-			&& (EffectTriggers == null || EffectTriggers.Count == 0);
+			&& (EffectTriggers == null || EffectTriggers.Count == 0)
+			&& (TriggerEveryN == null || TriggerEveryN.Count == 0);
 	}
 }
 
@@ -185,6 +189,9 @@ internal static class CardEditorRelicOverrides
 				: null,
 			EffectTriggers = source.EffectTriggers != null
 				? new List<RelicTriggerKind>(source.EffectTriggers)
+				: null,
+			TriggerEveryN = source.TriggerEveryN != null
+				? new Dictionary<RelicTriggerKind, int>(source.TriggerEveryN)
 				: null
 		};
 	}
@@ -271,6 +278,157 @@ internal static class CardEditorRelicOverrides
 		}
 
 		return new LocString("extensions", key);
+	}
+
+	// Maps a relic trigger to the sentence-lead used when auto-describing its effects, mirroring the
+	// editor dropdown labels so the generated relic text reads the same as the trigger the user picked.
+	internal static string GetTriggerDescriptionPhrase(RelicTriggerKind trigger, int everyN = 1)
+	{
+		string basePhrase = trigger switch
+		{
+			RelicTriggerKind.OnCombatStart => "At combat start",
+			RelicTriggerKind.OnCombatEnd => "At combat end",
+			RelicTriggerKind.OnCombatVictory => "On combat victory",
+			RelicTriggerKind.OnTurnStart => "At the start of your turn",
+			RelicTriggerKind.OnTurnEnd => "At the end of your turn",
+			RelicTriggerKind.OnEnemyTurnStart => "At the start of the enemy turn",
+			RelicTriggerKind.OnEnemyTurnEnd => "At the end of the enemy turn",
+			RelicTriggerKind.OnHandDraw => "Before you draw your hand",
+			RelicTriggerKind.OnCardPlayed => "When you play a card",
+			RelicTriggerKind.OnCardDrawn => "When you draw a card",
+			RelicTriggerKind.OnCardDiscarded => "When you discard a card",
+			RelicTriggerKind.OnCardExhausted => "When you exhaust a card",
+			RelicTriggerKind.OnShuffle => "When you shuffle your deck",
+			RelicTriggerKind.OnDamageDealt => "When you deal damage",
+			RelicTriggerKind.OnDamageTaken => "When you take damage",
+			RelicTriggerKind.OnEnemyKilled => "When you kill an enemy",
+			RelicTriggerKind.OnBlockGained => "When you gain Block",
+			RelicTriggerKind.OnHpLost => "When you lose HP",
+			RelicTriggerKind.OnHeal => "When you heal",
+			RelicTriggerKind.OnEnergyReset => "When your energy resets",
+			RelicTriggerKind.OnStarsGained => "When you gain Stars",
+			RelicTriggerKind.OnOrbChanneled => "When you channel an Orb",
+			RelicTriggerKind.OnPickup => "When obtained",
+			_ => "In combat"
+		};
+		// A relic configured to fire only every Nth occurrence reads e.g. "When you play a card (every 3rd time)".
+		return everyN > 1 ? $"{basePhrase} (every {Ordinal(everyN)} time)" : basePhrase;
+	}
+
+	// "1st"/"2nd"/"3rd"/"11th"/"21st"… for the "every Nth time" trigger qualifier.
+	private static string Ordinal(int n)
+	{
+		int mod100 = n % 100;
+		if (mod100 >= 11 && mod100 <= 13)
+		{
+			return n + "th";
+		}
+		return (n % 10) switch
+		{
+			1 => n + "st",
+			2 => n + "nd",
+			3 => n + "rd",
+			_ => n + "th"
+		};
+	}
+
+	private static CardModel? TryGetDescriptionProxyCard()
+	{
+		try
+		{
+			return ModelDb.GetById<CardModel>(ModelDb.GetId<CardEditorRelicProxyCard>());
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][RelicEffects] description proxy lookup failed: {ex.Message}");
+			return null;
+		}
+	}
+
+	// Builds a human-readable description of a relic's custom effects, grouped by trigger, using the exact
+	// same per-effect text builder the card editor uses (so relic effect text matches card effect text).
+	// Returns "" when there is nothing renderable.
+	internal static string BuildEffectsDescriptionText(RelicModel? relic, IReadOnlyList<RelicEffectEntry>? effects, IReadOnlyDictionary<RelicTriggerKind, int>? everyN = null)
+	{
+		if (effects == null || effects.Count == 0)
+		{
+			return string.Empty;
+		}
+
+		CardModel? proxy = TryGetDescriptionProxyCard();
+		if (proxy == null)
+		{
+			return string.Empty;
+		}
+
+		List<string> lines = new();
+		foreach (RelicTriggerKind trigger in effects.Where(e => e?.Effect != null).Select(e => e.Trigger).Distinct().OrderBy(t => (int)t))
+		{
+			List<string> effectTexts = new();
+			foreach (RelicEffectEntry entry in effects)
+			{
+				if (entry?.Effect == null || entry.Trigger != trigger)
+				{
+					continue;
+				}
+				string? line = CardEditorExtraEffects.FormatSingleEffectLine(proxy, entry.Effect);
+				if (!string.IsNullOrWhiteSpace(line))
+				{
+					effectTexts.Add(line!.Trim());
+				}
+			}
+			if (effectTexts.Count == 0)
+			{
+				continue;
+			}
+			int triggerEveryN = (everyN != null && everyN.TryGetValue(trigger, out int n)) ? n : 1;
+			lines.Add($"{GetTriggerDescriptionPhrase(trigger, triggerEveryN)}: {string.Join(" ", effectTexts)}");
+		}
+
+		return string.Join("\n", lines);
+	}
+
+	// Set by the relic editor while it reads a relic's BASE description for its live preview, so the
+	// Postfix below does not append saved effects on top of the current-UI effects the editor adds itself.
+	[ThreadStatic]
+	internal static bool SuppressEffectDescriptionAppend;
+
+	// Appends the auto-generated effect description to a relic's normal in-game description. Skipped when
+	// the user supplied explicit custom text (that path is handled by TryBuildCustomDynamicDescription).
+	internal static void TryAppendEffectsDescription(RelicModel relic, ref LocString locString)
+	{
+		if (SuppressEffectDescriptionAppend
+			|| relic == null
+			|| locString == null
+			|| !_overrides.TryGetValue(relic.Id, out RelicOverride? overrideData)
+			|| overrideData.CustomDescriptionEnabled == true
+			|| overrideData.ExtraEffects == null
+			|| overrideData.ExtraEffects.Count == 0)
+		{
+			return;
+		}
+
+		string effectsText = BuildEffectsDescriptionText(relic, overrideData.ExtraEffects, overrideData.TriggerEveryN);
+		if (string.IsNullOrWhiteSpace(effectsText))
+		{
+			return;
+		}
+
+		string original = locString.GetFormattedText() ?? string.Empty;
+		string combined = string.IsNullOrWhiteSpace(original) ? effectsText : original + "\n\n" + effectsText;
+		LocString combinedLoc = CreateRuntimeRelicLocString("CARD_EDITOR.RELIC_DESCRIPTION.", combined);
+		relic.DynamicVars.AddTo(combinedLoc);
+		string prefix = EnergyIconHelper.GetPrefix(relic);
+		combinedLoc.Add("energyPrefix", prefix);
+		combinedLoc.Add("singleStarIcon", "[img]res://images/packed/sprite_fonts/star_icon.png[/img]");
+		foreach (KeyValuePair<string, object> variable in combinedLoc.Variables)
+		{
+			if (variable.Value is EnergyVar energyVar)
+			{
+				energyVar.ColorPrefix = prefix;
+			}
+		}
+		locString = combinedLoc;
 	}
 
 	internal static List<RelicPoolModel> EditablePools()
@@ -944,6 +1102,7 @@ internal static class CardEditorRelicOverrideStore
 		public List<string>? FixedSourceKeys { get; set; }
 		public List<RelicEffectEntryDto>? ExtraEffects { get; set; }
 		public List<string>? EffectTriggers { get; set; }
+		public Dictionary<string, int>? TriggerEveryN { get; set; }
 
 		public RelicOverride ToOverride()
 		{
@@ -961,7 +1120,8 @@ internal static class CardEditorRelicOverrideStore
 				FixedSourceKeys = FixedSourceKeys != null
 					? new HashSet<string>(FixedSourceKeys.Where(p => !string.IsNullOrWhiteSpace(p)), StringComparer.Ordinal)
 					: null,
-				ExtraEffects = ParseEffectEntries(ExtraEffects)
+				ExtraEffects = ParseEffectEntries(ExtraEffects),
+				TriggerEveryN = ParseTriggerEveryN(TriggerEveryN)
 			};
 		}
 
@@ -978,8 +1138,12 @@ internal static class CardEditorRelicOverrideStore
 				{
 					continue;
 				}
+				// OnPickup ("When obtained") has no runtime dispatch path (relic-obtained fires out of combat,
+				// where the effect engine has no CombatState), so it would load but silently never fire. Normalize
+				// it to OnCombatStart so legacy/imported data attaches to a trigger that actually runs.
 				RelicTriggerKind trigger = (Enum.TryParse(dto.Trigger, ignoreCase: true, out RelicTriggerKind parsed)
-						&& Enum.IsDefined(typeof(RelicTriggerKind), parsed))
+						&& Enum.IsDefined(typeof(RelicTriggerKind), parsed)
+						&& parsed != RelicTriggerKind.OnPickup)
 					? parsed
 					: RelicTriggerKind.OnCombatStart;
 				result.Add(new RelicEffectEntry { Trigger = trigger, Effect = effect });
@@ -998,9 +1162,29 @@ internal static class CardEditorRelicOverrideStore
 			{
 				if (Enum.TryParse(name, ignoreCase: true, out RelicTriggerKind parsed)
 					&& Enum.IsDefined(typeof(RelicTriggerKind), parsed)
+					&& parsed != RelicTriggerKind.OnPickup // unsupported at runtime; never persist it as a live trigger
 					&& !result.Contains(parsed))
 				{
 					result.Add(parsed);
+				}
+			}
+			return result.Count > 0 ? result : null;
+		}
+
+		private static Dictionary<RelicTriggerKind, int>? ParseTriggerEveryN(Dictionary<string, int>? raw)
+		{
+			if (raw == null)
+			{
+				return null;
+			}
+			Dictionary<RelicTriggerKind, int> result = new();
+			foreach (KeyValuePair<string, int> kv in raw)
+			{
+				if (kv.Value > 1
+					&& Enum.TryParse(kv.Key, ignoreCase: true, out RelicTriggerKind parsed)
+					&& Enum.IsDefined(typeof(RelicTriggerKind), parsed))
+				{
+					result[parsed] = kv.Value;
 				}
 			}
 			return result.Count > 0 ? result : null;
@@ -1029,6 +1213,9 @@ internal static class CardEditorRelicOverrideStore
 						.Where(e => e?.Effect != null)
 						.Select(e => new RelicEffectEntryDto { Trigger = e.Trigger.ToString(), Effect = CardEditorPresetStore.CardExtraEffectDto.FromEffect(e.Effect) })
 						.ToList()
+					: null,
+				TriggerEveryN = overrideData.TriggerEveryN != null
+					? overrideData.TriggerEveryN.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value)
 					: null
 			};
 		}
@@ -1332,6 +1519,13 @@ internal static class RelicModel_get_DynamicDescription_CardEditorRelicTextOverr
 		}
 
 		return true;
+	}
+
+	// When we did NOT replace the description with custom text (Prefix returned true), append the
+	// auto-generated text for any custom effects the relic has, so adding effects updates its description.
+	public static void Postfix(RelicModel __instance, ref LocString __result)
+	{
+		CardEditorRelicOverrides.TryAppendEffectsDescription(__instance, ref __result);
 	}
 }
 

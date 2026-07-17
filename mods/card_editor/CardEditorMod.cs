@@ -165,14 +165,14 @@ public static class CardEditorMod
 				typeof(Hook_ModifyDamageInternal_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
 				label: "Hook.ModifyDamageInternal");
 
-			MethodInfo? modifyHpLostAfterOsty = AccessTools.Method(typeof(Hook), "ModifyHpLostAfterOsty");
-			if (modifyHpLostAfterOsty != null)
+			MethodInfo? modifyHpLost = AccessTools.Method(typeof(Hook), nameof(Hook.ModifyHpLost));
+			if (modifyHpLost != null)
 			{
 				EnsurePatched(
 					harmony,
-					modifyHpLostAfterOsty,
-					typeof(Hook_ModifyHpLostAfterOsty_IgnoreNegation_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
-					label: "Hook.ModifyHpLostAfterOsty");
+					modifyHpLost,
+					typeof(Hook_ModifyHpLost_IgnoreNegation_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
+					label: "Hook.ModifyHpLost");
 			}
 
 			EnsurePatched(
@@ -283,11 +283,9 @@ public static class CardEditorMod
 				Log.Warn($"[CardEditor] Created card slots requested={desired} but only found={cards.Count} types.");
 			}
 
-			foreach (Type cardType in cards)
-			{
-				SavedPropertiesTypeCache.InjectTypeIntoCache(cardType);
-			}
-
+			// v0.109.0 removed SavedPropertiesTypeCache: ModelIdSerializationCache.Init now scans every
+			// ModelDb type (mod models included) and caches their [SavedProperty] members itself, so the
+			// created-card types no longer need manual injection - pool registration alone is enough.
 			foreach (Type poolType in pools)
 			{
 				foreach (Type cardType in cards)
@@ -296,7 +294,6 @@ public static class CardEditorMod
 				}
 			}
 
-			SavedPropertiesTypeCache.InjectTypeIntoCache(typeof(CardEditorBuiltTinkerCard));
 			ModHelper.AddModelToPool(typeof(EventCardPool), typeof(CardEditorBuiltTinkerCard));
 		}
 		catch (Exception ex)
@@ -3185,7 +3182,7 @@ public static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryPower_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeSideTurnEnd))]
 public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 {
 	public static void Postfix(CombatState combatState, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
@@ -3231,7 +3228,7 @@ public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.AfterTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterSideTurnEnd))]
 public static class Hook_AfterTurnEnd_Patch
 {
 	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)

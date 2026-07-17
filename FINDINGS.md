@@ -1,3 +1,214 @@
+## 2026-07-17 - UI feedback round: prefix flood reverted, hint cleanup, ally/player target text
+
+User verdict on the deployed #15 UI: WORSE - the "Category / Name" prefix flooded every kind dropdown (truncated in the fixed-width select, redundant under the browser's section headers), hints showed baked numbers ("Summon 5") for configurable amounts, one hint leaked a raw res:// image path, and card text does not react to targeting changes (ally/enemy/player) for most effects.
+Hypothesis: prefixes belong ONLY in the browser (as section headers); hints must show placeholders; the target-text failure is formatters missing AnyAlly/AllAllies/AnyPlayer branches (falling into the generic "_" default).
+Finding: True on all counts.
+Fixes:
+- DROPDOWNS RESTORED TO CLASSIC: DefinitionDisplayLabel no longer prefixes the category - every kind select shows the plain label in the original alphabetical order. Categories now exist ONLY inside the Browse overlay as section headers (browser items are plain names, no more "Rules & Meta / X" under a "Rules & Meta" header).
+- HINTS: digits are replaced with "X" ("Summon X", "Apply X Poison.") since default amounts are placeholders; [img]...[/img] spans are dropped WHOLE (tag + inner path), fixing the "Gain res://images/..." leak on Gain Energy-style hints.
+- TARGET TEXT (the real bug): AnyAlly(5)/AllAllies(6)/AnyPlayer(4) fell into the "_" default of every target switch, so changing targeting produced identical text. Added explicit branches ("An ally gains X Block.", "ALL allies heal X HP.", "Apply X Weak to any player", ...) to 16 formatter switches: DealDamage, GainBlock, Heal, LoseHp, RemoveBlock, RemoveArtifact, ApplyDebuff (x2 overloads), SignedPower (x2 overloads - all stat gains/losses), GainPower, RemovePower, CleansePowers, ApplyPower (plain + duration), MultiplyStat. EventTarget intentionally stays on the "the target" default.
+- Known remainder: the "equal to {value source}" reference-text variants (~8 switches around CardEditorExtraEffects 15640-16090) still lack ally branches - lower traffic, same pattern if reported.
+Build: 0 errors / 278 warnings (baseline). NOT deployed yet.
+
+## 2026-07-17 - Browse picker v2: self-truthing effect descriptions + Recently Used section
+
+Hypothesis: per-effect descriptions in the browser need 140+ hand-written blurbs (drift-prone); rival: the card-text pipeline can generate them.
+Finding: Rival confirmed - descriptions are generated, not authored.
+What shipped (NCardEditorPopup.cs):
+- DESCRIPTIONS: each browser entry now shows a one-line hint = the effect's DEFAULT-configured card text, produced by the same TryFormatLineForAudit call the startup consistency audit uses (host = the card being edited), with [tags] stripped for plain Button rendering. Self-truthing: the hint is literally what the effect prints, so it can never drift from behavior; kinds with no default text (pure rules/markers) show none. Inline hint truncated at ~90 chars, full text in the tooltip.
+- SEARCH NOW MATCHES DESCRIPTIONS: typing "exhaust" finds every effect whose generated text mentions Exhaust, not just label matches.
+- RECENTLY USED: session-wide list (static, max 8) of picked entries shown as a top section when the search box is empty; picking anywhere records it.
+Build: 0 errors / 278 warnings (baseline). Not deployed; not in-game tested.
+Next Step: in-game smoke test of the browser, then deploy the #10-#16 batch on approval.
+
+## 2026-07-17 - Bug list #15: Add Effect overhaul v1 - categories everywhere + searchable Browse picker
+
+Hypothesis: the "confusing AF" Add Effect experience is mostly the flat 140+ item kind dropdown; the definition model already had a Category display path (DefinitionDisplayLabel renders "Category / Label" and pickers sort by it) that was never populated, so categorization + search could ship without touching any save/hydrate/visibility logic ("0 loss").
+Finding: True.
+What shipped:
+- CATEGORIES: CardExtraEffectDefinition.Category is now DERIVED from one central map (CardEditorExtraEffects.GetEffectKindCategory - a switch over all 147 kinds; unmapped/new kinds fall to "Other", so nothing can ship uncategorized). 13 categories: Attack, Defense, Buffs & Stats, Debuffs, Powers, Draw & Hand, Resources, Costs, Create Cards, Cards & Piles, Osty & Orbs, Scaling & Logic, Rules & Meta. Every kind dropdown now reads "Attack / Deal Damage" and clusters by category (existing sort-by-label does the grouping); loc keys effectCategory.* wrap each name.
+- BROWSE PICKER: new "Browse" button next to the kind dropdown on BOTH row builders (main extra-effect rows + card-smith rows). Opens a searchable overlay (same overlay pattern as the specific-card picker: backstop, panel, live-filter search field, results count, scrollable category sections, current kind marked with ">"). The option list is taken VERBATIM from that row's dropdown (labels via GetItemText, including unified-group entries), and picking drives kindSelect.Select + EmitSignal(ItemSelected) - so the existing row-reconfiguration, save and hydration paths run completely unchanged. Overlay registered in IsDefinitionEditorBlocked + the picker mutual-exclusion guard + popup close reset.
+- Progressive disclosure was already in place (per-kind row visibility switch); the discoverability gap was the picker itself.
+Not in-game tested yet (build-verified only). Follow-up ideas if wanted: per-effect one-line descriptions in the browser, favorites/recent section.
+Build: 0 errors / 278 warnings (baseline). Bug list COMPLETE (15/15).
+
+## 2026-07-17 - Bug list #14: "Refresh Cards" button - rebuild live card data without restarting
+
+Hypothesis: base/upgrade desyncs on custom cards come from stale live instances (canonical values, upgrade deltas, materialized DynamicVars) that only a restart rebuilt; the existing resync machinery just needed a user-facing trigger + full coverage.
+Finding: True.
+Evidence: CardEditorOverrides already had the full per-instance rebuild (RefreshCardAfterUpgradeStateChanged: downgrade to level 0 -> canonical values -> override -> re-upgrade, preserving runtime enchantments, then vanilla-parity var invalidation) and ApplyAllToExistingCards - but the sweep only ran on override SAVE, required at least one override to exist, and had no manual trigger. Player.Piles spans the run deck AND in-combat hand/draw/discard/exhaust (Player.cs:218-228), so one sweep covers combat too.
+Fix:
+- NEW CardEditorOverrides.RefreshAllLiveCardData(): unconditional sweep of every card in every pile of every player - per-instance rebuild + CardEditorExtraEffects.RefreshCardVisuals (now internal) so table nodes redraw; per-card try/catch so one broken instance can't abort the sweep; returns the rebuilt count (verbose-logged).
+- NEW "Refresh Cards" button in the editor's bottom action row (next to Status Editor), tooltip explains scope. It follows the SAME multiplayer shared-state lock as Apply/Reset (greyed with reason) - a one-sided rebuild could desync per-action checksums.
+Build: 0 errors / 278 warnings (baseline). Next Step: task #15 (Add Effect UI overhaul).
+
+## 2026-07-17 - Bug list #13: literal numbers in custom text - {{=50}} opt-out for the auto number-link
+
+Hypothesis: the custom-text live-number sync auto-links every visible number positionally, so a description constant ("Reduces damage by 50%") gets bound to an unrelated effect value (1-stack buff -> "by 1%"), and there is no way to opt out.
+Finding: True - implemented the opt-out.
+Evidence: the sync tokenizes raw numbers into {{n1}}/{{l2n1}} live tokens at seed time (ReplaceVisibleNumbersWithTokens) and positionally fills leftover raw numbers at render time (ApplyRenderedNumberTokens) - no literal escape existed; the user's workaround was a dummy "Damage Rule Modifier" effect just to have a value to reference.
+Fix (CardEditorDescriptionNumberHighlighter.cs):
+- NEW literal token {{=50}}: renders as "50", never auto-links, never consumes a positional slot (resolved in TryResolveSemanticLiveNumberToken; IsSemanticLiveNumberToken deliberately stays false for '=' so seed/counting passes ignore it). Diff-safe: it resolves before the upgrade-preview diff, so an unchanged literal never greens and a changed one greens like any word.
+- HARDENING: ApplyRenderedNumberTokens now skips {{...}} blobs entirely - the positional pass could previously consume/replace digits INSIDE an unresolved live token (e.g. a stale {{l2n1}}), corrupting it.
+- Help text (editor tooltip) documents the syntax alongside {{n1}}/[[green]].
+Recipe: write "Reduces incoming attack damage by {{=50}}%." - the 50 stays 50 forever.
+Build: 0 errors / 278 warnings (baseline). Next Step: task #14.
+
+## 2026-07-17 - Bug list #12: upgrade-diff green highlighting + custom upgrade text - ALL FOUR SUB-ASKS ALREADY SHIPPED (verification)
+
+Hypothesis: the three reported highlight defects (single-line shows no green; a prepended upgrade line turns all following lines green; whole lines green instead of changed words) plus the requested manual-control field all need new work.
+Finding: False - every sub-ask is already implemented in the current tree (fixed in an earlier session; the report predates the fixes). Verified end-to-end this pass.
+Evidence (CardEditorDescriptionNumberHighlighter.cs):
+- Single line: HighlightChangedNumbers routes single-line pairs through HighlightChangedWordsInLine (:801-804; comment cites this exact bug - the old path compared only numeric tokens).
+- Prepended line (Innate): HighlightChangedNumbersByLine pairs each upgraded line with the most-similar UNUSED base line (exact visible-key, then >0.5 word overlap) instead of by index (:857-931; comment cites the shift-everything-green bug); unmatched new lines green whole, like vanilla {IfUpgraded}.
+- Word-level: HighlightChangedWordsInLine does an LCS word diff and greens only changed tokens; bracketed color spans ([gold]X[/gold]) diff as one token so tags never split (:933-987).
+- Manual control: [[green]]text[[/green]] renders green ONLY in upgrade previews and disappears in play (ResolvePreviewOnlyHighlightMarkers :810) - the "custom upgrade text" ask is served by the existing upgraded-text fields (created cards: CustomTextUpgraded + enable flag; edited vanilla cards: Upgrade.ModifiedBaseText) combined with these markers; both pipelines diff through the same fixed highlighter (CreatedCardsTextPatches:284, VanillaDescriptionOverrideSupport:118).
+Reason: report compiled against an older build.
+Next Step: none needed; recipe documented above.
+
+## 2026-07-17 - Bug list #11: multi-hit vs Phantasmal Gardener mid-flurry block - per-repeat AfterAttack leak (Osty attacks)
+
+Hypothesis: the mod's multi-hit attacks run as N separate AttackCommands, so once-per-attack reactions (Skittish) fire between hits - vanilla resolves the whole flurry as ONE attack, then reacts.
+Finding: Partially true - the DealDamage paths were ALREADY vanilla-parity (report predates that work); the surviving leak was Osty attack repeats (plus this documents the global rule).
+Evidence:
+- Vanilla mechanic: SkittishPower (Phantasmal Gardener) gains block in AfterAttack (SkittishPower.cs:56) - a hook AttackCommand.Execute fires ONCE after its whole hit loop (AttackCommand.cs:549-551 BeforeAttack -> hit loop -> AfterAttack). Vanilla multi-hit = one command with WithHitCount(N) (PhantasmalGardener's own Flail uses it), so mid-flurry block gain via Skittish is impossible in vanilla.
+- Mod DealDamage already matches: single row -> WithHitCount (CardEditorExtraEffects.cs:28159 + comment), multi-row plays share one AttackContext (:28150), dynamic result-repeats + OtherEnemies + per-target-conditional all group hits under an AttackContextLease (:27647/:27724/:27801) so Before/AfterAttack fire once.
+- The LEAK: the generic repeat loop (:28231) wraps the whole kind switch, and OstyAction Attack/AttackAll built a FULL AttackCommand per repeat (:28751/:28756) - each Execute fires its own BeforeAttack/AfterAttack, letting Skittish block interpose after hit 1 and eat hits 2..N (and double-firing any per-attack latched buffs).
+Fix: Osty attacks are now hoisted out of the repeat loop into ONE AttackCommand with WithHitCount(repeats) (mirrors the DealDamage pre-loop case; non-attack Osty actions Heal/Kill keep per-repeat semantics). Bonus parity: Hook.ModifyAttackHitCount now applies to modded Osty flurries like vanilla.
+Build: 0 errors / 278 warnings (baseline; two new CS8604 silenced with owner.Osty! - non-null guaranteed by Osty.CheckMissingWithAnim).
+Next Step: task #12 (upgrade-diff highlights + custom upgrade text).
+
+## 2026-07-17 - Bug list #10: "choose a card in hand at turn start - chosen card never returns to hand" - stale ExecutionFinished attach
+
+Hypothesis: the turn-start hand selection strands the chosen card in the selected-card strip because the release is tied to an event that never fires.
+Finding: True - root-caused to the scheduler path.
+Evidence (chain, all verified in game source + mod):
+- Vanilla NPlayerHand.SelectCards lifts picked card nodes into the selected strip; AfterCardsSelected(source) releases them back to the hand fan EITHER immediately (source==null) OR on source.ExecutionFinished (NPlayerHand.cs:700-707, OnSelectModeSourceFinished :919). Every vanilla caller passes the RESOLVING card/power as source, so the event always fires at play end.
+- The mod's single choke point (SelectCardsFromCandidates -> ResolveHandSelectionUiSource, CardEditorExtraEffects.cs:30032) already forced source=null for power effects and non-OnPlay triggers - but TIMED rows (Timing = "Start of your turn" etc.) keep their base Trigger==OnPlay and are not power effects, so the guard passed sourceCard through.
+- Timed rows execute via CardEditorExtraEffectScheduler.ExecuteScheduledEffect (scheduler runs from Hook.AfterPlayerTurnStart, i.e. exactly "start of turn, after drawing") with a synthetic CardPlay whose source is the card instance that finished playing LAST turn (or a pile-less snapshot clone). Its ExecutionFinished never fires again -> the chosen card's NODE stays in the strip forever. The MODEL is fine (keyword/transform did apply), which matches the report: effect resolves, card just never comes back down.
+- Differentials all explained: mid-turn OnPlay works (source genuinely resolving, event fires); non-hand piles work (grid selector, no node lift); turn-start power/boundary triggers work (IsPowerEffect -> source already null).
+Fix: ResolveHandSelectionUiSource now attaches the selection to the source only when the source card is genuinely mid-play RIGHT NOW (sourceCard.Pile?.Type == PileType.Play - the same "currently playing" signal the transform deferral already uses at :9689); otherwise source=null -> vanilla's immediate-release path. Release-early is always safe; attach-to-dead-source is the strand. The mod's vanilla-replica card patches (Acrobatics/Survivor/DaggerThrow in CardEditorTargetedDiscardPatches.cs) pass the truly-resolving card and discard the selection - untouched.
+Build: 0 errors / 278 warnings (baseline). NOT in the deploy from earlier today (bak-17e deploy covered #3-#9 only) - needs a fresh deploy to ship.
+Next Step: task #11 (multi-hit vs mid-hit block, Phantasmal Gardener).
+
+## 2026-07-17 - Bug list #9: targeted cost reduction (recipe) / lose keywords (implemented) / stars-spent trigger (already exists)
+
+Hypothesis: three separate asks - (a) "reduce a specific card's Energy cost directly" needs a new feature, (b) "make cards LOSE keywords" needs a new feature, (c) "add 'stars spent' to the whenever conditions" needs a new count event.
+Finding: Partially true - only (b) was a real gap. (a) already exists via the Grant tickbox (undiscoverable -> more task #15 evidence); (c) already exists end-to-end (the report predates its addition).
+(c) Stars Spent: CardExtraEffectCountEvent.StarsSpent=52 is in BOTH whenever/trigger dropdown lists (PowerTriggerCountEvents CardEditorExtraEffects.cs:1710, cardSmith list :2988), labeled "Stars Spent" (:3294), window support (:3543), trigger handling (:3703), history counting (:34579), captured per play from CardPlay.Resources.StarsSpent (:24475). Nothing to add.
+(a) Targeted cost reduction RECIPE: Card Cost Modifier (CardCostsLess) is grantable (SupportsGrantToCard :5421 does not exclude it). Add a "Card Cost Modifier" row, set reduction + duration, tick "Grant" ("granted to another card instead of resolving immediately"), then pick targets with the selection controls: Choose 1 in hand for a chosen card; Match: Card Id + the id/pick field for one exact card; All + "future matching cards" for an aura on every copy. Granted rows stack (task #3) and the printed cost refreshes live (task #6).
+(b) Lose keywords IMPLEMENTED: "Remove instead" tickbox on the Grant Keyword action (GrantKeywordToPile). New CardExtraEffect.GrantedKeywordRemove; executor branch calls vanilla CardCmd.RemoveKeyword (CardCmd.cs:685 -> CardModel.RemoveKeyword:1337, which edits LocalKeywords - seeded from canonical keywords, so it strips BASE printed keywords too, exactly like vanilla "loses X" effects, plus mod-granted local keywords). Card text renders "loses {keyword}" variants (cardText.removeKeyword.* keys, no duration suffix). Round-trips through the preset DTO (CardEditorPresetStore) and override JSON automatically (CardExtraEffect serializes directly; old saves default false). Both save builders and both effect comparers (upgrade pairing :12515, effect matching :39083) distinguish grant vs remove. Limits: removal lasts the rest of the combat (grant-duration dropdown intentionally ignored); cannot strip GLOBAL power-granted keywords (e.g. Hex's Ethereal) - same as vanilla; the future-matching aura stays grant-only (remove mode falls back to immediate removal).
+Build: 0 errors / 278 warnings (baseline). NOT deployed (undeployed batch now spans tasks #3-#9). Next Step: task #10.
+
+## 2026-07-17 - Bug list #8: generation upgrades - rarity + keywords already exist (recipes); random transforms now arrive upgraded (implemented)
+
+Hypothesis: all three generation asks need new features.
+Finding: Mixed - two of three already exist, one was a real gap (now fixed).
+(1) "Generate 2 Common cards" - EXISTS: the generation effect's rarity filter (CardExtraEffect.CardSelectionRarity, CardExtraEffectCardRarityFilter enum) is fully wired: UI dropdowns (NCardEditorPopup 13657/15740/19994), DTO round-trip, and candidate filtering (PassesRarityFilter at CardEditorExtraEffects 37853-37855 in the generation pool + 32143 in the creates-cards matchers). Recipe: Card Generation -> set the rarity filter dropdown to Common, Amount 2.
+(2) Keywords (Exhaust/Ethereal) on generated cards - EXISTS via chaining: every generation executor publishes its generated cards as the row's selection (ReplaceCurrentSelectedCards at 31016/31242/31420/31460/36901/36973/37273/37421/37498). Recipe: Row 1 = Card Generation; Row 2 = Grant Keyword (Exhaust), Selection = Selected By Effect, Source = Row 1; Row 3 = same for Ethereal. Works for any post-processing of generated cards (cost mods, extra effects), not just keywords.
+(3) Random transforms arriving upgraded - REAL GAP, implemented: the save path hard-forced SpecificCardUpgradeMode=MatchSource unless TransformMode==SpecificCard (NCardEditorPopup 33135/34605), the upgrade dropdown was hidden for random mode (it lives inside the specific-card row), and the executor never applied a mode (vanilla CardCmd.Transform rolls the replacement internally, so pre-roll application is impossible). Fix: (a) save gates honor the dropdown for ALL TransformCards rows; (b) the specific-card row now shows for random transforms with the id-entry controls hidden (new ExtraEffectRow.SpecificCardPickButton tracks the pick button; row label becomes "Transformed Card"); (c) TransformCardsWithCurrentPlayDeferral takes the effect and applies ApplySpecificCardUpgradeMode(replacement, original, effect) POST-ROLL on each vanilla result - gated to the explicit Upgraded mode only, so stored MatchSource rows keep their legacy no-op behavior (no surprise upgrades for existing configs). Known limit: deferred self-transforms (a card randomly transforming ITSELF mid-play) skip the upgrade (rare; documented).
+Builds clean, 0 errors. Next Step: task #9.
+
+## 2026-07-17 - Bug list #7: composite action chains (play+exhaust, discard+play) - already fully supported via Selected By Effect
+
+Hypothesis: chaining two actions on the same chosen card needs a new composite-effect primitive.
+Finding: False - the chaining primitive exists end to end and both requested combos are constructible today. Mechanism: any pile-action row can set Selection = SelectedByEffect (CardExtraEffectCardSelectionMode.SelectedByEffect, offered in the UI mode list at NCardEditorPopup.cs:22723-22732) plus a source-effect picker (CardSelectionSourceRow, shown when that mode is selected, 26029-26052); at execution, GetCandidatesFromConfiguredPile routes to GetCandidatesFromSelectedEffectSource which reads the source row's selection from CardEditorEffectExecutionAmountContext (per-play AsyncLocal); EVERY selection mode reports its picked cards (ReportSelectedCards), and rows execute sequentially in row order - so row B acts on exactly the card(s) row A picked, after row A finished. PlayCardFromPile even has dedicated selected-card replay controls (25113-25116).
+WORKING RECIPES (relay to users):
+- "Play a card from your hand, then Exhaust it": Row 1 = Card Action -> Play From Pile (Hand, Choose/Random, 1). Row 2 = Card Action -> Exhaust, Selection = Selected By Effect, Source = Row 1. (Alternative: single row Play From Pile + Result Pile Override -> Exhaust, variant 11.)
+- "Discard and play a card from your hand": Row 1 = Card Action -> Discard (Hand, Choose 1). Row 2 = Card Action -> Play From Pile, Selection = Selected By Effect, Source = Row 1. The discard is a real discard (history entry, discard triggers) and the same instance then plays from wherever it landed.
+No code change shipped: nothing was broken or missing. Like #6, this is a discoverability failure - the chaining mode is one unlabeled option inside a generic selection dropdown; folded into task #15's requirements (the Add Effect redesign should surface "act on the card from step N" as a first-class concept).
+Next Step: task #8 (generation upgrades).
+
+## 2026-07-17 - Bug list #6: Sneaky Strike / Eviscerate - machinery already existed; fixed the missing live cost refresh
+
+Hypothesis: "cards discarded this turn" needs a new count event + condition plumbing.
+Finding: False - everything already exists end to end. CardExtraEffectCountEvent.Discarded (=2) counts CardDiscardedEntry per owner with window support (ThisTurn/ThisCombat/LastTurns); ScaleMode has ConditionOnly ("Only If Count") and PerHistoryCount; the effect UI offers the FULL event enum + all 3 modes + comparisons; SupportsHistoryScaling allows CardCostsLess and GainEnergy; and GetCardCostsLessAdjustment accumulates the card's OWN override rows and applies history scaling + count conditions live inside the cost hook.
+WORKING RECIPES (relay to users):
+- Sneaky Strike ("if you discarded a card this turn, gain 2 Energy"): Gain Energy 2, Trigger On Play, scaling ON: Mode = Only If Count, Event = Discarded, Window = This Turn, Comparison = At Least, Amount = 1.
+- Eviscerate ("costs 1 less for each card discarded this turn"): add a Card Cost Modifier (CardCostsLess, Reduce 1) row on the card itself, scaling ON: Mode = Per Count, Event = Discarded, Window = This Turn.
+The REAL defect: nothing refreshed the hand UI when a counted event changed a scaled cost - GetCardCostsLessAdjustment evaluates live, but the printed cost stayed frozen until an unrelated redraw, making a correctly-configured Eviscerate look broken (very likely why the user judged it "impossible").
+Fix: new CardEditorScaledCostRefreshPatches - postfixes on CombatHistory.CardDiscarded/CardDrawn/CardExhausted (the single chokepoints that write the counted entries) refresh the event-owner's hand cards that carry a history-scaled CardCostsLess/CardStarCostsLess row (InvokeEnergyCostChanged + NCard.UpdateVisuals; failure-isolated).
+Discoverability note: the scaling/conditions UI being invisible to users is the core evidence for task #15's redesign (conditions live behind a generic "scaling" tickbox with jargon labels).
+Builds clean, 0 errors. Next Step: task #7 (composite action chains).
+
+## 2026-07-17 - Bug list #5: Knowledge Demon's Disintegration ignores edits - encounter post-creation var writes clobbered overrides
+
+Hypothesis: boss-owned card copies bypass the override chokepoint entirely.
+Finding: False on the chokepoint, True on the outcome. KnowledgeDemon creates its Curse-of-Knowledge offers via CombatState.CreateCard(canonical, target.Player) -> canonical.ToMutable() -> the mod's CardModel_ToMutable_Patch postfix DOES apply the stored override (owner-agnostic). The edit is lost one line later: the demon hard-sets cardModel.DynamicVars["DisintegrationPower"].BaseValue to its escalating damage table AFTER CreateCard returns (KnowledgeDemon.cs:176-183), overwriting the user's edited value. Disintegration's whole effect IS that var (OnChosen applies DisintegrationPower with DynamicVars["DisintegrationPower"].BaseValue), so "its effect doesn't change".
+Fix: CardEditorOverrides.ReassertDynamicVarBaseValues(card) (mirrors ApplyOverride's var-application block, gated on IsMutable/Suppress/stored override) + new CardEditorEncounterCardOfferPatches: prefix on CardSelectCmd.FromChooseACardScreen re-asserts each offered card's override var values right before the choose screen shows them - user's absolute edit wins over ANY encounter's post-creation var writes (boss-agnostic; covers the whole class, not just Knowledge Demon), and OnChosen executes the same instance, so the applied power uses the edited value.
+Scope note: extra-effect ROW edits on Disintegration still cannot execute from OnChosen (it is not a card play - vanilla effect bodies are not replaceable); the realistic edit for this card is its damage var, which is what now works. Text/cost/keyword edits were already applying via the creation chokepoint.
+Builds clean, 0 errors. Next Step: task #6 (discarded-this-turn conditions).
+
+## 2026-07-17 - Bug list #4: custom power lifecycle - stacks trigger per-stack, buff color by target, orphaned powers pruned
+
+Hypothesis: apply-power stacks don't reach the behavior execution; color/persistence are registry-level defects.
+Finding: True on all three.
+(1) STACKS ("apply 5 stacks -> triggers as 1"): custom-status behaviors live as PowerEffectEntry items on the invisible CardEditorExtraEffectPower host, and execution multiplies by entry.StackCount (runCount = stackCount, CardEditorExtraEffectPower.cs ~957) - but AddCustomStatusBehaviorEffects HARD-CODED StackCount = 1 on both create and refresh (and even reset an existing entry back to 1). Direct plays instead accumulate StackCount via MergeIntoEntry, which is why playing the source card 5x worked. Fix: AddCustomStatusBehaviorEffects takes the status's stack count; ApplyCustomStatusPower passes Amount on fresh apply and active.Amount after ModifyAmount; new SyncCustomStatusBehaviorStacks keeps entries in step on reductions (ReduceConfiguredPower, ModifyActivePowers). Behavior now fires once per stack - identical to playing the source N times.
+(2) COLOR (red debuff number on a self-buff): CardEditorCustomStatusRegistry.InferPowerType classified the status by WHAT its behavior applies (PowerId=Poison -> Debuff) regardless of target. Fix: classification is now target-aware - only self/ally-facing behaviors (Self/AnyPlayer/AnyAlly/AllAllies) inherit the applied power's debuff type; enemy-facing debuff-appliers ("apply 1 Poison to enemies") classify as Buff on the holder. Explicit icon choice (StatusIconPowerId) keeps authority.
+(3) DELETION PERSISTENCE ("deleted card's power still invocable"): CardEditorRunPowerState (user://card_editor/run_power_state.json) re-applies stored powers by name at every combat start for 14 days, even after the defining card/definition is gone; the stale stored definition also shadowed same-name recreations via Resolve()'s stored-first preference. Fix: new CardEditorCustomStatusRegistry.DefinitionExists; ApplyForCombat prunes+persists orphaned custom-status entries instead of resurrecting them. With the orphan gone, recreating a power under the same name resolves fresh.
+Note: "buffs split into separate icons" for direct plays is the per-row PowerStackMode choice (Merge vs Separate) working as designed - Merge collapses entries/icons; documented rather than changed.
+Builds clean, 0 errors. Next Step: task #5 (enemy/boss copies respect overrides).
+
+## 2026-07-17 - Bug list #3: granted card effects now STACK amounts ("Gain 1 Thorns" twice = Gain 2)
+
+Hypothesis: the second grant is dropped by a dedup rule instead of merging amounts.
+Finding: True. CardEditorTemporaryExtraEffectController.Grant() ran IsDuplicateGrantedEffect (CardEditorExtraEffects.cs:39031) on every new grant: equivalent effect + equal Amount + same EffectId (always the case when the same source row grants again) -> "duplicate ignored", only the duration refreshed. The amount-merge pattern existed but ONLY for timed cost-reduction grants (TryStackTimedCardCostsLess).
+Fix: new CardEditorExtraEffects.TryStackDuplicateGrantedEffect - matches EffectsMatchExceptAmount, refuses keyword grant PACKAGES (GetCanonicalGrantPackageKey non-empty: re-granting the same keyword stays identity/no-op), X-amounts, and non-magnitude kinds (reuses IsNonStackingGrantedEffectKind = !SupportsRepeat + toggle kinds), then folds candidate.Amount into existing.Amount (signed amounts fold correctly). Grant() tries stacking FIRST (same-duration grants only; different durations coexist as separate entries and already execute additively), falling back to the old duplicate-ignore. grant.Effect is the same instance referenced by state.Effects, so the merged amount is immediately live for execution and card text. All four Grant() call sites (aura controller, 3 ExtraEffects paths) funnel through the fixed method.
+Also covers: grant 1 then grant 2 -> 3 (old rule only matched EQUAL amounts, so unequal re-grants previously created ambiguity); a third grant keeps accumulating.
+Note: the OTHER half of the original report ("buffs overwrite or split into separate icons") is the custom POWER stacking path - handled in task #4 (power lifecycle) alongside apply-power amounts and buff/debuff color.
+Builds clean, 0 errors. Next Step: task #4.
+
+## 2026-07-17 - Bug list #2: Thrash can't read custom-card damage - vanilla DynamicVars parity for created cards
+
+Hypothesis: vanilla readers see created cards as damage-less because created cards never expose vanilla DynamicVars.
+Finding: True. Thrash.OnPlay (v0.109 source) reads the exhausted card's DynamicVars by key ("CalculatedDamage" -> "Damage" -> "OstyDamage"), warns and uses 0 if absent; Reap/SeekerStrike/Neutralize/Wither/WroughtInWar/UltimateStrike read the same surface. CardEditorCreatedCardBase never overrode CanonicalVars, so created cards had an empty var set - their damage lives only in DealDamage effect rows.
+Fix: CardEditorExtraEffects.BuildVanillaParityVars(card) derives a vanilla DamageVar (first on-play, non-payload, non-X, non-self DealDamage row) and BlockVar (first on-play GainBlock row) from GetEffectsForDescription(card, false) - which already fuses upgrade deltas via CurrentUpgradeLevel and includes combat-granted rows. CardEditorCreatedCardBase now overrides CanonicalVars to return these. Staleness handling (CardModel.DynamicVars materializes lazily ONCE per instance and clones COPY the materialized set, source CardModel.cs:538-552/1202): CardEditorExtraEffects.InvalidateVanillaParityVars nulls the private _dynamicVars cache via reflection at three points - CardEditorCreatedCardsStore.SetOverride (canonical instance, so new run clones derive fresh), CardEditorOverrides.ApplyToExistingCardInstance (live mutable instances after edits), and CardEditorCreatedCardBase.OnUpgrade (re-derive fused values; vanilla re-materializes after OnUpgrade, and downgrade resets from canonical which is level-0 correct).
+Recursion audit: the derivation chain (GetEffectsForDescription -> GetEffectiveExtraEffects at 38302 / GetActiveGrantedExtraEffects / temporary+aura controllers) contains zero .DynamicVars accesses, so materializing the set from CanonicalVars cannot re-enter DynamicVars. Builds clean, 0 errors.
+Not covered (noted): OstyDamage var for created cards with Osty-attack rows (rare; add OstyDamageVar the same way if reported), and vanilla cards whose OVERRIDE adds damage rows to a non-attack card (would need a CardModel-level patch rather than CanonicalVars - revisit with task #5's instantiation chokepoint).
+Next Step: deploy with the next batch; task #3 (grant/buff stacking).
+
+## 2026-07-17 - Bug list #1: "editing a card wipes its custom keywords" - root-caused, fixed, adversarially verified
+
+Hypothesis: a contained store bug replaces the keyword list on save.
+Finding: Partially true - worse than a store bug. Custom keywords have NO dedicated store: a keyword grant is CardExtraEffect entries with CustomKeywordName inside CardOverride.ExtraEffects, and the editor rebuilds the ENTIRE override from UI rows on every Apply (BuildOverrideFromUi -> CardEditorOverrides.Set = full replace). Any stored effect that fails to round-trip the row UI is permanently deleted by an Apply that touched only name/art/rarity.
+Root cause (3-agent trace): validity-rule asymmetry. Save-side IsValidExtraEffectAmountForSave has an escape hatch persisting CreatedCardsCostLess Free/HalfCost/FreeToPlay rows with Amount=0 (canonical keyword-maker behavior rows); the card RENDERER accepts them (IsRenderableCreatedCardsCostLess); but the popup's LOAD filter used raw IsValidEffectAmount (rejects 0) so those effects never became rows -> next Apply deleted them. Secondary vectors: KeywordGroupField null-out when the widget is freed, batch apply overwriting every card with one card's state, preset-load filter, upgrade rebase drops, stale cached popups.
+Fix round 1: unified predicate CardEditorExtraEffects.IsPersistableEffect (AmountIsX + valid amounts + cost-modifier escape) applied at popup hydration (both duplicated paths), preset ToOverride, RebaseUpgradeEffectsAfterBaseEdit; preservation stash (_unrepresentedBaseEffects/_unrepresentedUpgradeEffects) re-appending effects the UI cannot represent; HydratedCustomKeywordName fallback; batch per-target preserve; row-cache round-trip of stash state; stale-cache keyword-group guard (_hydrationSeenKeywordGroups).
+Adversarial verification (4 lenses: deletion/duplication/alignment/lifecycle) found 9 real issues in round 1 - 3 critical: (1) deleting a keyword ADDED through the same kept-alive popup instance got resurrected by the stale-guard (seen-set only populated at hydration; Apply keeps the popup as the fresh cache entry with no rehydration) and became undeletable; (2) the definition-behavior editor reuses BuildOverrideFromUi with definition rows swapped in - the card's stash/guard effects leaked INTO keyword/status definitions (and an emptied behavior list could never save empty); (3) tail-appending the stash REORDERED the base list in preview drafts while the attached upgrade list stayed unrebased - OnApplyPressed feeds the draft to RebaseUpgradeEffectsAfterBaseEdit whose POSITIONAL pairing then swaps upgrade slot deltas onto wrong base effects (deterministic corruption). Majors: main-build upgrade no-base hydration branch left unconverted; AlignUpgradeEffectsForEditor still strict-filtered absolutes before the stash could see them; upgrade builder's stash append unreachable with zero rows; batch double-preserve (template stash + per-target merge, compounding); minors: stash resurrection after external ReplaceAll; half-visible keyword groups undeletable.
+Fix round 2 (all 9): stash entries carry StoredIndex and are REINSERTED at original positions (order-stable => upgrade slot pairing safe); seen-set unioned with every applied keyword group at the end of base Apply; _suppressPreservedBaseEffects gate (definition-behavior builds + batch template build); IsPersistableEffect + stash in the missed upgrade branch and AlignUpgradeEffectsForEditor; upgrade builder no-rows else-branch; batch EffectId dedup; stash entries skipped when externally deleted (EffectId no longer in stored) or when their keyword group had visible rows at hydration and the user deleted them all.
+Builds clean, 0 errors. Custom keywords + keyword maker fully preserved; deliberate deletion honored on every surface.
+Next Step: deploy on user confirmation; then task #2 (vanilla DynamicVars parity).
+
+## 2026-07-17 - Game hotfixed to v0.109.0 overnight; mod init crashed (TypeLoadException) - rebuilt
+
+Hypothesis: "Card editor isn't loading at all" = my 00:14 MP-hardening build broke something.
+Finding: False - Steam pushed beta v0.109.0 (commit c12f634d, built 02:31Z, installed 05:46; the user's fresh source drop IS v0.109.0). The mod (built vs v0.108.0) died at init: TypeLoadException for MegaCrit.Sts2.Core.Saves.Runs.SavedPropertiesTypeCache at JIT of CardEditorMod.RegisterCreatedCardsInPools - the method-level try/catch cannot catch a JIT-time type-load failure, so Init aborted before ANY Harmony patching (main menu loads, zero editor).
+Evidence: godot.log L22-24 (exception), release_info.json v0.109.0, ModelIdSerializationCache line now has "Properties: 50" (new property-name net-id table).
+v0.108->v0.109 API changes fixed: (1) SavedPropertiesTypeCache deleted - ModelIdSerializationCache.Init now scans every ModelDb type (mod models included) and caches [SavedProperty] members + property-name net ids itself, so the two InjectTypeIntoCache calls were simply removed (pool registration suffices). (2) Hook.ModifyCardPlayResultPileTypeAndPosition -> Hook.ModifyCardPlayResultLocation returning the new CardLocation record struct (player, pileType, position); patch retargeted, preserves __result.player. (3) CardPlay gained `required Player Player` - inserted `Player = <card>.Owner` into all 27 synthetic CardPlay initializers via scripted transform. (4) CreatureCmd.LoseBlock now (choiceContext, target, amount, remover). (5) The four Hook.ModifyHpLost* statics folded into Hook.ModifyHpLost(..., HpLossHookPhase phases, out modifiers) - the IgnoreDamageNegation patch (skips the AfterOstyLate negation pass, e.g. Buffer) rewritten against the consolidated hook (guards on phases.HasFlag(AfterOsty), mirrors vanilla incl. decimal.Truncate change-detection, still skips AfterOstyLate); manual EnsurePatched registration in CardEditorMod.EnsureIgnoreDamagePatches updated; IterateHookListenersCompat widened to ICombatState?.
+Verified still present in v0.109.0 source (string-based targets that fail silently): Hook.ModifyDamageInternal (cardPlay shape unchanged), NCardTransformShineVfx.PlayAnimation + _cardNode/_endCard, ChecksumTracker.CompareChecksums, RunManager.InitializeShared, AttackCommand.ModelSource auto-property, NCardPlayQueue._playQueue, NoDrawPower.AfterSideTurnEnd. Builds clean: 0 errors.
+Next Step: deploy (both players again), then the user's fix list.
+
+## 2026-07-17 - MP "ready not registering" = the mod's own ready-gate deadlocking (first live run of L1); hardened to fail-open
+
+Hypothesis: The joiner's eaten Ready click is the game's fault (join gates / host DLL).
+Finding: False - it is the mod's L1 client ready-gate (CardEditorMultiplayerSync.AllowClientReady) deadlocking on its first-ever field run. Both players were on v0.108.0 + matching mod (join succeeded, host hash 693432997 = modded), user's multiplayer_settings.json has MultiplayerSyncEnabled=true -> the gate armed and held every SetReady(true), and the fail-open never fired.
+Evidence (joiner logs, session 23:46 2026-07-16): zero CardEditorMultiplayerSnapshotMessage receive lines across 6 join attempts (host snapshot never arrived), zero "Readying WITHOUT a confirmed card-editor sync" timeout warns (the FirePendingReadyIfNeeded pump never fired -> runner node _Process dead or Update() early-return), and every "Local player ... is ready" line is explainable as SetReady(false) passes (vanilla logs the same "is ready" text for BOTH values - confirmed in decompiled v0.108.0 StartRunLobby.SetReady). Host therefore only ever received value=False -> checkmark never appeared -> "waiting for players to ready" -> host quits ("Disconnected from host, reason: Quit" x6). Old 7.6MB v0.107.1 log has zero sync traffic despite working MP -> the gate existed in the 22.06 DLL but was inert there; tonight's rebuild was its first armed run. UI aggravator: NCharacterSelectScreen.OnEmbarkPressed switches the joiner's own screen to "Ready and waiting" even when the prefix blocks SetReady, so the joiner looks ready to themselves while the lobby never got it.
+Fix applied (CardEditorMultiplayerSync.cs, builds clean): (1) Update() now calls FirePendingReadyIfNeeded() BEFORE the IsConnected early-return; (2) AllowClientReady only holds when the runner is verifiably alive (IsInsideTree), else passes through with a warn; (3) EnsureRunner treats a valid-but-orphaned runner as missing and retries via CallDeferred(AddChild) with a NotifyRunnerEnteredTree/_runnerAddQueued dedupe (BindToNetService can run mid scene setup where sync AddChild is rejected); (4) ReadyGateTimeoutSeconds 8s -> 3s; (5) hold/release/timeout are now Log.Info/Warn (previously VerboseLog-only, and VerboseLogging=false in card_editor_settings.txt hid everything).
+Source-verified (fresh v0.108.0 decompiled source drop, 2026-07-17): every game-side link is sound, pinning the dead pump as the SOLE root cause. (1) OneTimeInitialization.ExecuteVeryEarly loads mods BEFORE ExecuteEssential:84 runs MessageTypes.Initialize(), which appends ReflectionHelper.GetSubtypesInMods<INetMessage>() - the mod's 3 sync messages get valid wire ids, and NetTypeCache assigns ids by NAME-SORTED order (deterministic; identical for identically-modded peers; also explains why modded<->vanilla is impossible: mod names interleave and shift vanilla ids). (2) NetMessageBus.TryDeserializeMessage drops unknown ids with a one-time "outside the bounds of our known messages" warn - only fires on mismatched mod sets. (3) NetHostGameService.SendMessage(msg, peerId) (the snapshot reply path) does NOT check readyForBroadcasting - only the broadcast overload does. (4) Bus buffering (ShouldBuffer) is only active during the lobby->run transition (StartRunLobby.BeginRunForAllPlayers:490 on, RunManager.Launch:684 off), not in the idle lobby. (5) v0.108.0 NCharacterSelectScreen.OnEmbarkPressed:394-404 switches the local UI to "Ready and waiting" even when the SetReady prefix blocks the call - the joiner LOOKS ready to themselves while the lobby never got it. So: dead runner _Process => no snapshot request sent (Update() sends it) AND no gate release/timeout (same Update()) => host only ever received False. Both symptoms, one cause.
+Next Step: deploy to BOTH players; verify in joiner log: "Holding lobby ready ... (fails open after 3s)" then either "Host snapshot applied; sending the held lobby ready" (host sync on) or the WITHOUT-confirmed warn (host sync off/blocked -> then check host's Multiplayer Sync toggle + host log for the request/response). Note: OnSyncRequestReceived answers only when the HOST's MultiplayerSyncEnabled=true.
+
+## 2026-07-16 - Beta v0.108.0 broke the mod (API changes); fixed + rebuilt. MP blocked by compat gates
+
+Hypothesis: The combat freeze/error spam and dead intents after tonight's Steam beta update come from the mod DLL (built 22.06 vs v0.107.1) referencing APIs that changed in v0.108.0; the multiplayer failure is the game's join gates, not the lobby ready code.
+Finding: True (combat/mod). Partially true / Unconfirmed (multiplayer — no post-update MP log exists on this machine; all rotated logs incl. the 7.6MB co-op session are v0.107.1 where join+ready+resume all worked and the session ended in StateDivergence at 17:53).
+Evidence: %APPDATA%\SlayTheSpire2\logs\godot.log (v0.108.0 modded session): 9 Harmony patch classes skipped at load + repeating `MissingMethodException: AbstractModel.ModifyDamageCap(Creature, ValueProp, Creature, CardModel)` thrown from Hook_ModifyDamageInternal_IgnoreCaps_Patch.Prefix via MonoMod JIT hook whenever NIntent.UpdateVisuals/UpdateDynamicVarPreview ran (= missing enemy intents + error spam in combat). Decompiled the new sts2.dll (9,571,328 bytes, 2026-07-16 21:58) with .tools\ilspycmd:
+- ModifyDamage*/ModifyBlock*/Hook.ModifyDamage(Internal) gained `CardPlay? cardPlay`; CreatureCmd.Damage overloads likewise.
+- Hook.BeforeTurnEnd/AfterTurnEnd renamed to BeforeSideTurnEnd/AfterSideTurnEnd (ICombatState param); model-level AfterTurnEnd → AfterSideTurnEnd(PlayerChoiceContext, CombatSide, IEnumerable<Creature>).
+- NCardTransformVfx.PlayAnimOnCardInHand removed; on-card transform anim now = NCardTransformShineVfx (fields _cardNode/_endCard, method PlayAnimation).
+- AttackCommand.CreateContextAsync now takes CardPlay (not CardModel); FromCard/FromOsty take CardPlay?; PotionFactory.GetPotionOptions(Player) lost blacklist; CardCreationOptions ctor now (IEnumerable<CardPoolModel>, source, odds, Func<CardModel,bool>? filter) — candidate-list ctor gone; ITemporaryPower.IgnoreNextInstance removed (wrappers now re-apply internal power in BeforeApplied/AfterPowerAmountChanged).
+Fix applied (builds clean, 0 errors, warnings only pre-existing): cardPlay plumbed through Hook_ModifyDamageInternal_IgnoreCaps_Patch + preview Hook.ModifyDamage calls + all CreatureCmd.Damage/FromCard/FromOsty/CreateContextAsync call sites; 6 hook-patch attributes renamed to *SideTurnEnd; CreatureCmd.Damage patch type-arrays extended with CardPlay; transform-interop patch retargeted to NCardTransformShineVfx.PlayAnimation (Prepare-guarded, reads _cardNode/_endCard); CardEditorMarkedPower override updated; RewardPools filteredOptions now uses pools+Id-set predicate; GetPotionOptions call fixed; NEW CardEditorTemporaryPowerCompat.cs recreates IgnoreNextInstance as a ConditionalWeakTable flag consumed by Prepare-guarded prefixes on {TemporaryStrength,TemporaryDexterity,TemporaryFocus}Power.{BeforeApplied,AfterPowerAmountChanged}; all 7 IgnoreNextInstance call sites swapped to it. Duration patches were already dual-target (AfterSideTurnEnd primary + guarded legacy) — no change needed.
+Reason (MP): v0.108.0 JoinFlow (decompiled) hard-refuses on (1) version mismatch, (2) gameplay-relevant mod list mismatch (card_editor.json declares affects_gameplay:true), (3) ModelIdSerializationCache hash mismatch (modded 0.108.0 = 2175 entries/hash 693432997 vs vanilla 1648/1978543599). So both players must run the same game version AND the identical mod build (or both vanilla) — a friend on stable v0.107.1 or without the updated mod is rejected before the lobby, which players see as "can't ready up". The mod's own ready-gate (holds SetReady until the host snapshot syncs, 8s timeout, StartRunLobby/LoadRunLobby prefixes) compiled clean vs 0.108.0 and none of its patches were skipped; the v0.107.1 log shows it fired correctly all session.
+Next Step: deploy the rebuilt card_editor.dll (+pdb) into Steam mods\Card_editor (after backing up the old one), relaunch, confirm 0 incompatible-patch warnings and no MissingMethodException in combat; then retest co-op with BOTH players on beta v0.108.0 + this exact DLL, and if ready-up still fails grab %APPDATA%\SlayTheSpire2\logs\godot.log right after (look for [JoinFlow] VersionMismatch/ModMismatch/hash lines or "[CardEditor][MultiplayerSync] Holding lobby ready").
+
 ## 2026-06-16 - Relic effects feasibility (deep dive) + plan
 
 Hypothesis: Porting all card effects onto relics is feasible by reusing the existing effect/trigger infra.
@@ -309,3 +520,177 @@ Root cause: TargetType.AnyPlayer is only half-wired for COMBAT card targeting in
 Fix: map AnyPlayer -> AnyAlly at the single source of a created card's target (CardEditorCreatedCards.TargetType getter), covering both the dynamic-identity and store paths, new and existing cards. AnyAlly is fully supported end to end; the effect-level target (CardExtraEffectTarget, fixed earlier via ResolveTargetPlayers) still restricts grants to player allies, so grant-to-ally keeps working. Chose this over patching ~5 core game UI methods (high risk to all cards).
 Tradeoff: an AnyPlayer card target now behaves like AnyAlly (Osty hoverable in the targeting cursor), but clicking Osty grants nothing (effect filters to players). Build 0 errors; deployed live + staging; committed to main.
 Next: user retest the grant-to-ally card with the AnyAlly (or formerly-AnyPlayer) target.
+
+## 2026-06-21 - "Stars Spent" Whenever-trigger (quick win #2)
+
+Hypothesis:
+"Stars Spent" can be added as a clean one-line mirror of "Energy Spent" (EnergyUsed), since EnergyUsed already works as a Whenever-trigger.
+
+Finding: Partially true.
+
+Evidence:
+- EnergyUsed reads a dedicated game history type EnergySpentEntry (CardEditorExtraEffects.cs TryGetResourceHistoryCountMultiplier case ~34049; CombatHistory.cs:84 adds EnergySpentEntry).
+- The game has NO StarsSpentEntry - stars only have StarsModifiedEntry (gained/lost), which is exactly why "Stars Lost" never fires on spending.
+- BUT the game DOES expose Hook.AfterStarsSpent(ICombatState, int amount, Player spender) (Hook.cs:910), used by GalacticDust / ChildOfTheStarsPower.
+- The mod already self-tracks events the game does not (TimesGainedHp etc.) via _resourceCountHistory + RecordResourceCount, populated from hook Postfix patches in CardEditorResourceCountPatches.cs.
+
+Reason:
+No StarsSpentEntry means no one-line history mirror. But AfterStarsSpent + the existing _resourceCountHistory pattern make it a clean hook-tracked feature instead.
+
+What Changed:
+Implemented StarsSpent (enum=52) end-to-end: new Hook.AfterStarsSpent Postfix patch -> RecordResourceCount + TriggerPowerCountEvent + RecordRunProgress; added to PowerTriggerCountEvents (the Whenever dropdown) + _cardSmithCountEvents; label "Stars Spent"; verb spend/spent with star icon; scaling-count read case via _resourceCountHistory; quest gate. Deliberately NOT added to PowerCountEventUsesCardFilters (the stars hook supplies no triggering card, unlike EnergySpent). Build: 0 errors; markers present in DLL.
+
+Next Step:
+Deploy to the 4 locations + in-game test ("Whenever you spend stars, gain Block"); then proceed to quick win #8 (Osty's Cards filter) / #7 (Copy Buffs/Stats/Power).
+## 2026-06-21 - Scaling sources: Current Turn Number + Number of Enemies (quick win #3 subset)
+
+Hypothesis:
+"Current value" count events (like CurrentStars) can be mirrored to add CurrentTurnNumber + NumberOfEnemies as scaling/count sources.
+
+Finding: True.
+
+Evidence:
+- The count-event dropdown iterates Enum.GetValues<CardExtraEffectCountEvent>() (NCardEditorPopup.cs ~18993), so appending enum values + a label makes them selectable - no explicit array needed (unlike the Whenever-trigger dropdown PowerTriggerCountEvents).
+- CombatState.RoundNumber is 1-indexed (CombatState.cs:79 inits to 1, CombatManager.cs:1185 increments) => it IS the turn number, no +1.
+- Living enemies enumerated via combatState.Enemies filtered by IsEnemy && IsAlive (mirrors GetRelevantEnemyConditionTargets at 18482).
+- A "current value" event touches exactly 6 sites: enum, label switch, CountEventUsesWindow exclusion (instantaneous, no time window), scaling-suffix text, condition text, and the value resolver (~33728, CurrentStars => PlayerCombatState.Stars).
+
+What Changed:
+Added CurrentTurnNumber=53 (=> combatState.RoundNumber) and NumberOfEnemies=54 (=> count of living enemies) across all 6 sites. Inserted the 3 text/resolver blocks via a brace-tracked PowerShell script (Edit tool kept failing on deep-nested tab matching); fixed a uniform +1 tab over-indent afterward. Build 0 errors; deployed + hash-verified to all 4 locations.
+
+Next Step:
+In-game test ("deal damage equal to the turn number" / "...equal to the number of enemies"); continue backlog (Osty HP scaling, Osty's Cards filter #8, Copy Buffs #7).
+## 2026-06-21 - Relic editor: Add-Effect box height + description-from-effects
+
+Hypothesis:
+(a) The Add-Effect box is too tall because of a fixed-height inner scroll; (b) relic descriptions ignore custom effects.
+
+Finding: Both True.
+
+Evidence:
+- NRelicEditorPopup AddEffectGroup wrapped the effect editor in a ScrollContainer with CustomMinimumSize=(0,560), forcing 560px even when empty, nested INSIDE the editor's own outer scroll (scroll->settings->_effectGroupsContainer) -> double scrollbar + clip.
+- TryBuildCustomDynamicDescription (patched into RelicModel.get_DynamicDescription) only used overrideData.CustomDescription; ExtraEffects (List<RelicEffectEntry>) never fed into any description.
+
+What Changed:
+- Height: dropped the inner ScrollContainer; effectsContainer added straight to groupRoot, so the box sizes to content (compact empty) and the outer scroll handles overflow.
+- Description: new CardEditorRelicOverrides.BuildEffectsDescriptionText (groups ExtraEffects by trigger, formats each via CardEditorExtraEffects.FormatSingleEffectLine on the canonical proxy card, prefixes a trigger phrase). Wired in-game via a Postfix on get_DynamicDescription (appends to the original unless custom text is set) and in the editor preview via RefreshPreviewFromUi (reads BASE description under a [ThreadStatic] SuppressEffectDescriptionAppend flag, then appends the live UI effects from CollectEffectGroupEntries).
+- Live preview: the embedded host's QueuePreviewRefresh early-returns for embedded hosts; added EmbeddedEffectsChanged?.Invoke() there + an onEffectsChanged param to InitializeAsEmbeddedEffectHost, so every effect edit calls the relic editor's RefreshPreviewFromUi. Plus explicit refresh on trigger-change and group-remove, and a re-entrancy guard.
+
+Reason:
+FormatSingleEffectLine needs only a proxy CardModel (no combat), making relic effect text a clean reuse of the card text builder.
+
+Next Step:
+In-game test (add a relic effect, confirm the description updates live in the editor and on the in-game relic); continue backlog (Osty HP scaling, #8, #7).
+## 2026-06-21 - Osty's Cards filter (#8) + Copy Buffs (#7)
+
+Hypothesis:
+Both can reuse existing patterns rather than new subsystems.
+
+Finding: True (both).
+
+Evidence / What Changed:
+- #8 Osty's Cards: card filters match via MatchesCountCardEffectFilter, each case checking HasDynamicVar(card,"X") || HasExtraEffectKind(Kind). Added CardExtraEffectCountCardFilter.ActsThroughOsty=40 -> HasDynamicVar(card,"OstyDamage") || HasExtraEffectKind(CardExtraEffectKind.OstyAction), so it catches BOTH vanilla Osty cards (OstyDamage var) and edited cards with an Osty-action effect. Dropdown auto-populates from Enum.GetValues; added label "Osty's Cards" + prefix "Osty" + the contribute/amount case. 5 sites.
+- #7 Copy Buffs: discovered an existing CopyDebuffsFromTarget effect (CardExtraEffectKind.CopyDebuffs=130) that clones a source creature's PowerType.Debuff powers onto destination creatures. Mirrored it as CopyBuffs=143 filtering PowerType.Buff (which includes Strength/Dexterity/Focus stat-powers, so "Buffs/Stats" is covered). 7 sites: enum, effect template ("Copy Buffs / Stats", AllowedTargets AllAllies/Self/OtherEnemies/AllEnemies, default AllAllies), 2 text-dispatch + FormatCopyBuffs, execution case + CopyBuffsFromTarget method, NCardEditorPopup no-amount grouping.
+
+Reason:
+Filter matching and the copy-powers execution already existed; both features were extensions, not new machinery.
+
+Next Step:
+In-game test: (a) a count/trigger using the "Osty's Cards" filter; (b) a card with "Copy Buffs / Stats" targeting an ally with Strength/etc. Remaining backlog: orb-value inheritance #1, per-enemy "Target Itself" #4, draw-conditionals #5, Hang-style debuff #6, relic QoL.
+## 2026-06-21 - Hang debuff (#2 done) + Target-Itself/#3 + Draw-conditionals/#4 scope
+
+#2 Mark/Hang debuff: DONE + deployed.
+- New CardEditorMarkedDamage.cs: per-combat registry (ConditionalWeakTable<object combatState, Dictionary<Creature,int>>) + a Postfix on Hook.ModifyDamage gated on modifyDamageHookType==All && props.IsPoweredAttack(), multiplying __result by (1 + 0.5*stacks). Pattern modeled on VulnerablePower.ModifyDamageMultiplicative; chosen the hook-Postfix route to avoid a new PowerModel + its icon/registration machinery.
+- New effect kind CardExtraEffectKind.ApplyMarked=144 ("Mark (attack vulnerability)"): enum + template + execution case (AddMark per resolved target) + FormatMarked text in both dispatches.
+- KNOWN LIMITATION: the mark has NO visible status icon (it is registry-only, not a real PowerModel). To add a visible debuff later, make a dedicated CardEditorCustomStatusPower-style power that overrides ModifyDamageMultiplicative, or extend CardEditorCustomStatusPower with a damage-amp field + the status-editor UI.
+
+#3 "The Target Itself" (per-target value source) - SCOPE (NOT built):
+- The effect amount is resolved ONCE in ResolveConfiguredEffectAmount -> ResolveValueSourceAmount (CardEditorExtraEffects.cs ~26969/26990): ResolveValueSourceCreatures -> GetValueSourceAmount per creature -> AggregateValueSourceAmounts. Then each effect kind applies that single amount to ALL its targets.
+- To add a CardExtraEffectValueSourceActor.EachTarget that uses each affected target's OWN stat, the amount must be re-resolved per-target INSIDE each kind's apply loop (DealDamage, ApplyStatus, etc.) - there is no central per-target application hook. This is per-effect-kind execution rework on combat-critical paths.
+
+#4 Draw-based conditionals (#5) - SCOPE (NOT built):
+- Pillage/Escape-Plan/Expertise/Scrawl-style: a new control-flow effect that draws until a condition then branches on the drawn card. New effect kind + a draw loop + a condition check + a branch. Medium-large.
+
+Next Step: #3 and #4 are best implemented in a fresh session with full context (combat-critical, multi-kind). #1 (relic every-N) and #2 (Mark) are shipped + deployed this session.
+## 2026-06-21 - #3 (Target Itself) + #4 (Draw-until) BUILT cautiously (supersedes the "NOT built" note above)
+
+Both shipped + deployed. Built defensively (opt-in / additive) so existing effects are byte-for-byte unaffected.
+
+#3 "The Target Itself" = CardExtraEffectValueSourceActor.EachTarget (=5):
+- KEY SAFETY: fully opt-in. Gated entirely on ValueSourceActor==EachTarget, which no existing effect uses (default Self). Zero change to existing behavior.
+- Mechanism (no per-kind rework): a [ThreadStatic] Creature? _eachTargetCurrent. ExecuteEffect, when ValueSourceActor==EachTarget && _eachTargetCurrent==null, fans out: for each ResolveTargets(effect.Target), sets _eachTargetCurrent and RE-RUNS ExecuteEffect on the SAME effect, then returns. During the sub-run, ResolveTargets returns _eachTargetCurrent (top-of-method short-circuit) and the EachTarget value source returns _eachTargetCurrent -> the existing single-target path applies the effect to that creature using that creature's own stat. branchDepth+1 caps runaway; sub-run can't recurse (gate requires _eachTargetCurrent==null). Dropdown auto-includes it (Enum.GetValues); aggregation correctly stays disabled (not a group actor).
+- So "deal damage to ALL enemies = each enemy's own Doom" now works. (Single-target already worked via ValueSourceActor.Target.)
+
+#4 Draw-conditionals (subset) = CardExtraEffectKind.DrawUntilHandSize (=145):
+- Additive new effect kind ("Draw Until Hand Has N"): draws needed = amount - hand.Count via the existing DrawMatchingCards primitive (which the game caps at hand-full/deck-empty). Covers Expertise/Scrawl.
+- NOT YET: Escape-Plan-style "draw 1, branch on the drawn card's type" (the conditional-on-drawn half). Cleanest future approach: a draw + a branch gated by a "drawn-this-effect matches filter" check. Deferred to keep #4 bounded/safe.
+
+Net session shipped (all deployed, 4 locations, hash-verified): relic every-N (#1), Mark/Hang debuff (#2/#6), EachTarget (#3/#4), DrawUntilHandSize (#4/#5) - plus earlier: Stars Spent, Turn#/Enemies/Osty-HP scaling, Osty's Cards filter, Copy Buffs, relic editor height + relic description-from-effects.
+## 2026-06-21 - The two #2/#4 limitations are now FIXED (supersedes the "known limitation" notes above)
+
+(1) Mark is now a VISIBLE power. Replaced the registry+Hook.ModifyDamage approach with CardEditorMarkedPower : PowerModel (CardEditorMarkedDamage.cs). It overrides ModifyDamageMultiplicative exactly like VulnerablePower (gate target==Owner && props.IsPoweredAttack(); return 1 + 0.5*Amount). Visibility via additive Harmony Prefixes on PowerModel.get_Icon/get_BigIcon/get_HoverTips that fire ONLY for CardEditorMarkedPower (borrows VulnerablePower's icon; shows "Marked" + a tooltip). PowerCmd.Apply<T> needs no ModelDb registration (custom-status precedent). ApplyMarked now does PowerCmd.Apply<CardEditorMarkedPower>(...). Persists for combat (no tick-down), shows a status pip + amount + tooltip + predicted-damage bump.
+
+(2) Escape-Plan draw-and-check = CardExtraEffectKind.DrawAndCheck (=146): "Draw, Then Branch If Drawn Type". Draws `amount` cards via DrawMatchingCards, checks the ACTUAL drawn cards against effect.BranchCountCardType (MatchesGeneratedCardType), and if any match, runs the effect's branch (GetUsableBranchEffect) AFTER the draw - so it sees the just-drawn card (the existing branch evaluates the condition BEFORE the main effect, which is why DrawCards+branch couldn't do this). Excluded from the normal pre-effect branch (shouldRunBranch += effect.Kind != DrawAndCheck). Branch UI is per-effect (BranchTickbox), so no kind-gating needed. Recursion bounded by a [ThreadStatic] _drawAndCheckBranchDepth (< 5) that also feeds ExecuteEffect's MaxBranchDepth.
+  - Build it: DrawAndCheck (amount=1) + tick Branch, set the branch card type = Skill, branch effect = Gain Block => Escape Plan.
+
+All deployed (4 locations, hash-verified). Session total: 14 features/fixes.
+## 2026-06-21 - Triaged ChatGPT's "Potential bugs.md" (23 items)
+
+Verified against code (not taken at face value). Outcome:
+
+FIXED this pass (real, in my recent work):
+- #17 relic TriggerEveryN dropped by Clone() - TRUE/P1. Clone() copied EffectTriggers but not TriggerEveryN; Set() clones before saving => every-N silently reverted to "every time". Fixed: Clone() now copies TriggerEveryN.
+- #21 EachTarget double-consumes use limits - TRUE/P2. Fan-out dispatch sits after TryConsumeEffectUseLimit, so outer + each sub-call consumed. Fixed: sub-calls (_eachTargetCurrent != null) skip consumption (outer pays once). (Sub-point: ResolveValueSourceReferenceText still lacks an EachTarget case -> minor card-text mismatch, not fixed.)
+- #20 Copy Buffs clones hidden infra powers - TRUE/P2. CopyBuffsFromTarget cloned ALL PowerType.Buff incl. the mod's invisible behavior/tracker powers (Copy Debuffs was safe since infra powers are Buffs). Fixed: added the CleanseRemainingPowersByType exclusion (CardEditorCustomStatusPower || not-mod-assembly).
+
+STALE: #23 DrawAndCheck build break - was a transient compile error in my mid-work tree; already fixed (thread-static depth guard); build is green.
+
+CONFIRMED REAL, pre-existing, NOT yet fixed:
+- #15 OnDamageDealt fires on fully-blocked hits - VERIFIED: Hook_AfterDamageGiven_CardEditorRelicEffects_Patch ignores DamageResult. Same class: #10 OnDamageTaken, #11 OnBlockGained/OnHeal (zero gain), #12 OnEnemyKilled (any death, not "you kill"), #16 OnTurnEnd (ignores participant list). The relic reactive-trigger patches don't filter by effective amount/killer/participants.
+- #7 Copy Debuffs no-ops in common cases (user-REPORTED) + #19 Copy Buffs same source-target design flaw: source = ResolveSingleTarget (random fallback on no-target cards), destinations exclude the source => no-op in 1-enemy combat / unclear source UX.
+- #6 Hits-All-Enemies grant soft-lock (reported + detailed static path), #13 OnPickup never dispatches, #18 every-N not described in generated text, #22 MarkedTarget watcher ignores stored manual targets.
+
+LIKELY FALSE: #1 proxy card "never registered" - relics demonstrably work; the lookup falls back to safe defaults (Attack/AnyEnemy) per the code comment.
+RISK (not broken today): #5 StarsSpent hooks private CardModel.SpendStars - works, brittle across updates.
+PLAUSIBLE, need in-game repro: #2, #3, #8, #9, #14.
+REPO HYGIENE (not a mod bug): #4 root .sln pulls in .tmp_*.cs scratch files; the card_editor project itself builds clean.
+## 2026-06-21 - Fixed the relic reactive-trigger over-firing class (#10/#11/#15/#16)
+
+Verified hook signatures in game Hook.cs first, then guarded each relic patch in CardEditorRelicEffects.cs:
+- #15 OnDamageDealt (AfterDamageGiven): added DamageResult results param + require results.UnblockedDamage > 0 (no longer fires on fully-blocked attacks). FIXED.
+- #10 OnDamageTaken (AfterDamageReceived): added DamageResult result param + require result.UnblockedDamage > 0 (no longer fires on fully-blocked hits). FIXED. (Caveat: vanilla skips this hook on lethal, so a killing blow still can't fire it - a vanilla limitation.)
+- #11 OnBlockGained (AfterBlockGained): added decimal amount param + require amount > 0 (no longer fires on 0-block events). FIXED.
+- #16 OnTurnEnd (AfterTurnEnd): added IEnumerable<Creature> participants param; now WrapForTarget per actual participant instead of Wrap-to-all-players (correct in extra-turn / MP flows). FIXED.
+
+DEFERRED (hook limitations, flagged to user):
+- #12 OnEnemyKilled: Hook.AfterDeath(IRunState, ICombatState?, Creature, bool, float) has NO killer/dealer param, so "you killed" cannot be derived here. Proper fix needs a per-target last-damage-dealer registry fed from AfterDamageGiven, checked in AfterDeath. Doable but adds machinery; left for a follow-up.
+- #11 OnHeal: AfterCurrentHpChanged delta semantics (requested vs effective) are unverified; left the existing delta > 0 check rather than change working behavior on an unverified claim.
+
+All built clean + deployed (4 locations). Session bug-fix tally: 3 (my regressions: #17/#20/#21) + 4 (relic over-fire: #10/#11/#15/#16) = 7 real bugs fixed.
+## 2026-06-21 - #12 OnEnemyKilled now attributes the kill
+Verified game CreatureCmd.Damage: Hook.AfterDamageGiven fires for the lethal hit (line 279) BEFORE Kill()/AfterDeath (298); DamageResult.WasTargetKilled flags the killing hit. Added a _lastLethalDealer ConditionalWeakTable<Creature,Creature>; AfterDamageGiven records (target->dealer) when WasTargetKilled; AfterDeath now ConsumeLethalDealer(creature) and fires OnEnemyKilled via WrapForTarget(killer) only when killer.Player != null. Result: fires only for the player who dealt the killing blow (not all players, not on poison/scripted/enemy-vs-enemy deaths). Caveat: kills with no captured direct-damage dealer (e.g. pure poison) don't fire; Osty kills depend on Osty.Player resolving. Built clean + deployed.
+## 2026-06-22 - Fixed remaining real bugs in order (#7/#19, #6, #13, #18, #22)
+
+Hypothesis: the five remaining list items are genuine and individually fixable without touching the working paths.
+Finding: True for all five.
+Evidence + fixes (CardEditorExtraEffects.cs / CardEditorRelicOverrides.cs / NRelicEditorPopup.cs / CardEditorExtraEffectPower.cs):
+- #7 Copy Debuffs no-op: RequiresManualEnemyTarget now also forces a manual enemy pick for Kind==CopyDebuffs (both override + granted predicate occurrences), so the player designates the source enemy instead of a random fallback. FIXED (2+ enemy combat; 1-enemy is inherently a no-op since destinations exclude the source).
+- #19 Copy Buffs source flaw: CopyBuffsFromTarget source changed from ResolveSingleTarget (random enemy on no-target cards) to `cardPlay.Target ?? ownerCreature` - explicit card target if any, else self. Deterministic, no random. FIXED.
+- #6 Hits-All-Enemies grant soft-lock: added HitsAllEnemies to the SupportsGrantToCard exclusion list, so the retargeting modifier can no longer be granted onto a vanilla single-target card (which would run OnPlay with Target==null and stick centered). Custom AllEnemies cards use native targeting. FIXED.
+- #13 OnPickup never dispatches: OnPickup (RelicTriggerKind=4, "When obtained") has zero runtime dispatch (relic-obtained fires out of combat; the effect engine needs a CombatState). Normalized it on load - ParseEffectEntries maps OnPickup->OnCombatStart, ParseTriggers drops it - so legacy/imported data attaches to a trigger that actually runs instead of being silently dead. FIXED (defensive; OnPickup isn't editor-selectable so no live data expected).
+- #18 every-N not in generated text: GetTriggerDescriptionPhrase gained an everyN param + Ordinal() helper ("(every 3rd time)"); BuildEffectsDescriptionText gained an everyN map and applies it per trigger; the saved-override caller passes overrideData.TriggerEveryN and the live preview passes a new shared CollectTriggerEveryN() (same EveryNSelect.Selected+1 the save path persists). FIXED.
+- #22 MarkedTarget watcher ignores manual targets: refactored the manual-target predicate into EffectNeedsManualEnemyTarget, which now ALSO returns true for power effects whose PowerTriggerFrom==MarkedTarget (so a no-target card prompts for the marked enemy). CaptureWatchedTarget now falls back from cardPlay.Target to TryGetManualTarget when the former is null. FIXED.
+Reason: each was a confirmed code-path gap; fixes are opt-in/narrow (no change to existing non-MarkedTarget targeting, non-OnPickup triggers, or targeted Copy cards).
+Next Step: in-game verification of the five behaviors; build clean (0 errors), deployed + hash-verified to all 3 DLL targets. Session real-bug tally now 12.
+## 2026-07-02 - Offline investigation: "multiplayer broke after the newest update" (9.0)
+
+Hypothesis: the 9.0 release (tag release-20260620) introduced an MP regression; rival hypothesis = the Jun-19 game update (v0.107.1, buildid 23811903) broke the mod.
+Finding: Partially true (mod 9.0 is the dominant cause via several distinct mechanisms; "game update broke the mod's bindings" REFUTED; the game update contributes noise).
+Evidence: 17-agent offline audit (read-only, all shipped code read at release-20260620, NOT the working tree). Verified chain:
+- REFUTED: game-update broke Harmony bindings. f648a94 rebuilt the mod against the post-update sts2.dll 40 min after the update (bundled build/net9.0/sts2.dll blob == live game dll byte-identical); all patched MP symbols exist unchanged; SP works. No game update after Jun 20.
+- JOIN-BLOCK (probable bulk of reports): the game's JoinFlow has 3 gates - version, gameplay-mod list (id+"-"+version), ModelDb hash (JoinFlow.cs:82-100). Mod manifest version is FROZEN across releases ("2.0"/card_editor.json "7.7"), so the mod-list gate can't catch mixed mod versions - but the ModelDb hash gate DOES: 9.0 added CardEditorRelicProxyCard (the ONLY concrete AbstractModel subtype change e4a655e->9.0), so an 8.x + 9.0 pair is REJECTED AT JOIN with a cryptic "ModelDb hash mismatch"/VersionMismatch error. Pre-9.0 out-of-sync updating did not block joins; with 9.0 it does = "we can't play together since the update". Corollary: the LOCAL Jun-22 deployed dll adds CardEditorMarkedPower (PowerModel:AbstractModel) => the dev build cannot join shipped-9.0 peers either.
+- SAME-VERSION mechanisms shipped in 9.0 (f648a94's own message admits "MP features still need a real 2-peer test"): (a) L1 ready-gate defers the client's real SetReady; the NEW game build drops late lobby messages (_isBeginningRun guards) => deferred SetReady can be silently ignored = stuck lobby (only occurs 9.0-on-new-build - true regression pair); (b) 8s snapshot timeout lets a client enter a run UNSYNCED, then L2 run-freeze DISCARDS all mid-run snapshots => stale definitions locked in => host-side per-action XxHash32 checksum kick (StateDivergence, hard kick, no resync) the first time edited content acts; (c) new relic reactive-trigger system (16 hooks added same-day as release) with the known over-fire bugs + choice-opening effects awaiting GameAction.CompletionTask inside wrapped hooks (queue stress/hang); (d) new host toggle "Disable Desync Protection" prefixes out ChecksumTracker.CompareChecksums => users who enable it convert kicks into silent state corruption.
+- NOISE: vanilla v0.107.1 throws MP exceptions unmodded (relic-pick, MapDrawing InvalidOperationException); a live StateDivergence kick was captured locally Jul 1 with the mod DISABLED (CARD.GOLD_AXE play, checksum 444709782 vs 1058123555) - some reports may be the game itself.
+- EVIDENCE GAPS: godot log rotation kept only Jun-22+ sessions, ALL with the mod disabled - no direct log of the breakage; shipped 9.0.rar (Jun 20) != local deployed dll (Jun 22).
+Reason: multiple independently verified mechanisms all point at the 9.0 window; the join-block is deterministic and matches the "after the update" wording; the same-version paths are consistent with mid-run kick reports.
+Next Step (pending user go-ahead): 9.1 hotfix = bump manifest version EVERY release (turns the cryptic hash error into a clear "Mod mismatch card_editor-9.0 vs 9.1" message), include the 12 working-tree fixes, harden L1 timeout (never enter a run unsynced), don't discard mid-run snapshots silently, bump StateDto.Version with graceful handling; Nexus post: both players must run the exact same mod version; ask one reporter for %APPDATA%\SlayTheSpire2\logs\godot.log to discriminate join-block vs mid-run kick vs stuck lobby.

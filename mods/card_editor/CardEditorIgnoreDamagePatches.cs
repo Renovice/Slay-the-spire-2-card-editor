@@ -18,7 +18,8 @@ namespace SlayTheSpire2Mod.CardEditor;
 	typeof(decimal),
 	typeof(ValueProp),
 	typeof(Creature),
-	typeof(CardModel)
+	typeof(CardModel),
+	typeof(CardPlay)
 })]
 internal static class CreatureCmd_Damage_IgnoreProps_Patch
 {

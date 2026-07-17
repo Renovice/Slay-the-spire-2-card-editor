@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -28,6 +29,19 @@ public abstract class CardEditorCreatedCardBase : CardModel, KnowledgeDemon.ICho
 			AssertMutable();
 			_cardEditorSelfScalingDiff = value ?? string.Empty;
 		}
+	}
+
+	// Vanilla parity: expose this card's primary damage/block as real DynamicVars so vanilla readers
+	// (Thrash, Reap, SeekerStrike, previews) see created cards like any other card. The set is
+	// materialized lazily per instance and invalidated when the definition changes or the card
+	// upgrades (CardEditorExtraEffects.InvalidateVanillaParityVars).
+	protected override IEnumerable<DynamicVar> CanonicalVars => CardEditorExtraEffects.BuildVanillaParityVars(this);
+
+	protected override void OnUpgrade()
+	{
+		base.OnUpgrade();
+		// Re-derive the parity vars against the fused (upgraded) effect rows.
+		CardEditorExtraEffects.InvalidateVanillaParityVars(this);
 	}
 
 	public override CardPoolModel Pool => CardEditorExtraEffects.TryGetDynamicIdentitySource(this, out CardModel identitySource)

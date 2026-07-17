@@ -114,6 +114,7 @@ internal partial class CardEditorMultiplayerSyncRunner : Node
 	{
 		Name = "CardEditorMultiplayerSyncRunner";
 		ProcessMode = ProcessModeEnum.Always;
+		CardEditorMultiplayerSync.NotifyRunnerEnteredTree();
 	}
 
 	public override void _Process(double delta)
@@ -191,7 +192,8 @@ internal static class CardEditorMultiplayerSync
 	private static ulong _pendingReadyStartMs;
 	private static bool _bypassReadyGate;
 	private static ulong _lastSyncRequestMs;
-	private const double ReadyGateTimeoutSeconds = 8.0;
+	private static bool _runnerAddQueued;
+	private const double ReadyGateTimeoutSeconds = 3.0;
 	private const double SyncRequestRetrySeconds = 2.0;
 
 	public static bool IsBoundToMultiplayerSession => _netService != null && _netService.Type.IsMultiplayer();
@@ -305,12 +307,22 @@ internal static class CardEditorMultiplayerSync
 			return true;
 		}
 
+		// The deferred re-fire runs from the runner node's _Process. If that pump is not verifiably
+		// alive, holding would eat the click forever - let it through instead (worst case is the old
+		// pre-gate behavior: readying with possibly unsynced definitions).
+		EnsureRunner();
+		if (_runner == null || !GodotObject.IsInstanceValid(_runner) || !_runner.IsInsideTree())
+		{
+			Log.Warn("[CardEditor][MultiplayerSync] Sync pump unavailable; sending lobby ready without waiting for the host snapshot.");
+			return true;
+		}
+
 		_pendingClientReady = true;
 		_pendingReadyAction = fireReadyTrue;
 		if (_pendingReadyStartMs == 0)
 		{
 			_pendingReadyStartMs = Time.GetTicksMsec();
-			CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Holding lobby ready until the card-editor snapshot is applied.");
+			Log.Info($"[CardEditor][MultiplayerSync] Holding lobby ready until the card-editor snapshot is applied (fails open after {ReadyGateTimeoutSeconds:0}s).");
 		}
 		_requestedInitialSync = false;
 		return false;
@@ -349,6 +361,10 @@ internal static class CardEditorMultiplayerSync
 		{
 			Log.Warn("[CardEditor][MultiplayerSync] Readying WITHOUT a confirmed card-editor sync "
 				+ "(host may have sync disabled or lack the mod). Card/relic mismatches may still desync.");
+		}
+		else
+		{
+			Log.Info("[CardEditor][MultiplayerSync] Host snapshot applied; sending the held lobby ready.");
 		}
 
 		Action? fire = _pendingReadyAction;
@@ -461,6 +477,10 @@ internal static class CardEditorMultiplayerSync
 
 	public static void Update()
 	{
+		// Fire first so a held lobby ready can never be eaten by a service that looks disconnected -
+		// the timeout inside fails open for sessions that never sync.
+		FirePendingReadyIfNeeded();
+
 		if (_netService == null || !_netService.IsConnected)
 		{
 			return;
@@ -482,7 +502,6 @@ internal static class CardEditorMultiplayerSync
 				}
 			}
 
-			FirePendingReadyIfNeeded();
 			return;
 		}
 
@@ -1097,9 +1116,21 @@ internal static class CardEditorMultiplayerSync
 			$"parent={(control.GetParent()?.Name.ToString() ?? "<null>")}";
 	}
 
+	internal static void NotifyRunnerEnteredTree()
+	{
+		_runnerAddQueued = false;
+	}
+
 	private static void EnsureRunner()
 	{
-		if (_runner != null && GodotObject.IsInstanceValid(_runner))
+		// A runner instance that never entered the tree (AddChild raced scene setup) has a dead
+		// _Process - treat it like a missing runner and retry, instead of trusting IsInstanceValid.
+		if (_runner != null && GodotObject.IsInstanceValid(_runner) && _runner.IsInsideTree())
+		{
+			return;
+		}
+
+		if (_runnerAddQueued)
 		{
 			return;
 		}
@@ -1109,8 +1140,15 @@ internal static class CardEditorMultiplayerSync
 			return;
 		}
 
-		_runner = new CardEditorMultiplayerSyncRunner();
-		sceneTree.Root.AddChild(_runner);
+		if (_runner == null || !GodotObject.IsInstanceValid(_runner))
+		{
+			_runner = new CardEditorMultiplayerSyncRunner();
+		}
+
+		// Deferred add: BindToNetService runs from Harmony postfixes that can fire mid scene setup,
+		// where a synchronous AddChild on a busy parent is rejected.
+		_runnerAddQueued = true;
+		sceneTree.Root.CallDeferred(Node.MethodName.AddChild, _runner);
 	}
 
 	private static void DetachCurrentService(bool restoreLocalState)

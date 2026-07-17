@@ -69,6 +69,7 @@ public partial class NRelicEditorPopup : Control
 	{
 		public RelicTriggerKind Trigger;
 		public OptionButton TriggerSelect = null!;
+		public OptionButton EveryNSelect = null!;
 		public NCardEditorPopup Host = null!;
 		public Control Root = null!;
 	}
@@ -668,8 +669,17 @@ public partial class NRelicEditorPopup : Control
 		return preview;
 	}
 
+	private bool _refreshingPreview;
+
 	private void RefreshPreviewFromUi()
 	{
+		// Guard against re-entry: reading the embedded effect hosts (CollectEffectGroupEntries) could, in
+		// principle, fire another change notification; a redundant nested refresh would just waste work.
+		if (_refreshingPreview)
+		{
+			return;
+		}
+		_refreshingPreview = true;
 		try
 		{
 			RelicModel? preview = BuildCurrentPreview();
@@ -694,11 +704,32 @@ public partial class NRelicEditorPopup : Control
 					.Where(pool => pool != null)
 					.Select(pool => CardEditorRelicOverrides.GetPoolLabel(pool!))
 					.DefaultIfEmpty("No pool"));
-				string rawDescription = preview.DynamicDescription.GetFormattedText() ?? string.Empty;
+				string rawDescription;
+				CardEditorRelicOverrides.SuppressEffectDescriptionAppend = true;
+				try
+				{
+					rawDescription = preview.DynamicDescription.GetFormattedText() ?? string.Empty;
+				}
+				finally
+				{
+					CardEditorRelicOverrides.SuppressEffectDescriptionAppend = false;
+				}
 				bool customTextEnabled = _customTextTickbox?.IsTicked ?? false;
 				string displayDescription = customTextEnabled && _customTextField != null && GodotObject.IsInstanceValid(_customTextField)
 					? _customTextField.Text ?? string.Empty
 					: rawDescription;
+				if (!customTextEnabled)
+				{
+					// Mirror the in-game behaviour: append the auto-generated text for the relic's current
+					// (unsaved) effects so the description updates live as triggers/effects are edited.
+					string effectsText = CardEditorRelicOverrides.BuildEffectsDescriptionText(preview, CollectEffectGroupEntries(), CollectTriggerEveryN());
+					if (!string.IsNullOrEmpty(effectsText))
+					{
+						displayDescription = string.IsNullOrWhiteSpace(displayDescription)
+							? effectsText
+							: displayDescription + "\n\n" + effectsText;
+					}
+				}
 				_descriptionLabel.Text = $"{rarity}\n{pools}\n\n{FormatRelicTextForPreview(displayDescription)}";
 				if (_customTextField != null
 					&& GodotObject.IsInstanceValid(_customTextField)
@@ -712,6 +743,10 @@ public partial class NRelicEditorPopup : Control
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor][RelicEditor] Failed refreshing relic preview: {ex}");
+		}
+		finally
+		{
+			_refreshingPreview = false;
 		}
 	}
 
@@ -796,7 +831,8 @@ public partial class NRelicEditorPopup : Control
 		foreach (RelicTriggerKind trigger in groupOrder)
 		{
 			byTrigger.TryGetValue(trigger, out List<CardExtraEffect>? effects);
-			AddEffectGroup(trigger, effects);
+			int groupEveryN = existing.TriggerEveryN != null && existing.TriggerEveryN.TryGetValue(trigger, out int savedEveryN) ? savedEveryN : 1;
+			AddEffectGroup(trigger, effects, groupEveryN);
 		}
 	}
 
@@ -836,7 +872,7 @@ public partial class NRelicEditorPopup : Control
 		}
 	}
 
-	private void AddEffectGroup(RelicTriggerKind trigger, List<CardExtraEffect>? effects)
+	private void AddEffectGroup(RelicTriggerKind trigger, List<CardExtraEffect>? effects, int everyN = 1)
 	{
 		if (_effectGroupsContainer == null || !GodotObject.IsInstanceValid(_effectGroupsContainer))
 		{
@@ -888,29 +924,40 @@ public partial class NRelicEditorPopup : Control
 		groupTitle.Text = RelicTriggerLabel(trigger);
 		headerRow.AddChild(triggerSelect);
 
+		Label fireLabel = CreateBodyLabel("Fire:");
+		headerRow.AddChild(fireLabel);
+		OptionButton everyNSelect = new()
+		{
+			CustomMinimumSize = new Vector2(150f, 44f),
+			SizeFlagsHorizontal = SizeFlags.ShrinkBegin
+		};
+		StyleInput(everyNSelect);
+		everyNSelect.AddItem("Every time");
+		for (int everyNOption = 2; everyNOption <= 10; everyNOption++)
+		{
+			everyNSelect.AddItem($"Every {everyNOption}");
+		}
+		everyNSelect.Select(Math.Clamp(everyN - 1, 0, 9));
+		everyNSelect.ItemSelected += _ => RefreshPreviewFromUi();
+		headerRow.AddChild(everyNSelect);
+
 		Button removeButton = CreateButton("Remove");
 		headerRow.AddChild(removeButton);
 		groupRoot.AddChild(headerRow);
 
-		// The embedded effect editor can grow past 1000px with many rows; cap it in its own scroll box
-		// so a trigger group stays a manageable height inside the relic editor window instead of
-		// stretching below the visible area (the bug where the bottom half of the effects was cut off).
-		ScrollContainer effectsScroll = new()
-		{
-			CustomMinimumSize = new Vector2(0f, 560f),
-			SizeFlagsHorizontal = SizeFlags.ExpandFill,
-			HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
-		};
+		// The effect editor sizes to its content and the whole relic editor scrolls (the outer
+		// ScrollContainer that holds `settings`), so an empty trigger group stays compact — just the
+		// "Add Effect" button — and only grows as real effects are added. No fixed-height inner scroll
+		// box (it wasted vertical space when empty and double-scrolled under the window scrollbar).
 		VBoxContainer effectsContainer = new() { SizeFlagsHorizontal = SizeFlags.ExpandFill };
-		effectsScroll.AddChild(effectsContainer);
-		groupRoot.AddChild(effectsScroll);
+		groupRoot.AddChild(effectsContainer);
 
 		_effectGroupsContainer.AddChild(groupPanel);
 
 		// Hidden host node: lives in this menu's tree so deferred calls work, but only builds
 		// its effect-list UI into effectsContainer (no popup chrome).
 		NCardEditorPopup host = new();
-		host.InitializeAsEmbeddedEffectHost(proxy);
+		host.InitializeAsEmbeddedEffectHost(proxy, RefreshPreviewFromUi);
 		host.Name = "RelicEffectHost_" + _effectGroups.Count;
 		AddChild(host);
 		host.BuildEmbeddedEffectsUi(effectsContainer);
@@ -926,6 +973,7 @@ public partial class NRelicEditorPopup : Control
 		{
 			Trigger = trigger,
 			TriggerSelect = triggerSelect,
+			EveryNSelect = everyNSelect,
 			Host = host,
 			Root = groupPanel
 		};
@@ -934,6 +982,7 @@ public partial class NRelicEditorPopup : Control
 			group.Trigger = (RelicTriggerKind)triggerSelect.GetItemId((int)idx);
 			groupTitle.Text = RelicTriggerLabel(group.Trigger);
 			RefreshGroupTriggerOptions();
+			RefreshPreviewFromUi();
 		};
 		removeButton.Pressed += () => RemoveEffectGroup(group);
 
@@ -953,6 +1002,7 @@ public partial class NRelicEditorPopup : Control
 			group.Root.QueueFreeSafely();
 		}
 		RefreshGroupTriggerOptions();
+		RefreshPreviewFromUi();
 	}
 
 	private CardModel? TryGetRelicProxyCard()
@@ -1022,6 +1072,26 @@ public partial class NRelicEditorPopup : Control
 			}
 		}
 		return entries;
+	}
+
+	// Same trigger->N map the save path persists (EveryNSelect index + 1), reused so the live preview text
+	// can show the "every Nth time" qualifier before the relic is saved.
+	private Dictionary<RelicTriggerKind, int> CollectTriggerEveryN()
+	{
+		Dictionary<RelicTriggerKind, int> triggerEveryN = new();
+		foreach (RelicEffectGroup everyNGroup in _effectGroups)
+		{
+			if (everyNGroup.EveryNSelect == null || !GodotObject.IsInstanceValid(everyNGroup.EveryNSelect))
+			{
+				continue;
+			}
+			int everyNValue = everyNGroup.EveryNSelect.Selected + 1;
+			if (everyNValue > 1)
+			{
+				triggerEveryN[everyNGroup.Trigger] = everyNValue;
+			}
+		}
+		return triggerEveryN;
 	}
 
 	private void ApplyAndClose()
@@ -1099,6 +1169,11 @@ public partial class NRelicEditorPopup : Control
 		if (groupTriggers.Count > 0)
 		{
 			overrideData.EffectTriggers = groupTriggers;
+		}
+		Dictionary<RelicTriggerKind, int> triggerEveryN = CollectTriggerEveryN();
+		if (triggerEveryN.Count > 0)
+		{
+			overrideData.TriggerEveryN = triggerEveryN;
 		}
 
 		CardEditorRelicOverrides.SetAndSave(canonical.Id, overrideData);

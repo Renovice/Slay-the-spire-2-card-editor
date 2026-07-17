@@ -792,6 +792,17 @@ internal static class CardEditorCreatedCardsStore
 		CardEditorOverrides.Set(cardId, def.Override);
 		Revision++;
 		Save();
+
+		// The canonical instance's vanilla-parity DynamicVars (Damage/Block mirrors for Thrash-style
+		// readers) were derived from the previous definition; drop the cached set so the next access
+		// re-derives, and so new run instances clone fresh values.
+		try
+		{
+			CardEditorExtraEffects.InvalidateVanillaParityVars(ModelDb.GetByIdOrNull<CardModel>(cardId));
+		}
+		catch
+		{
+		}
 	}
 
 	public static void EnsureLoaded()

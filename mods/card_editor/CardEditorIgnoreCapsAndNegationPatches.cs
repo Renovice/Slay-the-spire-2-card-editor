@@ -270,6 +270,7 @@ internal static class CardEditorIgnoreEffectHelpers
 		return new CardPlay
 		{
 			Card = card,
+			Player = card.Owner,
 			Target = target,
 			ResultPile = card.Pile?.Type ?? PileType.None,
 			Resources = new ResourceInfo
@@ -382,6 +383,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		decimal damage,
 		ValueProp props,
 		CardModel? cardSource,
+		CardPlay? cardPlay,
 		ModifyDamageHookType modifyDamageHookType,
 		ref List<AbstractModel> modifiers,
 		ref decimal __result)
@@ -407,7 +409,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		{
 			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
-				decimal delta = item.ModifyDamageAdditive(target, num, props, dealer, cardSource);
+				decimal delta = item.ModifyDamageAdditive(target, num, props, dealer, cardSource, cardPlay);
 				num += delta;
 				if (delta != 0m)
 				{
@@ -420,7 +422,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		{
 			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
-				decimal mult = item.ModifyDamageMultiplicative(target, num, props, dealer, cardSource);
+				decimal mult = item.ModifyDamageMultiplicative(target, num, props, dealer, cardSource, cardPlay);
 				if (ignoreEnemyReductions && ShouldSkipTargetOwnedReduction(item, target, mult))
 				{
 					continue;
@@ -438,7 +440,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 			decimal cap = decimal.MaxValue;
 			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
-				decimal candidate = item.ModifyDamageCap(target, props, dealer, cardSource);
+				decimal candidate = item.ModifyDamageCap(target, props, dealer, cardSource, cardPlay);
 				bool skipAsEnemyReduction = ignoreEnemyReductions && ShouldSkipTargetOwnedCap(item, target, candidate);
 				if (debug && candidate < decimal.MaxValue)
 				{
@@ -472,40 +474,63 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), "ModifyHpLostAfterOsty")]
-internal static class Hook_ModifyHpLostAfterOsty_IgnoreNegation_Patch
+// v0.109.0 folded the four HpLost hook statics into Hook.ModifyHpLost(..., HpLossHookPhase, ...).
+[HarmonyPatch(typeof(Hook), nameof(Hook.ModifyHpLost))]
+internal static class Hook_ModifyHpLost_IgnoreNegation_Patch
 {
-	public static bool Prepare()
-	{
-		return AccessTools.Method(typeof(Hook), "ModifyHpLostAfterOsty") != null;
-	}
-
 	public static bool Prefix(
 		IRunState runState,
-		CombatState? combatState,
+		ICombatState? combatState,
 		Creature target,
 		decimal amount,
 		ValueProp props,
 		Creature? dealer,
 		CardModel? cardSource,
+		HpLossHookPhase phases,
 		ref IEnumerable<AbstractModel> modifiers,
 		ref decimal __result)
 	{
+		if (!phases.HasFlag(HpLossHookPhase.AfterOsty))
+		{
+			return true;
+		}
+
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
-		if (!CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageNegation, effectiveSource, dealer, combatState, target))
+		if (!CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageNegation, effectiveSource, dealer, combatState.GetConcreteCombatState(), target))
 		{
 			return true;
 		}
 
 		// "Damage negation" in STS2 is primarily implemented via ModifyHpLostAfterOstyLate (e.g., Buffer -> 0 HP loss).
-		// Skipping the Late phase avoids negation without consuming the negating power.
+		// Run the vanilla phases but skip that Late pass, so negation is bypassed without consuming the negating power.
 		decimal num = amount;
 		List<AbstractModel> list = new List<AbstractModel>();
+		if (phases.HasFlag(HpLossHookPhase.BeforeOsty))
+		{
+			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
+			{
+				decimal before = num;
+				num = item.ModifyHpLostBeforeOsty(target, num, props, dealer, cardSource);
+				if (decimal.Truncate(before) != decimal.Truncate(num))
+				{
+					list.Add(item);
+				}
+			}
+			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
+			{
+				decimal before = num;
+				num = item.ModifyHpLostBeforeOstyLate(target, num, props, dealer, cardSource);
+				if (decimal.Truncate(before) != decimal.Truncate(num))
+				{
+					list.Add(item);
+				}
+			}
+		}
 		foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 		{
 			decimal before = num;
 			num = item.ModifyHpLostAfterOsty(target, num, props, dealer, cardSource);
-			if ((int)before != (int)num)
+			if (decimal.Truncate(before) != decimal.Truncate(num))
 			{
 				list.Add(item);
 			}

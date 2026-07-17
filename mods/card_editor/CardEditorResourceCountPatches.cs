@@ -86,6 +86,41 @@ internal static class Hook_AfterEnergySpent_CardEditorPowerCountEvent_Patch
 	}
 }
 
+[HarmonyPatch(typeof(CardModel), "SpendStars", new[] { typeof(int) })]
+internal static class CardModel_SpendStars_CardEditorPowerCountEvent_Patch
+{
+	public static void Postfix(CardModel __instance, int amount, ref Task __result)
+	{
+		Creature? spenderCreature = __instance?.TryGetOwnerCreature();
+		if (__result == null || __instance == null || spenderCreature == null)
+		{
+			return;
+		}
+
+		__result = TrackAfter(__result, __instance, spenderCreature, amount);
+	}
+
+	private static async Task TrackAfter(Task original, CardModel card, Creature creature, int amount)
+	{
+		await original;
+		try
+		{
+			int delta = Math.Max(0, amount);
+			CombatState? state = creature.GetConcreteCombatState();
+			if (delta > 0 && state != null)
+			{
+				CardEditorExtraEffects.RecordResourceCount(state, creature, CardExtraEffectCountEvent.StarsSpent, delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(state, creature, CardExtraEffectCountEvent.StarsSpent, triggeringCard: card, amount: delta);
+				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.StarsSpent, delta, state);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Stars-spent trigger failed: {ex}");
+		}
+	}
+}
+
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterDamageGiven))]
 internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 {
@@ -136,6 +171,7 @@ internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 		return new CardPlay
 		{
 			Card = cardSource,
+			Player = cardSource.Owner,
 			Target = target,
 			ResultPile = cardSource.Pile?.Type ?? PileType.None,
 			Resources = new ResourceInfo

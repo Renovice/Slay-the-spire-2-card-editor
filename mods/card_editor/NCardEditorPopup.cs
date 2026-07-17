@@ -135,6 +135,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private CardModel _previewCard = null!;
 	private ModelId _cardId;
 	private Action? _onApplied;
+
+	// Fired on every effect change while this popup is an embedded effect host (e.g. the relic editor),
+	// so the host's owner can live-refresh its own preview/description. Null in normal card-editor mode.
+	internal Action? EmbeddedEffectsChanged;
 	private bool _useModalContainer;
 	private bool _isUpgradeEditor;
 	private bool _isCreatedCard;
@@ -2571,7 +2575,13 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			Rows = _extraEffectRows.ToList(),
 			CardIdText = _cardId.ToString(),
-			IsUpgradeEditor = _isUpgradeEditor
+			IsUpgradeEditor = _isUpgradeEditor,
+			UnrepresentedBaseEffects = _unrepresentedBaseEffects
+				.Select(p => new UnrepresentedBaseEffect { StoredIndex = p.StoredIndex, Effect = CardEditorExtraEffects.CloneEffect(p.Effect) })
+				.ToList(),
+			UnrepresentedUpgradeEffects = _unrepresentedUpgradeEffects.Select(CardEditorExtraEffects.CloneEffect).ToList(),
+			SeenKeywordGroups = new HashSet<string>(_hydrationSeenKeywordGroups, StringComparer.OrdinalIgnoreCase),
+			RowKeywordGroups = new HashSet<string>(_hydrationRowKeywordGroups, StringComparer.OrdinalIgnoreCase)
 		};
 
 		foreach (ExtraEffectRow row in entry.Rows)
@@ -2625,6 +2635,17 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_extraEffectsContainer);
 		RemoveChildrenSafely(_effectSummaryContainer);
 		_extraEffectRows.Clear();
+		// Restore the preservation state captured with these rows - saving with an empty stash would
+		// delete the unrepresentable (keyword-carrying) stored effects this row set never showed.
+		_unrepresentedBaseEffects.Clear();
+		_unrepresentedBaseEffects.AddRange(entry.UnrepresentedBaseEffects
+			.Select(p => new UnrepresentedBaseEffect { StoredIndex = p.StoredIndex, Effect = CardEditorExtraEffects.CloneEffect(p.Effect) }));
+		_unrepresentedUpgradeEffects.Clear();
+		_unrepresentedUpgradeEffects.AddRange(entry.UnrepresentedUpgradeEffects.Select(CardEditorExtraEffects.CloneEffect));
+		_hydrationSeenKeywordGroups.Clear();
+		_hydrationSeenKeywordGroups.UnionWith(entry.SeenKeywordGroups);
+		_hydrationRowKeywordGroups.Clear();
+		_hydrationRowKeywordGroups.UnionWith(entry.RowKeywordGroups);
 
 		foreach (ExtraEffectRow row in entry.Rows)
 		{
@@ -2707,6 +2728,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_pendingExistingExtraEffectRowTotal = 0;
 		_pendingExistingExtraEffectRowBuilt = 0;
 		_bulkInitializingExtraEffectRows = false;
+		_unrepresentedBaseEffects.Clear();
+		_unrepresentedUpgradeEffects.Clear();
+		_hydrationSeenKeywordGroups.Clear();
+		_hydrationRowKeywordGroups.Clear();
 		ClearExistingExtraEffectLoadingLabels();
 
 		RemoveChildrenSafely(_extraEffectsContainer);
@@ -2748,7 +2773,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 				foreach (CardExtraEffect upgradeEffect in absoluteUpgradeEffects)
 				{
-					QueueExistingExtraEffectRowForHydration(upgradeEffect);
+					if (!QueueExistingExtraEffectRowForHydration(upgradeEffect) && upgradeEffect != null)
+					{
+						_unrepresentedUpgradeEffects.Add(CardEditorExtraEffects.CloneEffect(upgradeEffect));
+					}
 				}
 			}
 			else if (upgradeEffects != null && upgradeEffects.Count > 0)
@@ -2756,9 +2784,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 				foreach (CardExtraEffect? effect in upgradeEffects)
 				{
 					CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
-					if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
+					bool queued = normalizedEffect != null
+						&& CardEditorExtraEffects.IsPersistableEffect(normalizedEffect)
+						&& QueueExistingExtraEffectRowForHydration(normalizedEffect);
+					if (!queued && effect != null)
 					{
-						QueueExistingExtraEffectRowForHydration(normalizedEffect);
+						_unrepresentedUpgradeEffects.Add(CardEditorExtraEffects.CloneEffect(effect));
 					}
 				}
 			}
@@ -2773,12 +2804,31 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 		if (baseEffects != null && baseEffects.Count > 0)
 		{
-			foreach (CardExtraEffect effect in baseEffects)
+			for (int storedIndex = 0; storedIndex < baseEffects.Count; storedIndex++)
 			{
-				CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
-				if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
+				CardExtraEffect effect = baseEffects[storedIndex];
+				if (effect != null && !string.IsNullOrWhiteSpace(effect.CustomKeywordName))
 				{
-					QueueExistingExtraEffectRowForHydration(normalizedEffect);
+					_hydrationSeenKeywordGroups.Add(effect.CustomKeywordName.Trim());
+				}
+
+				CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+				bool queued = normalizedEffect != null
+					&& CardEditorExtraEffects.IsPersistableEffect(normalizedEffect)
+					&& QueueExistingExtraEffectRowForHydration(normalizedEffect);
+				if (queued && effect != null && !string.IsNullOrWhiteSpace(effect.CustomKeywordName))
+				{
+					_hydrationRowKeywordGroups.Add(effect.CustomKeywordName.Trim());
+				}
+				if (!queued && effect != null)
+				{
+					// The UI cannot represent this stored effect as a row; carry it through the
+					// next Apply untouched instead of silently deleting it.
+					_unrepresentedBaseEffects.Add(new UnrepresentedBaseEffect
+					{
+						StoredIndex = storedIndex,
+						Effect = CardEditorExtraEffects.CloneEffect(effect)
+					});
 				}
 			}
 		}
@@ -2961,6 +3011,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_hardcodedPowerAmountDefaults.Clear();
 		_spinButtons.Clear();
 		_extraEffectRows.Clear();
+		_unrepresentedBaseEffects.Clear();
+		_unrepresentedUpgradeEffects.Clear();
+		_hydrationSeenKeywordGroups.Clear();
+		_hydrationRowKeywordGroups.Clear();
 		_localizedSharedCreatedRowsCacheRevisionKey = string.Empty;
 		_cardSmithRows.Clear();
 		_pendingExistingExtraEffectRows.Clear();
@@ -2978,6 +3032,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_keywordPickerOverlay = null;
 		_rewardPoolPickerOverlay = null;
 		_definitionEditorOverlay = null;
+		_effectKindPickerOverlay = null;
 		_cardNameLabel = null;
 		_targetTypeSelect = null;
 		_starCostField = null;
@@ -3066,6 +3121,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 	private Button? _applyButton;
 	private Button? _resetButton;
+	private Button? _refreshLiveCardsButton;
 
 	// Re-applies the shared-state lock greying to the (persistent/cached) popup's Apply/Reset buttons.
 	// Called on every open so a cached popup never shows a stale enabled/disabled state.
@@ -3081,6 +3137,16 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		{
 			_resetButton.Disabled = reason != null;
 			_resetButton.TooltipText = reason ?? string.Empty;
+		}
+		// Rebuilding live instances mutates run state, so it follows the same multiplayer lock as
+		// Apply/Reset - a one-sided refresh could desync the per-action checksums.
+		if (_refreshLiveCardsButton != null && GodotObject.IsInstanceValid(_refreshLiveCardsButton))
+		{
+			_refreshLiveCardsButton.Disabled = reason != null;
+			if (reason != null)
+			{
+				_refreshLiveCardsButton.TooltipText = reason;
+			}
 		}
 	}
 
@@ -3215,9 +3281,10 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	//   foreach (CardExtraEffect e in existing) host.LoadEmbeddedEffect(e);
 	//   ... later, on apply ...
 	//   List<CardExtraEffect> edited = host.ReadEmbeddedEffects();
-	internal void InitializeAsEmbeddedEffectHost(CardModel hostCard)
+	internal void InitializeAsEmbeddedEffectHost(CardModel hostCard, Action? onEffectsChanged = null)
 	{
 		_isEmbeddedEffectHost = true;
+		EmbeddedEffectsChanged = onEffectsChanged;
 		Initialize(hostCard, static () => { }, useModalContainer: false, isUpgradeEditor: false, preferredPanelSize: null);
 		Name = "CardEditorEmbeddedEffectHost";
 		Visible = false;
@@ -4226,6 +4293,24 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		TrackExtraEffectHydrationButton(statusEditor);
 		buttons.AddChild(statusEditor);
 
+		Button refreshLiveCards = new Button
+		{
+			Text = CardEditorLoc.T("button.refreshLiveCards", "Refresh Cards"),
+			CustomMinimumSize = new Vector2(0, 42),
+			TooltipText = CardEditorLoc.T(
+				"tooltip.refreshLiveCards",
+				"Rebuild every live card in this run (deck and combat piles) from its saved definition and re-sync base/upgraded data - fixes stale cards without restarting the game.")
+		};
+		StyleActionButton(refreshLiveCards, minWidth: 125f);
+		refreshLiveCards.Pressed += () =>
+		{
+			int refreshedCount = CardEditorOverrides.RefreshAllLiveCardData();
+			CardEditorMod.VerboseLog($"[CardEditor] Manual live-card refresh rebuilt {refreshedCount} instances");
+			QueuePreviewUpdate();
+		};
+		_refreshLiveCardsButton = refreshLiveCards;
+		buttons.AddChild(refreshLiveCards);
+
 		buttons.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 		buttons.Alignment = BoxContainer.AlignmentMode.Begin;
 		Button apply = new Button { Text = CardEditorLoc.T("button.apply", "Apply") };
@@ -4858,6 +4943,9 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public OptionButton UnifiedEffectVariantSelect { get; init; } = null!;
 		public Control KeywordGroupRow { get; init; } = null!;
 		public LineEdit KeywordGroupField { get; init; } = null!;
+		// The CustomKeywordName the row was hydrated with; used as the save-time fallback so a
+		// missing/freed KeywordGroupField widget cannot silently strip the keyword grouping.
+		public string? HydratedCustomKeywordName { get; set; }
 		public Control IgnoreVariantRow { get; init; } = null!;
 		public OptionButton IgnoreVariantSelect { get; init; } = null!;
 		public Control AutoActionVariantRow { get; init; } = null!;
@@ -4880,6 +4968,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 		public Control SpecificCardRow { get; init; } = null!;
 		public LineEdit SpecificCardIdField { get; init; } = null!;
+		public Button? SpecificCardPickButton { get; init; }
 		public OptionButton SpecificCardUpgradeSelect { get; init; } = null!;
 		public KeywordTickbox SpecificCardFullTextTickbox { get; init; } = null!;
 		public OptionButton ChooseOneExecutionSelect { get; init; } = null!;
@@ -5024,6 +5113,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 		public Control GrantedKeywordRow { get; init; } = null!;
 		public OptionButton GrantedKeywordSelect { get; init; } = null!;
+		public KeywordTickbox? GrantedKeywordRemoveTickbox { get; init; }
 
 		public Control MultiplyStatRow { get; init; } = null!;
 		public OptionButton MultiplyStatSelect { get; init; } = null!;
@@ -5141,6 +5231,12 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public List<ExtraEffectRow> Rows { get; init; } = new();
 		public string CardIdText { get; init; } = string.Empty;
 		public bool IsUpgradeEditor { get; init; }
+		// Preservation state captured alongside the rows: without it, re-attaching cached rows would
+		// save with an empty stash and delete the unrepresentable (keyword-carrying) stored effects.
+		public List<UnrepresentedBaseEffect> UnrepresentedBaseEffects { get; init; } = new();
+		public List<CardExtraEffect> UnrepresentedUpgradeEffects { get; init; } = new();
+		public HashSet<string> SeenKeywordGroups { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> RowKeywordGroups { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 	}
 
 	private sealed class CardSmithRow
@@ -9811,7 +9907,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	{
 		return CardEditorLoc.T(
 			"tooltip.liveNumberTokens",
-			"Live numbers: use {{n1}}, {{n2}} for generated numbers, or {{l2n1}} for line 2 number 1.\n[[green]]text[[/green]] shows green only in upgrade previews (like vanilla upgrade text).");
+			"Live numbers: use {{n1}}, {{n2}} for generated numbers, or {{l2n1}} for line 2 number 1.\n{{=50}} keeps 50 as literal text (never auto-linked to an effect value).\n[[green]]text[[/green]] shows green only in upgrade previews (like vanilla upgrade text).");
 	}
 
 	private Button CreateLiveNumberLinkButton(Action onPressed, bool visible)
@@ -12128,6 +12224,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		_pendingExistingExtraEffectRowBuilt = 0;
 		_existingExtraEffectHydrating = false;
 		_existingExtraEffectHydrationScheduled = false;
+		_unrepresentedBaseEffects.Clear();
+		_unrepresentedUpgradeEffects.Clear();
+		_hydrationSeenKeywordGroups.Clear();
+		_hydrationRowKeywordGroups.Clear();
 		ClearExistingExtraEffectLoadingLabels();
 
 		CardOverride? effectiveBase = GetEffectivePopupOverride();
@@ -12166,7 +12266,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				{
 					foreach (CardExtraEffect upgradeEffect in absoluteUpgradeEffects)
 					{
-						QueueExistingExtraEffectRowForHydration(upgradeEffect);
+						if (!QueueExistingExtraEffectRowForHydration(upgradeEffect) && upgradeEffect != null)
+						{
+							_unrepresentedUpgradeEffects.Add(CardEditorExtraEffects.CloneEffect(upgradeEffect));
+						}
 					}
 				}
 			}
@@ -12175,9 +12278,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				foreach (CardExtraEffect? effect in upgradeEffects)
 				{
 					CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
-					if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
+					bool queued = normalizedEffect != null
+						&& CardEditorExtraEffects.IsPersistableEffect(normalizedEffect)
+						&& QueueExistingExtraEffectRowForHydration(normalizedEffect);
+					if (!queued && effect != null)
 					{
-						QueueExistingExtraEffectRowForHydration(normalizedEffect);
+						_unrepresentedUpgradeEffects.Add(CardEditorExtraEffects.CloneEffect(effect));
 					}
 				}
 			}
@@ -12192,12 +12298,31 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 			if (baseEffects != null && baseEffects.Count > 0)
 			{
-				foreach (CardExtraEffect effect in baseEffects)
+				for (int storedIndex = 0; storedIndex < baseEffects.Count; storedIndex++)
 				{
-					CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
-					if (normalizedEffect != null && CardEditorExtraEffects.IsValidEffectAmount(normalizedEffect.Kind, normalizedEffect.Amount))
+					CardExtraEffect effect = baseEffects[storedIndex];
+					if (effect != null && !string.IsNullOrWhiteSpace(effect.CustomKeywordName))
 					{
-						QueueExistingExtraEffectRowForHydration(normalizedEffect);
+						_hydrationSeenKeywordGroups.Add(effect.CustomKeywordName.Trim());
+					}
+
+					CardExtraEffect? normalizedEffect = CardEditorExtraEffects.NormalizeSignedEffectAmount(effect);
+					bool queued = normalizedEffect != null
+						&& CardEditorExtraEffects.IsPersistableEffect(normalizedEffect)
+						&& QueueExistingExtraEffectRowForHydration(normalizedEffect);
+					if (queued && effect != null && !string.IsNullOrWhiteSpace(effect.CustomKeywordName))
+					{
+						_hydrationRowKeywordGroups.Add(effect.CustomKeywordName.Trim());
+					}
+					if (!queued && effect != null)
+					{
+						// The UI cannot represent this stored effect as a row; carry it through the
+						// next Apply untouched instead of silently deleting it.
+						_unrepresentedBaseEffects.Add(new UnrepresentedBaseEffect
+						{
+							StoredIndex = storedIndex,
+							Effect = CardEditorExtraEffects.CloneEffect(effect)
+						});
 					}
 				}
 			}
@@ -12226,17 +12351,125 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		EnsurePendingExistingExtraEffectRowsHydrationScheduled();
 	}
 
-	private void QueueExistingExtraEffectRowForHydration(CardExtraEffect effect, bool isUpgradeDeltaRow = false)
+	// A stored effect the editor UI could not represent as a row, remembered together with its
+	// original position in the stored ExtraEffects list. Reinserting at the original index (instead
+	// of tail-appending) keeps the base effect ORDER stable, which the upgrade system relies on:
+	// Upgrade.ExtraEffects slot deltas pair positionally with base effects during rebasing, and a
+	// reordered preview draft would swap upgrade deltas onto the wrong base effects.
+	private sealed class UnrepresentedBaseEffect
+	{
+		public required int StoredIndex { get; init; }
+		public required CardExtraEffect Effect { get; init; }
+	}
+
+	// Re-appends stored effects the UI never showed, so an Apply cannot silently delete them:
+	// (1) effects that failed a hydration filter (no row was ever created for them), and
+	// (2) keyword groups added to the stored override EXTERNALLY after this popup hydrated its rows
+	//     (stale cached popup) - groups the user saw and deleted stay deleted.
+	// Suppressed while the popup's rows temporarily host DEFINITION behavior rows or a batch template
+	// build: preservation is scoped to this card's override, not to other effect lists.
+	private void AppendPreservedBaseEffects(List<CardExtraEffect> effects)
+	{
+		if (_suppressPreservedBaseEffects)
+		{
+			return;
+		}
+
+		CardOverride? storedNow = CardEditorOverrides.Get(_cardId);
+
+		// Keyword groups represented by the row-built list, BEFORE preservation - used to detect
+		// "the user deleted this group's visible rows" below.
+		HashSet<string> rowGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (CardExtraEffect rowEffect in effects)
+		{
+			if (rowEffect != null && !string.IsNullOrWhiteSpace(rowEffect.CustomKeywordName))
+			{
+				rowGroups.Add(rowEffect.CustomKeywordName.Trim());
+			}
+		}
+
+		foreach (UnrepresentedBaseEffect preserved in _unrepresentedBaseEffects.OrderBy(p => p.StoredIndex))
+		{
+			CardExtraEffect effect = preserved.Effect;
+			string? keyword = effect.CustomKeywordName?.Trim();
+			if (!string.IsNullOrWhiteSpace(keyword)
+				&& _hydrationRowKeywordGroups.Contains(keyword)
+				&& !rowGroups.Contains(keyword))
+			{
+				// The group had visible rows at hydration and the user deleted them all - honor the
+				// deletion for the invisible remnant too instead of keeping the keyword half-alive.
+				continue;
+			}
+
+			if (!string.IsNullOrWhiteSpace(effect.EffectId)
+				&& storedNow?.ExtraEffects != null
+				&& !storedNow.ExtraEffects.Any(e => e != null && string.Equals(e.EffectId, effect.EffectId, StringComparison.Ordinal)))
+			{
+				// Deleted from the stored override externally (preset load / multiplayer sync) after
+				// this popup hydrated - do not resurrect it.
+				continue;
+			}
+
+			effects.Insert(Math.Min(Math.Max(preserved.StoredIndex, 0), effects.Count), CardEditorExtraEffects.CloneEffect(effect));
+		}
+
+		if (storedNow?.ExtraEffects == null)
+		{
+			return;
+		}
+
+		// Snapshot the groups already covered by the outgoing list BEFORE preserving, so every effect
+		// of an externally-added keyword group is carried over (not just the first one).
+		HashSet<string> groupsAlreadyPresent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (CardExtraEffect existing in effects)
+		{
+			if (existing != null && !string.IsNullOrWhiteSpace(existing.CustomKeywordName))
+			{
+				groupsAlreadyPresent.Add(existing.CustomKeywordName.Trim());
+			}
+		}
+
+		foreach (CardExtraEffect stored in storedNow.ExtraEffects)
+		{
+			string? keyword = stored?.CustomKeywordName?.Trim();
+			if (string.IsNullOrWhiteSpace(keyword)
+				|| _hydrationSeenKeywordGroups.Contains(keyword)
+				|| groupsAlreadyPresent.Contains(keyword))
+			{
+				continue;
+			}
+
+			effects.Add(CardEditorExtraEffects.CloneEffect(stored!));
+		}
+	}
+
+	// Stored effects the editor UI could not represent as rows (failed a hydration filter). They are
+	// re-appended on save so an Apply never silently deletes them - custom keywords live on such
+	// effects (CustomKeywordName), and losing them was the "editing a card removes its modded
+	// keywords" bug. Deliberate row deletion is unaffected: these effects never had a row to delete.
+	private readonly List<UnrepresentedBaseEffect> _unrepresentedBaseEffects = new List<UnrepresentedBaseEffect>();
+	// Keyword groups that had at least one VISIBLE row at hydration (subset of the seen set).
+	private readonly HashSet<string> _hydrationRowKeywordGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	// True while _extraEffectRows temporarily hosts rows that do NOT belong to this card's override
+	// (definition-behavior editing, batch template build) - preservation must not fire there.
+	private bool _suppressPreservedBaseEffects;
+	private readonly List<CardExtraEffect> _unrepresentedUpgradeEffects = new List<CardExtraEffect>();
+	// Every keyword group name present in the stored base effects when this popup hydrated its rows.
+	// Used at save time to preserve keyword effects added EXTERNALLY after hydration (stale cached
+	// popup), while keyword groups the user saw and deleted stay deleted.
+	private readonly HashSet<string> _hydrationSeenKeywordGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+	private bool QueueExistingExtraEffectRowForHydration(CardExtraEffect effect, bool isUpgradeDeltaRow = false)
 	{
 		if (effect == null)
 		{
-			return;
+			return false;
 		}
 
 		CardExtraEffect? normalizedMergedTransform = CardEditorExtraEffects.NormalizeLegacyDynamicTransformEffect(effect);
 		if (normalizedMergedTransform == null)
 		{
-			return;
+			return false;
 		}
 
 		CardExtraEffect pendingEffect = CardEditorExtraEffects.CloneEffect(normalizedMergedTransform);
@@ -12255,6 +12488,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			PlaceholderPanel = placeholderPanel
 		});
 		_pendingExistingExtraEffectRowTotal++;
+		return true;
 	}
 
 	private Control? CreatePendingExtraEffectPlaceholderPanel(CardExtraEffect effect, bool isUpgradeDeltaRow)
@@ -13923,7 +14157,32 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			QueuePreviewUpdate();
 		};
 
+		Button smithBrowseKindButton = new Button
+		{
+			Text = CardEditorLoc.T("button.browseEffects", "Browse"),
+			CustomMinimumSize = new Vector2(0, _fieldMinSize.Y),
+			TooltipText = CardEditorLoc.T("tooltip.browseEffects", "Browse every effect by category, with search.")
+		};
+		StyleInput(smithBrowseKindButton);
+		smithBrowseKindButton.Pressed += () =>
+		{
+			List<(string Label, string Category, string Hint)> browseOptions = new List<(string Label, string Category, string Hint)>(allowedDefinitions.Count);
+			for (int optionIndex = 0; optionIndex < allowedDefinitions.Count && optionIndex < kindSelect.ItemCount; optionIndex++)
+			{
+				browseOptions.Add((kindSelect.GetItemText(optionIndex), CardEditorExtraEffects.GetEffectKindCategory(allowedDefinitions[optionIndex].Kind), BuildEffectKindHint(allowedDefinitions[optionIndex])));
+			}
+			OpenEffectKindPicker(browseOptions, kindSelect.Selected, pickedIndex =>
+			{
+				if (pickedIndex >= 0 && pickedIndex < kindSelect.ItemCount && pickedIndex != kindSelect.Selected)
+				{
+					kindSelect.Select(pickedIndex);
+					kindSelect.EmitSignal(OptionButton.SignalName.ItemSelected, (long)pickedIndex);
+				}
+			});
+		};
+
 		rowTop.AddChild(kindSelect);
+		rowTop.AddChild(smithBrowseKindButton);
 		rowTop.AddChild(spinButtons);
 		rowTop.AddChild(amountField);
 		rowTop.AddChild(amountXTickbox);
@@ -17045,8 +17304,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		grantedKeywordSelect.Select(grantedKeywordIdx);
 		grantedKeywordSelect.ItemSelected += _ => QueuePreviewUpdate();
 
+		Control grantedKeywordRemoveVisuals = InstantiateTickboxVisuals();
+		Label grantedKeywordRemoveLabel = new Label { Text = CardEditorLoc.T("grantedKeyword.removeMode", "Remove instead") };
+		StyleBodyLabel(grantedKeywordRemoveLabel);
+		KeywordTickbox grantedKeywordRemoveTickbox = new KeywordTickbox(grantedKeywordRemoveVisuals, grantedKeywordRemoveLabel, effect?.GrantedKeywordRemove == true)
+		{
+			TooltipText = CardEditorLoc.T("tooltip.grantedKeywordRemove", "Remove the keyword from the selected cards instead of granting it. Removal lasts the rest of the combat, so the grant duration does not apply.")
+		};
+		grantedKeywordRemoveTickbox.Toggled += () => QueuePreviewUpdate();
+
 		grantedKeywordRow.AddChild(grantedKeywordLabel);
 		grantedKeywordRow.AddChild(grantedKeywordSelect);
+		grantedKeywordRow.AddChild(grantedKeywordRemoveTickbox);
 		grantedKeywordRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
 
 		HBoxContainer ignoreVariantRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Visible = false };
@@ -20593,6 +20862,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			UnifiedEffectVariantSelect = unifiedEffectVariantSelect,
 			KeywordGroupRow = keywordGroupRow,
 			KeywordGroupField = keywordGroupField,
+			HydratedCustomKeywordName = string.IsNullOrWhiteSpace(effect?.CustomKeywordName) ? null : effect!.CustomKeywordName.Trim(),
 			IgnoreVariantRow = ignoreVariantRow,
 			IgnoreVariantSelect = ignoreVariantSelect,
 			CardActionVariantRow = cardActionVariantRow,
@@ -20611,6 +20881,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			StatefulTransformDurationField = statefulTransformDurationField,
 			SpecificCardRow = specificCardRow,
 			SpecificCardIdField = specificCardIdField,
+			SpecificCardPickButton = pickSpecificCardButton,
 			SpecificCardUpgradeSelect = specificCardUpgradeSelect,
 			SpecificCardFullTextTickbox = specificCardFullTextTickbox,
 			ChooseOneExecutionSelect = chooseOneExecutionSelect,
@@ -20679,6 +20950,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CreatureCommandSelect = creatureCommandSelect,
 			GrantedKeywordRow = grantedKeywordRow,
 			GrantedKeywordSelect = grantedKeywordSelect,
+			GrantedKeywordRemoveTickbox = grantedKeywordRemoveTickbox,
 			MultiplyStatRow = multiplyStatRow,
 			MultiplyStatSelect = multiplyStatSelect,
 			ConditionalBonusRow = conditionalBonusRow,
@@ -21703,7 +21975,33 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		repeatRow.CustomMinimumSize = new Vector2(0, _fieldMinSize.Y);
 		grantCountRow.CustomMinimumSize = new Vector2(0, _fieldMinSize.Y);
 
+		Button browseKindButton = new Button
+		{
+			Text = CardEditorLoc.T("button.browseEffects", "Browse"),
+			CustomMinimumSize = new Vector2(0, _fieldMinSize.Y),
+			TooltipText = CardEditorLoc.T("tooltip.browseEffects", "Browse every effect by category, with search.")
+		};
+		StyleInput(browseKindButton);
+		browseKindButton.Pressed += () =>
+		{
+			List<(string Label, string Category, string Hint)> browseOptions = new List<(string Label, string Category, string Hint)>(kindDefinitionIndices.Count);
+			for (int optionIndex = 0; optionIndex < kindDefinitionIndices.Count && optionIndex < kindSelect.ItemCount; optionIndex++)
+			{
+				CardExtraEffectDefinition optionDef = CardEditorExtraEffects.Definitions[kindDefinitionIndices[optionIndex]];
+				browseOptions.Add((kindSelect.GetItemText(optionIndex), CardEditorExtraEffects.GetEffectKindCategory(optionDef.Kind), BuildEffectKindHint(optionDef)));
+			}
+			OpenEffectKindPicker(browseOptions, kindSelect.Selected, pickedIndex =>
+			{
+				if (pickedIndex >= 0 && pickedIndex < kindSelect.ItemCount && pickedIndex != kindSelect.Selected)
+				{
+					kindSelect.Select(pickedIndex);
+					kindSelect.EmitSignal(OptionButton.SignalName.ItemSelected, (long)pickedIndex);
+				}
+			});
+		};
+
 		rowTop.AddChild(kindSelect);
+		rowTop.AddChild(browseKindButton);
 		rowTop.AddChild(amountSlotControl);
 		rowTop.AddChild(repeatRow);
 		rowTop.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
@@ -22633,6 +22931,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			or CardExtraEffectKind.StatefulTransform
 			or CardExtraEffectKind.CountdownEffect
 			or CardExtraEffectKind.CopyDebuffs
+			or CardExtraEffectKind.CopyBuffs
 			or CardExtraEffectKind.CleanseDebuffs
 			or CardExtraEffectKind.CleanseBuffs
 			or CardExtraEffectKind.DoesNotConsumeVigor
@@ -25271,11 +25570,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			row.StatefulTransformRow.Visible = isStatefulTransform;
 			UpdateExtraEffectStatefulTransformDurationEnabled(row);
 		}
-		row.SpecificCardRow.Visible = isSpecificCard;
-		bool showSpecificCardUpgrade = isStatefulTransform || transformIntoSpecific || isGeneratedEffect || kind == CardExtraEffectKind.PlayRandomGeneratedCard || isLinkedCardAction;
+		// Random transforms can also choose whether the rolled replacement arrives upgraded (bug
+		// list #8); the dropdown lives inside the specific-card row, so show that row with the
+		// id-entry controls hidden when the transform target is random.
+		bool randomTransformUpgradeOnly = isTransformCards && !transformIntoSpecific;
+		row.SpecificCardRow.Visible = isSpecificCard || randomTransformUpgradeOnly;
+		bool showSpecificCardUpgrade = isStatefulTransform || transformIntoSpecific || isGeneratedEffect || kind == CardExtraEffectKind.PlayRandomGeneratedCard || isLinkedCardAction || randomTransformUpgradeOnly;
 		if (row.SpecificCardUpgradeSelect != null && GodotObject.IsInstanceValid(row.SpecificCardUpgradeSelect))
 		{
 			row.SpecificCardUpgradeSelect.Visible = showSpecificCardUpgrade;
+		}
+		bool showSpecificCardIdControls = isSpecificCard || !randomTransformUpgradeOnly;
+		if (row.SpecificCardIdField != null && GodotObject.IsInstanceValid(row.SpecificCardIdField))
+		{
+			row.SpecificCardIdField.Visible = showSpecificCardIdControls;
+		}
+		if (row.SpecificCardPickButton != null && GodotObject.IsInstanceValid(row.SpecificCardPickButton))
+		{
+			row.SpecificCardPickButton.Visible = showSpecificCardIdControls;
+		}
+		if (row.SpecificCardFullTextTickbox != null && GodotObject.IsInstanceValid(row.SpecificCardFullTextTickbox))
+		{
+			row.SpecificCardFullTextTickbox.Visible = showSpecificCardIdControls;
 		}
 		if (row.SpecificCardRow != null && GodotObject.IsInstanceValid(row.SpecificCardRow))
 		{
@@ -25287,7 +25603,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						? CardEditorLoc.T("row.linkedCardActionTarget", "Linked Card")
 					: isStatefulTransform
 							? CardEditorLoc.T("row.statefulTransformCard", "Transform Into")
-							: CardEditorLoc.T("cardMatch.cardId", "Card Id");
+							: randomTransformUpgradeOnly
+								? CardEditorLoc.T("row.transformedCardUpgrade", "Transformed Card")
+								: CardEditorLoc.T("cardMatch.cardId", "Card Id");
 			string specificCardTooltip = isScalingStage
 				? CardEditorLoc.T("tooltip.scalingStageEffect", "Pick the effect-source card that should run when this stage condition passes.")
 				: isHoverPreview
@@ -31003,9 +31321,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void QueuePreviewRefresh()
 	{
-		// Embedded effect-list hosts (e.g. the relic editor) have no card preview to refresh.
+		// Embedded effect-list hosts (e.g. the relic editor) have no card preview of their own to refresh,
+		// but they DO need to notify their owner so it can live-rebuild its description from the effects.
 		if (_isEmbeddedEffectHost)
 		{
+			EmbeddedEffectsChanged?.Invoke();
 			return;
 		}
 		if (_previewUpdateQueued)
@@ -32926,7 +33246,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 							&& row.MatchCardIdFullTextTickbox.IsTicked))
 							? CardExtraEffectCardReferenceDisplayMode.FullText
 							: CardExtraEffectCardReferenceDisplayMode.NameOnly,
-					SpecificCardUpgradeMode = isStatefulTransform || (resolvedKind == CardExtraEffectKind.TransformCards && transformMode == CardExtraEffectTransformMode.SpecificCard) || usesGeneratedUpgradeMode
+					SpecificCardUpgradeMode = isStatefulTransform || resolvedKind == CardExtraEffectKind.TransformCards || usesGeneratedUpgradeMode
 						? GetSelectedSpecificCardUpgradeMode(row)
 						: CardExtraEffectSpecificCardUpgradeMode.MatchSource,
 					ResourceConsumptionMode = row.ResourceConsumptionRow != null
@@ -33017,6 +33337,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					OstyAction = resolvedKind == CardExtraEffectKind.OstyAction ? GetSelectedOstyAction(row) : default,
 					CreatureCommandId = resolvedKind == CardExtraEffectKind.CreatureCommand ? GetSelectedCreatureCommandId(row) : null,
 					GrantedKeyword = resolvedKind == CardExtraEffectKind.GrantKeywordToPile ? GetSelectedGrantedKeyword(row) : default,
+					GrantedKeywordRemove = resolvedKind == CardExtraEffectKind.GrantKeywordToPile
+						&& row.GrantedKeywordRemoveTickbox != null
+						&& GodotObject.IsInstanceValid(row.GrantedKeywordRemoveTickbox)
+						&& row.GrantedKeywordRemoveTickbox.IsTicked,
 					CardMatchMode = GetSelectedCardMatchMode(row),
 					MatchCardId = row.MatchCardIdField != null && GodotObject.IsInstanceValid(row.MatchCardIdField)
 						? (string.IsNullOrWhiteSpace(row.MatchCardIdField.Text) ? null : row.MatchCardIdField.Text.Trim())
@@ -33027,7 +33351,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					MatchCustomKeyword = GetSelectedMatchCustomKeyword(row),
 					CustomKeywordName = row.KeywordGroupField != null && GodotObject.IsInstanceValid(row.KeywordGroupField)
 						? (string.IsNullOrWhiteSpace(row.KeywordGroupField.Text) ? null : row.KeywordGroupField.Text.Trim())
-						: null,
+						: row.HydratedCustomKeywordName,
 					SelfScalingOperation = GetSelectedSelfScalingOperation(row),
 					SelfScalingTargetType = GetSelectedSelfScalingTargetType(row),
 					SelfScalingField = GetSelectedSelfScalingField(row),
@@ -33052,9 +33376,22 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				};
 				effects.Add(CardEditorExtraEffects.NormalizeSignedEffectAmount(builtEffect) ?? builtEffect);
 			}
+			if (!_isUpgradeEditor)
+			{
+				AppendPreservedBaseEffects(effects);
+			}
 			if (effects.Any(e => e != null))
 			{
 				overrideData.ExtraEffects = effects;
+			}
+		}
+		else if (!_isUpgradeEditor)
+		{
+			List<CardExtraEffect> preservedOnly = new List<CardExtraEffect>();
+			AppendPreservedBaseEffects(preservedOnly);
+			if (preservedOnly.Count > 0)
+			{
+				overrideData.ExtraEffects = preservedOnly;
 			}
 		}
 
@@ -34383,7 +34720,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 							&& row.MatchCardIdFullTextTickbox.IsTicked))
 							? CardExtraEffectCardReferenceDisplayMode.FullText
 							: CardExtraEffectCardReferenceDisplayMode.NameOnly,
-					SpecificCardUpgradeMode = isStatefulTransform || (resolvedKind == CardExtraEffectKind.TransformCards && transformMode == CardExtraEffectTransformMode.SpecificCard) || usesGeneratedUpgradeMode
+					SpecificCardUpgradeMode = isStatefulTransform || resolvedKind == CardExtraEffectKind.TransformCards || usesGeneratedUpgradeMode
 						? GetSelectedSpecificCardUpgradeMode(row)
 						: CardExtraEffectSpecificCardUpgradeMode.MatchSource,
 					ResourceConsumptionMode = row.ResourceConsumptionRow != null
@@ -34474,6 +34811,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					OstyAction = resolvedKind == CardExtraEffectKind.OstyAction ? GetSelectedOstyAction(row) : default,
 					CreatureCommandId = resolvedKind == CardExtraEffectKind.CreatureCommand ? GetSelectedCreatureCommandId(row) : null,
 					GrantedKeyword = resolvedKind == CardExtraEffectKind.GrantKeywordToPile ? GetSelectedGrantedKeyword(row) : default,
+					GrantedKeywordRemove = resolvedKind == CardExtraEffectKind.GrantKeywordToPile
+						&& row.GrantedKeywordRemoveTickbox != null
+						&& GodotObject.IsInstanceValid(row.GrantedKeywordRemoveTickbox)
+						&& row.GrantedKeywordRemoveTickbox.IsTicked,
 					CardMatchMode = GetSelectedCardMatchMode(row),
 					MatchCardId = row.MatchCardIdField != null && GodotObject.IsInstanceValid(row.MatchCardIdField)
 						? (string.IsNullOrWhiteSpace(row.MatchCardIdField.Text) ? null : row.MatchCardIdField.Text.Trim())
@@ -34484,7 +34825,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					MatchCustomKeyword = GetSelectedMatchCustomKeyword(row),
 					CustomKeywordName = row.KeywordGroupField != null && GodotObject.IsInstanceValid(row.KeywordGroupField)
 						? (string.IsNullOrWhiteSpace(row.KeywordGroupField.Text) ? null : row.KeywordGroupField.Text.Trim())
-						: null,
+						: row.HydratedCustomKeywordName,
 					SelfScalingOperation = GetSelectedSelfScalingOperation(row),
 					SelfScalingTargetType = GetSelectedSelfScalingTargetType(row),
 					SelfScalingField = GetSelectedSelfScalingField(row),
@@ -34550,6 +34891,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 				effects.Add(upgradeEffect);
 			}
+			if (_unrepresentedUpgradeEffects.Count > 0)
+			{
+				// Absolute upgrade effects the editor could not represent as rows ride along instead
+				// of being deleted (they may carry custom keywords). Entries beyond the base slot
+				// count are treated as absolute by the alignment/rebase helpers.
+				foreach (CardExtraEffect preserved in _unrepresentedUpgradeEffects)
+				{
+					effects.Add(CardEditorExtraEffects.CloneEffect(preserved));
+				}
+			}
 			if (effects.Any(e => e != null))
 			{
 				upgrade.ExtraEffectNumericFieldsAreDeltas = true;
@@ -34560,6 +34911,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				_cardId.ToString(),
 				upgrade,
 				baseExtraEffects);
+		}
+		else if (_unrepresentedUpgradeEffects.Count > 0)
+		{
+			// No rows at all, but hydration stashed unrepresentable stored upgrade effects - they must
+			// still ride along (mirrors the base builder's no-rows preservation branch).
+			upgrade.ExtraEffectNumericFieldsAreDeltas = true;
+			upgrade.ExtraEffects = _unrepresentedUpgradeEffects.Select(CardEditorExtraEffects.CloneEffect).ToList();
 		}
 
 		return upgrade;
@@ -34907,6 +35265,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				CardEditorOverrides.Set(_cardId, overrideData);
 			}
+
+			// This popup instance stays alive as the fresh cache entry after Apply. Mark every keyword
+			// group just written as seen, so deleting it later through this same popup cannot be
+			// undone by the external-add guard in AppendPreservedBaseEffects.
+			if (overrideData.ExtraEffects != null)
+			{
+				foreach (CardExtraEffect appliedEffect in overrideData.ExtraEffects)
+				{
+					if (appliedEffect != null && !string.IsNullOrWhiteSpace(appliedEffect.CustomKeywordName))
+					{
+						_hydrationSeenKeywordGroups.Add(appliedEffect.CustomKeywordName.Trim());
+					}
+				}
+			}
 		}
 
 		if (_isCreatedCard)
@@ -34956,7 +35328,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void ApplyBatchExtraEffects()
 	{
-		CardOverride batchDraft = BuildOverrideFromUi();
+		// The template list must carry only ROW-derived effects: each target card's own preservation
+		// happens in the per-target merge below, and letting the popup card's stash ride along here
+		// would inject it into every batch card and duplicate it on the popup card itself.
+		CardOverride batchDraft;
+		bool previousSuppressPreserved = _suppressPreservedBaseEffects;
+		_suppressPreservedBaseEffects = true;
+		try
+		{
+			batchDraft = BuildOverrideFromUi();
+		}
+		finally
+		{
+			_suppressPreservedBaseEffects = previousSuppressPreserved;
+		}
 		List<CardExtraEffect>? editedEffects = batchDraft.ExtraEffects?
 			.Select(CardEditorExtraEffects.CloneEffect)
 			.ToList();
@@ -34988,9 +35373,32 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				.ToList();
 			CardUpgradeOverride? existingUpgrade = CloneUpgradeOverride(overrideData.Upgrade);
 
-			overrideData.ExtraEffects = editedEffects != null && editedEffects.Count > 0
+			List<CardExtraEffect> mergedBatchEffects = editedEffects != null && editedEffects.Count > 0
 				? editedEffects.Select(CardEditorExtraEffects.CloneEffect).ToList()
-				: null;
+				: new List<CardExtraEffect>();
+			// Same preservation rule as the single-card Apply: stored effects the editor UI cannot
+			// represent as rows (they often carry custom keywords) must survive a batch apply too.
+			if (existingBaseEffects != null)
+			{
+				foreach (CardExtraEffect existing in existingBaseEffects)
+				{
+					if (existing == null)
+					{
+						continue;
+					}
+					CardExtraEffect? normalized = CardEditorExtraEffects.NormalizeSignedEffectAmount(existing);
+					if (normalized == null || !CardEditorExtraEffects.IsPersistableEffect(normalized))
+					{
+						bool alreadyPresent = !string.IsNullOrWhiteSpace(existing.EffectId)
+							&& mergedBatchEffects.Any(e => e != null && string.Equals(e.EffectId, existing.EffectId, StringComparison.Ordinal));
+						if (!alreadyPresent)
+						{
+							mergedBatchEffects.Add(CardEditorExtraEffects.CloneEffect(existing));
+						}
+					}
+				}
+			}
+			overrideData.ExtraEffects = mergedBatchEffects.Count > 0 ? mergedBatchEffects : null;
 			overrideData.Keywords = new HashSet<CardKeyword>(desiredKeywords);
 
 			HashSet<CardTag> canonicalTags;
@@ -37264,7 +37672,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			|| (_keywordPickerOverlay != null && GodotObject.IsInstanceValid(_keywordPickerOverlay))
 			|| (_specificCardPickerOverlay != null && GodotObject.IsInstanceValid(_specificCardPickerOverlay))
 			|| (_specificPotionPickerOverlay != null && GodotObject.IsInstanceValid(_specificPotionPickerOverlay))
-			|| (_rewardPoolPickerOverlay != null && GodotObject.IsInstanceValid(_rewardPoolPickerOverlay));
+			|| (_rewardPoolPickerOverlay != null && GodotObject.IsInstanceValid(_rewardPoolPickerOverlay))
+			|| (_effectKindPickerOverlay != null && GodotObject.IsInstanceValid(_effectKindPickerOverlay));
 	}
 
 	private Control CreateDefinitionEditorOverlay(string nodeName, string titleText, out VBoxContainer root, out ColorRect backstop, out Button closeButton)
@@ -37789,10 +38198,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	{
 		bool previousSuppressPreviewUpdate = _suppressPreviewUpdate;
 		bool previousIsUpgradeEditor = _isUpgradeEditor;
+		bool previousSuppressPreserved = _suppressPreservedBaseEffects;
 		try
 		{
 			_suppressPreviewUpdate = true;
 			_isUpgradeEditor = false;
+			// The rows currently hold DEFINITION behavior rows, not this card's effects - the card's
+			// preservation stash/guard must not leak into the keyword/status definition being built.
+			_suppressPreservedBaseEffects = true;
 			CardOverride draft = BuildOverrideFromUi();
 			return (draft.ExtraEffects ?? new List<CardExtraEffect>())
 				.Where(effect => effect != null)
@@ -37803,7 +38216,356 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			_isUpgradeEditor = previousIsUpgradeEditor;
 			_suppressPreviewUpdate = previousSuppressPreviewUpdate;
+			_suppressPreservedBaseEffects = previousSuppressPreserved;
 		}
+	}
+
+	private Control? _effectKindPickerOverlay;
+
+	// Session-wide "Recently Used" picks shown at the top of the effect browser.
+	private static readonly List<string> _recentEffectPickLabels = new();
+
+	private static void RecordRecentEffectPick(string label)
+	{
+		if (string.IsNullOrWhiteSpace(label))
+		{
+			return;
+		}
+		_recentEffectPickLabels.Remove(label);
+		_recentEffectPickLabels.Insert(0, label);
+		if (_recentEffectPickLabels.Count > 8)
+		{
+			_recentEffectPickLabels.RemoveAt(_recentEffectPickLabels.Count - 1);
+		}
+	}
+
+	// Self-truthing one-line description for an effect kind: format the DEFAULT-configured effect
+	// through the real card-text pipeline (same call the consistency audit uses), so the hint can
+	// never drift from what the effect actually prints. Kinds that render no default text (pure
+	// rules/markers) simply show no hint.
+	private string BuildEffectKindHint(CardExtraEffectDefinition definition)
+	{
+		try
+		{
+			if (definition == null || _cardId == null || _cardId == ModelId.none)
+			{
+				return string.Empty;
+			}
+
+			CardModel? host = ModelDb.GetByIdOrNull<CardModel>(_cardId);
+			if (host == null)
+			{
+				return string.Empty;
+			}
+
+			CardExtraEffect sample = new CardExtraEffect
+			{
+				Kind = definition.Kind,
+				Target = definition.DefaultTarget,
+				Amount = definition.DefaultAmount,
+			};
+			if (!CardEditorExtraEffects.TryFormatLineForAudit(host, sample, out string? line) || string.IsNullOrWhiteSpace(line))
+			{
+				return string.Empty;
+			}
+
+			return StripMarkupForHint(line!);
+		}
+		catch
+		{
+			return string.Empty;
+		}
+	}
+
+	private static string StripMarkupForHint(string text)
+	{
+		if (string.IsNullOrEmpty(text))
+		{
+			return text;
+		}
+
+		System.Text.StringBuilder builder = new System.Text.StringBuilder(text.Length);
+		bool lastWasNumberPlaceholder = false;
+		for (int i = 0; i < text.Length;)
+		{
+			if (text[i] == '[')
+			{
+				// [img]res://...[/img] carries the resource PATH as inner text - drop the whole
+				// span, not just the tags, or hints leak raw res:// paths (user report).
+				if (i + 4 <= text.Length && string.Compare(text, i, "[img", 0, 4, StringComparison.OrdinalIgnoreCase) == 0)
+				{
+					int imgClose = text.IndexOf("[/img]", i, StringComparison.OrdinalIgnoreCase);
+					if (imgClose >= 0)
+					{
+						i = imgClose + "[/img]".Length;
+						continue;
+					}
+				}
+
+				int end = text.IndexOf(']', i);
+				if (end >= 0)
+				{
+					i = end + 1;
+					continue;
+				}
+			}
+
+			// The default-configured amounts are placeholders, not real values - show "X" so the
+			// hint reads "Summon X" instead of implying a fixed number (user report).
+			if (char.IsDigit(text[i]))
+			{
+				if (!lastWasNumberPlaceholder)
+				{
+					builder.Append('X');
+					lastWasNumberPlaceholder = true;
+				}
+				i++;
+				continue;
+			}
+
+			lastWasNumberPlaceholder = false;
+			builder.Append(text[i]);
+			i++;
+		}
+
+		return builder.ToString();
+	}
+
+	// Bug list #15: categorized, searchable effect browser. Presents the SAME option list as the
+	// row's kind dropdown (labels taken verbatim from it, so nothing is reachable in one that
+	// isn't in the other), grouped by category with live text filtering. Picking an entry drives
+	// the dropdown through its normal ItemSelected flow, so every existing row-reconfiguration
+	// path runs unchanged.
+	private void OpenEffectKindPicker(IReadOnlyList<(string Label, string Category, string Hint)> options, int currentIndex, Action<int> onPickedIndex)
+	{
+		EnsurePendingPopupHydrationCompleted();
+		if (onPickedIndex == null || options == null || options.Count == 0)
+		{
+			return;
+		}
+
+		if ((_effectKindPickerOverlay != null && GodotObject.IsInstanceValid(_effectKindPickerOverlay))
+			|| (_specificCardPickerOverlay != null && GodotObject.IsInstanceValid(_specificCardPickerOverlay))
+			|| (_keywordPickerOverlay != null && GodotObject.IsInstanceValid(_keywordPickerOverlay))
+			|| (_specificPotionPickerOverlay != null && GodotObject.IsInstanceValid(_specificPotionPickerOverlay)))
+		{
+			return;
+		}
+
+		Control overlay = new Control
+		{
+			Name = "EffectKindPickerOverlay",
+			MouseFilter = MouseFilterEnum.Stop,
+			ZIndex = IsDefinitionBehaviorEditorOpen() ? 340 : 250,
+			Visible = true
+		};
+		overlay.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+
+		ColorRect backstop = new ColorRect
+		{
+			Name = "Backstop",
+			Color = new Color(0, 0, 0, 0.85f),
+			MouseFilter = MouseFilterEnum.Stop
+		};
+		backstop.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+		overlay.AddChild(backstop);
+
+		PanelContainer panel = new PanelContainer { Name = "Panel", MouseFilter = MouseFilterEnum.Stop };
+		panel.AnchorLeft = 0.18f;
+		panel.AnchorTop = 0.05f;
+		panel.AnchorRight = 0.82f;
+		panel.AnchorBottom = 0.95f;
+		panel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+		{
+			BgColor = new Color(0.05f, 0.05f, 0.05f, 0.97f),
+			BorderWidthLeft = 2,
+			BorderWidthRight = 2,
+			BorderWidthTop = 2,
+			BorderWidthBottom = 2,
+			BorderColor = new Color(0.9f, 0.75f, 0.2f, 1f),
+			CornerRadiusTopLeft = 6,
+			CornerRadiusTopRight = 6,
+			CornerRadiusBottomLeft = 6,
+			CornerRadiusBottomRight = 6,
+			ContentMarginLeft = 16,
+			ContentMarginRight = 16,
+			ContentMarginTop = 16,
+			ContentMarginBottom = 16
+		});
+		overlay.AddChild(panel);
+
+		VBoxContainer root = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+		root.AddThemeConstantOverride("separation", 10);
+		panel.AddChild(root);
+
+		HBoxContainer headerRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		headerRow.AddThemeConstantOverride("separation", 10);
+		root.AddChild(headerRow);
+
+		Label title = new Label { Text = CardEditorLoc.T("ui.effectPicker.title", "Browse Effects") };
+		StyleSectionLabel(title);
+		title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		headerRow.AddChild(title);
+
+		Button closeButton = new Button
+		{
+			Text = CardEditorLoc.T("ui.close", "Close"),
+			CustomMinimumSize = new Vector2(120, _fieldMinSize.Y)
+		};
+		StyleInput(closeButton);
+		headerRow.AddChild(closeButton);
+
+		HBoxContainer searchRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		searchRow.AddThemeConstantOverride("separation", 10);
+		root.AddChild(searchRow);
+
+		Label searchLabel = new Label { Text = CardEditorLoc.T("ui.search", "Search") + ":" };
+		StyleBodyLabel(searchLabel);
+		searchLabel.CustomMinimumSize = new Vector2(120, 0);
+		searchRow.AddChild(searchLabel);
+
+		NMegaLineEdit searchField = new NMegaLineEdit { CustomMinimumSize = _fieldMinSize, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		searchField.PlaceholderText = CardEditorLoc.T("ui.effectPicker.placeholder", "Type to filter effects...");
+		StyleInput(searchField);
+		searchRow.AddChild(searchField);
+
+		Label resultsLabel = new Label { Text = string.Empty, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		StyleHintLabel(resultsLabel);
+		root.AddChild(resultsLabel);
+
+		ScrollContainer scroll = new ScrollContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+			HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled
+		};
+		VBoxContainer listRoot = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		listRoot.AddThemeConstantOverride("separation", 4);
+		scroll.AddChild(listRoot);
+		root.AddChild(scroll);
+
+		void ClosePicker()
+		{
+			if (_effectKindPickerOverlay != null && GodotObject.IsInstanceValid(_effectKindPickerOverlay))
+			{
+				_effectKindPickerOverlay.QueueFree();
+			}
+			_effectKindPickerOverlay = null;
+		}
+
+		Button BuildPickerItem(int index, string label, string hint)
+		{
+			string display = index == currentIndex ? "> " + label : label;
+			if (!string.IsNullOrWhiteSpace(hint))
+			{
+				string shortHint = hint.Length > 90 ? hint.Substring(0, 89) + "..." : hint;
+				display = display + "   -   " + shortHint;
+			}
+
+			Button item = new Button
+			{
+				Text = display,
+				TooltipText = hint,
+				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+				CustomMinimumSize = new Vector2(0, 40),
+				Alignment = HorizontalAlignment.Left,
+				ClipText = true
+			};
+			StyleInput(item);
+			int picked = index;
+			item.Pressed += () =>
+			{
+				RecordRecentEffectPick(label);
+				ClosePicker();
+				onPickedIndex(picked);
+			};
+			return item;
+		}
+
+		void RebuildList()
+		{
+			foreach (Node child in listRoot.GetChildren())
+			{
+				listRoot.RemoveChild(child);
+				child.QueueFree();
+			}
+
+			string query = (searchField.Text ?? string.Empty).Trim();
+			List<(int Index, string Label, string Category, string Hint)> visible = new List<(int, string, string, string)>(options.Count);
+			for (int i = 0; i < options.Count; i++)
+			{
+				(string label, string category, string hint) = options[i];
+				if (!string.IsNullOrWhiteSpace(query)
+					&& !label.Contains(query, StringComparison.OrdinalIgnoreCase)
+					&& !category.Contains(query, StringComparison.OrdinalIgnoreCase)
+					&& !hint.Contains(query, StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
+				visible.Add((i, label, category, hint));
+			}
+
+			resultsLabel.Text = visible.Count > 0
+				? CardEditorLoc.F("ui.effectPicker.results", $"{visible.Count.ToString(CultureInfo.InvariantCulture)} effects", ("Count", visible.Count))
+				: CardEditorLoc.T("ui.effectPicker.empty", "No matching effects.");
+
+			if (string.IsNullOrWhiteSpace(query) && _recentEffectPickLabels.Count > 0)
+			{
+				List<(int Index, string Label, string Category, string Hint)> recent = new List<(int, string, string, string)>();
+				foreach (string recentLabel in _recentEffectPickLabels)
+				{
+					foreach ((int Index, string Label, string Category, string Hint) entry in visible)
+					{
+						if (string.Equals(entry.Label, recentLabel, StringComparison.Ordinal))
+						{
+							recent.Add(entry);
+							break;
+						}
+					}
+				}
+
+				if (recent.Count > 0)
+				{
+					Label recentHeader = new Label { Text = CardEditorLoc.T("ui.effectPicker.recent", "Recently Used") };
+					StyleSectionLabel(recentHeader);
+					listRoot.AddChild(recentHeader);
+					foreach ((int index, string label, _, string hint) in recent)
+					{
+						listRoot.AddChild(BuildPickerItem(index, label, hint));
+					}
+				}
+			}
+
+			foreach (IGrouping<string, (int Index, string Label, string Category, string Hint)> group in visible
+				.GroupBy(entry => entry.Category, StringComparer.Ordinal)
+				.OrderBy(g => CardEditorLoc.T($"effectCategory.{g.Key}", g.Key), StringComparer.CurrentCultureIgnoreCase))
+			{
+				Label sectionHeader = new Label { Text = CardEditorLoc.T($"effectCategory.{group.Key}", group.Key) };
+				StyleSectionLabel(sectionHeader);
+				listRoot.AddChild(sectionHeader);
+
+				foreach ((int index, string label, _, string hint) in group)
+				{
+					listRoot.AddChild(BuildPickerItem(index, label, hint));
+				}
+			}
+		}
+
+		searchField.TextChanged += _ => RebuildList();
+		closeButton.Pressed += ClosePicker;
+		backstop.GuiInput += input =>
+		{
+			if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+			{
+				ClosePicker();
+				overlay.AcceptEvent();
+			}
+		};
+
+		RebuildList();
+		AddOverlayChild(overlay);
+		_effectKindPickerOverlay = overlay;
+		Callable.From(() => searchField.GrabFocus()).CallDeferred();
 	}
 
 	private void OpenSpecificCardPicker(Action<ModelId> onPicked)

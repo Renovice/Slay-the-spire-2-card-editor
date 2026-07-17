@@ -619,6 +619,37 @@ public static class CardEditorOverrides
 		ApplyOverride(card, overrideData);
 	}
 
+	// Encounter code can overwrite a card's DynamicVars AFTER creation already applied the user's
+	// override (Knowledge Demon sets Disintegration's escalating damage post-CreateCard), so the
+	// edit never shows. Re-asserts only the override's absolute var values on a live instance.
+	public static void ReassertDynamicVarBaseValues(CardModel? card)
+	{
+		if (card == null || !card.IsMutable || SuppressAllOverrides)
+		{
+			return;
+		}
+		if (!_overrides.TryGetValue(card.Id, out CardOverride overrideData)
+			|| overrideData.DynamicVarBaseValues == null
+			|| overrideData.DynamicVarBaseValues.Count == 0)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach ((string key, decimal value) in overrideData.DynamicVarBaseValues)
+			{
+				if (card.DynamicVars.TryGetValue(key, out var dynamicVar))
+				{
+					dynamicVar.BaseValue = value;
+				}
+			}
+		}
+		catch
+		{
+		}
+	}
+
 	private static void ApplyOverride(CardModel card, CardOverride overrideData)
 	{
 		CardEditorUpgradeDeltaDebugLog.LogCardState("Overrides.ApplyOverride.before", card, overrideData);
@@ -1303,10 +1334,65 @@ public static class CardEditorOverrides
 		}
 	}
 
+	// Bug list #14: manual "Refresh Live Cards". Rebuilds EVERY live card instance in the run
+	// (Player.Piles spans the run deck AND the in-combat hand/draw/discard/exhaust piles) from its
+	// canonical definition + effective override: full downgrade -> canonical -> override -> re-upgrade,
+	// runtime modifiers preserved, vanilla-parity vars re-derived, table visuals redrawn. Recovery
+	// tool for base/upgrade desyncs that previously needed a full game restart. Unlike
+	// ApplyAllToExistingCards this does not require any override to exist - created-card instances
+	// resync from their definitions too.
+	public static int RefreshAllLiveCardData()
+	{
+		RunState? runState = RunManager.Instance.DebugOnlyGetState();
+		if (runState == null)
+		{
+			return 0;
+		}
+
+		int refreshed = 0;
+		foreach (Player player in runState.Players)
+		{
+			foreach (var pile in player.Piles)
+			{
+				foreach (CardModel card in pile.Cards.ToList())
+				{
+					if (card == null)
+					{
+						continue;
+					}
+
+					try
+					{
+						ApplyToExistingCardInstance(card);
+						refreshed++;
+					}
+					catch
+					{
+						// one broken instance must not abort the sweep
+					}
+
+					try
+					{
+						CardEditorExtraEffects.RefreshCardVisuals(card);
+					}
+					catch
+					{
+						// a failed visual redraw must not abort the data resync
+					}
+				}
+			}
+		}
+
+		return refreshed;
+	}
+
 	private static void ApplyToExistingCardInstance(CardModel card)
 	{
 		RefreshCardAfterUpgradeStateChanged(card);
 		CardEditorRunSelfScalingState.TryRestoreCard(card, cardAlreadyRebased: true);
+		// Live created-card instances re-derive their vanilla-parity DynamicVars (Damage/Block
+		// mirrors for Thrash-style readers) from the changed definition on next access.
+		CardEditorExtraEffects.InvalidateVanillaParityVars(card);
 	}
 
 	internal static void RefreshCardAfterUpgradeStateChanged(CardModel card)

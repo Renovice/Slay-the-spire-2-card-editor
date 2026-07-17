@@ -234,6 +234,27 @@ internal static class CardEditorTemporaryExtraEffectController
 
 		foreach (ExtraEffectGrant grant in state.Grants)
 		{
+			if (grant?.Effect == null || grant.Duration != duration)
+			{
+				continue;
+			}
+
+			// Vanilla parity: an equivalent magnitude grant stacks its amount (Gain 1 Thorns twice
+			// = Gain 2 Thorns) instead of being ignored. grant.Effect is the same instance held by
+			// state.Effects, so the merged amount is immediately live.
+			if (CardEditorExtraEffects.TryStackDuplicateGrantedEffect(grant.Effect, stored))
+			{
+				if (remainingTurns > 0)
+				{
+					grant.RemainingTurns = Math.Max(grant.RemainingTurns, remainingTurns);
+				}
+				CardEditorMod.VerboseLog($"[CardEditor][TempEffectGrant] stacked card={card.Id} key={key?.Id} kind={stored.Kind} added={stored.Amount} total={grant.Effect.Amount} duration={duration}");
+				return;
+			}
+		}
+
+		foreach (ExtraEffectGrant grant in state.Grants)
+		{
 			if (grant?.Effect == null || !CardEditorExtraEffects.IsDuplicateGrantedEffect(grant.Effect, stored))
 			{
 				continue;

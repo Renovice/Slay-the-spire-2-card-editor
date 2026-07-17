@@ -369,9 +369,9 @@ internal sealed class CardEditorPowerDurationTrackerPower : PowerModel
 			return;
 		}
 
-		if (active is ITemporaryPower temporaryPower)
+		if (active is ITemporaryPower)
 		{
-			temporaryPower.IgnoreNextInstance();
+			CardEditorTemporaryPowerCompat.IgnoreNextInternalApplication(active);
 		}
 
 		if (entry.AmountDelta > 0 && active.Amount <= entry.AmountDelta)

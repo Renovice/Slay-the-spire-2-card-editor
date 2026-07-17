@@ -103,7 +103,7 @@ internal static class CardEditorCombatStateCompat
 		return (HookPlayerChoiceContext)ctor.Invoke(new object[] { owner, netId, gameActionType });
 	}
 
-	internal static IEnumerable<AbstractModel> IterateHookListenersCompat(this IRunState? runState, CombatState? combatState)
+	internal static IEnumerable<AbstractModel> IterateHookListenersCompat(this IRunState? runState, ICombatState? combatState)
 	{
 		if (runState == null)
 		{
