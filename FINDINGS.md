@@ -1,3 +1,16 @@
+## 2026-07-17 - Card Engine rework: 9-agent audit + design bake-off -> CARD_ENGINE_PLAN.md
+
+Hypothesis: universal effect composition requires reshaping the persisted model; rival: every composability wall is a hand-maintained list or UI lock over buses that already exist.
+Finding: Rival confirmed (verified at every layer by 3 independent auditors + 3 adversarial critics).
+Key audit facts (file:line evidence in the plan doc):
+- CardExtraEffect = 254-field flat record (78 kind-specific), 147 kinds, 115-case switch + ~25 executors; UI "unified groups" already hide ~90 kinds behind ~10 entries (proto-taxonomy, UI-only).
+- Text: 33 target-switches = 16 full (fixed today) + 13 partial ("equal to" family - one site :16053 feeds ~30 kinds) + ~9 fully target-blind resource formatters whose RUNTIME honors ally/player targets; root cause = ExpandMultiplayerTargets widens every dropdown unconditionally. Some kinds' runtime ignores Target entirely (GainMaxHp/Summon/Forge/Discard/Exhaust) - dropdown lies.
+- Composability: branches are ALREADY recursively persisted+synced+executed (UI-locked to helper cards only); generators publish selections the UI never offers; FetchSpecificCardToHand advertised as source but never publishes (bug); DrawCards can't consume; 37 kinds ungrantable; metrics DealDamage-only.
+Design bake-off: (1) registry+wall-removal ADOPTED for runtime; (2) full primitive-graph interpreter REJECTED (single-seam claim false - trigger layer is ~25 entry points; compile cache broken by in-place self-scaling mutation; green-diff needs field provenance) - its symmetric publish/consume ideas absorbed; (3) sentence composer ADOPTED for text + step UI as the long-term editor.
+Critique-mandated safety rails: golden text snapshots BEFORE any wording change; the custom-text live-number system MATCHES ON generated text (wording changes need alias/re-match pass + boot audit); composer must share the extracted amount/upgrade-diff preamble, not bypass it; MP sync gets a version handshake (refuse mismatch) before any behavior phase.
+Output: CARD_ENGINE_PLAN.md (repo root) - 7 phases, each independently shippable: P0 safety rails + capability registry, P1 sentence composer (kills "the target" everywhere), P2 selection bus ("create X then act on X"), P3 inline branch payloads, P4 grant+target routing, P5 value bus (honest scope), P6 step-block UI.
+Next Step: user picks a phase to green-light; P0+P1 recommended first.
+
 ## 2026-07-17 - UI feedback round: prefix flood reverted, hint cleanup, ally/player target text
 
 User verdict on the deployed #15 UI: WORSE - the "Category / Name" prefix flooded every kind dropdown (truncated in the fixed-width select, redundant under the browser's section headers), hints showed baked numbers ("Summon 5") for configurable amounts, one hint leaked a raw res:// image path, and card text does not react to targeting changes (ally/enemy/player) for most effects.
