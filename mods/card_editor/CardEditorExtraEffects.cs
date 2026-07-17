@@ -15578,7 +15578,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				$"the trigger creature's {valueLabel}",
 				("Value", valueLabel)),
 			CardExtraEffectValueSourceActor.AllEnemies => ResolveGroupedValueSourceReferenceText(effect.ValueSourceAggregation, valueLabel, CardEditorLoc.T("cardText.valueSource.allEnemies", "ALL enemies")),
-			CardExtraEffectValueSourceActor.AllAllies => ResolveGroupedValueSourceReferenceText(effect.ValueSourceAggregation, valueLabel, CardEditorLoc.T("cardText.valueSource.allAllies", "ALL allies")),
+			CardExtraEffectValueSourceActor.AllAllies => ResolveGroupedValueSourceReferenceText(effect.ValueSourceAggregation, valueLabel, CardEditorLoc.T("cardText.valueSource.allAllies", "ALL players")),
 			_ => CardEditorLoc.F(
 				"cardText.valueSource.self",
 				$"your {valueLabel}",
@@ -16377,8 +16377,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 					CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.heal.otherEnemies", $"Other enemies heal {amountText} HP.", ("Amount", amountText)),
 					CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.heal.randomEnemy", $"A random enemy heals {amountText} HP.", ("Amount", amountText)),
 					CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.heal.self", $"Heal {amountText} HP.", ("Amount", amountText)),
-					CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.heal.allAllies", $"ALL allies heal {amountText} HP.", ("Amount", amountText)),
-					CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.heal.anyAlly", $"An ally heals {amountText} HP.", ("Amount", amountText)),
+					CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.heal.allAllies", $"ALL players heal {amountText} HP.", ("Amount", amountText)),
+					CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.heal.anyAlly", $"Another player heals {amountText} HP.", ("Amount", amountText)),
 					CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.heal.anyPlayer", $"Any player heals {amountText} HP.", ("Amount", amountText)),
 					_ => CardEditorLoc.F("cardText.heal.target", $"The target heals {amountText} HP.", ("Amount", amountText))
 				},
@@ -16388,8 +16388,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 					CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.loseHp.otherEnemies", $"Other enemies lose {amountText} HP.", ("Amount", amountText)),
 					CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.loseHp.randomEnemy", $"A random enemy loses {amountText} HP.", ("Amount", amountText)),
 					CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.loseHp.self", $"Lose {amountText} HP.", ("Amount", amountText)),
-					CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.loseHp.allAllies", $"ALL allies lose {amountText} HP.", ("Amount", amountText)),
-					CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.loseHp.anyAlly", $"An ally loses {amountText} HP.", ("Amount", amountText)),
+					CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.loseHp.allAllies", $"ALL players lose {amountText} HP.", ("Amount", amountText)),
+					CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.loseHp.anyAlly", $"Another player loses {amountText} HP.", ("Amount", amountText)),
 					CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.loseHp.anyPlayer", $"Any player loses {amountText} HP.", ("Amount", amountText)),
 					_ => CardEditorLoc.F("cardText.loseHp.target", $"The target loses {amountText} HP.", ("Amount", amountText))
 				},
@@ -20770,8 +20770,8 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.removeBlock.otherEnemies", $"Other enemies lose {amountText} Block.", ("Amount", amountText)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.removeBlock.randomEnemy", $"A random enemy loses {amountText} Block.", ("Amount", amountText)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.removeBlock.self", $"Lose {amountText} Block.", ("Amount", amountText)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.removeBlock.allAllies", $"ALL allies lose {amountText} Block.", ("Amount", amountText)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.removeBlock.anyAlly", $"An ally loses {amountText} Block.", ("Amount", amountText)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.removeBlock.allAllies", $"ALL players lose {amountText} Block.", ("Amount", amountText)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.removeBlock.anyAlly", $"Another player loses {amountText} Block.", ("Amount", amountText)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.removeBlock.anyPlayer", $"Any player loses {amountText} Block.", ("Amount", amountText)),
 			_ => CardEditorLoc.F("cardText.removeBlock.target", $"The target loses {amountText} Block.", ("Amount", amountText))
 		};
@@ -20785,8 +20785,8 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.removeArtifact.otherEnemies", $"Other enemies lose {amountText} Artifact.", ("Amount", amountText)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.removeArtifact.randomEnemy", $"A random enemy loses {amountText} Artifact.", ("Amount", amountText)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.removeArtifact.self", $"Lose {amountText} Artifact.", ("Amount", amountText)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.removeArtifact.allAllies", $"ALL allies lose {amountText} Artifact.", ("Amount", amountText)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.removeArtifact.anyAlly", $"An ally loses {amountText} Artifact.", ("Amount", amountText)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.removeArtifact.allAllies", $"ALL players lose {amountText} Artifact.", ("Amount", amountText)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.removeArtifact.anyAlly", $"Another player loses {amountText} Artifact.", ("Amount", amountText)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.removeArtifact.anyPlayer", $"Any player loses {amountText} Artifact.", ("Amount", amountText)),
 			_ => CardEditorLoc.F("cardText.removeArtifact.target", $"The target loses {amountText} Artifact.", ("Amount", amountText))
 		};
@@ -24330,8 +24330,8 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.dealDamage.otherEnemies", $"Deal {amountText} damage to other enemies.", ("Amount", amountText)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.dealDamage.randomEnemy", $"Deal {amountText} damage to a random enemy.", ("Amount", amountText)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.dealDamage.self", $"Take {amountText} damage.", ("Amount", amountText)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.dealDamage.allAllies", $"Deal {amountText} damage to ALL allies.", ("Amount", amountText)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.dealDamage.anyAlly", $"Deal {amountText} damage to an ally.", ("Amount", amountText)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.dealDamage.allAllies", $"Deal {amountText} damage to ALL players.", ("Amount", amountText)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.dealDamage.anyAlly", $"Deal {amountText} damage to another player.", ("Amount", amountText)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.dealDamage.anyPlayer", $"Deal {amountText} damage to any player.", ("Amount", amountText)),
 			_ => CardEditorLoc.F("cardText.dealDamage.target", $"Deal {amountText} damage.", ("Amount", amountText))
 		};
@@ -24470,8 +24470,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.gainBlock.otherEnemies", $"Other enemies gain {amountText} [gold]Block[/gold].", ("Amount", amountText)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.gainBlock.randomEnemy", $"A random enemy gains {amountText} [gold]Block[/gold].", ("Amount", amountText)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.gainBlock.self", $"Gain {amountText} [gold]Block[/gold].", ("Amount", amountText)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.gainBlock.allAllies", $"ALL allies gain {amountText} [gold]Block[/gold].", ("Amount", amountText)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.gainBlock.anyAlly", $"An ally gains {amountText} [gold]Block[/gold].", ("Amount", amountText)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.gainBlock.allAllies", $"ALL players gain {amountText} [gold]Block[/gold].", ("Amount", amountText)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.gainBlock.anyAlly", $"Another player gains {amountText} [gold]Block[/gold].", ("Amount", amountText)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.gainBlock.anyPlayer", $"Any player gains {amountText} [gold]Block[/gold].", ("Amount", amountText)),
 			_ => CardEditorLoc.F("cardText.gainBlock.target", $"The target gains {amountText} [gold]Block[/gold].", ("Amount", amountText))
 		};
@@ -24488,8 +24488,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.applyDebuff.otherEnemies", $"Apply {payload} to other enemies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.applyDebuff.randomEnemy", $"Apply {payload} to a random enemy{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.applyDebuff.self", $"Gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyDebuff.allAllies", $"Apply {payload} to ALL allies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyDebuff.anyAlly", $"Apply {payload} to an ally{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyDebuff.allAllies", $"Apply {payload} to ALL players{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyDebuff.anyAlly", $"Apply {payload} to another player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.applyDebuff.anyPlayer", $"Apply {payload} to any player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			_ => CardEditorLoc.F("cardText.applyDebuff.target", $"Apply {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart))
 		};
@@ -24506,8 +24506,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.applyDebuff.otherEnemies", $"Apply {payload} to other enemies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.applyDebuff.randomEnemy", $"Apply {payload} to a random enemy{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.applyDebuff.self", $"Gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyDebuff.allAllies", $"Apply {payload} to ALL allies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyDebuff.anyAlly", $"Apply {payload} to an ally{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyDebuff.allAllies", $"Apply {payload} to ALL players{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyDebuff.anyAlly", $"Apply {payload} to another player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.applyDebuff.anyPlayer", $"Apply {payload} to any player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			_ => CardEditorLoc.F("cardText.applyDebuff.target", $"Apply {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart))
 		};
@@ -24535,8 +24535,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.signedPower.otherEnemies", $"Other enemies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.signedPower.randomEnemy", $"A random enemy {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.signedPower.self", $"{wordSelf} {payload}{suffixPart}", ("Verb", wordSelf), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.signedPower.allAllies", $"ALL allies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.signedPower.anyAlly", $"An ally {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.signedPower.allAllies", $"ALL players {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.signedPower.anyAlly", $"Another player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.signedPower.anyPlayer", $"Any player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
 			_ => CardEditorLoc.F("cardText.signedPower.target", $"The target {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart))
 		};
@@ -24566,8 +24566,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.signedPower.otherEnemies", $"Other enemies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.signedPower.randomEnemy", $"A random enemy {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.signedPower.self", $"{wordSelf} {payload}{suffixPart}", ("Verb", wordSelf), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.signedPower.allAllies", $"ALL allies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.signedPower.anyAlly", $"An ally {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.signedPower.allAllies", $"ALL players {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.signedPower.anyAlly", $"Another player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.signedPower.anyPlayer", $"Any player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
 			_ => CardEditorLoc.F("cardText.signedPower.target", $"The target {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart))
 		};
@@ -24585,8 +24585,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.gainPower.otherEnemies", $"Other enemies gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.gainPower.randomEnemy", $"A random enemy gains {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.gainPower.self", $"Gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.gainPower.allAllies", $"ALL allies gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.gainPower.anyAlly", $"An ally gains {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.gainPower.allAllies", $"ALL players gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.gainPower.anyAlly", $"Another player gains {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.gainPower.anyPlayer", $"Any player gains {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			_ => CardEditorLoc.F("cardText.gainPower.target", $"The target gains {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart))
 		};
@@ -24603,8 +24603,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.removePower.otherEnemies", $"Remove {payload} from other enemies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.removePower.randomEnemy", $"Remove {payload} from a random enemy{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.removePower.self", $"Remove {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.removePower.allAllies", $"Remove {payload} from ALL allies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.removePower.anyAlly", $"Remove {payload} from an ally{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.removePower.allAllies", $"Remove {payload} from ALL players{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.removePower.anyAlly", $"Remove {payload} from another player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.removePower.anyPlayer", $"Remove {payload} from any player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
 			_ => CardEditorLoc.F("cardText.removePower.target", $"Remove {payload} from the target{suffixPart}", ("Payload", payload), ("Suffix", suffixPart))
 		};
@@ -24625,8 +24625,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.cleansePowers.otherEnemies", $"Cleanse all {family} from other enemies.", ("Family", family)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.cleansePowers.randomEnemy", $"Cleanse all {family} from a random enemy.", ("Family", family)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.cleansePowers.self", $"Cleanse all {family}.", ("Family", family)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.cleansePowers.allAllies", $"Cleanse all {family} from ALL allies.", ("Family", family)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.cleansePowers.anyAlly", $"Cleanse all {family} from an ally.", ("Family", family)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.cleansePowers.allAllies", $"Cleanse all {family} from ALL players.", ("Family", family)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.cleansePowers.anyAlly", $"Cleanse all {family} from another player.", ("Family", family)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.cleansePowers.anyPlayer", $"Cleanse all {family} from any player.", ("Family", family)),
 			_ => CardEditorLoc.F("cardText.cleansePowers.target", $"Cleanse all {family} from the target.", ("Family", family))
 		};
@@ -24645,8 +24645,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 				CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.applyPower.duration.otherEnemies", $"Apply {payload} to other enemies{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
 				CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.applyPower.duration.randomEnemy", $"Apply {payload} to a random enemy{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
 				CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.applyPower.duration.self", $"Gain {payload}{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
-				CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyPower.duration.allAllies", $"Apply {payload} to ALL allies{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
-				CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyPower.duration.anyAlly", $"Apply {payload} to an ally{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
+				CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyPower.duration.allAllies", $"Apply {payload} to ALL players{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
+				CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyPower.duration.anyAlly", $"Apply {payload} to another player{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
 				CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.applyPower.duration.anyPlayer", $"Apply {payload} to any player{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart)),
 				_ => CardEditorLoc.F("cardText.applyPower.duration.target", $"Apply {payload}{suffixPart}.", ("Payload", payload), ("Suffix", suffixPart))
 			};
@@ -24658,8 +24658,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.applyPower.otherEnemies", $"Apply {payload} to other enemies.", ("Payload", payload)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.applyPower.randomEnemy", $"Apply {payload} to a random enemy.", ("Payload", payload)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.applyPower.self", $"Gain {payload}.", ("Payload", payload)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyPower.allAllies", $"Apply {payload} to ALL allies.", ("Payload", payload)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyPower.anyAlly", $"Apply {payload} to an ally.", ("Payload", payload)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyPower.allAllies", $"Apply {payload} to ALL players.", ("Payload", payload)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyPower.anyAlly", $"Apply {payload} to another player.", ("Payload", payload)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.applyPower.anyPlayer", $"Apply {payload} to any player.", ("Payload", payload)),
 			_ => CardEditorLoc.F("cardText.applyPower.target", $"Apply {payload}.", ("Payload", payload))
 		};
@@ -24708,8 +24708,8 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.multiplyStat.otherEnemies", $"Multiply other enemies' {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
 			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.multiplyStat.randomEnemy", $"Multiply a random enemy's {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
 			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.multiplyStat.self", $"Multiply your {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.multiplyStat.allAllies", $"Multiply ALL allies' {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.multiplyStat.anyAlly", $"Multiply an ally's {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
+			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.multiplyStat.allAllies", $"Multiply ALL players' {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
+			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.multiplyStat.anyAlly", $"Multiply another player's {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
 			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.multiplyStat.anyPlayer", $"Multiply any player's {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText)),
 			_ => CardEditorLoc.F("cardText.multiplyStat.target", $"Multiply the target's {statText} by {factorText}.", ("Stat", statText), ("Amount", factorText))
 		};

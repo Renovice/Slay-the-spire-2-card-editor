@@ -1,3 +1,18 @@
+## 2026-07-17 - Card Engine P0 SHIPPED (safety rails) + vanilla verbiage corpus mined
+
+Hypothesis: P0 (snapshot harness, MP guard, capability registry) can land with zero behavior change, and vanilla has explicit ally-target phrasing to copy.
+Finding: True on both; the verbiage research OVERTURNED our earlier ally wording.
+P0 landed (all build-clean, 0 errors / 278 baseline, behavior-neutral):
+- TEXT SNAPSHOT HARNESS (CardEditorTextSnapshotAudit.cs): boot renders every kind x all 8 targets through the real pipeline into user://card_editor/text_snapshot.current.txt, seeds baseline on first run, warns with before/after examples on drift. Delete baseline to accept intended changes.
+- MP SYNC VERSION GUARD (CardEditorMultiplayerSync.cs): SyncProtocolVersion const (stays 1 until a behavior phase ships) + ModVersion label (assembly version + DLL timestamp) stamped into snapshots; mismatch now REFUSES loudly ("Both players must install the SAME card_editor build") instead of the old silent Version==1 drop.
+- CAPABILITY REGISTRY (CardEditorEffectKindRegistry.cs): EffectCaps flags + EffectTargetSemantics per all 147 kinds, transcribed from the ~10 legacy predicate lists; boot audits check coverage (every enum member) AND parity against the 5 callable legacy predicates (SupportsGrantToCard/AsPower/Repeat/AppliedEffectRowAmountSource/HistoryScaling) - transcription errors surface as startup warnings on next launch (self-verifying; check the log after first boot!).
+VANILLA VERBIAGE CORPUS (from localization/eng/cards.json+powers.json, all ~630 card strings; full conventions in the research output):
+- Single ally = "another player" (14/16 vanilla AnyAlly cards; frames: "Another player gains X." / "Give another player X" / "Choose another player."); ally-including-self group = "ALL players" (caps); everyone-but-you = "other players"; possessive = singular "their". "ally/allies" is reserved for passive aura powers (Tank/Covered).
+- Apply (enemy debuffs) vs Gain (self, incl. self-debuffs) vs Give (ally grants); "lose HP" vs "take damage" distinction; [gold] on keywords/piles, plain damage/HP; energy always icons; "this turn/combat" suffixes; "Whenever you X," trigger-first comma form; ALL-caps emphasis family (ALL/EVERYONE'S/ANYONE).
+- APPLIED NOW: the 16 target-switch sites' ally branches rewritten to vanilla terms (An ally->Another player, ALL allies->ALL players, an ally's->another player's; 33 lines). Two pre-existing partial sites (CopyBuffs :15781, power-trigger actor :17142) intentionally left for the P1 composer migration.
+- Registry research also confirmed/expanded the disagreement list (dead ResolveTargetPlayers cases for CardType/Drawn/Generated cost auras; GrantReplay standalone = silent no-op; UpgradeDeckCards/EnchantCard publish gaps; repeat-blacklist intent not enforced for 9 pile-op kinds) - all captured for P2/P4.
+Next Step: launch the game once to seed the text baseline + verify registry parity comes back clean, then P1 (Sentence Composer on the vanilla corpus).
+
 ## 2026-07-17 - Card Engine rework: 9-agent audit + design bake-off -> CARD_ENGINE_PLAN.md
 
 Hypothesis: universal effect composition requires reshaping the persisted model; rival: every composability wall is a hand-maintained list or UI lock over buses that already exist.

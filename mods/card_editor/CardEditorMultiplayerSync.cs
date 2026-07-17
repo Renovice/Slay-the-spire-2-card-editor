@@ -28,7 +28,14 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal sealed class CardEditorMultiplayerStateDto
 {
-	public int Version { get; set; } = 1;
+	// Card Engine P0 sync guard: bump SyncProtocolVersion whenever a release changes how existing
+	// field combinations BEHAVE (new composition capabilities, executor semantics). Old peers parse
+	// new snapshots cleanly but would execute them with old semantics - a silent mid-run desync.
+	// The version gate turns that into a loud, actionable join-time error instead.
+	public const int SyncProtocolVersion = 1;
+
+	public int Version { get; set; } = SyncProtocolVersion;
+	public string? ModVersion { get; set; }
 	public CardEditorMultiplayerAuthorityMode AuthorityMode { get; set; } = CardEditorMultiplayerAuthorityMode.HostOnly;
 	public Dictionary<string, CardEditorPresetStore.CardOverrideDto> Overrides { get; set; } = new(StringComparer.Ordinal);
 	public Dictionary<string, List<string>> BaseDecks { get; set; } = new(StringComparer.Ordinal);
@@ -1318,6 +1325,8 @@ internal static class CardEditorMultiplayerSync
 	{
 		CardEditorMultiplayerStateDto dto = new()
 		{
+			Version = CardEditorMultiplayerStateDto.SyncProtocolVersion,
+			ModVersion = GetLocalModVersionLabel(),
 			AuthorityMode = CardEditorMultiplayerSettings.AuthorityMode,
 			CreatedCardSlotCount = Math.Clamp(CardEditorCreatedCardsStore.SlotCount, 1, CardEditorCreatedCardsStore.MaxSlotCount),
 			KeywordDefinitions = CardEditorDefinitionStore.GetKeywordDefinitions()
@@ -1536,12 +1545,45 @@ internal static class CardEditorMultiplayerSync
 		try
 		{
 			state = JsonSerializer.Deserialize<CardEditorMultiplayerStateDto>(json, _jsonOptions);
-			return state != null && state.Version == 1;
+			if (state == null)
+			{
+				return false;
+			}
+
+			if (state.Version != CardEditorMultiplayerStateDto.SyncProtocolVersion)
+			{
+				// Loud, actionable refusal instead of the old silent 'Version == 1' drop: a peer on a
+				// different card_editor build must update before shared definitions can sync - applying
+				// anyway would run the same rows with different semantics (silent mid-run desync).
+				Log.Warn(
+					$"[CardEditor][MultiplayerSync] REFUSING sync: peer runs card_editor sync protocol v{state.Version} "
+					+ $"(mod {state.ModVersion ?? "unknown"}), this game runs v{CardEditorMultiplayerStateDto.SyncProtocolVersion} "
+					+ $"(mod {GetLocalModVersionLabel()}). Both players must install the SAME card_editor build.");
+				state = null;
+				return false;
+			}
+
+			return true;
 		}
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor][MultiplayerSync] Failed parsing multiplayer snapshot: {ex}");
 			return false;
+		}
+	}
+
+	private static string GetLocalModVersionLabel()
+	{
+		try
+		{
+			System.Reflection.Assembly assembly = typeof(CardEditorMultiplayerSync).Assembly;
+			string? version = assembly.GetName().Version?.ToString();
+			System.DateTime buildStamp = System.IO.File.GetLastWriteTime(assembly.Location);
+			return $"{version ?? "?"} ({buildStamp:yyyy-MM-dd HH:mm})";
+		}
+		catch
+		{
+			return "unknown";
 		}
 	}
 

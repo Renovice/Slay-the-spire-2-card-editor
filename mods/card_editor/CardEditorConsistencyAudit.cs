@@ -25,9 +25,10 @@ internal static class CardEditorConsistencyAudit
 		issues += RunSafely(AuditDefinitionCoverage, "definition coverage");
 		issues += RunSafely(AuditCloneFidelity, "clone fidelity");
 		issues += RunSafely(AuditDtoRoundTrip, "save round-trip");
+		issues += RunSafely(CardEditorEffectKindRegistry.RunAudits, "capability registry");
 		if (issues == 0)
 		{
-			Log.Info("[CardEditor] Consistency audit passed (definitions, clone, save round-trip).");
+			Log.Info("[CardEditor] Consistency audit passed (definitions, clone, save round-trip, capability registry).");
 		}
 	}
 
@@ -40,6 +41,7 @@ internal static class CardEditorConsistencyAudit
 
 		_descriptionAuditRan = true;
 		RunSafely(() => AuditDescriptionCoverage(card), "description coverage");
+		CardEditorTextSnapshotAudit.RunOnce(card);
 	}
 
 	private static int RunSafely(Func<int> audit, string name)
