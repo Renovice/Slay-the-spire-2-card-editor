@@ -1,3 +1,14 @@
+## 2026-07-18 - Chainboard C2 SHIPPED (code): the strip authors chains
+
+The Effect Chains panel gains authoring:
+- "+" AT THE END OF EACH STRIP: opens the categorized/searchable kind picker (full definitions list, hints included) and appends a row PRE-WIRED to the chain: if the new kind ConsumesCards and the last step publishes -> CardSelectionMode=SelectedByEffect + source id set (no dropdowns touched); else if it takes DynamicAmount -> AmountSourceMode=AppliedEffectRow + source id ("deal damage = cards drawn" in two clicks); else plain sequenced row.
+- "+ New Chain" (also shown when the card has no effects): picker-driven unlinked row - the classic Add Effect with the better picker.
+- FORWARD-LINK WARNING: a consumer reordered ABOVE its source renders its connector as "(warn) #n" with a tooltip (rows execute in order; the link finds nothing until moved back) - reordering can't silently kill a chain anymore.
+- Registry correction: DrawCards/DrawCardsThatCostLess gained ConsumesCards (the P2 consume path existed; the flag was missed - auto-wiring reads it).
+Auto-wire uses the registry (publishes/consumes/dynamic-amount), so future capability changes flow into the panel automatically.
+Build: 0 errors / 278 warnings (baseline). NOT deployed (undeployed: C2).
+Next: C3 - IF-boxes + setting chips on the boxes; box click-to-scroll; step removal from the strip.
+
 ## 2026-07-18 - Chainboard C0+C1 SHIPPED (code): transform publishes results + read-only chain strips
 
 C0 (the prerequisite gap found in design verification): TransformCardsWithCurrentPlayDeferral now re-publishes the REPLACEMENT cards via ReplaceCurrentSelectedCards after the immediate transforms - "transform a card, then shuffle IT into your deck" chains onto the result instead of the vanished original (generator re-publish pattern). Deferred self-transforms excluded (they resolve after the play).

@@ -147,8 +147,9 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.OstyAction, G | P | R | H, Creatures);
 
 		// Player-resolved resource/draw effects.
-		Add(CardExtraEffectKind.DrawCards, G | P | R | D | H | S | s, Players);
-		Add(CardExtraEffectKind.DrawCardsThatCostLess, G | D | S | s, Players);
+		// ConsumesCards since P2: DrawMatchingCards has a SelectedByEffect path ("draw THOSE cards").
+		Add(CardExtraEffectKind.DrawCards, G | P | R | D | H | S | s | C, Players);
+		Add(CardExtraEffectKind.DrawCardsThatCostLess, G | D | S | s | C, Players);
 		Add(CardExtraEffectKind.DrawUntilHandSize, G | P | R | D | H | s, Players);
 		Add(CardExtraEffectKind.DrawAndCheck, G | P | R | D | H | s, Players);
 		Add(CardExtraEffectKind.GainEnergy, G | P | R | D | H, Players);

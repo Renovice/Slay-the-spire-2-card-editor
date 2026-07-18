@@ -22539,6 +22539,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			};
 			StyleHintLabel(empty);
 			_effectChainContainer.AddChild(empty);
+
+			Button firstChainButton = new Button
+			{
+				Text = CardEditorLoc.T("effectChains.newChain", "+ New Chain"),
+				CustomMinimumSize = new Vector2(0, 32),
+				SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+			};
+			StyleInput(firstChainButton);
+			firstChainButton.Pressed += () => OnAddChainStep(null);
+			_effectChainContainer.AddChild(firstChainButton);
 			return;
 		}
 
@@ -22554,12 +22564,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		int[] cardSrc = new int[count];
+		int[] cardSrcForward = new int[count];
 		int[] amountSrc = new int[count];
 		int[] group = new int[count];
 		for (int i = 0; i < count; i++)
 		{
 			ExtraEffectRow row = _extraEffectRows[i];
 			cardSrc[i] = -1;
+			cardSrcForward[i] = -1;
 			amountSrc[i] = -1;
 			group[i] = i;
 
@@ -22574,9 +22586,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if ((moveSelectedByEffect || grantSelectedByEffect)
 				&& !string.IsNullOrWhiteSpace(row.CardSelectionSourceEffectId)
 				&& idToIndex.TryGetValue(row.CardSelectionSourceEffectId, out int cardIndex)
-				&& cardIndex < i)
+				&& cardIndex != i)
 			{
-				cardSrc[i] = cardIndex;
+				if (cardIndex < i)
+				{
+					cardSrc[i] = cardIndex;
+				}
+				else
+				{
+					// A consumer moved ABOVE its source: rows execute in order, so this link finds
+					// nothing at runtime. Grouped and rendered with a warning connector.
+					cardSrcForward[i] = cardIndex;
+				}
 			}
 
 			if (!string.IsNullOrWhiteSpace(row.AmountSourceEffectId)
@@ -22602,6 +22623,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			if (cardSrc[i] >= 0)
 			{
 				int rootA = FindRoot(cardSrc[i]);
+				int rootB = FindRoot(i);
+				if (rootA != rootB)
+				{
+					group[rootB] = rootA;
+				}
+			}
+			if (cardSrcForward[i] >= 0)
+			{
+				int rootA = FindRoot(cardSrcForward[i]);
 				int rootB = FindRoot(i);
 				if (rootA != rootB)
 				{
@@ -22651,25 +22681,127 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				if (m > 0)
 				{
 					int prevIndex = chain[m - 1];
-					string connectorText = cardSrc[rowIndex] == prevIndex
-						? "──▶"
-						: amountSrc[rowIndex] == prevIndex
-							? "─ ─▶"
-							: cardSrc[rowIndex] >= 0
-								? $"#{(cardSrc[rowIndex] + 1).ToString(CultureInfo.InvariantCulture)} ▶"
-								: amountSrc[rowIndex] >= 0
-									? $"= #{(amountSrc[rowIndex] + 1).ToString(CultureInfo.InvariantCulture)} ▶"
-									: "—";
+					string connectorText = cardSrcForward[rowIndex] >= 0
+						? $"⚠ #{(cardSrcForward[rowIndex] + 1).ToString(CultureInfo.InvariantCulture)} ▶"
+						: cardSrc[rowIndex] == prevIndex
+							? "──▶"
+							: amountSrc[rowIndex] == prevIndex
+								? "─ ─▶"
+								: cardSrc[rowIndex] >= 0
+									? $"#{(cardSrc[rowIndex] + 1).ToString(CultureInfo.InvariantCulture)} ▶"
+									: amountSrc[rowIndex] >= 0
+										? $"= #{(amountSrc[rowIndex] + 1).ToString(CultureInfo.InvariantCulture)} ▶"
+										: "—";
 					Label connector = new Label { Text = connectorText, VerticalAlignment = VerticalAlignment.Center };
 					StyleHintLabel(connector);
+					if (cardSrcForward[rowIndex] >= 0)
+					{
+						connector.TooltipText = CardEditorLoc.T(
+							"effectChains.forwardLink",
+							"This step's source runs AFTER it - move this step below its source or the link finds nothing.");
+					}
 					strip.AddChild(connector);
 				}
 
 				strip.AddChild(BuildEffectChainBox(rowIndex));
 			}
 
+			// C2: extend this chain - the new step auto-wires to act on the last step's result.
+			string lastStepId = _extraEffectRows[chain[chain.Count - 1]].StableEffectId;
+			if (!string.IsNullOrWhiteSpace(lastStepId))
+			{
+				Button addStep = new Button
+				{
+					Text = "+",
+					CustomMinimumSize = new Vector2(34, 34),
+					TooltipText = CardEditorLoc.T("effectChains.addStep", "Add a step that acts on this chain's result.")
+				};
+				StyleInput(addStep);
+				string capturedSourceId = lastStepId;
+				addStep.Pressed += () => OnAddChainStep(capturedSourceId);
+				strip.AddChild(addStep);
+			}
+
 			_effectChainContainer.AddChild(stripScroll);
 		}
+
+		Button newChainButton = new Button
+		{
+			Text = CardEditorLoc.T("effectChains.newChain", "+ New Chain"),
+			CustomMinimumSize = new Vector2(0, 32),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(newChainButton);
+		newChainButton.Pressed += () => OnAddChainStep(null);
+		_effectChainContainer.AddChild(newChainButton);
+	}
+
+	// C2: append a new effect row via the categorized picker; when sourceEffectId is given, the new
+	// step auto-wires to consume that step's cards (or read its amount when it can't take cards).
+	private void OnAddChainStep(string? sourceEffectId)
+	{
+		EnsurePendingPopupHydrationCompleted();
+
+		List<CardExtraEffectDefinition> pickerDefs = CardEditorExtraEffects.Definitions
+			.Where(d => !CardEditorExtraEffects.IsLegacyOrbChannelKind(d.Kind)
+				&& !CardEditorExtraEffects.IsLegacyEvokeOrbsKind(d.Kind)
+				&& !CardEditorExtraEffects.IsLegacyOrbSlotKind(d.Kind)
+				&& !CardEditorExtraEffects.IsLegacySelfPileAutoKind(d.Kind)
+				&& d.Kind is not CardExtraEffectKind.CreatedCardsCostLess
+					and not CardExtraEffectKind.CreatedCardsUpgraded
+					and not CardExtraEffectKind.GeneratedCardsUpgraded
+					and not CardExtraEffectKind.CardsInPileUpgradedAura
+					and not CardExtraEffectKind.DynamicIdentity
+					and not CardExtraEffectKind.ConditionalGlow)
+			.OrderBy(CardEditorExtraEffects.DefinitionDisplayLabel, StringComparer.CurrentCultureIgnoreCase)
+			.ThenBy(d => d.Kind.ToString(), StringComparer.Ordinal)
+			.ToList();
+		List<(string Label, string Category, string Hint)> pickerOptions = new List<(string, string, string)>(pickerDefs.Count);
+		foreach (CardExtraEffectDefinition def in pickerDefs)
+		{
+			pickerOptions.Add((CardEditorExtraEffects.DefinitionDisplayLabel(def), CardEditorExtraEffects.GetEffectKindCategory(def.Kind), BuildEffectKindHint(def)));
+		}
+
+		OpenEffectKindPicker(pickerOptions, -1, pickedIndex =>
+		{
+			if (pickedIndex < 0 || pickedIndex >= pickerDefs.Count)
+			{
+				return;
+			}
+
+			CardExtraEffectDefinition pickedDef = pickerDefs[pickedIndex];
+			CardExtraEffect seed = new CardExtraEffect
+			{
+				Kind = pickedDef.Kind,
+				Amount = pickedDef.DefaultAmount,
+				Target = pickedDef.DefaultTarget,
+				EffectId = Guid.NewGuid().ToString("N")
+			};
+
+			if (!string.IsNullOrWhiteSpace(sourceEffectId))
+			{
+				ExtraEffectRow? sourceRow = _extraEffectRows.FirstOrDefault(r => string.Equals(r.StableEffectId, sourceEffectId, StringComparison.Ordinal));
+				if (sourceRow != null)
+				{
+					CardExtraEffectKind sourceKind = GetCurrentResolvedExtraEffectKind(sourceRow);
+					bool sourcePublishes = CardEditorEffectKindRegistry.Has(sourceKind, EffectCaps.PublishesCardsUi)
+						|| CardEditorEffectKindRegistry.Has(sourceKind, EffectCaps.PublishesCardsRuntime);
+					if (sourcePublishes && CardEditorEffectKindRegistry.Has(pickedDef.Kind, EffectCaps.ConsumesCards))
+					{
+						seed.CardSelectionMode = CardExtraEffectCardSelectionMode.SelectedByEffect;
+						seed.CardSelectionSourceEffectId = sourceEffectId;
+					}
+					else if (sourcePublishes && CardEditorEffectKindRegistry.Has(pickedDef.Kind, EffectCaps.DynamicAmount))
+					{
+						seed.AmountSourceMode = CardExtraEffectAmountSourceMode.AppliedEffectRow;
+						seed.AmountSourceEffectId = sourceEffectId;
+					}
+				}
+			}
+
+			AddExtraEffectRow(seed);
+			QueuePreviewUpdate();
+		});
 	}
 
 	private Control BuildEffectChainBox(int rowIndex)
