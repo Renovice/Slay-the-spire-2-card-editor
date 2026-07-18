@@ -1,4 +1,12 @@
-﻿## 2026-07-18 - Pierce/Sovereign-Blade bug: upgrade fuse erased the card-match filter
+﻿## 2026-07-18 - Chainboard relocated: full-width board in the main column, movable card boxes
+
+User feedback: the Effect Chains panel was squeezed into the 340px left sidebar under the Effect List - boxes clipped, strips unreadable. It belongs in the MAIN content column (where the Numbers section lives), horizontal left-to-right.
+- Left-column panel deleted; the board is now a full-width section in the right column, directly after the Extra Effects list and above Numbers. Strips get the whole main-column width and h-scroll only when a chain is genuinely long.
+- Boxes rebuilt as cards (min 180px wide, padded): title + X on top, Trigger/Target line, then a bottom row with move-earlier/move-later arrow buttons wired to the existing MoveExtraEffectRow (which already rewires by StableEffectId and repaints the strip via RefreshEffectSummaryList). Upgrade-delta rows stay pinned (no move/remove).
+- Ordering fix: the container is created AFTER BuildExtraEffectsUi now, so an immediate RefreshEffectChainStrip() paints rows hydrated before it existed.
+Build: 0 errors / 278 warnings (baseline). NOT deployed yet.
+Next Step: deploy on request; C4 polish queue = true drag-and-drop reorder, live sentence under strips, chain badges on classic rows.
+## 2026-07-18 - Pierce/Sovereign-Blade bug: upgrade fuse erased the card-match filter
 
 Hypothesis: the grant flow falls back to a null (match-everything) hand filter when the filtered candidate set is empty.
 Finding: Partially true - the null-filter fallback exists but is LATENT (unreachable via current callers); the LIVE route is the upgrade fuse.

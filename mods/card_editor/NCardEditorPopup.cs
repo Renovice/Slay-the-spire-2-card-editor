@@ -3879,23 +3879,6 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_effectSummaryScroll.AddChild(effectSummaryViewportMargin);
 		effectListBody.AddChild(_effectSummaryScroll);
 
-		// Chainboard C1: read-only chain strips - rows render as linked boxes (solid = card link,
-		// dashed = amount link). The panel is a VIEW over the same rows; authoring lands in C2.
-		PanelContainer effectChainsPanel = CreateEditorSectionPanel(CardEditorLoc.T("section.effectChains", "Effect Chains"), out VBoxContainer effectChainsBody);
-		effectChainsPanel.CustomMinimumSize = new Vector2(0, 96);
-		leftColumn.AddChild(effectChainsPanel);
-
-		ScrollContainer effectChainScroll = new ScrollContainer
-		{
-			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-			SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-			CustomMinimumSize = new Vector2(0, 64)
-		};
-		_effectChainContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-		_effectChainContainer.AddThemeConstantOverride("separation", 6);
-		effectChainScroll.AddChild(_effectChainContainer);
-		effectChainsBody.AddChild(effectChainScroll);
-
 		ScrollContainer rightScroll = new ScrollContainer
 		{
 			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -4118,6 +4101,18 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		ulong extraEffectsStartMs = Time.GetTicksMsec();
 		BuildExtraEffectsUi(rightColumn);
 		extraEffectsMs = (long)(Time.GetTicksMsec() - extraEffectsStartMs);
+
+		// Chainboard: full-width board in the main column - strips run left to right and the
+		// boxes are movable cards over the same effect rows.
+		Label chainsLabel = new Label { Text = CardEditorLoc.T("section.effectChains", "Effect Chains") };
+		StyleSectionLabel(chainsLabel);
+		rightColumn.AddChild(chainsLabel);
+
+		_effectChainContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		_effectChainContainer.AddThemeConstantOverride("separation", 8);
+		rightColumn.AddChild(_effectChainContainer);
+		// Rows built before this container existed won't repaint it - paint once now.
+		RefreshEffectChainStrip();
 
 		Label varLabel = new Label
 		{
@@ -22672,10 +22667,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 				VerticalScrollMode = ScrollContainer.ScrollMode.Disabled,
-				CustomMinimumSize = new Vector2(0, 58)
+				CustomMinimumSize = new Vector2(0, 96)
 			};
 			HBoxContainer strip = new HBoxContainer();
-			strip.AddThemeConstantOverride("separation", 6);
+			strip.AddThemeConstantOverride("separation", 8);
 			stripScroll.AddChild(strip);
 
 			for (int m = 0; m < chain.Count; m++)
@@ -22822,6 +22817,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		PanelContainer box = CreateEditorPanel(bgAlpha: 0.62f);
 		box.MouseFilter = MouseFilterEnum.Stop;
 		box.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+		box.CustomMinimumSize = new Vector2(180, 0);
 		box.TooltipText = CardEditorLoc.T("effectChains.boxTooltip", "Click to jump to this effect's full settings.");
 		box.GuiInput += input =>
 		{
@@ -22831,34 +22827,25 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		};
 
-		HBoxContainer header = new HBoxContainer();
-		header.AddThemeConstantOverride("separation", 6);
+		MarginContainer cardMargin = new MarginContainer();
+		cardMargin.AddThemeConstantOverride("margin_left", 8);
+		cardMargin.AddThemeConstantOverride("margin_right", 8);
+		cardMargin.AddThemeConstantOverride("margin_top", 6);
+		cardMargin.AddThemeConstantOverride("margin_bottom", 6);
 
-		VBoxContainer body = new VBoxContainer();
-		body.AddThemeConstantOverride("separation", 0);
+		VBoxContainer card = new VBoxContainer();
+		card.AddThemeConstantOverride("separation", 2);
+
+		HBoxContainer topRow = new HBoxContainer();
+		topRow.AddThemeConstantOverride("separation", 6);
 
 		Label title = new Label
 		{
-			Text = $"{(rowIndex + 1).ToString(CultureInfo.InvariantCulture)}. {GetEffectSummaryKindText(row)}{GetEffectSummaryAmountText(row)}"
+			Text = $"{(rowIndex + 1).ToString(CultureInfo.InvariantCulture)}. {GetEffectSummaryKindText(row)}{GetEffectSummaryAmountText(row)}",
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
 		};
 		StyleBodyLabel(title);
-		body.AddChild(title);
-
-		string triggerText = GetSelectedItemText(row.TriggerSelect, string.Empty);
-		string targetText = GetSelectedItemText(row.TargetSelect, string.Empty);
-		string subText = string.IsNullOrWhiteSpace(targetText)
-			? triggerText
-			: string.IsNullOrWhiteSpace(triggerText)
-				? targetText
-				: $"{triggerText} • {targetText}";
-		if (!string.IsNullOrWhiteSpace(subText))
-		{
-			Label sub = new Label { Text = subText };
-			StyleHintLabel(sub);
-			body.AddChild(sub);
-		}
-
-		header.AddChild(body);
+		topRow.AddChild(title);
 
 		if (!row.IsUpgradeDeltaRow)
 		{
@@ -22871,10 +22858,56 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			};
 			StyleInput(removeStep);
 			removeStep.Pressed += () => RemoveExtraEffectRow(row);
-			header.AddChild(removeStep);
+			topRow.AddChild(removeStep);
 		}
 
-		box.AddChild(header);
+		card.AddChild(topRow);
+
+		string triggerText = GetSelectedItemText(row.TriggerSelect, string.Empty);
+		string targetText = GetSelectedItemText(row.TargetSelect, string.Empty);
+		string subText = string.IsNullOrWhiteSpace(targetText)
+			? triggerText
+			: string.IsNullOrWhiteSpace(triggerText)
+				? targetText
+				: $"{triggerText} • {targetText}";
+		if (!string.IsNullOrWhiteSpace(subText))
+		{
+			Label sub = new Label { Text = subText };
+			StyleHintLabel(sub);
+			card.AddChild(sub);
+		}
+
+		if (!row.IsUpgradeDeltaRow)
+		{
+			HBoxContainer moveRow = new HBoxContainer();
+			moveRow.AddThemeConstantOverride("separation", 4);
+
+			Button moveEarlier = new Button
+			{
+				Text = "◀",
+				CustomMinimumSize = new Vector2(28, 24),
+				TooltipText = CardEditorLoc.T("effectChains.moveEarlier", "Move this step earlier (runs sooner).")
+			};
+			StyleInput(moveEarlier);
+			moveEarlier.Pressed += () => MoveExtraEffectRow(row, direction: -1);
+			moveRow.AddChild(moveEarlier);
+
+			Button moveLater = new Button
+			{
+				Text = "▶",
+				CustomMinimumSize = new Vector2(28, 24),
+				TooltipText = CardEditorLoc.T("effectChains.moveLater", "Move this step later (runs after).")
+			};
+			StyleInput(moveLater);
+			moveLater.Pressed += () => MoveExtraEffectRow(row, direction: 1);
+			moveRow.AddChild(moveLater);
+
+			moveRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+			card.AddChild(moveRow);
+		}
+
+		cardMargin.AddChild(card);
+		box.AddChild(cardMargin);
 		return box;
 	}
 
