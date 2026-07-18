@@ -1,3 +1,12 @@
+## 2026-07-18 - Chainboard C3 SHIPPED (code): chips, IF prefixes, click-to-jump, per-box remove
+
+- BOX CHIPS: each box now shows "N. Kind Amount" + a dim "Trigger • Target" line (same summary helpers as the Effect List, so wording stays in sync).
+- IF CHIP: a step whose Branch tickbox is active gets a small "IF <condition type>" prefix chip in the strip - conditions are visible in the chain, click to edit.
+- CLICK-TO-JUMP: clicking any box (or IF chip) hydrates pending rows and scrolls the right column to that effect's full editor (new _rightColumnScroll ref + deferred scroll so post-hydration layout is current). Boxes get the pointing-hand cursor + tooltip.
+- PER-BOX REMOVE: a compact X on each box calls the same RemoveExtraEffectRow as the classic list (hidden on upgrade-delta rows, matching the summary panel's rule).
+Build: 0 errors / 278 warnings (baseline). NOT deployed (undeployed: C3).
+Chainboard remaining (C4, polish tier): drag reorder, live sentence under strips, chain badges on classic rows, collapse-classic option.
+
 ## 2026-07-18 - Chainboard C2 SHIPPED (code): the strip authors chains
 
 The Effect Chains panel gains authoring:

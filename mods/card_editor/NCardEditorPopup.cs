@@ -221,6 +221,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private ScrollContainer? _effectSummaryScroll;
 	private VBoxContainer? _effectSummaryContainer;
 	private VBoxContainer? _effectChainContainer;
+	private ScrollContainer? _rightColumnScroll;
 	private Label? _extraEffectsLoadingLabel;
 	private Label? _effectSummaryLoadingLabel;
 	private VBoxContainer? _cardSmithContainer;
@@ -3038,6 +3039,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_definitionEditorOverlay = null;
 		_effectKindPickerOverlay = null;
 		_effectChainContainer = null;
+		_rightColumnScroll = null;
 		_cardNameLabel = null;
 		_targetTypeSelect = null;
 		_starCostField = null;
@@ -3903,6 +3905,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		rightScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
 		rightScroll.MouseFilter = MouseFilterEnum.Pass;
 		contentRow.AddChild(rightScroll);
+		_rightColumnScroll = rightScroll;
 
 		MarginContainer rightScrollMargin = new MarginContainer
 		{
@@ -22703,6 +22706,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					strip.AddChild(connector);
 				}
 
+				// C3: a step with an active branch condition gets an IF prefix chip.
+				ExtraEffectRow chainRow = _extraEffectRows[rowIndex];
+				if (chainRow.BranchTickbox != null
+					&& GodotObject.IsInstanceValid(chainRow.BranchTickbox)
+					&& chainRow.BranchTickbox.IsTicked)
+				{
+					strip.AddChild(BuildEffectChainIfChip(chainRow));
+				}
+
 				strip.AddChild(BuildEffectChainBox(rowIndex));
 			}
 
@@ -22808,26 +22820,112 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	{
 		ExtraEffectRow row = _extraEffectRows[rowIndex];
 		PanelContainer box = CreateEditorPanel(bgAlpha: 0.62f);
+		box.MouseFilter = MouseFilterEnum.Stop;
+		box.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+		box.TooltipText = CardEditorLoc.T("effectChains.boxTooltip", "Click to jump to this effect's full settings.");
+		box.GuiInput += input =>
+		{
+			if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+			{
+				JumpToEffectRow(row);
+			}
+		};
+
+		HBoxContainer header = new HBoxContainer();
+		header.AddThemeConstantOverride("separation", 6);
+
 		VBoxContainer body = new VBoxContainer();
 		body.AddThemeConstantOverride("separation", 0);
 
 		Label title = new Label
 		{
-			Text = $"{(rowIndex + 1).ToString(CultureInfo.InvariantCulture)}. {GetEffectSummaryKindText(row)}"
+			Text = $"{(rowIndex + 1).ToString(CultureInfo.InvariantCulture)}. {GetEffectSummaryKindText(row)}{GetEffectSummaryAmountText(row)}"
 		};
 		StyleBodyLabel(title);
 		body.AddChild(title);
 
 		string triggerText = GetSelectedItemText(row.TriggerSelect, string.Empty);
-		if (!string.IsNullOrWhiteSpace(triggerText))
+		string targetText = GetSelectedItemText(row.TargetSelect, string.Empty);
+		string subText = string.IsNullOrWhiteSpace(targetText)
+			? triggerText
+			: string.IsNullOrWhiteSpace(triggerText)
+				? targetText
+				: $"{triggerText} • {targetText}";
+		if (!string.IsNullOrWhiteSpace(subText))
 		{
-			Label sub = new Label { Text = triggerText };
+			Label sub = new Label { Text = subText };
 			StyleHintLabel(sub);
 			body.AddChild(sub);
 		}
 
-		box.AddChild(body);
+		header.AddChild(body);
+
+		if (!row.IsUpgradeDeltaRow)
+		{
+			Button removeStep = new Button
+			{
+				Text = "✕",
+				CustomMinimumSize = new Vector2(24, 24),
+				SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+				TooltipText = CardEditorLoc.T("tooltip.effect.remove", "Remove effect")
+			};
+			StyleInput(removeStep);
+			removeStep.Pressed += () => RemoveExtraEffectRow(row);
+			header.AddChild(removeStep);
+		}
+
+		box.AddChild(header);
 		return box;
+	}
+
+	private Control BuildEffectChainIfChip(ExtraEffectRow row)
+	{
+		PanelContainer chip = CreateEditorPanel(bgAlpha: 0.45f);
+		chip.MouseFilter = MouseFilterEnum.Stop;
+		chip.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+		chip.TooltipText = CardEditorLoc.T("effectChains.ifTooltip", "This step has a branch condition - click to edit it.");
+		chip.GuiInput += input =>
+		{
+			if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+			{
+				JumpToEffectRow(row);
+			}
+		};
+
+		string conditionText = GetSelectedItemText(row.BranchConditionTypeSelect, string.Empty);
+		Label label = new Label
+		{
+			Text = string.IsNullOrWhiteSpace(conditionText)
+				? CardEditorLoc.T("effectChains.ifChip", "IF")
+				: $"{CardEditorLoc.T("effectChains.ifChip", "IF")} {conditionText}"
+		};
+		StyleHintLabel(label);
+		chip.AddChild(label);
+		return chip;
+	}
+
+	// C3: scroll the right column to a row's full editor panel.
+	private void JumpToEffectRow(ExtraEffectRow row)
+	{
+		EnsurePendingPopupHydrationCompleted();
+		if (_rightColumnScroll == null || !GodotObject.IsInstanceValid(_rightColumnScroll)
+			|| row?.Container == null || !GodotObject.IsInstanceValid(row.Container))
+		{
+			return;
+		}
+
+		ScrollContainer scroll = _rightColumnScroll;
+		Control target = row.Container;
+		Callable.From(() =>
+		{
+			if (!GodotObject.IsInstanceValid(scroll) || !GodotObject.IsInstanceValid(target))
+			{
+				return;
+			}
+
+			float offset = target.GlobalPosition.Y - scroll.GlobalPosition.Y + scroll.ScrollVertical;
+			scroll.ScrollVertical = (int)Math.Max(0, offset - 8);
+		}).CallDeferred();
 	}
 
 	private void RefreshEffectSummaryList()
