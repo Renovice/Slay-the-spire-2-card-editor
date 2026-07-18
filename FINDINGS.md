@@ -1,3 +1,13 @@
+## 2026-07-18 - Chainboard C0+C1 SHIPPED (code): transform publishes results + read-only chain strips
+
+C0 (the prerequisite gap found in design verification): TransformCardsWithCurrentPlayDeferral now re-publishes the REPLACEMENT cards via ReplaceCurrentSelectedCards after the immediate transforms - "transform a card, then shuffle IT into your deck" chains onto the result instead of the vanished original (generator re-publish pattern). Deferred self-transforms excluded (they resolve after the play).
+C1 (per CHAINBOARD_PLAN.md): new "Effect Chains" section under the Effect List (left column) rendering the live rows as linked box strips:
+- Rows connected by card links (SelectedByEffect, move OR grant mode) or amount links union into one strip; unlinked rows are singleton boxes. Boxes show "N. Kind" + trigger; strips h-scroll.
+- Connectors: "──▶" card link from the previous box, "─ ─▶" amount link, "#n ▶" non-adjacent card link, "= #n ▶" non-adjacent amount link, "—" grouped without a direct neighbor link.
+- Pure VIEW over _extraEffectRows (StableEffectId + CardSelectionSourceEffectId + AmountSourceEffectId), rebuilt with RefreshEffectSummaryList, cleared on popup reset. Zero persistence, zero behavior change.
+Next: C2 authoring (+ Step with auto-wiring, reorder, New Chain), C3 condition/setting chips.
+Build: 0 errors / 278 warnings (baseline). NOT deployed (undeployed: draw-save fix-up + C0 + C1).
+
 ## 2026-07-17 - P2 fix-up (user repro): "draw those cards" mode never SAVED for Draw rows
 
 User in-game: no way to wire "add 10 random cards, draw those". Root cause: P2 made the selection-Mode dropdown VISIBLE for DrawCards and the runtime consume path exists, but the SAVE builders' kind list (NCardEditorPopup ~:32656) excluded DrawCards - its "else if" branch (:32738) only persisted the pile, so Mode=Selected By Effect and the source row id were silently dropped on Apply (mode saved as Choose, source null, runtime never consumed).

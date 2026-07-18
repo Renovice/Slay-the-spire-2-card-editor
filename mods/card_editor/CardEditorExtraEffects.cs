@@ -9923,6 +9923,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			IReadOnlyList<CardTransformation> immediateList = immediate;
 			List<CardPileAddResult> results = (await CardCmd.Transform(immediateList, rng, GetTransformPreviewStyle(immediateList))).ToList();
+			List<CardModel> immediateReplacements = new List<CardModel>(results.Count);
 			for (int i = 0; i < immediateList.Count && i < results.Count; i++)
 			{
 				CardModel? replacement = results[i].cardAdded;
@@ -9939,8 +9940,17 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 					}
 					CardEditorTemporaryEnchantmentController.OnCardTransformed(replacementCombatState, immediateList[i].Original, replacement);
 					RefreshTransformVisuals(immediateList[i].Original, replacement);
+					immediateReplacements.Add(replacement);
 					transformed++;
 				}
+			}
+
+			// Chainboard C0: downstream SelectedByEffect steps must act on the RESULT cards - the
+			// originals published during selection stop existing after the transform. Same
+			// re-publish pattern the card generators use.
+			if (immediateReplacements.Count > 0)
+			{
+				CardEditorEffectExecutionAmountContext.ReplaceCurrentSelectedCards(immediateReplacements);
 			}
 		}
 

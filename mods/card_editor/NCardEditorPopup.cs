@@ -220,6 +220,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private VBoxContainer _extraEffectsContainer = null!;
 	private ScrollContainer? _effectSummaryScroll;
 	private VBoxContainer? _effectSummaryContainer;
+	private VBoxContainer? _effectChainContainer;
 	private Label? _extraEffectsLoadingLabel;
 	private Label? _effectSummaryLoadingLabel;
 	private VBoxContainer? _cardSmithContainer;
@@ -2590,6 +2591,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 		_extraEffectRows.Clear();
 		RemoveChildrenSafely(_effectSummaryContainer);
+		RemoveChildrenSafely(_effectChainContainer);
 
 		if (_localizedSharedCreatedRowsCache.TryGetValue(cacheKey, out LocalizedSharedCreatedRowsCacheEntry? oldEntry)
 			&& oldEntry != null
@@ -2634,6 +2636,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		ClearExistingExtraEffectLoadingLabels();
 		RemoveChildrenSafely(_extraEffectsContainer);
 		RemoveChildrenSafely(_effectSummaryContainer);
+		RemoveChildrenSafely(_effectChainContainer);
 		_extraEffectRows.Clear();
 		// Restore the preservation state captured with these rows - saving with an empty stash would
 		// delete the unrepresentable (keyword-carrying) stored effects this row set never showed.
@@ -2736,6 +2739,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 		RemoveChildrenSafely(_extraEffectsContainer);
 		RemoveChildrenSafely(_effectSummaryContainer);
+		RemoveChildrenSafely(_effectChainContainer);
 		_extraEffectRows.Clear();
 	}
 
@@ -3033,6 +3037,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_rewardPoolPickerOverlay = null;
 		_definitionEditorOverlay = null;
 		_effectKindPickerOverlay = null;
+		_effectChainContainer = null;
 		_cardNameLabel = null;
 		_targetTypeSelect = null;
 		_starCostField = null;
@@ -3871,6 +3876,23 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		effectSummaryViewportMargin.AddChild(_effectSummaryContainer);
 		_effectSummaryScroll.AddChild(effectSummaryViewportMargin);
 		effectListBody.AddChild(_effectSummaryScroll);
+
+		// Chainboard C1: read-only chain strips - rows render as linked boxes (solid = card link,
+		// dashed = amount link). The panel is a VIEW over the same rows; authoring lands in C2.
+		PanelContainer effectChainsPanel = CreateEditorSectionPanel(CardEditorLoc.T("section.effectChains", "Effect Chains"), out VBoxContainer effectChainsBody);
+		effectChainsPanel.CustomMinimumSize = new Vector2(0, 96);
+		leftColumn.AddChild(effectChainsPanel);
+
+		ScrollContainer effectChainScroll = new ScrollContainer
+		{
+			SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+			SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+			CustomMinimumSize = new Vector2(0, 64)
+		};
+		_effectChainContainer = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		_effectChainContainer.AddThemeConstantOverride("separation", 6);
+		effectChainScroll.AddChild(_effectChainContainer);
+		effectChainsBody.AddChild(effectChainScroll);
 
 		ScrollContainer rightScroll = new ScrollContainer
 		{
@@ -22491,6 +22513,191 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return header;
 	}
 
+	// Chainboard C1: render the live rows as chain strips. Rows connected by card links
+	// (SelectedByEffect) or amount links group into one strip; unlinked rows are singleton boxes.
+	// Connectors: "──▶" card link from the previous box, "─ ─▶" amount link, "#n ▶" link to a
+	// non-adjacent step, "—" same strip without a direct link to the neighbor.
+	private void RefreshEffectChainStrip()
+	{
+		if (_effectChainContainer == null || !GodotObject.IsInstanceValid(_effectChainContainer))
+		{
+			return;
+		}
+
+		foreach (Node child in _effectChainContainer.GetChildren().Cast<Node>().ToList())
+		{
+			_effectChainContainer.RemoveChild(child);
+			child.QueueFreeSafely();
+		}
+
+		if (_extraEffectRows.Count == 0)
+		{
+			Label empty = new Label
+			{
+				Text = CardEditorLoc.T("effectChains.empty", "No effects yet - chains appear here as rows link together."),
+				AutowrapMode = TextServer.AutowrapMode.WordSmart
+			};
+			StyleHintLabel(empty);
+			_effectChainContainer.AddChild(empty);
+			return;
+		}
+
+		int count = _extraEffectRows.Count;
+		Dictionary<string, int> idToIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+		for (int i = 0; i < count; i++)
+		{
+			string id = _extraEffectRows[i].StableEffectId;
+			if (!string.IsNullOrWhiteSpace(id) && !idToIndex.ContainsKey(id))
+			{
+				idToIndex[id] = i;
+			}
+		}
+
+		int[] cardSrc = new int[count];
+		int[] amountSrc = new int[count];
+		int[] group = new int[count];
+		for (int i = 0; i < count; i++)
+		{
+			ExtraEffectRow row = _extraEffectRows[i];
+			cardSrc[i] = -1;
+			amountSrc[i] = -1;
+			group[i] = i;
+
+			bool moveSelectedByEffect = row.MoveSelectionModeSelect != null
+				&& GodotObject.IsInstanceValid(row.MoveSelectionModeSelect)
+				&& row.MoveSelectionModeSelect.Visible
+				&& GetSelectedCardSelectionMode(row.MoveSelectionModeSelect, CardExtraEffectCardSelectionMode.Choose) == CardExtraEffectCardSelectionMode.SelectedByEffect;
+			bool grantSelectedByEffect = row.GrantModeSelect != null
+				&& GodotObject.IsInstanceValid(row.GrantModeSelect)
+				&& row.GrantModeSelect.Visible
+				&& GetSelectedCardSelectionMode(row.GrantModeSelect, CardExtraEffectCardSelectionMode.Choose) == CardExtraEffectCardSelectionMode.SelectedByEffect;
+			if ((moveSelectedByEffect || grantSelectedByEffect)
+				&& !string.IsNullOrWhiteSpace(row.CardSelectionSourceEffectId)
+				&& idToIndex.TryGetValue(row.CardSelectionSourceEffectId, out int cardIndex)
+				&& cardIndex < i)
+			{
+				cardSrc[i] = cardIndex;
+			}
+
+			if (!string.IsNullOrWhiteSpace(row.AmountSourceEffectId)
+				&& idToIndex.TryGetValue(row.AmountSourceEffectId, out int amountIndex)
+				&& amountIndex < i)
+			{
+				amountSrc[i] = amountIndex;
+			}
+		}
+
+		int FindRoot(int x)
+		{
+			while (group[x] != x)
+			{
+				group[x] = group[group[x]];
+				x = group[x];
+			}
+			return x;
+		}
+
+		for (int i = 0; i < count; i++)
+		{
+			if (cardSrc[i] >= 0)
+			{
+				int rootA = FindRoot(cardSrc[i]);
+				int rootB = FindRoot(i);
+				if (rootA != rootB)
+				{
+					group[rootB] = rootA;
+				}
+			}
+			if (amountSrc[i] >= 0)
+			{
+				int rootA = FindRoot(amountSrc[i]);
+				int rootB = FindRoot(i);
+				if (rootA != rootB)
+				{
+					group[rootB] = rootA;
+				}
+			}
+		}
+
+		List<List<int>> chains = new List<List<int>>();
+		Dictionary<int, int> rootToChain = new Dictionary<int, int>();
+		for (int i = 0; i < count; i++)
+		{
+			int root = FindRoot(i);
+			if (!rootToChain.TryGetValue(root, out int chainIndex))
+			{
+				chainIndex = chains.Count;
+				rootToChain[root] = chainIndex;
+				chains.Add(new List<int>());
+			}
+			chains[chainIndex].Add(i);
+		}
+
+		foreach (List<int> chain in chains)
+		{
+			ScrollContainer stripScroll = new ScrollContainer
+			{
+				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+				VerticalScrollMode = ScrollContainer.ScrollMode.Disabled,
+				CustomMinimumSize = new Vector2(0, 58)
+			};
+			HBoxContainer strip = new HBoxContainer();
+			strip.AddThemeConstantOverride("separation", 6);
+			stripScroll.AddChild(strip);
+
+			for (int m = 0; m < chain.Count; m++)
+			{
+				int rowIndex = chain[m];
+				if (m > 0)
+				{
+					int prevIndex = chain[m - 1];
+					string connectorText = cardSrc[rowIndex] == prevIndex
+						? "──▶"
+						: amountSrc[rowIndex] == prevIndex
+							? "─ ─▶"
+							: cardSrc[rowIndex] >= 0
+								? $"#{(cardSrc[rowIndex] + 1).ToString(CultureInfo.InvariantCulture)} ▶"
+								: amountSrc[rowIndex] >= 0
+									? $"= #{(amountSrc[rowIndex] + 1).ToString(CultureInfo.InvariantCulture)} ▶"
+									: "—";
+					Label connector = new Label { Text = connectorText, VerticalAlignment = VerticalAlignment.Center };
+					StyleHintLabel(connector);
+					strip.AddChild(connector);
+				}
+
+				strip.AddChild(BuildEffectChainBox(rowIndex));
+			}
+
+			_effectChainContainer.AddChild(stripScroll);
+		}
+	}
+
+	private Control BuildEffectChainBox(int rowIndex)
+	{
+		ExtraEffectRow row = _extraEffectRows[rowIndex];
+		PanelContainer box = CreateEditorPanel(bgAlpha: 0.62f);
+		VBoxContainer body = new VBoxContainer();
+		body.AddThemeConstantOverride("separation", 0);
+
+		Label title = new Label
+		{
+			Text = $"{(rowIndex + 1).ToString(CultureInfo.InvariantCulture)}. {GetEffectSummaryKindText(row)}"
+		};
+		StyleBodyLabel(title);
+		body.AddChild(title);
+
+		string triggerText = GetSelectedItemText(row.TriggerSelect, string.Empty);
+		if (!string.IsNullOrWhiteSpace(triggerText))
+		{
+			Label sub = new Label { Text = triggerText };
+			StyleHintLabel(sub);
+			body.AddChild(sub);
+		}
+
+		box.AddChild(body);
+		return box;
+	}
+
 	private void RefreshEffectSummaryList()
 	{
 		if (_effectSummaryContainer == null || !GodotObject.IsInstanceValid(_effectSummaryContainer))
@@ -22516,6 +22723,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			};
 			StyleHintLabel(empty);
 			_effectSummaryContainer.AddChild(empty);
+			RefreshEffectChainStrip();
 			return;
 		}
 
@@ -22601,6 +22809,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				row.SummaryMoveDownButton.Disabled = i == _extraEffectRows.Count - 1;
 			}
 		}
+
+		RefreshEffectChainStrip();
 	}
 
 	private void FollowMovedEffectSummary(ExtraEffectRow row, float previousSummaryTop, int direction, Vector2? previousButtonWindowPosition, Vector2? previousMouseWindowPosition)
