@@ -30493,7 +30493,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		{
 			CardModel? source = ResolveHandSelectionUiSource(sourceEffect, sourceCard, excludeSourceCardInHandSelector);
 			HashSet<CardModel> candidateSet = new HashSet<CardModel>(candidates.Where(c => c != null), ReferenceEqualityComparer<CardModel>.Instance);
-			Func<CardModel, bool>? filter = candidateSet.Count == 0 ? null : (CardModel c) => c != null && candidateSet.Contains(c);
+			if (candidateSet.Count == 0)
+			{
+				// A null filter would make FromHand treat EVERY hand card as selectable.
+				return ReportSelectedCards(new List<CardModel>());
+			}
+			Func<CardModel, bool>? filter = (CardModel c) => c != null && candidateSet.Contains(c);
 
 			IEnumerable<CardModel> selected = preferHandDiscardSelector
 				? await CardSelectCmd.FromHandForDiscard(choiceContext, owner, prefs, filter, source)
@@ -32507,7 +32512,8 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 			}
 			if (!TryParseSpecificCardId(idStr, out ModelId desiredId))
 			{
-				return true;
+				// Fail closed: a corrupt id must restrict to nothing, not everything.
+				return false;
 			}
 			return card.Id == desiredId;
 		}
@@ -39285,12 +39291,17 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 		fused.CountDamageCurrentInclusion = upgradeEffect.CountDamageCurrentInclusion;
 		fused.CountResultEffectId = upgradeEffect.CountResultEffectId;
 		fused.CountResultMetric = upgradeEffect.CountResultMetric;
-		fused.CardMatchMode = upgradeEffect.CardMatchMode;
-		fused.MatchCardId = upgradeEffect.MatchCardId;
-		fused.MatchTagKind = upgradeEffect.MatchTagKind;
-		fused.MatchVanillaTag = upgradeEffect.MatchVanillaTag;
-		fused.MatchCustomTag = upgradeEffect.MatchCustomTag;
-		fused.MatchCustomKeyword = upgradeEffect.MatchCustomKeyword;
+		// Any is the unset default: an upgrade row with no match filter inherits the base row's
+		// restriction (same rule as CustomKeywordName below) instead of erasing it.
+		if (upgradeEffect.CardMatchMode != CardExtraEffectCardMatchMode.Any)
+		{
+			fused.CardMatchMode = upgradeEffect.CardMatchMode;
+			fused.MatchCardId = upgradeEffect.MatchCardId;
+			fused.MatchTagKind = upgradeEffect.MatchTagKind;
+			fused.MatchVanillaTag = upgradeEffect.MatchVanillaTag;
+			fused.MatchCustomTag = upgradeEffect.MatchCustomTag;
+			fused.MatchCustomKeyword = upgradeEffect.MatchCustomKeyword;
+		}
 		fused.NameFilterEnabled = upgradeEffect.NameFilterEnabled;
 		fused.NameFilterText = upgradeEffect.NameFilterText;
 		fused.CostFilterEnabled = upgradeEffect.CostFilterEnabled;

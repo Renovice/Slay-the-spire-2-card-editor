@@ -1,3 +1,12 @@
+﻿## 2026-07-18 - Pierce/Sovereign-Blade bug: upgrade fuse erased the card-match filter
+
+Hypothesis: the grant flow falls back to a null (match-everything) hand filter when the filtered candidate set is empty.
+Finding: Partially true - the null-filter fallback exists but is LATENT (unreachable via current callers); the LIVE route is the upgrade fuse.
+Evidence: 2-agent trace + created_cards.json (CARD.CARD_EDITOR_CREATED_CARD18): base Pierce grant rows have CardMatchMode=CardId/MatchCardId=CARD.SOVEREIGN_BLADE, but Upgrade.ExtraEffects[2] saved default Any/null; MergeUpgradeBaseSlotEffect (:39288) unconditionally overwrote the fused row with the upgrade values, so the upgraded card's grant row lost the restriction -> candidates = whole hand -> Choose picker over anything. The sibling row that KEPT its filter correctly no-ops when SB is absent (empty-candidate guards are sound).
+Reason: the fuse had an inherit rule for CustomKeywordName but none for the CardMatch* fields; two secondary fail-open paths (unparseable MatchCardId -> match-all; empty candidateSet -> null FromHand filter) could produce the same symptom on other cards.
+Fix (3 guards in CardEditorExtraEffects.cs): (1) fuse inherits base CardMatch*/Match* fields when the upgrade row's CardMatchMode is Any (mirrors the CustomKeywordName rule) - fixes the user's card with NO data repair needed; (2) PassesCardMatchFilter fails CLOSED on a non-blank unparseable MatchCardId; (3) SelectCardsFromCandidates returns an empty selection instead of passing a null filter to FromHand.
+Build: 0 errors / 278 warnings (baseline). NOT deployed yet.
+Next Step: deploy on request; in-game check = play upgraded Pierce card with no Sovereign Blade anywhere (expect silent no-op, no picker) and with SB in hand (expect only SB selectable).
 ## 2026-07-18 - Chainboard C3 SHIPPED (code): chips, IF prefixes, click-to-jump, per-box remove
 
 - BOX CHIPS: each box now shows "N. Kind Amount" + a dim "Trigger • Target" line (same summary helpers as the Effect List, so wording stays in sync).
