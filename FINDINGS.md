@@ -1,4 +1,11 @@
-﻿## 2026-07-19 - Chainboard C5 polish: live chain sentences + chain badges
+﻿## 2026-07-19 - Release prep: version 8.0, changelog, manifest in repo
+
+- card_editor.json brought into the repo (was only in the deployed folder) and bumped 7.7 -> 8.0 with a Chainboard mention in the description.
+- csproj gains <Version>8.0.0</Version> - the MP sync guard's ModVersion label now reads a real version (verified: built DLL stamps 8.0.0.0).
+- CHANGELOG.md (repo root): Nexus-pasteable 8.0 notes distilled from FINDINGS - Chainboard, Card Engine (selection/value bus, inline branches, grants, truthful targets, vanilla verbiage), QoL sweep, 2026-07-18 game-update compatibility, MP same-build requirement.
+Build: 0 errors / 274 warnings (baseline). Deploy = DLL + PDB + card_editor.json this time.
+Next Step: deploy on request; P1.5 (PhraseComposer hygiene) stays queued for a fresh session.
+## 2026-07-19 - Chainboard C5 polish: live chain sentences + chain badges
 
 - LIVE SENTENCE: every multi-step chain shows its actual rules text under the strip - built by the same BuildOverrideFromUi + TryFormatLineForAudit pipeline the preview/audit use, markup stripped with REAL numbers kept (StripMarkupForHint gained replaceDigits:false). Perf-guarded: skipped while typing in a chip (strip repaints per keystroke) and while lazy row hydration is still pending (the builder would force-complete it at popup-open).
 - CHAIN BADGE: classic Effect List rows that participate in a chain (card link, amount link, or board sequence link) carry a chain-link glyph in their title, so chain membership is visible from the classic list too.
