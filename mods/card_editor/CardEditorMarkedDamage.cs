@@ -34,7 +34,7 @@ internal sealed class CardEditorMarkedPower : PowerModel
 
 	// Mirrors VulnerablePower: every power on the struck creature is asked for a multiplier; gate on
 	// "I am the one being hit" (target == Owner) and a powered attack so non-attack damage is untouched.
-	public override decimal ModifyDamageMultiplicative(Creature? target, decimal amount, ValueProp props, Creature? dealer, CardModel? cardSource, CardPlay? cardPlay)
+	public override decimal ModifyDamageMultiplicative(Creature? target, decimal amount, ValueProp props, Creature? dealer, CardModel? cardSource)
 	{
 		if (target != base.Owner || !props.IsPoweredAttack())
 		{

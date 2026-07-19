@@ -1,4 +1,17 @@
-﻿## 2026-07-18 - Chainboard relocated: full-width board in the main column, movable card boxes
+﻿## 2026-07-19 - Game update (2026-07-18 13:57) broke the deployed mod: full compat pass
+
+Hypothesis: the "cant load my library / a bug has occured" popup and dead patches came from the Steam update changing game APIs under the deployed DLL (built 11:08, update landed 13:57).
+Finding: True.
+Evidence: godot.log - MissingMethodException CardPlay.set_Player at NCardLibraryGrid.InitGrid (the library crash) + 10 "[CardEditor] Skipping incompatible Harmony patch" warnings at boot; sts2.dll mtime 13:57; rebuild against the new DLL surfaced 46 unique compile errors.
+API changes handled (new shapes read from the game's fresh sts2.xml + a reflection probe):
+- CardPlay lost Player entirely (owner now flows from Card) - 27 initializer sites cleaned via compiler-line-verified script.
+- Hook.BeforeSideTurnEnd/AfterSideTurnEnd -> Hook.BeforeTurnEnd/AfterTurnEnd(ICombatState, CombatSide, IEnumerable<Creature>) - 6 patch classes retargeted with is-not-CombatState downcast guards.
+- Hook.ModifyCardPlayResultLocation + CardLocation record REMOVED (v0.109 un-reverted) -> Hook.ModifyCardPlayResultPileTypeAndPosition with (PileType, CardPilePosition) tuple result; patch restored from pre-v0.109 git history (b13ee61~1).
+- Hook.ModifyDamage / ModifyDamageInternal / AbstractModel.ModifyDamage{Additive,Multiplicative,Cap} dropped the CardPlay param; IgnoreCaps prefix + Marked power override + preview call sites updated; combatState is ICombatState now (GetConcreteCombatState() compat shim).
+- CreatureCmd.Damage overloads dropped the trailing CardPlay; AttackCommand.FromCard(card) / FromOsty(osty, card) slimmed; CreatureCmd.LoseBlock(creature, amount); PotionFactory.GetPotionOptions gained a required blacklist param (empty passed).
+Build: 0 errors / 274 warnings (NEW baseline, was 278 - four warnings lived in deleted code). NOT deployed yet; C4 board-native authoring rides in the same DLL (adversarial review re-running: wf_0b9fff6b-be2; the first run was interrupted by the session break).
+Next Step: deploy on request (game must be CLOSED); post-deploy check = library opens, Pierce ignores Block in combat, turn-start/turn-end triggers fire; then check godot.log for any remaining "Skipping incompatible" warnings.
+## 2026-07-18 - Chainboard relocated: full-width board in the main column, movable card boxes
 
 User feedback: the Effect Chains panel was squeezed into the 340px left sidebar under the Effect List - boxes clipped, strips unreadable. It belongs in the MAIN content column (where the Numbers section lives), horizontal left-to-right.
 - Left-column panel deleted; the board is now a full-width section in the right column, directly after the Extra Effects list and above Numbers. Strips get the whole main-column width and h-scroll only when a chain is genuinely long.

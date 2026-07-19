@@ -443,7 +443,6 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			CardPlay previewPlay = new CardPlay
 			{
 				Card = createdCard,
-				Player = createdCard.Owner,
 				Target = target,
 				ResultPile = createdCard.TryGetPile()?.Type ?? PileType.None,
 				Resources = new ResourceInfo

@@ -171,7 +171,6 @@ internal static class Hook_AfterDamageGiven_CardEditorPowerCountEvent_Patch
 		return new CardPlay
 		{
 			Card = cardSource,
-			Player = cardSource.Owner,
 			Target = target,
 			ResultPile = cardSource.Pile?.Type ?? PileType.None,
 			Resources = new ResourceInfo
