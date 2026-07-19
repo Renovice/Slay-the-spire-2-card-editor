@@ -11285,8 +11285,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 	private static string? NormalizeCustomKeywordName(string? value)
 	{
-		string trimmed = value?.Trim() ?? string.Empty;
-		return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+		return CardEditorPhraseComposer.NormalizeCustomName(value);
 	}
 
 	private static void EnsureGrantPackageKey(CardExtraEffect? effect)
@@ -15713,12 +15712,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			},
 			CardExtraEffectKind.GainMaxHp => $"Gain Max HP equal to {referenceText}.",
 			CardExtraEffectKind.LoseMaxHp => $"Lose Max HP equal to {referenceText}.",
-				CardExtraEffectKind.GainEnergy => FormatEqualToPlayerResourceText(effect.Target, gain: true, "Energy", referenceText),
-				CardExtraEffectKind.LoseEnergy => FormatEqualToPlayerResourceText(effect.Target, gain: false, "Energy", referenceText),
-				CardExtraEffectKind.GainStars => FormatEqualToPlayerResourceText(effect.Target, gain: true, "Stars", referenceText),
-				CardExtraEffectKind.LoseStars => FormatEqualToPlayerResourceText(effect.Target, gain: false, "Stars", referenceText),
-			CardExtraEffectKind.GainGold => FormatEqualToPlayerResourceText(effect.Target, gain: true, "Gold", referenceText),
-			CardExtraEffectKind.LoseGold => FormatEqualToPlayerResourceText(effect.Target, gain: false, "Gold", referenceText),
+				CardExtraEffectKind.GainEnergy => CardEditorPhraseComposer.FormatEqualToPlayerResourceText(effect.Target, gain: true, "Energy", referenceText),
+				CardExtraEffectKind.LoseEnergy => CardEditorPhraseComposer.FormatEqualToPlayerResourceText(effect.Target, gain: false, "Energy", referenceText),
+				CardExtraEffectKind.GainStars => CardEditorPhraseComposer.FormatEqualToPlayerResourceText(effect.Target, gain: true, "Stars", referenceText),
+				CardExtraEffectKind.LoseStars => CardEditorPhraseComposer.FormatEqualToPlayerResourceText(effect.Target, gain: false, "Stars", referenceText),
+			CardExtraEffectKind.GainGold => CardEditorPhraseComposer.FormatEqualToPlayerResourceText(effect.Target, gain: true, "Gold", referenceText),
+			CardExtraEffectKind.LoseGold => CardEditorPhraseComposer.FormatEqualToPlayerResourceText(effect.Target, gain: false, "Gold", referenceText),
 			CardExtraEffectKind.GainStrength => FormatEqualToSignedPowerText(effect.Target, gain: true, "Strength", referenceText, powerDurationSuffix),
 			CardExtraEffectKind.LoseStrength => FormatEqualToSignedPowerText(effect.Target, gain: false, "Strength", referenceText, powerDurationSuffix),
 			CardExtraEffectKind.GainDexterity => FormatEqualToSignedPowerText(effect.Target, gain: true, "Dexterity", referenceText, powerDurationSuffix),
@@ -15775,34 +15774,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		string title = PowerTitle(debuffName, debuffName);
 		string payload = $"[gold]{title}[/gold]";
 		string suffixPart = BuildSuffixPart(suffix);
-		return target switch
-		{
-			CardExtraEffectTarget.AllEnemies => $"Apply {payload} equal to {referenceText} to ALL enemies{suffixPart}",
-			CardExtraEffectTarget.OtherEnemies => $"Apply {payload} equal to {referenceText} to other enemies{suffixPart}",
-			CardExtraEffectTarget.RandomEnemy => $"Apply {payload} equal to {referenceText} to a random enemy{suffixPart}",
-			CardExtraEffectTarget.Self => $"Gain {payload} equal to {referenceText}{suffixPart}",
-			CardExtraEffectTarget.AllAllies => $"Apply {payload} equal to {referenceText} to ALL players{suffixPart}",
-			CardExtraEffectTarget.AnyAlly => $"Apply {payload} equal to {referenceText} to another player{suffixPart}",
-			CardExtraEffectTarget.AnyPlayer => $"Apply {payload} equal to {referenceText} to any player{suffixPart}",
-			_ => $"Apply {payload} equal to {referenceText}{suffixPart}"
-		};
-	}
-
-	// Vanilla frames for player-resolved resources ("Another player gains ...", "ALL players gain ...",
-	// per Believe in You / Energy Surge). Self keeps the imperative; enemy targets are not resolvable
-	// for these kinds at runtime, so they keep the imperative default too.
-	private static string FormatEqualToPlayerResourceText(CardExtraEffectTarget target, bool gain, string resourceName, string referenceText)
-	{
-		string selfVerb = gain ? "Gain" : "Lose";
-		string singularVerb = gain ? "gains" : "loses";
-		string pluralVerb = gain ? "gain" : "lose";
-		return target switch
-		{
-			CardExtraEffectTarget.AllAllies => $"ALL players {pluralVerb} {resourceName} equal to {referenceText}.",
-			CardExtraEffectTarget.AnyAlly => $"Another player {singularVerb} {resourceName} equal to {referenceText}.",
-			CardExtraEffectTarget.AnyPlayer => $"Any player {singularVerb} {resourceName} equal to {referenceText}.",
-			_ => $"{selfVerb} {resourceName} equal to {referenceText}."
-		};
+		return CardEditorPhraseComposer.FormatApplyEqualToText(target, payload, referenceText, suffixPart);
 	}
 
 	private static string FormatCopyDebuffs(CardExtraEffectTarget target)
@@ -16154,17 +16126,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		string title = ResolvePowerTitle(effect?.PowerId) ?? CardEditorLoc.T("cardText.power.unknown", "Unknown Power");
 		string payload = $"[gold]{title}[/gold]";
 		string suffixPart = BuildSuffixPart(suffix);
-		return effect.Target switch
-		{
-			CardExtraEffectTarget.AllEnemies => $"Apply {payload} equal to {referenceText} to ALL enemies{suffixPart}",
-			CardExtraEffectTarget.OtherEnemies => $"Apply {payload} equal to {referenceText} to other enemies{suffixPart}",
-			CardExtraEffectTarget.RandomEnemy => $"Apply {payload} equal to {referenceText} to a random enemy{suffixPart}",
-			CardExtraEffectTarget.Self => $"Gain {payload} equal to {referenceText}{suffixPart}",
-			CardExtraEffectTarget.AllAllies => $"Apply {payload} equal to {referenceText} to ALL players{suffixPart}",
-			CardExtraEffectTarget.AnyAlly => $"Apply {payload} equal to {referenceText} to another player{suffixPart}",
-			CardExtraEffectTarget.AnyPlayer => $"Apply {payload} equal to {referenceText} to any player{suffixPart}",
-			_ => $"Apply {payload} equal to {referenceText}{suffixPart}"
-		};
+		return CardEditorPhraseComposer.FormatApplyEqualToText(effect.Target, payload, referenceText, suffixPart);
 	}
 
 	private static string FinalizeSpecialEffectSourceLine(
@@ -16446,13 +16408,13 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.GainBlock => FormatGainBlock(effect.Target, amountText),
 				CardExtraEffectKind.DealDamage => FormatDealDamage(effect.Target, amountText),
 				CardExtraEffectKind.CardDealsExtraDamage => FormatCardDealsExtraDamage(amountText),
-				CardExtraEffectKind.DrawCards => ApplyPlayerDrawSubject(FormatDrawCards(effect, grammarAmount, amountText), effect.Target),
-				CardExtraEffectKind.DrawUntilHandSize => ApplyPlayerDrawSubject($"Draw until your hand holds {amountText} cards.", effect.Target),
-				CardExtraEffectKind.DrawAndCheck => ApplyPlayerDrawSubject($"Draw {amountText} card(s), then run the branch if a drawn card matches the branch card type.", effect.Target),
-				CardExtraEffectKind.GainEnergy => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.gainEnergy", $"Gain {FormatEnergyText()}.", ("Amount", FormatEnergyText())), $"gains {FormatEnergyText()}.", $"gain {FormatEnergyText()}."),
-				CardExtraEffectKind.LoseEnergy => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.loseEnergy", $"Lose {FormatEnergyText()}.", ("Amount", FormatEnergyText())), $"loses {FormatEnergyText()}.", $"lose {FormatEnergyText()}."),
-				CardExtraEffectKind.GainStars => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.gainStars", $"Gain {FormatStarText()}.", ("Amount", FormatStarText())), $"gains {FormatStarText()}.", $"gain {FormatStarText()}."),
-				CardExtraEffectKind.LoseStars => FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.loseStars", $"Lose {FormatStarText()}.", ("Amount", FormatStarText())), $"loses {FormatStarText()}.", $"lose {FormatStarText()}."),
+				CardExtraEffectKind.DrawCards => CardEditorPhraseComposer.ApplyPlayerDrawSubject(FormatDrawCards(effect, grammarAmount, amountText), effect.Target),
+				CardExtraEffectKind.DrawUntilHandSize => CardEditorPhraseComposer.ApplyPlayerDrawSubject($"Draw until your hand holds {amountText} cards.", effect.Target),
+				CardExtraEffectKind.DrawAndCheck => CardEditorPhraseComposer.ApplyPlayerDrawSubject($"Draw {amountText} card(s), then run the branch if a drawn card matches the branch card type.", effect.Target),
+				CardExtraEffectKind.GainEnergy => CardEditorPhraseComposer.FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.gainEnergy", $"Gain {FormatEnergyText()}.", ("Amount", FormatEnergyText())), $"gains {FormatEnergyText()}.", $"gain {FormatEnergyText()}."),
+				CardExtraEffectKind.LoseEnergy => CardEditorPhraseComposer.FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.loseEnergy", $"Lose {FormatEnergyText()}.", ("Amount", FormatEnergyText())), $"loses {FormatEnergyText()}.", $"lose {FormatEnergyText()}."),
+				CardExtraEffectKind.GainStars => CardEditorPhraseComposer.FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.gainStars", $"Gain {FormatStarText()}.", ("Amount", FormatStarText())), $"gains {FormatStarText()}.", $"gain {FormatStarText()}."),
+				CardExtraEffectKind.LoseStars => CardEditorPhraseComposer.FormatPlayerResourceArm(effect.Target, CardEditorLoc.F("cardText.loseStars", $"Lose {FormatStarText()}.", ("Amount", FormatStarText())), $"loses {FormatStarText()}.", $"lose {FormatStarText()}."),
 				CardExtraEffectKind.Heal => effect.Target switch
 				{
 					CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.heal.allEnemies", $"ALL enemies heal {amountText} HP.", ("Amount", amountText)),
@@ -16626,14 +16588,14 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.ConsumeCardValue => FormatConsumeCardValue(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.SelectCardsFromPile => FormatSelectCardsFromPile(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.AutoPlaySelfFromPile => FormatAutoPlaySelfFromPile(effect),
-				CardExtraEffectKind.DrawCardsThatCostLess => ApplyPlayerDrawSubject(FormatDrawCardsThatCostLess(card, effect, grammarAmount, amountText, cardCostsLessDurationSuffix), effect.Target),
+				CardExtraEffectKind.DrawCardsThatCostLess => CardEditorPhraseComposer.ApplyPlayerDrawSubject(FormatDrawCardsThatCostLess(card, effect, grammarAmount, amountText, cardCostsLessDurationSuffix), effect.Target),
 				CardExtraEffectKind.AutoDrawSelfFromPile => FormatAutoDrawSelfFromPile(effect),
 				CardExtraEffectKind.ConditionalAutoPlayFromPile => FormatAutoPlaySelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
 				CardExtraEffectKind.ConditionalAutoDrawFromPile => FormatAutoDrawSelfFromPile(NormalizeSelfPileAutoEffect(effect) ?? effect),
 				CardExtraEffectKind.ConditionalAutoRunEffects => FormatAutoRunEffectRows(card, NormalizeSelfPileAutoEffect(effect) ?? effect, target, isUpgradePreview),
 				CardExtraEffectKind.GrantKeywordToPile => FormatGrantKeywordToPile(effect, grammarAmount, amountText),
-				CardExtraEffectKind.GainGold => FormatPlayerResourceArm(effect.Target, $"Gain {amountText} [gold]Gold[/gold].", $"gains {amountText} [gold]Gold[/gold].", $"gain {amountText} [gold]Gold[/gold]."),
-				CardExtraEffectKind.LoseGold => FormatPlayerResourceArm(effect.Target, $"Lose {amountText} [gold]Gold[/gold].", $"loses {amountText} [gold]Gold[/gold].", $"lose {amountText} [gold]Gold[/gold]."),
+				CardExtraEffectKind.GainGold => CardEditorPhraseComposer.FormatPlayerResourceArm(effect.Target, $"Gain {amountText} [gold]Gold[/gold].", $"gains {amountText} [gold]Gold[/gold].", $"gain {amountText} [gold]Gold[/gold]."),
+				CardExtraEffectKind.LoseGold => CardEditorPhraseComposer.FormatPlayerResourceArm(effect.Target, $"Lose {amountText} [gold]Gold[/gold].", $"loses {amountText} [gold]Gold[/gold].", $"lose {amountText} [gold]Gold[/gold]."),
 				CardExtraEffectKind.UpgradeDeckCards => FormatUpgradeDeckCards(effect, grammarAmount, amountText),
 				CardExtraEffectKind.FetchSpecificCardToHand => FormatFetchSpecificCardToHand(effect, grammarAmount, amountText),
 				_ => null
@@ -22181,38 +22143,6 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		};
 	}
 
-	// Vanilla ally frames for player-resolved lines. Draw-style imperatives ("Draw 2 cards from your
-	// [gold]Discard Pile[/gold].") become "Another player draws 2 cards from their ..." (Constellation/
-	// Tutor wording); resource arms become "Another player gains {payload}" / "ALL players gain ..."
-	// (Believe in You / Energy Surge). Self keeps the untouched imperative line.
-	private static string ApplyPlayerDrawSubject(string line, CardExtraEffectTarget target)
-	{
-		string? subject = target switch
-		{
-			CardExtraEffectTarget.AnyAlly => "Another player draws",
-			CardExtraEffectTarget.AllAllies => "ALL players draw",
-			CardExtraEffectTarget.AnyPlayer => "Any player draws",
-			_ => null
-		};
-		if (subject == null || string.IsNullOrEmpty(line) || !line.StartsWith("Draw ", StringComparison.Ordinal))
-		{
-			return line;
-		}
-
-		return subject + line.Substring("Draw".Length).Replace(" your ", " their ");
-	}
-
-	private static string FormatPlayerResourceArm(CardExtraEffectTarget target, string selfLine, string singularVerbPhrase, string pluralVerbPhrase)
-	{
-		return target switch
-		{
-			CardExtraEffectTarget.AnyAlly => $"Another player {singularVerbPhrase}",
-			CardExtraEffectTarget.AllAllies => $"ALL players {pluralVerbPhrase}",
-			CardExtraEffectTarget.AnyPlayer => $"Any player {singularVerbPhrase}",
-			_ => selfLine
-		};
-	}
-
 	private static string FormatDrawCards(CardExtraEffect effect, int grammarAmount, string amountText)
 	{
 		CardExtraEffect displayEffect = GetGrantPayloadViewEffect(effect);
@@ -24813,17 +24743,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		string title = PowerTitle(debuffName, debuffName);
 		string payload = $"{amount.ToString(CultureInfo.InvariantCulture)} [gold]{title}[/gold]";
 		string suffixPart = BuildSuffixPart(suffix);
-		return target switch
-		{
-			CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.applyDebuff.allEnemies", $"Apply {payload} to ALL enemies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.applyDebuff.otherEnemies", $"Apply {payload} to other enemies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.applyDebuff.randomEnemy", $"Apply {payload} to a random enemy{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.applyDebuff.self", $"Gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyDebuff.allAllies", $"Apply {payload} to ALL players{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyDebuff.anyAlly", $"Apply {payload} to another player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.applyDebuff.anyPlayer", $"Apply {payload} to any player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			_ => CardEditorLoc.F("cardText.applyDebuff.target", $"Apply {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart))
-		};
+		return CardEditorPhraseComposer.FormatApplyDebuffPayload(target, payload, suffixPart);
 	}
 
 	private static string FormatApplyDebuffText(CardExtraEffectTarget target, string amountText, string debuffName, string? suffix = null)
@@ -24831,77 +24751,25 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		string title = PowerTitle(debuffName, debuffName);
 		string payload = $"{amountText} [gold]{title}[/gold]";
 		string suffixPart = BuildSuffixPart(suffix);
-		return target switch
-		{
-			CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.applyDebuff.allEnemies", $"Apply {payload} to ALL enemies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.applyDebuff.otherEnemies", $"Apply {payload} to other enemies{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.applyDebuff.randomEnemy", $"Apply {payload} to a random enemy{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.applyDebuff.self", $"Gain {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.applyDebuff.allAllies", $"Apply {payload} to ALL players{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.applyDebuff.anyAlly", $"Apply {payload} to another player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.applyDebuff.anyPlayer", $"Apply {payload} to any player{suffixPart}", ("Payload", payload), ("Suffix", suffixPart)),
-			_ => CardEditorLoc.F("cardText.applyDebuff.target", $"Apply {payload}{suffixPart}", ("Payload", payload), ("Suffix", suffixPart))
-		};
+		return CardEditorPhraseComposer.FormatApplyDebuffPayload(target, payload, suffixPart);
 	}
 
 	private static string FormatSignedPowerText(CardExtraEffectTarget target, bool gain, string amountText, string powerName, string? suffix = null)
 	{
-		string wordSelf = gain
-			? CardEditorLoc.T("cardText.word.gainSelf", "Gain")
-			: CardEditorLoc.T("cardText.word.loseSelf", "Lose");
-		string verbPlural = gain
-			? CardEditorLoc.T("cardText.word.gain", "gain")
-			: CardEditorLoc.T("cardText.word.lose", "lose");
-		string verbSingular = gain
-			? CardEditorLoc.T("cardText.word.gains", "gains")
-			: CardEditorLoc.T("cardText.word.loses", "loses");
-
 		string title = PowerTitle(powerName, powerName);
 		string payload = $"{amountText} [gold]{title}[/gold]";
 		string suffixPart = BuildSuffixPart(suffix);
-
-		return target switch
-		{
-			CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.signedPower.allEnemies", $"ALL enemies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.signedPower.otherEnemies", $"Other enemies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.signedPower.randomEnemy", $"A random enemy {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.signedPower.self", $"{wordSelf} {payload}{suffixPart}", ("Verb", wordSelf), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.signedPower.allAllies", $"ALL players {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.signedPower.anyAlly", $"Another player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.signedPower.anyPlayer", $"Any player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
-			_ => CardEditorLoc.F("cardText.signedPower.target", $"The target {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart))
-		};
+		return CardEditorPhraseComposer.FormatSignedPowerPayload(target, gain, payload, suffixPart);
 	}
 
 	private static string FormatSignedPower(CardExtraEffectTarget target, int signedAmount, string powerName, string? suffix = null)
 	{
 		int abs = Math.Abs(signedAmount);
 		bool gain = signedAmount >= 0;
-		string wordSelf = gain
-			? CardEditorLoc.T("cardText.word.gainSelf", "Gain")
-			: CardEditorLoc.T("cardText.word.loseSelf", "Lose");
-		string verbPlural = gain
-			? CardEditorLoc.T("cardText.word.gain", "gain")
-			: CardEditorLoc.T("cardText.word.lose", "lose");
-		string verbSingular = gain
-			? CardEditorLoc.T("cardText.word.gains", "gains")
-			: CardEditorLoc.T("cardText.word.loses", "loses");
-
 		string title = PowerTitle(powerName, powerName);
 		string payload = $"{abs.ToString(CultureInfo.InvariantCulture)} [gold]{title}[/gold]";
 		string suffixPart = BuildSuffixPart(suffix);
-
-		return target switch
-		{
-			CardExtraEffectTarget.AllEnemies => CardEditorLoc.F("cardText.signedPower.allEnemies", $"ALL enemies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.OtherEnemies => CardEditorLoc.F("cardText.signedPower.otherEnemies", $"Other enemies {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.RandomEnemy => CardEditorLoc.F("cardText.signedPower.randomEnemy", $"A random enemy {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.Self => CardEditorLoc.F("cardText.signedPower.self", $"{wordSelf} {payload}{suffixPart}", ("Verb", wordSelf), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AllAllies => CardEditorLoc.F("cardText.signedPower.allAllies", $"ALL players {verbPlural} {payload}{suffixPart}", ("Verb", verbPlural), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyAlly => CardEditorLoc.F("cardText.signedPower.anyAlly", $"Another player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
-			CardExtraEffectTarget.AnyPlayer => CardEditorLoc.F("cardText.signedPower.anyPlayer", $"Any player {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart)),
-			_ => CardEditorLoc.F("cardText.signedPower.target", $"The target {verbSingular} {payload}{suffixPart}", ("Verb", verbSingular), ("Payload", payload), ("Suffix", suffixPart))
-		};
+		return CardEditorPhraseComposer.FormatSignedPowerPayload(target, gain, payload, suffixPart);
 	}
 
 	private static string FormatGainPower(CardExtraEffectTarget target, string amountText, string powerName, string? suffix = null)
