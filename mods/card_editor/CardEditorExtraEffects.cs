@@ -15239,12 +15239,21 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		string targetLabel = GetSelfScalingTargetLabelWithNumberSelection(card, effect, isUpgradePreview);
 		string amountText = FormatSelfScalingAmountText(card, effect, isUpgradePreview);
 		string durationSuffix = FormatSelfScalingDurationSuffix(effect);
+		bool selectedByEffect = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
 		string recipientSuffix = effect.SelfScalingRecipientMode switch
 		{
-			CardExtraEffectSelfScalingRecipientMode.SelectedCards => CardEditorLoc.T("cardText.selfScaling.recipient.selected", " on selected cards"),
-			CardExtraEffectSelfScalingRecipientMode.MatchingCards => CardEditorLoc.T("cardText.selfScaling.recipient.matching", " on matching cards"),
-			CardExtraEffectSelfScalingRecipientMode.ThisAndSelectedCards => CardEditorLoc.T("cardText.selfScaling.recipient.thisAndSelected", " on this card and selected cards"),
-			CardExtraEffectSelfScalingRecipientMode.ThisAndMatchingCards => CardEditorLoc.T("cardText.selfScaling.recipient.thisAndMatching", " on this card and matching cards"),
+			CardExtraEffectSelfScalingRecipientMode.SelectedCards => selectedByEffect
+				? CardEditorLoc.T("cardText.selfScaling.recipient.selectedByEffect", " on those cards")
+				: CardEditorLoc.T("cardText.selfScaling.recipient.selected", " on selected cards"),
+			CardExtraEffectSelfScalingRecipientMode.MatchingCards => selectedByEffect
+				? CardEditorLoc.T("cardText.selfScaling.recipient.selectedByEffect", " on those cards")
+				: CardEditorLoc.T("cardText.selfScaling.recipient.matching", " on matching cards"),
+			CardExtraEffectSelfScalingRecipientMode.ThisAndSelectedCards => selectedByEffect
+				? CardEditorLoc.T("cardText.selfScaling.recipient.thisAndSelectedByEffect", " on this card and those cards")
+				: CardEditorLoc.T("cardText.selfScaling.recipient.thisAndSelected", " on this card and selected cards"),
+			CardExtraEffectSelfScalingRecipientMode.ThisAndMatchingCards => selectedByEffect
+				? CardEditorLoc.T("cardText.selfScaling.recipient.thisAndSelectedByEffect", " on this card and those cards")
+				: CardEditorLoc.T("cardText.selfScaling.recipient.thisAndMatching", " on this card and matching cards"),
 			_ => string.Empty
 		};
 		string action = $"{verb} {targetLabel} by {amountText}{durationSuffix}{recipientSuffix}";
@@ -15750,7 +15759,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectKind.RemovePower => FormatEqualToLosePowerText(effect.Target, ResolvePowerTitle(effect.PowerId) ?? CardEditorLoc.T("cardText.power.unknown", "Unknown Power"), referenceText),
 			CardExtraEffectKind.CopyDebuffs => FormatCopyDebuffs(effect.Target),
 			CardExtraEffectKind.CopyBuffs => FormatCopyBuffs(effect.Target),
-			CardExtraEffectKind.ApplyMarked => FormatMarked(effect.Target),
+			CardExtraEffectKind.ApplyMarked => FormatMarkedEqualTo(effect.Target, referenceText),
 			CardExtraEffectKind.ModifyActivePower => FormatModifyActivePower(effect, referenceText),
 			CardExtraEffectKind.Summon => $"[gold]Summon[/gold] equal to {referenceText}.",
 			CardExtraEffectKind.Forge => $"[gold]Forge[/gold] equal to {referenceText}.",
@@ -15823,6 +15832,16 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectTarget.AnyPlayer => "Mark any player. Marked targets take 50% more attack damage per stack this combat.",
 			_ => "Mark the target. Marked targets take 50% more attack damage per stack this combat."
 		};
+	}
+
+	// Linked/value-sourced amounts must surface the reference ("equal to ..."); FormatMarked's
+	// plain "Mark the target." wording hides the linked amount entirely.
+	private static string FormatMarkedEqualTo(CardExtraEffectTarget target, string referenceText)
+	{
+		string reminder = target == CardExtraEffectTarget.Self
+			? "You take 50% more attack damage per stack this combat."
+			: "Marked targets take 50% more attack damage per stack this combat.";
+		return $"{FormatEqualToDebuffText(target, "Marked", referenceText)} {reminder}";
 	}
 
 	private static string FormatCopyBuffs(CardExtraEffectTarget target)
@@ -16483,7 +16502,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.ModifyActivePower => FormatModifyActivePower(effect, amountText),
 				CardExtraEffectKind.CountdownEffect => FormatCountdownEffect(card, effect, isUpgradePreview),
 				CardExtraEffectKind.GainStatusEqualToStatus => FormatStatusToStatus(effect, amountText),
-				CardExtraEffectKind.GrantReplay => FormatGrantReplay(amountText),
+				CardExtraEffectKind.GrantReplay => FormatGrantReplay(effect, amountText),
 				CardExtraEffectKind.GainArtifact => FormatGainPower(effect.Target, amountText, "Artifact", powerDurationSuffix),
 				CardExtraEffectKind.GainThorns => FormatGainPower(effect.Target, amountText, "Thorns", powerDurationSuffix),
 				CardExtraEffectKind.GainRegen => FormatGainPower(effect.Target, amountText, "Regen", powerDurationSuffix),
@@ -16585,7 +16604,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				CardExtraEffectKind.DiscardCards => FormatDiscardCards(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.ExhaustCards => FormatExhaustCards(card, effect, grammarAmount, amountText),
 				CardExtraEffectKind.TransformCards => FormatTransformCards(card, effect, grammarAmount, amountText),
-				CardExtraEffectKind.EvokeOrbs => FormatEvokeOrbs(grammarAmount, amountText),
+				CardExtraEffectKind.EvokeOrbs => FormatEvokeOrbs(grammarAmount, amountText, usesAppliedEffectRowAmount || usesValueSourceAmount),
 				CardExtraEffectKind.OrbAction => FormatOrbAction(effect, grammarAmount, amountText),
 				CardExtraEffectKind.OstyAction => FormatOstyAction(effect, grammarAmount, amountText),
 				CardExtraEffectKind.CreatureCommand => FormatCreatureCommand(effect, amountText),
@@ -20355,6 +20374,27 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				: CardEditorLoc.F("cardText.moveCards.positional.many", $"Move the {position} {amountText} cards of {posFrom} to {posTo}.", ("Position", position), ("Amount", amountText), ("From", posFrom), ("To", posTo));
 			return BuildCostFilteredText(card, AppendCardSelectionNote(posResult, effect), effect);
 		}
+		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			// Linked rows act on the upstream step's published cards, so drop the "from {pile}"
+			// clause but keep the vanilla verb shortcuts for the discard/exhaust destinations.
+			string selectedResult;
+			if (effect.CardSelectionPile == CardExtraEffectCardPile.Hand && effect.MoveToPile == CardExtraEffectCardPile.DiscardPile)
+			{
+				selectedResult = CardEditorLoc.T("cardText.discard.selected", "Discard those cards.");
+			}
+			else if (effect.MoveToPile == CardExtraEffectCardPile.ExhaustPile)
+			{
+				selectedResult = CardEditorLoc.T("cardText.exhaust.selected", "Exhaust those cards.");
+			}
+			else
+			{
+				string selectedTo = GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition);
+				selectedResult = CardEditorLoc.F("cardText.moveCards.selected", $"Move those cards to {selectedTo}.", ("To", selectedTo));
+			}
+			selectedResult = AppendCardSelectionNote(selectedResult, effect);
+			return BuildCostFilteredText(card, selectedResult, effect);
+		}
 
 		// Prefer vanilla wording for common movement patterns (discard/exhaust) so it reads naturally and matches synergies.
 		if (!hasSelectionCriteria && effect.CardSelectionPile == CardExtraEffectCardPile.Hand && effect.MoveToPile == CardExtraEffectCardPile.DiscardPile)
@@ -20481,24 +20521,34 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			? CardEditorLoc.T("cardText.pile.anywhere", "anywhere")
 			: GetCardPilePossessive(effect.CardSelectionPile);
 		bool thisCard = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard;
+		bool selectedByEffect = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
 		string selected = thisCard
 			? CardEditorLoc.T("cardText.thisCard", "this card")
 			: BuildDelayedPileSelectionText(effect);
 
+		// Linked rows act on the upstream step's published cards, so drop the "from {pile}" clause.
 		string action = effect.DelayedPileAction switch
 		{
 			CardExtraEffectDelayedPileAction.Discard => thisCard
 				? CardEditorLoc.F("cardText.delayedPileAction.discard.self", $"discard {selected} from {from}", ("Card", selected), ("From", from))
-				: CardEditorLoc.F("cardText.delayedPileAction.discard", $"discard {selected} from {from}", ("Cards", selected), ("From", from)),
+				: selectedByEffect
+					? CardEditorLoc.F("cardText.delayedPileAction.discard.selected", $"discard {selected}", ("Cards", selected))
+					: CardEditorLoc.F("cardText.delayedPileAction.discard", $"discard {selected} from {from}", ("Cards", selected), ("From", from)),
 			CardExtraEffectDelayedPileAction.Exhaust => thisCard
 				? CardEditorLoc.F("cardText.delayedPileAction.exhaust.self", $"exhaust {selected} from {from}", ("Card", selected), ("From", from))
-				: CardEditorLoc.F("cardText.delayedPileAction.exhaust", $"exhaust {selected} from {from}", ("Cards", selected), ("From", from)),
+				: selectedByEffect
+					? CardEditorLoc.F("cardText.delayedPileAction.exhaust.selected", $"exhaust {selected}", ("Cards", selected))
+					: CardEditorLoc.F("cardText.delayedPileAction.exhaust", $"exhaust {selected} from {from}", ("Cards", selected), ("From", from)),
 			CardExtraEffectDelayedPileAction.RemoveFromDeck => thisCard
 				? CardEditorLoc.T("cardText.delayedPileAction.removeDeck.self", "remove this card from your deck")
-				: CardEditorLoc.F("cardText.delayedPileAction.removeDeck", $"remove the deck versions of {selected} from {from}", ("Cards", selected), ("From", from)),
+				: selectedByEffect
+					? CardEditorLoc.F("cardText.delayedPileAction.removeDeck.selected", $"remove the deck versions of {selected}", ("Cards", selected))
+					: CardEditorLoc.F("cardText.delayedPileAction.removeDeck", $"remove the deck versions of {selected} from {from}", ("Cards", selected), ("From", from)),
 			_ => thisCard
 				? CardEditorLoc.F("cardText.delayedPileAction.move.self", $"move {selected} from {from} to {GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)}", ("Card", selected), ("From", from), ("To", GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)))
-				: CardEditorLoc.F("cardText.delayedPileAction.move", $"move {selected} from {from} to {GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)}", ("Cards", selected), ("From", from), ("To", GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)))
+				: selectedByEffect
+					? CardEditorLoc.F("cardText.delayedPileAction.move.selected", $"move {selected} to {GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)}", ("Cards", selected), ("To", GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)))
+					: CardEditorLoc.F("cardText.delayedPileAction.move", $"move {selected} from {from} to {GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)}", ("Cards", selected), ("From", from), ("To", GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)))
 		};
 
 		string result = CardEditorLoc.F("cardText.delayedPileAction", $"{delay}, {action}.", ("Delay", delay), ("Action", action));
@@ -20521,6 +20571,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			CardExtraEffectCardSelectionMode.Top => CardEditorLoc.F("cardText.delayedPileAction.selection.top", $"the top matching {descriptor}", ("Cards", descriptor)),
 			CardExtraEffectCardSelectionMode.Bottom => CardEditorLoc.F("cardText.delayedPileAction.selection.bottom", $"the bottom matching {descriptor}", ("Cards", descriptor)),
 			CardExtraEffectCardSelectionMode.UpTo => CardEditorLoc.F("cardText.delayedPileAction.selection.upTo", $"up to one matching {descriptor}", ("Cards", descriptor)),
+			CardExtraEffectCardSelectionMode.SelectedByEffect => CardEditorLoc.T("cardText.delayedPileAction.selection.selected", "those cards"),
 			_ => CardEditorLoc.F("cardText.delayedPileAction.selection.choose", $"a matching {descriptor}", ("Cards", descriptor))
 		};
 	}
@@ -20657,6 +20708,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
 		bool all = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
 		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
+		bool selectedByEffect = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
 
 		string result;
 		if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard)
@@ -20664,6 +20716,11 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			result = UsesEventCardThisCardWording(effect)
 				? CardEditorLoc.T("cardText.upgradeFromPile.eventCard", "Upgrade it.")
 				: CardEditorLoc.T("cardText.upgradeFromPile.thisCard", "Upgrade this card.");
+		}
+		else if (selectedByEffect)
+		{
+			// Linked rows upgrade the upstream step's published cards, so drop the " {pile}" clause.
+			result = CardEditorLoc.T("cardText.upgradeFromPile.selected", "Upgrade those cards.");
 		}
 		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 		{
@@ -20740,6 +20797,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool all = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
 		bool random = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.Random;
 		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
+		bool selectedByEffect = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
 
 		if (effect.GrantedKeywordRemove)
 		{
@@ -20749,6 +20807,10 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				removeResult = UsesEventCardThisCardWording(effect)
 					? CardEditorLoc.F("cardText.removeKeyword.eventCard", $"It loses {keyword}.", ("Keyword", keyword))
 					: CardEditorLoc.F("cardText.removeKeyword.thisCard", $"This card loses {keyword}.", ("Keyword", keyword));
+			}
+			else if (selectedByEffect)
+			{
+				removeResult = CardEditorLoc.F("cardText.removeKeyword.selected", $"Those cards lose {keyword}.", ("Keyword", keyword));
 			}
 			else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 			{
@@ -20787,6 +20849,10 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			result = UsesEventCardThisCardWording(effect)
 				? CardEditorLoc.F("cardText.grantKeyword.eventCard", $"It gains {keyword} {durationText}.", ("Keyword", keyword), ("Duration", durationText))
 				: CardEditorLoc.F("cardText.grantKeyword.thisCard", $"This card gains {keyword} {durationText}.", ("Keyword", keyword), ("Duration", durationText));
+		}
+		else if (selectedByEffect)
+		{
+			result = CardEditorLoc.F("cardText.grantKeyword.selected", $"Those cards gain {keyword} {durationText}{futureText}.", ("Keyword", keyword), ("Duration", durationText), ("Future", futureText));
 		}
 		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 		{
@@ -20893,6 +20959,11 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				? CardEditorLoc.T("cardText.discard.eventCard", "Discard it.")
 				: CardEditorLoc.T("cardText.discard.thisCard", "Discard this card.");
 		}
+		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			// Linked rows discard the upstream step's published cards, so drop the " from {pile}" clause.
+			discardResult = CardEditorLoc.T("cardText.discard.selected", "Discard those cards.");
+		}
 		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 		{
 			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
@@ -20948,6 +21019,11 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				? CardEditorLoc.T("cardText.exhaust.eventCard", "Exhaust it.")
 				: CardEditorLoc.T("cardText.exhaust.thisCard", "Exhaust this card.");
 		}
+		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			// Linked rows exhaust the upstream step's published cards, so drop the " from {pile}" clause.
+			exhaustResult = CardEditorLoc.T("cardText.exhaust.selected", "Exhaust those cards.");
+		}
 		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 		{
 			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
@@ -20990,6 +21066,7 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		bool all = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
 		bool upTo = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.UpTo;
 		bool thisCard = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard;
+		bool selectedByEffect = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
 
 		string pileSuffix = string.Empty;
 		if (effect.CardSelectionPile != CardExtraEffectCardPile.Hand)
@@ -21015,6 +21092,11 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			// Transform resolves ThisCard via the effect-source context (host card on power
 			// rows too), so the "this card" wording is always accurate here.
 			result = CardEditorLoc.F("cardText.transform.thisCard", $"Transform this card{intoText}.", ("Into", intoText));
+		}
+		else if (selectedByEffect)
+		{
+			// Linked rows transform the upstream step's published cards, so drop the " from {pile}" clause.
+			result = CardEditorLoc.F("cardText.transform.selected", $"Transform those cards{intoText}.", ("Into", intoText));
 		}
 		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 		{
@@ -21150,9 +21232,17 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		};
 	}
 
-	private static string FormatEvokeOrbs(int amount, string amountText)
+	private static string FormatEvokeOrbs(int amount, string amountText, bool linkedAmount = false)
 	{
 		// Vanilla STS2 wording (Dualcast/Multi-Cast): "Evoke your rightmost Orb [N times]".
+		if (linkedAmount)
+		{
+			// Linked/value-sourced amounts force grammarAmount to 2; the "twice" shortcut would
+			// assert a literal count, so render the reference wording instead. The shared
+			// "Equal to ..." suffix is appended by the dispatch afterwards.
+			return CardEditorLoc.T("cardText.evoke.thatMany", "[gold]Evoke[/gold] your rightmost Orb that many times.");
+		}
+
 		if (amount == 1)
 		{
 			return CardEditorLoc.T("cardText.evoke.one", "[gold]Evoke[/gold] your rightmost Orb.");
@@ -21491,6 +21581,12 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 				? CardEditorLoc.T("cardText.selectPile.eventCard", "Select it.")
 				: CardEditorLoc.T("cardText.selectPile.thisCard", "Select this card.");
 		}
+		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			// Linked rows re-publish the upstream step's cards (optionally re-filtered by the
+			// notes appended below), so reference the link instead of a fresh pile pick.
+			result = CardEditorLoc.T("cardText.selectPile.selected", "Select those cards.");
+		}
 		else if (effect.CardSelectionMode is CardExtraEffectCardSelectionMode.Top or CardExtraEffectCardSelectionMode.Bottom)
 		{
 			string position = GetPositionalSelectionLabel(effect.CardSelectionMode);
@@ -21542,6 +21638,13 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			result = UsesEventCardThisCardWording(effect)
 				? CardEditorLoc.T("cardText.removeDeck.eventCard", "Remove it from your deck.")
 				: CardEditorLoc.T("cardText.removeDeck.thisCard", "Remove this card from your deck.");
+		}
+		else if (effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			// Linked rows remove the upstream step's published cards, not a fresh pile choice.
+			result = fromDeck
+				? CardEditorLoc.T("cardText.removeDeck.selected", "Remove those cards from your deck.")
+				: CardEditorLoc.T("cardText.removeDeckFromPile.selected", "Remove the deck versions of those cards.");
 		}
 		else if (fromDeck)
 		{
@@ -21889,33 +21992,56 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 			? CardEditorLoc.T("cardText.pile.anywhere", "anywhere")
 			: GetCardPilePossessive(effect.CardSelectionPile);
 		bool thisCard = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.ThisCard;
+		bool selectedByEffect = effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
 		string selected = thisCard
 			? CardEditorLoc.T("cardText.thisCard", "this card")
 			: BuildDelayedPileSelectionText(effect);
 		string value = ConsumedCardValueSourceLabel(effect.ConsumedCardValueSource).ToLowerInvariant();
 		string target = SelfScalingTargetTypeLabel(effect.SelfScalingTargetType).ToLowerInvariant();
+		// Linked rows consume the upstream step's published cards, so drop the "from {pile}" clause.
 		string action = effect.ConsumedCardAction switch
 		{
-			CardExtraEffectConsumedCardAction.None => CardEditorLoc.F("cardText.consumeCardValue.action.read", $"read {selected} from {from}", ("Cards", selected), ("From", from)),
-			CardExtraEffectConsumedCardAction.Discard => CardEditorLoc.F("cardText.consumeCardValue.action.discard", $"discard {selected} from {from}", ("Cards", selected), ("From", from)),
-			CardExtraEffectConsumedCardAction.Exhaust => CardEditorLoc.F("cardText.consumeCardValue.action.exhaust", $"exhaust {selected} from {from}", ("Cards", selected), ("From", from)),
+			CardExtraEffectConsumedCardAction.None => selectedByEffect
+				? CardEditorLoc.F("cardText.consumeCardValue.action.read.selected", $"read {selected}", ("Cards", selected))
+				: CardEditorLoc.F("cardText.consumeCardValue.action.read", $"read {selected} from {from}", ("Cards", selected), ("From", from)),
+			CardExtraEffectConsumedCardAction.Discard => selectedByEffect
+				? CardEditorLoc.F("cardText.consumeCardValue.action.discard.selected", $"discard {selected}", ("Cards", selected))
+				: CardEditorLoc.F("cardText.consumeCardValue.action.discard", $"discard {selected} from {from}", ("Cards", selected), ("From", from)),
+			CardExtraEffectConsumedCardAction.Exhaust => selectedByEffect
+				? CardEditorLoc.F("cardText.consumeCardValue.action.exhaust.selected", $"exhaust {selected}", ("Cards", selected))
+				: CardEditorLoc.F("cardText.consumeCardValue.action.exhaust", $"exhaust {selected} from {from}", ("Cards", selected), ("From", from)),
 			CardExtraEffectConsumedCardAction.RemoveFromDeck => thisCard
 				? CardEditorLoc.T("cardText.consumeCardValue.action.removeDeck.self", "remove this card from your deck")
-				: CardEditorLoc.F("cardText.consumeCardValue.action.removeDeck", $"remove the deck versions of {selected} from {from}", ("Cards", selected), ("From", from)),
-			_ => CardEditorLoc.F(
-				"cardText.consumeCardValue.action.move",
-				$"move {selected} from {from} to {GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)}",
-				("Cards", selected),
-				("From", from),
-				("To", GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)))
+				: selectedByEffect
+					? CardEditorLoc.F("cardText.consumeCardValue.action.removeDeck.selected", $"remove the deck versions of {selected}", ("Cards", selected))
+					: CardEditorLoc.F("cardText.consumeCardValue.action.removeDeck", $"remove the deck versions of {selected} from {from}", ("Cards", selected), ("From", from)),
+			_ => selectedByEffect
+				? CardEditorLoc.F(
+					"cardText.consumeCardValue.action.move.selected",
+					$"move {selected} to {GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)}",
+					("Cards", selected),
+					("To", GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)))
+				: CardEditorLoc.F(
+					"cardText.consumeCardValue.action.move",
+					$"move {selected} from {from} to {GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)}",
+					("Cards", selected),
+					("From", from),
+					("To", GetCardPileDestination(effect.MoveToPile, effect.MoveToPosition)))
 		};
 
-		string result = CardEditorLoc.F(
-			"cardText.consumeCardValue",
-			$"{CapitalizeFirst(action)}. Add its {value} to this card's {target}.",
-			("Action", CapitalizeFirst(action)),
-			("Value", value),
-			("Target", target));
+		string result = selectedByEffect
+			? CardEditorLoc.F(
+				"cardText.consumeCardValue.selected",
+				$"{CapitalizeFirst(action)}. Add their {value} to this card's {target}.",
+				("Action", CapitalizeFirst(action)),
+				("Value", value),
+				("Target", target))
+			: CardEditorLoc.F(
+				"cardText.consumeCardValue",
+				$"{CapitalizeFirst(action)}. Add its {value} to this card's {target}.",
+				("Action", CapitalizeFirst(action)),
+				("Value", value),
+				("Target", target));
 		result = AppendCardSelectionNote(result, effect);
 		return BuildCostFilteredText(card, result, effect);
 	}
@@ -22092,6 +22218,13 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		CardExtraEffect displayEffect = GetGrantPayloadViewEffect(effect);
 		CardExtraEffectCardPile sourcePile = GetEffectiveDrawSourcePile(displayEffect);
 		bool hasSelectionCriteria = displayEffect != null && HasCardSelectionCriteria(displayEffect);
+		bool selectedByEffect = displayEffect != null && displayEffect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect;
+		if (selectedByEffect)
+		{
+			// Linked rows draw the upstream step's published cards. Keep the "Draw " prefix so
+			// ApplyPlayerDrawSubject's player-target rewrite still applies.
+			return CardEditorLoc.T("cardText.drawCards.selected", "Draw those cards.");
+		}
 		if (hasSelectionCriteria || sourcePile != CardExtraEffectCardPile.DrawPile)
 		{
 			string descriptor = hasSelectionCriteria
@@ -22125,6 +22258,24 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 		string subjectCap = char.ToUpperInvariant(subject[0]) + subject[1..];
 		string cardOrCards = grammarAmount == 1 ? "card" : "cards";
 		CardExtraEffectCardPile sourcePile = GetEffectiveDrawSourcePile(displayEffect);
+		if (displayEffect != null && displayEffect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			// Linked rows draw the upstream step's published cards. Keep the "Draw " prefix so
+			// ApplyPlayerDrawSubject's player-target rewrite still applies.
+			if (durationSuffix != null)
+			{
+				return CardEditorLoc.F(
+					"cardText.drawCostLess.selected.duration",
+					$"Draw those cards. They cost {costLessText} less {durationSuffix}.",
+					("CostLess", costLessText),
+					("Duration", durationSuffix));
+			}
+
+			return CardEditorLoc.F(
+				"cardText.drawCostLess.selected",
+				$"Draw those cards. They cost {costLessText} less.",
+				("CostLess", costLessText));
+		}
 		if ((displayEffect != null && HasCardSelectionCriteria(displayEffect)) || sourcePile != CardExtraEffectCardPile.DrawPile)
 		{
 			string descriptor = displayEffect != null && HasCardSelectionCriteria(displayEffect)
@@ -24845,10 +24996,15 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		};
 	}
 
-	private static string FormatGrantReplay(string amountText)
+	private static string FormatGrantReplay(CardExtraEffect effect, string amountText)
 	{
 		string replay = CardEditorLoc.T("cardText.replay", "Replay");
 		string payload = $"{amountText} [gold]{replay}[/gold]";
+		if (effect != null && effect.CardSelectionMode == CardExtraEffectCardSelectionMode.SelectedByEffect)
+		{
+			// Linked rows grant Replay to the upstream step's published cards, not the player.
+			return CardEditorLoc.F("cardText.grantReplay.selected", $"Those cards gain {payload}.", ("Payload", payload));
+		}
 		return CardEditorLoc.F("cardText.grantReplay", $"Gain {payload}.", ("Payload", payload));
 	}
 

@@ -1,4 +1,12 @@
-﻿## 2026-07-19 - Release prep: version 8.0, changelog, manifest in repo
+﻿## 2026-07-19 - Chain-aware card text: 17 formatter gaps closed (user report)
+
+User: "card panel changes dont reflect in the card text - they are standalone and dont say what they do". 2-agent audit (wf_171b2e21-8eb) swept all ConsumesCards/DynamicAmount kinds vs their formatters: 18 gaps, 17 real (ChooseOneEffectSource's SelectedByEffect is unreachable at runtime - skipped).
+Implemented (agent ac600bc8, verified build): SelectedByEffect arms with "those cards" vanilla phrasing for DrawCards, DrawCardsThatCostLess ("Draw those cards. They cost [E] less."), GrantKeywordToPile (gain/lose), MoveCardsBetweenPiles (Discard/Exhaust verb shortcuts kept, "from pile" clause dropped), DiscardCards, ExhaustCards, UpgradeCardsInPile, SelectCardsFromPile, ConsumeCardValue ("their" plural + per-action verbs), DelayedPileAction (shared BuildDelayedPileSelectionText arm fixes both), TransformCards, RemoveCardsFromDeck ("deck versions of those cards"), GrantReplay, TargetCardMutation + PersistentTargetCardMutation (shared FormatSelfScalingLine recipient suffix "on those cards"). Amount links: ApplyMarked now renders "Apply Marked equal to <reference>" (was: no trace of the link); EvokeOrbs linked amounts bypass the hardcoded "twice" shortcut -> "that many times" + reference suffix.
+30 new loc keys, 2 formatter signatures extended, draw prefixes preserved for ApplyPlayerDrawSubject player rewrites.
+Known follow-ups: EvokeOrbs AmountIsX still hits the "twice" shortcut; ChooseOneEffectSource SelectedByEffect plumbing inert.
+Build: 0 errors / 274 warnings (baseline). NOT deployed - queued with the 8.0 release package.
+Next Step: deploy on request; in-game check = Select->Draw chain card should read "Select those cards. Draw those cards."
+## 2026-07-19 - Release prep: version 8.0, changelog, manifest in repo
 
 - card_editor.json brought into the repo (was only in the deployed folder) and bumped 7.7 -> 8.0 with a Chainboard mention in the description.
 - csproj gains <Version>8.0.0</Version> - the MP sync guard's ModVersion label now reads a real version (verified: built DLL stamps 8.0.0.0).
