@@ -224,7 +224,9 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private string? _expandedChainEffectId;
 	// Board-only "these belong together" links (drag-attach / + on unlinkable kinds); real
 	// card/amount links take precedence in rendering and are the only ones with runtime meaning.
+	// Persisted per card via CardEditorChainLinkStore so drag-built chains survive reopening.
 	private readonly Dictionary<string, string> _chainManualSequenceLinks = new(StringComparer.Ordinal);
+	private string? _chainLinksLoadedForCardKey;
 	private ScrollContainer? _rightColumnScroll;
 	private Label? _extraEffectsLoadingLabel;
 	private Label? _effectSummaryLoadingLabel;
@@ -2598,6 +2600,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_effectSummaryContainer);
 		RemoveChildrenSafely(_effectChainContainer);
 		_expandedChainEffectId = null;
+		_chainLinksLoadedForCardKey = null;
 
 		if (_localizedSharedCreatedRowsCache.TryGetValue(cacheKey, out LocalizedSharedCreatedRowsCacheEntry? oldEntry)
 			&& oldEntry != null
@@ -2644,6 +2647,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_effectSummaryContainer);
 		RemoveChildrenSafely(_effectChainContainer);
 		_expandedChainEffectId = null;
+		_chainLinksLoadedForCardKey = null;
 		_extraEffectRows.Clear();
 		// Restore the preservation state captured with these rows - saving with an empty stash would
 		// delete the unrepresentable (keyword-carrying) stored effects this row set never showed.
@@ -2748,6 +2752,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_effectSummaryContainer);
 		RemoveChildrenSafely(_effectChainContainer);
 		_expandedChainEffectId = null;
+		_chainLinksLoadedForCardKey = null;
 		_extraEffectRows.Clear();
 	}
 
@@ -22332,6 +22337,23 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			_expandedChainEffectId = null;
 		}
 
+		if (!string.IsNullOrWhiteSpace(row.StableEffectId))
+		{
+			bool chainLinksChanged = _chainManualSequenceLinks.Remove(row.StableEffectId);
+			foreach (string dependent in _chainManualSequenceLinks
+				.Where(kv => string.Equals(kv.Value, row.StableEffectId, StringComparison.Ordinal))
+				.Select(kv => kv.Key)
+				.ToList())
+			{
+				_chainManualSequenceLinks.Remove(dependent);
+				chainLinksChanged = true;
+			}
+			if (chainLinksChanged)
+			{
+				PersistChainManualSequenceLinks();
+			}
+		}
+
 		if (_extraEffectsContainer != null && GodotObject.IsInstanceValid(_extraEffectsContainer))
 		{
 			_extraEffectsContainer.RemoveChild(row.Container);
@@ -22533,6 +22555,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		if (_effectChainContainer == null || !GodotObject.IsInstanceValid(_effectChainContainer))
 		{
 			return;
+		}
+
+		// Per-card persisted sequence links: (re)load when the cached popup targets a new card.
+		string chainCardKey = _cardId.ToString();
+		if (!string.Equals(_chainLinksLoadedForCardKey, chainCardKey, StringComparison.Ordinal))
+		{
+			_chainManualSequenceLinks.Clear();
+			foreach ((string linkedEffectId, string linkSourceId) in CardEditorChainLinkStore.Get(chainCardKey))
+			{
+				_chainManualSequenceLinks[linkedEffectId] = linkSourceId;
+			}
+			_chainLinksLoadedForCardKey = chainCardKey;
 		}
 
 		// Typing in a chip triggers this rebuild every keystroke (via the classic handler's
@@ -22911,6 +22945,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					&& !string.IsNullOrWhiteSpace(newRow.StableEffectId))
 				{
 					_chainManualSequenceLinks[newRow.StableEffectId] = sourceEffectId;
+					PersistChainManualSequenceLinks();
 				}
 
 				// Open the fresh step on the board, ready to edit.
@@ -23325,6 +23360,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return null;
 	}
 
+	private void PersistChainManualSequenceLinks()
+	{
+		string cardKey = _chainLinksLoadedForCardKey ?? _cardId.ToString();
+		CardEditorChainLinkStore.Set(cardKey, _chainManualSequenceLinks);
+	}
+
 	// Drag a chain card onto another: attach it to that chain (sequence link; real card/amount
 	// links configured via the chips take render precedence) and slot it right after the target.
 	private void OnChainBoxDropped(string draggedEffectId, string targetEffectId)
@@ -23345,6 +23386,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		_chainManualSequenceLinks[draggedEffectId] = targetEffectId;
+		PersistChainManualSequenceLinks();
 
 		for (int safety = 0; safety < _extraEffectRows.Count + 1; safety++)
 		{

@@ -1,4 +1,11 @@
-﻿## 2026-07-19 - Chainboard UX rework: no inner scrollbars, "+" always joins, drag-to-chain
+﻿## 2026-07-19 - Chain groupings now persist (chain_links.json sidecar)
+
+The drag-built/plus-built sequence links were session-only - chains with no real card/amount link fell apart on reopen. Now:
+- New CardEditorChainLinkStore: user://card_editor/chain_links.json, cardKey -> (effectId -> sourceEffectId), System.Text.Json, lazy load + write-through saves. UI sidecar ONLY - card override DTO and MP snapshot untouched.
+- Popup loads the card's links on first strip paint per retarget (cached-popup safe via _chainLinksLoadedForCardKey), writes through on drag-attach, "+" fallback links, and prunes links (and dependents) when a row is removed.
+Build: 0 errors / 274 warnings (baseline). NOT deployed - queued with the wrap/drag rework (d51b74d).
+Next Step: deploy on request; check = build a chain from two unlinkable effects via drag, close + reopen the card, the chain is still one strip.
+## 2026-07-19 - Chainboard UX rework: no inner scrollbars, "+" always joins, drag-to-chain
 
 User verdict on deployed C4: inner strip scrollbars "hurt visibility" (main scrollbar exists), "+" spawned the new effect as a separate strip below when the picked kind had no card/amount link, and there was no mouse way to attach steps.
 - Strips are now HFlowContainers: long chains WRAP and the Effect Chains section simply grows taller - zero inner scrollbars, the main editor scrollbar is the only one. Height clamps and per-strip ScrollContainers deleted.
