@@ -2594,6 +2594,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		_extraEffectRows.Clear();
 		RemoveChildrenSafely(_effectSummaryContainer);
 		RemoveChildrenSafely(_effectChainContainer);
+		_expandedChainEffectId = null;
 
 		if (_localizedSharedCreatedRowsCache.TryGetValue(cacheKey, out LocalizedSharedCreatedRowsCacheEntry? oldEntry)
 			&& oldEntry != null
@@ -2639,6 +2640,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_extraEffectsContainer);
 		RemoveChildrenSafely(_effectSummaryContainer);
 		RemoveChildrenSafely(_effectChainContainer);
+		_expandedChainEffectId = null;
 		_extraEffectRows.Clear();
 		// Restore the preservation state captured with these rows - saving with an empty stash would
 		// delete the unrepresentable (keyword-carrying) stored effects this row set never showed.
@@ -2742,6 +2744,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_extraEffectsContainer);
 		RemoveChildrenSafely(_effectSummaryContainer);
 		RemoveChildrenSafely(_effectChainContainer);
+		_expandedChainEffectId = null;
 		_extraEffectRows.Clear();
 	}
 
@@ -22320,6 +22323,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
+		if (!string.IsNullOrWhiteSpace(row.StableEffectId)
+			&& string.Equals(_expandedChainEffectId, row.StableEffectId, StringComparison.Ordinal))
+		{
+			_expandedChainEffectId = null;
+		}
+
 		if (_extraEffectsContainer != null && GodotObject.IsInstanceValid(_extraEffectsContainer))
 		{
 			_extraEffectsContainer.RemoveChild(row.Container);
@@ -22523,6 +22532,19 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
+		// Typing in a chip triggers this rebuild every keystroke (via the classic handler's
+		// queued preview refresh); capture the focused mirror so it can be restored after.
+		ulong focusedChipSourceId = 0;
+		int focusedChipCaret = 0;
+		Control? chainFocusOwner = _effectChainContainer.GetViewport()?.GuiGetFocusOwner();
+		if (chainFocusOwner is LineEdit focusedMirror
+			&& _effectChainContainer.IsAncestorOf(focusedMirror)
+			&& focusedMirror.HasMeta(ChainChipSourceMeta))
+		{
+			focusedChipSourceId = focusedMirror.GetMeta(ChainChipSourceMeta).AsUInt64();
+			focusedChipCaret = focusedMirror.CaretColumn;
+		}
+
 		foreach (Node child in _effectChainContainer.GetChildren().Cast<Node>().ToList())
 		{
 			_effectChainContainer.RemoveChild(child);
@@ -22669,8 +22691,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			ScrollContainer stripScroll = new ScrollContainer
 			{
 				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-				VerticalScrollMode = ScrollContainer.ScrollMode.Disabled,
-				CustomMinimumSize = new Vector2(0, chainHasExpandedBox ? 260 : 96),
+				VerticalScrollMode = chainHasExpandedBox ? ScrollContainer.ScrollMode.Auto : ScrollContainer.ScrollMode.Disabled,
 				SizeFlagsVertical = Control.SizeFlags.ShrinkBegin
 			};
 			HBoxContainer strip = new HBoxContainer();
@@ -22705,8 +22726,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					strip.AddChild(connector);
 
 					// C4: insert a step between the two - auto-wired to act on the left step's result.
+					// Not in the upgrade editor: the upgrade save pairs base/delta rows by absolute
+					// index, and a row inserted mid-list would corrupt that pairing.
 					string leftStepId = _extraEffectRows[prevIndex].StableEffectId;
-					if (!string.IsNullOrWhiteSpace(leftStepId))
+					if (!_isUpgradeEditor && !string.IsNullOrWhiteSpace(leftStepId))
 					{
 						Button insertStep = new Button
 						{
@@ -22751,6 +22774,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				strip.AddChild(addStep);
 			}
 
+			// Expanded cards vary a lot in height (chip + IF rows wrap); size the strip to its
+			// content, clamped, with overflow scrollable instead of clipped.
+			float stripHeight = chainHasExpandedBox
+				? Math.Clamp(strip.GetCombinedMinimumSize().Y + 14f, 120f, 380f)
+				: 96f;
+			stripScroll.CustomMinimumSize = new Vector2(0, stripHeight);
 			_effectChainContainer.AddChild(stripScroll);
 		}
 
@@ -22763,6 +22792,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(newChainButton);
 		newChainButton.Pressed += () => OnAddChainStep(null);
 		_effectChainContainer.AddChild(newChainButton);
+
+		if (focusedChipSourceId != 0)
+		{
+			LineEdit? recreatedMirror = FindChainChipMirror(_effectChainContainer, focusedChipSourceId);
+			if (recreatedMirror != null)
+			{
+				recreatedMirror.GrabFocus();
+				recreatedMirror.CaretColumn = Math.Min(focusedChipCaret, recreatedMirror.Text?.Length ?? 0);
+			}
+		}
 	}
 
 	// C2: append a new effect row via the categorized picker; when sourceEffectId is given, the new
@@ -22833,7 +22872,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			ExtraEffectRow? newRow = _extraEffectRows.Count > 0 ? _extraEffectRows[_extraEffectRows.Count - 1] : null;
 			if (newRow != null)
 			{
-				if (insertAfterRowIndex >= 0)
+				// No mid-list insertion in the upgrade editor: the upgrade save pairs
+				// base/delta rows by absolute index.
+				if (insertAfterRowIndex >= 0 && !_isUpgradeEditor)
 				{
 					int targetIndex = Math.Min(insertAfterRowIndex + 1, _extraEffectRows.Count - 1);
 					while (_extraEffectRows.IndexOf(newRow) > targetIndex)
@@ -22863,19 +22904,26 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			&& string.Equals(_expandedChainEffectId, row.StableEffectId, StringComparison.Ordinal);
 		PanelContainer box = CreateEditorPanel(bgAlpha: isExpanded ? 0.78f : 0.62f);
 		box.MouseFilter = MouseFilterEnum.Stop;
-		box.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
 		box.CustomMinimumSize = new Vector2(isExpanded ? 280 : 180, 0);
-		box.TooltipText = isExpanded
-			? CardEditorLoc.T("effectChains.boxTooltipExpanded", "Click the title to collapse this step.")
-			: CardEditorLoc.T("effectChains.boxTooltip", "Click to edit this step in the chain.");
-		box.GuiInput += input =>
+		if (!isExpanded)
 		{
-			if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+			// Collapsed: the whole card is a click target to expand. When expanded, only the
+			// title row collapses - the padding between chips must not eat clicks mid-edit.
+			box.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+			box.TooltipText = CardEditorLoc.T("effectChains.boxTooltip", "Click to edit this step in the chain.");
+			box.GuiInput += input =>
 			{
-				_expandedChainEffectId = isExpanded ? null : row.StableEffectId;
-				RefreshEffectChainStrip();
-			}
-		};
+				if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+				{
+					_expandedChainEffectId = row.StableEffectId;
+					RefreshEffectChainStrip();
+				}
+			};
+		}
+		else
+		{
+			box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		}
 
 		MarginContainer cardMargin = new MarginContainer();
 		cardMargin.AddThemeConstantOverride("margin_left", 8);
@@ -22888,6 +22936,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		HBoxContainer topRow = new HBoxContainer();
 		topRow.AddThemeConstantOverride("separation", 6);
+		if (isExpanded)
+		{
+			topRow.MouseFilter = MouseFilterEnum.Stop;
+			topRow.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+			topRow.TooltipText = CardEditorLoc.T("effectChains.boxTooltipExpanded", "Click the title to collapse this step.");
+			topRow.GuiInput += input =>
+			{
+				if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
+				{
+					_expandedChainEffectId = null;
+					RefreshEffectChainStrip();
+				}
+			};
+		}
 
 		Label title = new Label
 		{
@@ -23042,6 +23104,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			{
 				return;
 			}
+			// Same availability as the classic Branch toggle (its row is hidden e.g. for Quest).
+			if (row.ScalingToggleRow != null && GodotObject.IsInstanceValid(row.ScalingToggleRow) && !row.ScalingToggleRow.Visible)
+			{
+				return;
+			}
 
 			Button addIf = new Button
 			{
@@ -23056,9 +23123,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				row.BranchTickbox.SetTickedSilent(true);
 				UpdateExtraEffectCustomRows(row);
 				UpdateExtraEffectPropertyGridOrder(row);
-				QueuePreviewUpdate();
 				_expandedChainEffectId = row.StableEffectId;
-				RefreshEffectSummaryList();
+				// QueuePreviewUpdate's deferred pass repaints the summary list and this strip.
+				QueuePreviewUpdate();
 			};
 			card.AddChild(addIf);
 			return;
@@ -23104,7 +23171,6 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				UpdateExtraEffectCustomRows(row);
 				UpdateExtraEffectPropertyGridOrder(row);
 				QueuePreviewUpdate();
-				RefreshEffectSummaryList();
 			};
 			ifFlow.AddChild(removeIf);
 		}
@@ -23158,8 +23224,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					return;
 				}
 				sourceSelect.Select((int)pickedIndex);
+				// The classic handler queues the preview refresh, whose deferred pass repaints
+				// the summary list AND this strip - no synchronous repaint here.
 				sourceSelect.EmitSignal(OptionButton.SignalName.ItemSelected, pickedIndex);
-				RefreshEffectSummaryList();
 			};
 			chip.AddChild(mirror);
 		}
@@ -23171,6 +23238,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				CustomMinimumSize = new Vector2(56, 26)
 			};
 			StyleInput(mirror);
+			// The classic TextChanged handler queues a same-frame strip rebuild that frees this
+			// mirror; the rebuild finds it again by source id and restores focus + caret.
+			mirror.SetMeta(ChainChipSourceMeta, sourceField.GetInstanceId());
 			mirror.TextChanged += newText =>
 			{
 				if (!GodotObject.IsInstanceValid(sourceField))
@@ -23180,7 +23250,6 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				sourceField.Text = newText;
 				sourceField.EmitSignal(LineEdit.SignalName.TextChanged, newText);
 			};
-			mirror.FocusExited += RefreshEffectSummaryList;
 			chip.AddChild(mirror);
 		}
 		else
@@ -23189,6 +23258,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		parent.AddChild(chip);
+	}
+
+	private const string ChainChipSourceMeta = "card_editor_chain_chip_source";
+
+	private static LineEdit? FindChainChipMirror(Node root, ulong sourceId)
+	{
+		foreach (Node child in root.GetChildren())
+		{
+			if (child is LineEdit mirror
+				&& mirror.HasMeta(ChainChipSourceMeta)
+				&& mirror.GetMeta(ChainChipSourceMeta).AsUInt64() == sourceId)
+			{
+				return mirror;
+			}
+
+			LineEdit? nested = FindChainChipMirror(child, sourceId);
+			if (nested != null)
+			{
+				return nested;
+			}
+		}
+		return null;
 	}
 
 	private Control BuildEffectChainIfChip(ExtraEffectRow row)

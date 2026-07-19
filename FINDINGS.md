@@ -1,4 +1,15 @@
-﻿## 2026-07-19 - Game update (2026-07-18 13:57) broke the deployed mod: full compat pass
+﻿## 2026-07-19 - Chainboard C4 adversarial review: 2 blockers + 3 should-fixes, all fixed
+
+Two-agent hostile review (Godot lifecycle + state consistency) of the board-native authoring code. Confirmed findings, all fixed same day:
+- BLOCKER chip typing: every keystroke's classic TextChanged handler queues a same-frame strip rebuild that freed the focused mirror field (one character per click). Fix: rebuild now captures the focused chip (by source-control instance id via metadata) + caret and restores focus on the recreated mirror; the FocusExited repaint hook is gone (each keystroke's deferred repaint keeps everything fresh).
+- BLOCKER upgrade editor: insert-between placed a non-delta row inside the delta block, corrupting the upgrade save's absolute-index base/delta pairing. Fix: connector "+" hidden in the upgrade editor + OnAddChainStep ignores insertAfterRowIndex there.
+- Expanded card clipped at fixed 260px with scrolling disabled (count-based IF conditions overflow past the action row). Fix: strip height = content min height clamped 120-380, VerticalScrollMode Auto when expanded, expanded box gets ExpandFill so chips wrap at real width.
+- Clicks on chip labels/gaps collapsed the card mid-edit (whole panel was the toggle). Fix: collapsed box = whole-card expand target; expanded card collapses only via the title row.
+- "+ IF" bypassed the classic branch-availability gate (Quest rows). Fix: offer gated on ScalingToggleRow.Visible, matching the classic toggle.
+- Nits: dropped the chip handlers' synchronous summary repaints (the classic deferred pass repaints identically - halves rebuilds per edit); _expandedChainEffectId now cleared on row removal and popup retarget. Refuted by review: EmitSignal write-through (works, long-vs-int marshalling fine), free-during-callback crashes (QueueFreeSafely defers), LineEdit loops.
+Build: 0 errors / 274 warnings (baseline). NOT deployed - ships with the compat pass.
+Next Step: deploy on request (game closed); board checklist = type a multi-digit amount in a chip, expand a card with a count IF (everything reachable), background click while editing must NOT collapse.
+## 2026-07-19 - Game update (2026-07-18 13:57) broke the deployed mod: full compat pass
 
 Hypothesis: the "cant load my library / a bug has occured" popup and dead patches came from the Steam update changing game APIs under the deployed DLL (built 11:08, update landed 13:57).
 Finding: True.
