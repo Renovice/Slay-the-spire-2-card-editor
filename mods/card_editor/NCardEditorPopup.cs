@@ -222,6 +222,9 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private VBoxContainer? _effectSummaryContainer;
 	private VBoxContainer? _effectChainContainer;
 	private string? _expandedChainEffectId;
+	// Board-only "these belong together" links (drag-attach / + on unlinkable kinds); real
+	// card/amount links take precedence in rendering and are the only ones with runtime meaning.
+	private readonly Dictionary<string, string> _chainManualSequenceLinks = new(StringComparer.Ordinal);
 	private ScrollContainer? _rightColumnScroll;
 	private Label? _extraEffectsLoadingLabel;
 	private Label? _effectSummaryLoadingLabel;
@@ -22587,6 +22590,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		int[] cardSrc = new int[count];
 		int[] cardSrcForward = new int[count];
 		int[] amountSrc = new int[count];
+		int[] seqSrc = new int[count];
 		int[] group = new int[count];
 		for (int i = 0; i < count; i++)
 		{
@@ -22594,6 +22598,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			cardSrc[i] = -1;
 			cardSrcForward[i] = -1;
 			amountSrc[i] = -1;
+			seqSrc[i] = -1;
 			group[i] = i;
 
 			bool moveSelectedByEffect = row.MoveSelectionModeSelect != null
@@ -22626,6 +22631,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				&& amountIndex < i)
 			{
 				amountSrc[i] = amountIndex;
+			}
+
+			if (cardSrc[i] < 0 && cardSrcForward[i] < 0 && amountSrc[i] < 0
+				&& !string.IsNullOrWhiteSpace(row.StableEffectId)
+				&& _chainManualSequenceLinks.TryGetValue(row.StableEffectId, out string? seqSourceId)
+				&& !string.IsNullOrWhiteSpace(seqSourceId)
+				&& idToIndex.TryGetValue(seqSourceId, out int seqIndex)
+				&& seqIndex != i)
+			{
+				seqSrc[i] = seqIndex;
 			}
 		}
 
@@ -22668,6 +22683,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					group[rootB] = rootA;
 				}
 			}
+			if (seqSrc[i] >= 0)
+			{
+				int rootA = FindRoot(seqSrc[i]);
+				int rootB = FindRoot(i);
+				if (rootA != rootB)
+				{
+					group[rootB] = rootA;
+				}
+			}
 		}
 
 		List<List<int>> chains = new List<List<int>>();
@@ -22686,17 +22710,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		foreach (List<int> chain in chains)
 		{
-			bool chainHasExpandedBox = !string.IsNullOrWhiteSpace(_expandedChainEffectId)
-				&& chain.Any(i => string.Equals(_extraEffectRows[i].StableEffectId, _expandedChainEffectId, StringComparison.Ordinal));
-			ScrollContainer stripScroll = new ScrollContainer
-			{
-				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-				VerticalScrollMode = chainHasExpandedBox ? ScrollContainer.ScrollMode.Auto : ScrollContainer.ScrollMode.Disabled,
-				SizeFlagsVertical = Control.SizeFlags.ShrinkBegin
-			};
-			HBoxContainer strip = new HBoxContainer();
-			strip.AddThemeConstantOverride("separation", 8);
-			stripScroll.AddChild(strip);
+			// No inner scrollbars: the strip WRAPS long chains and grows vertically, so the
+			// whole section extends and the main editor scrollbar is the only one.
+			HFlowContainer strip = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+			strip.AddThemeConstantOverride("h_separation", 8);
+			strip.AddThemeConstantOverride("v_separation", 6);
 
 			for (int m = 0; m < chain.Count; m++)
 			{
@@ -22758,29 +22776,26 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				strip.AddChild(BuildEffectChainBox(rowIndex));
 			}
 
-			// C2: extend this chain - the new step auto-wires to act on the last step's result.
-			string lastStepId = _extraEffectRows[chain[chain.Count - 1]].StableEffectId;
+			// C2: extend this chain - the new step lands right after the chain's last row and
+			// auto-wires (or sequence-links) so it always joins THIS chain, never a stray strip.
+			int lastChainRowIndex = chain[chain.Count - 1];
+			string lastStepId = _extraEffectRows[lastChainRowIndex].StableEffectId;
 			if (!string.IsNullOrWhiteSpace(lastStepId))
 			{
 				Button addStep = new Button
 				{
 					Text = "+",
 					CustomMinimumSize = new Vector2(34, 34),
-					TooltipText = CardEditorLoc.T("effectChains.addStep", "Add a step that acts on this chain's result.")
+					TooltipText = CardEditorLoc.T("effectChains.addStep", "Add a step to this chain.")
 				};
 				StyleInput(addStep);
 				string capturedSourceId = lastStepId;
-				addStep.Pressed += () => OnAddChainStep(capturedSourceId);
+				int capturedLastIndex = lastChainRowIndex;
+				addStep.Pressed += () => OnAddChainStep(capturedSourceId, insertAfterRowIndex: capturedLastIndex);
 				strip.AddChild(addStep);
 			}
 
-			// Expanded cards vary a lot in height (chip + IF rows wrap); size the strip to its
-			// content, clamped, with overflow scrollable instead of clipped.
-			float stripHeight = chainHasExpandedBox
-				? Math.Clamp(strip.GetCombinedMinimumSize().Y + 14f, 120f, 380f)
-				: 96f;
-			stripScroll.CustomMinimumSize = new Vector2(0, stripHeight);
-			_effectChainContainer.AddChild(stripScroll);
+			_effectChainContainer.AddChild(strip);
 		}
 
 		Button newChainButton = new Button
@@ -22888,6 +22903,16 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					}
 				}
 
+				// Kinds with no card/amount link still JOIN the chain visually via a
+				// board-side sequence link - "+" must never spawn a stray strip.
+				if (!string.IsNullOrWhiteSpace(sourceEffectId)
+					&& string.IsNullOrWhiteSpace(seed.CardSelectionSourceEffectId)
+					&& string.IsNullOrWhiteSpace(seed.AmountSourceEffectId)
+					&& !string.IsNullOrWhiteSpace(newRow.StableEffectId))
+				{
+					_chainManualSequenceLinks[newRow.StableEffectId] = sourceEffectId;
+				}
+
 				// Open the fresh step on the board, ready to edit.
 				_expandedChainEffectId = newRow.StableEffectId;
 				RefreshEffectSummaryList();
@@ -22910,7 +22935,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			// Collapsed: the whole card is a click target to expand. When expanded, only the
 			// title row collapses - the padding between chips must not eat clicks mid-edit.
 			box.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
-			box.TooltipText = CardEditorLoc.T("effectChains.boxTooltip", "Click to edit this step in the chain.");
+			box.TooltipText = CardEditorLoc.T("effectChains.boxTooltip", "Click to edit this step. Drag onto another step to chain them.");
 			box.GuiInput += input =>
 			{
 				if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
@@ -22923,6 +22948,24 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		else
 		{
 			box.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		}
+
+		if (!row.IsUpgradeDeltaRow && !_isUpgradeEditor && !string.IsNullOrWhiteSpace(row.StableEffectId))
+		{
+			string dragEffectId = row.StableEffectId;
+			string dragTitle = $"{(rowIndex + 1).ToString(CultureInfo.InvariantCulture)}. {GetEffectSummaryKindText(row)}";
+			box.SetDragForwarding(
+				Callable.From((Vector2 _) =>
+				{
+					Label dragPreview = new Label { Text = dragTitle };
+					StyleBodyLabel(dragPreview);
+					box.SetDragPreview(dragPreview);
+					return Variant.From(dragEffectId);
+				}),
+				Callable.From((Vector2 _, Variant data) =>
+					data.VariantType == Variant.Type.String
+					&& !string.Equals(data.AsString(), dragEffectId, StringComparison.Ordinal)),
+				Callable.From((Vector2 _, Variant data) => OnChainBoxDropped(data.AsString(), dragEffectId)));
 		}
 
 		MarginContainer cardMargin = new MarginContainer();
@@ -23280,6 +23323,45 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		}
 		return null;
+	}
+
+	// Drag a chain card onto another: attach it to that chain (sequence link; real card/amount
+	// links configured via the chips take render precedence) and slot it right after the target.
+	private void OnChainBoxDropped(string draggedEffectId, string targetEffectId)
+	{
+		if (_isUpgradeEditor
+			|| string.IsNullOrWhiteSpace(draggedEffectId)
+			|| string.IsNullOrWhiteSpace(targetEffectId)
+			|| string.Equals(draggedEffectId, targetEffectId, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		ExtraEffectRow? dragged = _extraEffectRows.FirstOrDefault(r => string.Equals(r.StableEffectId, draggedEffectId, StringComparison.Ordinal));
+		ExtraEffectRow? target = _extraEffectRows.FirstOrDefault(r => string.Equals(r.StableEffectId, targetEffectId, StringComparison.Ordinal));
+		if (dragged == null || target == null || dragged.IsUpgradeDeltaRow)
+		{
+			return;
+		}
+
+		_chainManualSequenceLinks[draggedEffectId] = targetEffectId;
+
+		for (int safety = 0; safety < _extraEffectRows.Count + 1; safety++)
+		{
+			int draggedIndex = _extraEffectRows.IndexOf(dragged);
+			int targetIndex = _extraEffectRows.IndexOf(target);
+			if (draggedIndex < 0 || targetIndex < 0 || draggedIndex == targetIndex + 1)
+			{
+				break;
+			}
+			MoveExtraEffectRow(dragged, draggedIndex > targetIndex + 1 ? -1 : 1);
+			if (_extraEffectRows.IndexOf(dragged) == draggedIndex)
+			{
+				break;
+			}
+		}
+
+		RefreshEffectSummaryList();
 	}
 
 	private Control BuildEffectChainIfChip(ExtraEffectRow row)

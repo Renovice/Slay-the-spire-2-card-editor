@@ -1,4 +1,13 @@
-﻿## 2026-07-19 - Chainboard C4 adversarial review: 2 blockers + 3 should-fixes, all fixed
+﻿## 2026-07-19 - Chainboard UX rework: no inner scrollbars, "+" always joins, drag-to-chain
+
+User verdict on deployed C4: inner strip scrollbars "hurt visibility" (main scrollbar exists), "+" spawned the new effect as a separate strip below when the picked kind had no card/amount link, and there was no mouse way to attach steps.
+- Strips are now HFlowContainers: long chains WRAP and the Effect Chains section simply grows taller - zero inner scrollbars, the main editor scrollbar is the only one. Height clamps and per-strip ScrollContainers deleted.
+- "+" (strip end AND connectors) inserts right after the chain's last/left row AND always joins that chain: real auto-wire when the registry allows, otherwise a board-side sequence link (_chainManualSequenceLinks, session-scoped, plain dash connector; real card/amount links take render precedence and are still the only runtime-meaningful ones).
+- Drag & drop via Control.SetDragForwarding: grab any chain card, drop it on another - it attaches to that chain (sequence link) and repositions right after the target through MoveExtraEffectRow (stall-guarded loop). Disabled in the upgrade editor and for delta rows (index-pairing hazard).
+Known limit (documented): sequence links are session-scoped - chains held together ONLY by them regroup as singletons after reopening the card; chains with any real link survive. Persisting them needs a UI-sidecar store (candidate for C5).
+Build: 0 errors / 274 warnings (baseline). NOT deployed yet.
+Next Step: deploy on request (game closed); check = a 3+ box chain wraps instead of scrolling, "+" lands the step in the same strip, dragging a box onto another joins them.
+## 2026-07-19 - Chainboard C4 adversarial review: 2 blockers + 3 should-fixes, all fixed
 
 Two-agent hostile review (Godot lifecycle + state consistency) of the board-native authoring code. Confirmed findings, all fixed same day:
 - BLOCKER chip typing: every keystroke's classic TextChanged handler queues a same-frame strip rebuild that freed the focused mirror field (one character per click). Fix: rebuild now captures the focused chip (by source-control instance id via metadata) + caret and restores focus on the recreated mirror; the FocusExited repaint hook is gone (each keystroke's deferred repaint keeps everything fresh).
