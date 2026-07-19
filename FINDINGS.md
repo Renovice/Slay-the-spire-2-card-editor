@@ -1,4 +1,10 @@
-﻿## 2026-07-19 - Chain groupings now persist (chain_links.json sidecar)
+﻿## 2026-07-19 - Chainboard C5 polish: live chain sentences + chain badges
+
+- LIVE SENTENCE: every multi-step chain shows its actual rules text under the strip - built by the same BuildOverrideFromUi + TryFormatLineForAudit pipeline the preview/audit use, markup stripped with REAL numbers kept (StripMarkupForHint gained replaceDigits:false). Perf-guarded: skipped while typing in a chip (strip repaints per keystroke) and while lazy row hydration is still pending (the builder would force-complete it at popup-open).
+- CHAIN BADGE: classic Effect List rows that participate in a chain (card link, amount link, or board sequence link) carry a chain-link glyph in their title, so chain membership is visible from the classic list too.
+Build: 0 errors / 274 warnings (baseline).
+Next Step: deployed with d51b74d + 54598ed (wrap/drag + persistence) per user instruction.
+## 2026-07-19 - Chain groupings now persist (chain_links.json sidecar)
 
 The drag-built/plus-built sequence links were session-only - chains with no real card/amount link fell apart on reopen. Now:
 - New CardEditorChainLinkStore: user://card_editor/chain_links.json, cardKey -> (effectId -> sourceEffectId), System.Text.Json, lazy load + write-through saves. UI sidecar ONLY - card override DTO and MP snapshot untouched.

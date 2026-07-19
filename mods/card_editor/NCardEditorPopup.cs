@@ -22742,6 +22742,32 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			chains[chainIndex].Add(i);
 		}
 
+		// C5: live sentences under multi-step chains - the actual rules text, from the same
+		// builder the preview uses. Skipped while typing in a chip (this repaints per
+		// keystroke) and before lazy row hydration completes (the builder would force it).
+		Dictionary<string, CardExtraEffect> liveEffectById = new Dictionary<string, CardExtraEffect>(StringComparer.Ordinal);
+		bool wantLiveSentences = focusedChipSourceId == 0
+			&& _previewCard != null
+			&& _pendingExistingExtraEffectRows.Count == 0
+			&& chains.Any(c => c.Count > 1);
+		if (wantLiveSentences)
+		{
+			try
+			{
+				foreach (CardExtraEffect built in BuildOverrideFromUi().ExtraEffects ?? new List<CardExtraEffect>())
+				{
+					if (built != null && !string.IsNullOrWhiteSpace(built.EffectId) && !liveEffectById.ContainsKey(built.EffectId))
+					{
+						liveEffectById[built.EffectId] = built;
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				PopupLagLog($"chain sentence build failed: {ex.Message}");
+			}
+		}
+
 		foreach (List<int> chain in chains)
 		{
 			// No inner scrollbars: the strip WRAPS long chains and grows vertically, so the
@@ -22830,6 +22856,40 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 
 			_effectChainContainer.AddChild(strip);
+
+			if (wantLiveSentences && chain.Count > 1)
+			{
+				System.Text.StringBuilder sentence = new System.Text.StringBuilder();
+				foreach (int sentenceRowIndex in chain)
+				{
+					string sentenceEffectId = _extraEffectRows[sentenceRowIndex].StableEffectId;
+					if (string.IsNullOrWhiteSpace(sentenceEffectId)
+						|| !liveEffectById.TryGetValue(sentenceEffectId, out CardExtraEffect? liveEffect))
+					{
+						continue;
+					}
+					if (CardEditorExtraEffects.TryFormatLineForAudit(_previewCard!, liveEffect, out string? liveLine)
+						&& !string.IsNullOrWhiteSpace(liveLine))
+					{
+						if (sentence.Length > 0)
+						{
+							sentence.Append(' ');
+						}
+						sentence.Append(StripMarkupForHint(liveLine!, replaceDigits: false));
+					}
+				}
+				if (sentence.Length > 0)
+				{
+					Label sentenceLabel = new Label
+					{
+						Text = sentence.ToString(),
+						AutowrapMode = TextServer.AutowrapMode.WordSmart,
+						SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+					};
+					StyleHintLabel(sentenceLabel);
+					_effectChainContainer.AddChild(sentenceLabel);
+				}
+			}
 		}
 
 		Button newChainButton = new Button
@@ -23549,7 +23609,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				: string.Empty;
 			if (row.SummaryTitleLabel != null && GodotObject.IsInstanceValid(row.SummaryTitleLabel))
 			{
-				row.SummaryTitleLabel.Text = $"{i + 1}. {disabledPrefix}{kindText}{amountText}";
+				// C5: linked rows carry a chain badge so the classic list shows chain membership.
+				bool isChained = !string.IsNullOrWhiteSpace(row.AmountSourceEffectId)
+					|| !string.IsNullOrWhiteSpace(row.CardSelectionSourceEffectId)
+					|| (!string.IsNullOrWhiteSpace(row.StableEffectId)
+						&& (_chainManualSequenceLinks.ContainsKey(row.StableEffectId)
+							|| _chainManualSequenceLinks.ContainsValue(row.StableEffectId)));
+				row.SummaryTitleLabel.Text = $"{i + 1}. {disabledPrefix}{kindText}{amountText}{(isChained ? " ⛓" : string.Empty)}";
 			}
 
 			string triggerText = GetSelectedItemText(row.TriggerSelect, CardEditorLoc.T("effectList.noTrigger", "No trigger"));
@@ -39481,7 +39547,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 	}
 
-	private static string StripMarkupForHint(string text)
+	private static string StripMarkupForHint(string text, bool replaceDigits = true)
 	{
 		if (string.IsNullOrEmpty(text))
 		{
@@ -39516,7 +39582,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 			// The default-configured amounts are placeholders, not real values - show "X" so the
 			// hint reads "Summon X" instead of implying a fixed number (user report).
-			if (char.IsDigit(text[i]))
+			// Live chain sentences pass replaceDigits: false - their numbers are real.
+			if (replaceDigits && char.IsDigit(text[i]))
 			{
 				if (!lastWasNumberPlaceholder)
 				{
