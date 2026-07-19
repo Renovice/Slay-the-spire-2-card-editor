@@ -122,8 +122,25 @@ Robustness rules the panel must honor:
   "New Chain" starting from any producing kind.
 - **C3 — condition & modifier chips** (M): IF-boxes writing the step's branch/condition fields
   (incl. P3 inline payloads); duration/target/keyword chips inside expanded boxes.
-- **C4 — polish** (S-M, ongoing): drag to reorder, live sentence under the strip, chain badges on
-  classic rows, collapse-classic-when-chained option.
+- **C4 — board-native authoring** (M-L): the board stops being a viewer and becomes the editor.
+  User verdict on C1-C3: "just shows me cards of already existing effects, not putting
+  conditionals and modifying effects with each other and doing what-if". So:
+  1. **Expandable cards**: clicking a card expands it IN the strip (no jump) with editable
+     chips bound write-through to that row's classic controls — Amount (field), Target
+     (dropdown), Amount-source ("= step #n" dropdown over earlier steps). A "Full settings"
+     link in the expanded card still jumps to the classic row for the long tail.
+  2. **IF authoring in the board**: every card gets "+ IF" — it activates the row's branch and
+     expands an inline condition editor in the strip: condition type, comparison/threshold,
+     and result style (gate this step / run an inline effect with kind + amount + target —
+     the P3 payload). The IF chip becomes the collapsed view of it.
+     Grammar covered: "effect, effect if condition is met, result" and "what if X: do Y".
+  3. **Insert between steps**: connectors gain a "+" — inserts a picker-chosen step at that
+     position (append + move into place), auto-wired to consume the left step's cards.
+  Binding mechanism: board controls never own state — they set the classic control and emit
+  its change signal (ItemSelected/TextChanged/Toggled), so every classic side effect
+  (visibility reconfig, preview, text refresh) runs identically. Zero new persistence.
+- **C5 — polish** (S-M, ongoing): drag to reorder, live sentence under the strip, chain badges
+  on classic rows, collapse-classic-when-chained option.
 
 ## UI spec (v1)
 

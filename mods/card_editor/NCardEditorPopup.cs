@@ -221,6 +221,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private ScrollContainer? _effectSummaryScroll;
 	private VBoxContainer? _effectSummaryContainer;
 	private VBoxContainer? _effectChainContainer;
+	private string? _expandedChainEffectId;
 	private ScrollContainer? _rightColumnScroll;
 	private Label? _extraEffectsLoadingLabel;
 	private Label? _effectSummaryLoadingLabel;
@@ -22663,11 +22664,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		foreach (List<int> chain in chains)
 		{
+			bool chainHasExpandedBox = !string.IsNullOrWhiteSpace(_expandedChainEffectId)
+				&& chain.Any(i => string.Equals(_extraEffectRows[i].StableEffectId, _expandedChainEffectId, StringComparison.Ordinal));
 			ScrollContainer stripScroll = new ScrollContainer
 			{
 				SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
 				VerticalScrollMode = ScrollContainer.ScrollMode.Disabled,
-				CustomMinimumSize = new Vector2(0, 96)
+				CustomMinimumSize = new Vector2(0, chainHasExpandedBox ? 260 : 96),
+				SizeFlagsVertical = Control.SizeFlags.ShrinkBegin
 			};
 			HBoxContainer strip = new HBoxContainer();
 			strip.AddThemeConstantOverride("separation", 8);
@@ -22699,6 +22703,24 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 							"This step's source runs AFTER it - move this step below its source or the link finds nothing.");
 					}
 					strip.AddChild(connector);
+
+					// C4: insert a step between the two - auto-wired to act on the left step's result.
+					string leftStepId = _extraEffectRows[prevIndex].StableEffectId;
+					if (!string.IsNullOrWhiteSpace(leftStepId))
+					{
+						Button insertStep = new Button
+						{
+							Text = "+",
+							CustomMinimumSize = new Vector2(22, 22),
+							SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+							TooltipText = CardEditorLoc.T("effectChains.insertStep", "Insert a step here - it acts on the left step's result.")
+						};
+						StyleInput(insertStep);
+						int capturedPrevIndex = prevIndex;
+						string capturedLeftId = leftStepId;
+						insertStep.Pressed += () => OnAddChainStep(capturedLeftId, insertAfterRowIndex: capturedPrevIndex);
+						strip.AddChild(insertStep);
+					}
 				}
 
 				// C3: a step with an active branch condition gets an IF prefix chip.
@@ -22745,7 +22767,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	// C2: append a new effect row via the categorized picker; when sourceEffectId is given, the new
 	// step auto-wires to consume that step's cards (or read its amount when it can't take cards).
-	private void OnAddChainStep(string? sourceEffectId)
+	private void OnAddChainStep(string? sourceEffectId, int insertAfterRowIndex = -1)
 	{
 		EnsurePendingPopupHydrationCompleted();
 
@@ -22807,6 +22829,29 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 
 			AddExtraEffectRow(seed);
+
+			ExtraEffectRow? newRow = _extraEffectRows.Count > 0 ? _extraEffectRows[_extraEffectRows.Count - 1] : null;
+			if (newRow != null)
+			{
+				if (insertAfterRowIndex >= 0)
+				{
+					int targetIndex = Math.Min(insertAfterRowIndex + 1, _extraEffectRows.Count - 1);
+					while (_extraEffectRows.IndexOf(newRow) > targetIndex)
+					{
+						int before = _extraEffectRows.IndexOf(newRow);
+						MoveExtraEffectRow(newRow, direction: -1);
+						if (_extraEffectRows.IndexOf(newRow) == before)
+						{
+							break;
+						}
+					}
+				}
+
+				// Open the fresh step on the board, ready to edit.
+				_expandedChainEffectId = newRow.StableEffectId;
+				RefreshEffectSummaryList();
+			}
+
 			QueuePreviewUpdate();
 		});
 	}
@@ -22814,16 +22859,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	private Control BuildEffectChainBox(int rowIndex)
 	{
 		ExtraEffectRow row = _extraEffectRows[rowIndex];
-		PanelContainer box = CreateEditorPanel(bgAlpha: 0.62f);
+		bool isExpanded = !string.IsNullOrWhiteSpace(row.StableEffectId)
+			&& string.Equals(_expandedChainEffectId, row.StableEffectId, StringComparison.Ordinal);
+		PanelContainer box = CreateEditorPanel(bgAlpha: isExpanded ? 0.78f : 0.62f);
 		box.MouseFilter = MouseFilterEnum.Stop;
 		box.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
-		box.CustomMinimumSize = new Vector2(180, 0);
-		box.TooltipText = CardEditorLoc.T("effectChains.boxTooltip", "Click to jump to this effect's full settings.");
+		box.CustomMinimumSize = new Vector2(isExpanded ? 280 : 180, 0);
+		box.TooltipText = isExpanded
+			? CardEditorLoc.T("effectChains.boxTooltipExpanded", "Click the title to collapse this step.")
+			: CardEditorLoc.T("effectChains.boxTooltip", "Click to edit this step in the chain.");
 		box.GuiInput += input =>
 		{
 			if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
 			{
-				JumpToEffectRow(row);
+				_expandedChainEffectId = isExpanded ? null : row.StableEffectId;
+				RefreshEffectChainStrip();
 			}
 		};
 
@@ -22834,7 +22884,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		cardMargin.AddThemeConstantOverride("margin_bottom", 6);
 
 		VBoxContainer card = new VBoxContainer();
-		card.AddThemeConstantOverride("separation", 2);
+		card.AddThemeConstantOverride("separation", isExpanded ? 6 : 2);
 
 		HBoxContainer topRow = new HBoxContainer();
 		topRow.AddThemeConstantOverride("separation", 6);
@@ -22863,21 +22913,87 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		card.AddChild(topRow);
 
-		string triggerText = GetSelectedItemText(row.TriggerSelect, string.Empty);
-		string targetText = GetSelectedItemText(row.TargetSelect, string.Empty);
-		string subText = string.IsNullOrWhiteSpace(targetText)
-			? triggerText
-			: string.IsNullOrWhiteSpace(triggerText)
-				? targetText
-				: $"{triggerText} • {targetText}";
-		if (!string.IsNullOrWhiteSpace(subText))
+		if (!isExpanded)
 		{
-			Label sub = new Label { Text = subText };
-			StyleHintLabel(sub);
-			card.AddChild(sub);
+			string triggerText = GetSelectedItemText(row.TriggerSelect, string.Empty);
+			string targetText = GetSelectedItemText(row.TargetSelect, string.Empty);
+			string subText = string.IsNullOrWhiteSpace(targetText)
+				? triggerText
+				: string.IsNullOrWhiteSpace(triggerText)
+					? targetText
+					: $"{triggerText} • {targetText}";
+			if (!string.IsNullOrWhiteSpace(subText))
+			{
+				Label sub = new Label { Text = subText };
+				StyleHintLabel(sub);
+				card.AddChild(sub);
+			}
+		}
+		else
+		{
+			HFlowContainer chips = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+			chips.AddThemeConstantOverride("h_separation", 8);
+			chips.AddThemeConstantOverride("v_separation", 4);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.trigger", "Trigger"), row.TriggerSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.target", "Target"), row.TargetSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.amount", "Amount"), row.AmountField);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.amountFrom", "Amount from"), row.AmountSourceModeSelect);
+			AddChainChip(chips, "=", row.AmountSourceEffectSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.pile", "Pile"), row.MoveFromPileSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.toPile", "To"), row.MoveToPileSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.select", "Select"), row.MoveSelectionModeSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.cardsOf", "Cards of"), row.CardSelectionSourceEffectSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.grantPile", "Grant pile"), row.GrantPileSelect);
+			AddChainChip(chips, CardEditorLoc.T("effectChains.chip.grantMode", "Grant mode"), row.GrantModeSelect);
+			if (chips.GetChildCount() > 0)
+			{
+				card.AddChild(chips);
+			}
+
+			BuildChainIfSection(card, row);
+
+			HBoxContainer actionRow = new HBoxContainer();
+			actionRow.AddThemeConstantOverride("separation", 4);
+
+			Button fullSettings = new Button
+			{
+				Text = CardEditorLoc.T("effectChains.fullSettings", "Full settings"),
+				CustomMinimumSize = new Vector2(0, 24),
+				TooltipText = CardEditorLoc.T("effectChains.fullSettingsTooltip", "Jump to this effect's complete editor below.")
+			};
+			StyleInput(fullSettings);
+			fullSettings.Pressed += () => JumpToEffectRow(row);
+			actionRow.AddChild(fullSettings);
+
+			actionRow.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+
+			if (!row.IsUpgradeDeltaRow)
+			{
+				Button moveEarlier = new Button
+				{
+					Text = "◀",
+					CustomMinimumSize = new Vector2(28, 24),
+					TooltipText = CardEditorLoc.T("effectChains.moveEarlier", "Move this step earlier (runs sooner).")
+				};
+				StyleInput(moveEarlier);
+				moveEarlier.Pressed += () => MoveExtraEffectRow(row, direction: -1);
+				actionRow.AddChild(moveEarlier);
+
+				Button moveLater = new Button
+				{
+					Text = "▶",
+					CustomMinimumSize = new Vector2(28, 24),
+					TooltipText = CardEditorLoc.T("effectChains.moveLater", "Move this step later (runs after).")
+				};
+				StyleInput(moveLater);
+				moveLater.Pressed += () => MoveExtraEffectRow(row, direction: 1);
+				actionRow.AddChild(moveLater);
+			}
+
+			card.AddChild(actionRow);
 		}
 
-		if (!row.IsUpgradeDeltaRow)
+		if (!isExpanded && !row.IsUpgradeDeltaRow)
 		{
 			HBoxContainer moveRow = new HBoxContainer();
 			moveRow.AddThemeConstantOverride("separation", 4);
@@ -22911,6 +23027,170 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return box;
 	}
 
+	// C4: the IF row inside an expanded card - activates the row's branch fields and mirrors the
+	// visible condition/payload controls, so conditions are authored without leaving the board.
+	private void BuildChainIfSection(VBoxContainer card, ExtraEffectRow row)
+	{
+		if (row.BranchTickbox == null || !GodotObject.IsInstanceValid(row.BranchTickbox))
+		{
+			return;
+		}
+
+		if (!row.BranchTickbox.IsTicked)
+		{
+			if (row.IsUpgradeDeltaRow)
+			{
+				return;
+			}
+
+			Button addIf = new Button
+			{
+				Text = CardEditorLoc.T("effectChains.addIf", "+ IF condition"),
+				CustomMinimumSize = new Vector2(0, 24),
+				SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+				TooltipText = CardEditorLoc.T("effectChains.addIfTooltip", "This step only happens when a condition is met - or runs a different effect instead.")
+			};
+			StyleInput(addIf);
+			addIf.Pressed += () =>
+			{
+				row.BranchTickbox.SetTickedSilent(true);
+				UpdateExtraEffectCustomRows(row);
+				UpdateExtraEffectPropertyGridOrder(row);
+				QueuePreviewUpdate();
+				_expandedChainEffectId = row.StableEffectId;
+				RefreshEffectSummaryList();
+			};
+			card.AddChild(addIf);
+			return;
+		}
+
+		HFlowContainer ifFlow = new HFlowContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+		ifFlow.AddThemeConstantOverride("h_separation", 8);
+		ifFlow.AddThemeConstantOverride("v_separation", 4);
+
+		Label ifLabel = new Label { Text = CardEditorLoc.T("effectChains.ifChip", "IF"), VerticalAlignment = VerticalAlignment.Center };
+		StyleBodyLabel(ifLabel);
+		ifFlow.AddChild(ifLabel);
+
+		AddChainChip(ifFlow, null, row.BranchConditionTypeSelect);
+		AddChainChip(ifFlow, null, row.BranchModeSelect);
+		AddChainChip(ifFlow, null, row.BranchConditionSelect);
+		AddChainChip(ifFlow, null, row.BranchStatusModeSelect);
+		AddChainChip(ifFlow, null, row.BranchEnemyStatusSelect);
+		AddChainChip(ifFlow, null, row.BranchPowerSelect);
+		AddChainChip(ifFlow, null, row.BranchEnemyIntentSelect);
+		AddChainChip(ifFlow, null, row.BranchCountEventSelect);
+		AddChainChip(ifFlow, null, row.BranchCountWindowSelect);
+		AddChainChip(ifFlow, null, row.BranchCountPileSelect);
+		AddChainChip(ifFlow, null, row.BranchCountComparisonSelect);
+		AddChainChip(ifFlow, null, row.BranchCountConditionField);
+		AddChainChip(ifFlow, CardEditorLoc.T("effectChains.chip.then", "then"), row.BranchPayloadStyleSelect);
+		AddChainChip(ifFlow, CardEditorLoc.T("effectChains.chip.do", "do"), row.BranchInlineKindSelect);
+		AddChainChip(ifFlow, CardEditorLoc.T("effectChains.chip.amount", "Amount"), row.BranchInlineAmountField);
+		AddChainChip(ifFlow, CardEditorLoc.T("effectChains.chip.on", "on"), row.BranchInlineTargetSelect);
+
+		if (!row.IsUpgradeDeltaRow)
+		{
+			Button removeIf = new Button
+			{
+				Text = "✕ IF",
+				CustomMinimumSize = new Vector2(0, 24),
+				TooltipText = CardEditorLoc.T("effectChains.removeIf", "Remove the condition - this step always happens.")
+			};
+			StyleInput(removeIf);
+			removeIf.Pressed += () =>
+			{
+				row.BranchTickbox.SetTickedSilent(false);
+				UpdateExtraEffectCustomRows(row);
+				UpdateExtraEffectPropertyGridOrder(row);
+				QueuePreviewUpdate();
+				RefreshEffectSummaryList();
+			};
+			ifFlow.AddChild(removeIf);
+		}
+
+		card.AddChild(ifFlow);
+	}
+
+	// C4 write-through: board chips never own state. Dropdown chips re-emit the classic control's
+	// ItemSelected so every classic side effect (visibility reconfig, preview, id sync) runs the
+	// same as a direct edit; text chips defer the strip repaint to focus-out so typing survives.
+	private void AddChainChip(Container parent, string? label, Control? source)
+	{
+		if (source == null || !GodotObject.IsInstanceValid(source) || !source.Visible)
+		{
+			return;
+		}
+
+		HBoxContainer chip = new HBoxContainer();
+		chip.AddThemeConstantOverride("separation", 4);
+		if (!string.IsNullOrWhiteSpace(label))
+		{
+			Label chipLabel = new Label { Text = label, VerticalAlignment = VerticalAlignment.Center };
+			StyleHintLabel(chipLabel);
+			chip.AddChild(chipLabel);
+		}
+
+		if (source is OptionButton sourceSelect)
+		{
+			OptionButton mirror = new OptionButton
+			{
+				FitToLongestItem = false,
+				CustomMinimumSize = new Vector2(0, 26)
+			};
+			StyleInput(mirror);
+			for (int i = 0; i < sourceSelect.ItemCount; i++)
+			{
+				mirror.AddItem(sourceSelect.GetItemText(i), sourceSelect.GetItemId(i));
+				if (sourceSelect.IsItemDisabled(i))
+				{
+					mirror.SetItemDisabled(i, true);
+				}
+			}
+			if (sourceSelect.Selected >= 0 && sourceSelect.Selected < mirror.ItemCount)
+			{
+				mirror.Selected = sourceSelect.Selected;
+			}
+			mirror.ItemSelected += pickedIndex =>
+			{
+				if (!GodotObject.IsInstanceValid(sourceSelect))
+				{
+					return;
+				}
+				sourceSelect.Select((int)pickedIndex);
+				sourceSelect.EmitSignal(OptionButton.SignalName.ItemSelected, pickedIndex);
+				RefreshEffectSummaryList();
+			};
+			chip.AddChild(mirror);
+		}
+		else if (source is LineEdit sourceField)
+		{
+			LineEdit mirror = new LineEdit
+			{
+				Text = sourceField.Text,
+				CustomMinimumSize = new Vector2(56, 26)
+			};
+			StyleInput(mirror);
+			mirror.TextChanged += newText =>
+			{
+				if (!GodotObject.IsInstanceValid(sourceField))
+				{
+					return;
+				}
+				sourceField.Text = newText;
+				sourceField.EmitSignal(LineEdit.SignalName.TextChanged, newText);
+			};
+			mirror.FocusExited += RefreshEffectSummaryList;
+			chip.AddChild(mirror);
+		}
+		else
+		{
+			return;
+		}
+
+		parent.AddChild(chip);
+	}
+
 	private Control BuildEffectChainIfChip(ExtraEffectRow row)
 	{
 		PanelContainer chip = CreateEditorPanel(bgAlpha: 0.45f);
@@ -22921,7 +23201,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			if (input is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left && mb.Pressed)
 			{
-				JumpToEffectRow(row);
+				_expandedChainEffectId = row.StableEffectId;
+				RefreshEffectChainStrip();
 			}
 		};
 
