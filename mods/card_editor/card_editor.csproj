@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>card_editor</AssemblyName>
     <RootNamespace>SlayTheSpire2Mod.CardEditor</RootNamespace>
-    <Version>8.0.0</Version>
+    <Version>10.0.0</Version>
     <LangVersion>latest</LangVersion>
     <OutputPath>build\</OutputPath>
     <Sts2GameDir Condition="'$(Sts2GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64</Sts2GameDir>

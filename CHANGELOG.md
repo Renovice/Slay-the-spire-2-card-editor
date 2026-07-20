@@ -1,6 +1,6 @@
 # Card Editor changelog
 
-## 8.0 — The Card Engine & Chainboard update (2026-07-19)
+## 10.0 — The Card Engine & Chainboard update (2026-07-19)
 
 The biggest rework since release: effects are now a composable engine, and you can build them visually.
 
