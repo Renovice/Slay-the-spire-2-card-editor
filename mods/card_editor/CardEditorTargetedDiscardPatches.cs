@@ -161,7 +161,7 @@ internal static class DaggerThrow_OnPlay_TargetedDiscardCount_Patch
 	{
 		ArgumentNullException.ThrowIfNull(cardPlay.Target, nameof(cardPlay.Target));
 
-		await DamageCmd.Attack(card.DynamicVars.Damage.BaseValue).FromCard(card).Targeting(cardPlay.Target)
+		await DamageCmd.Attack(card.DynamicVars.Damage.BaseValue).FromCard(card, cardPlay).Targeting(cardPlay.Target)
 			.WithAttackerFx(() => NDaggerSprayFlurryVfx.Create(card.Owner.Creature, new Color("#b1ccca"), goingRight: true))
 			.WithHitVfxNode((Creature t) => NDaggerSprayImpactVfx.Create(t, new Color("#b1ccca"), goingRight: true))
 			.Execute(choiceContext);

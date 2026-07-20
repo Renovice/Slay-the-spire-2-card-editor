@@ -270,6 +270,7 @@ internal static class CardEditorIgnoreEffectHelpers
 		return new CardPlay
 		{
 			Card = card,
+			Player = card.Owner,
 			Target = target,
 			ResultPile = card.Pile?.Type ?? PileType.None,
 			Resources = new ResourceInfo
@@ -376,20 +377,20 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 
 	public static bool Prefix(
 		IRunState runState,
-		ICombatState? combatState,
+		CombatState? combatState,
 		Creature? target,
 		Creature? dealer,
 		decimal damage,
 		ValueProp props,
 		CardModel? cardSource,
+		CardPlay? cardPlay,
 		ModifyDamageHookType modifyDamageHookType,
 		ref List<AbstractModel> modifiers,
 		ref decimal __result)
 	{
 		CardModel? effectiveSource = CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
-		CombatState? concreteCombatState = combatState.GetConcreteCombatState();
-		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, concreteCombatState, target);
-		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, concreteCombatState, target);
+		bool ignoreCaps = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource, dealer, combatState, target);
+		bool ignoreEnemyReductions = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreEnemyDamageReductions, effectiveSource, dealer, combatState, target);
 		bool debug = CardEditorIgnoreEffectHelpers.ShouldLogCapDebug(CardExtraEffectKind.IgnoreDamageCaps, effectiveSource ?? cardSource, target);
 		if (debug)
 		{
@@ -408,7 +409,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		{
 			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
-				decimal delta = item.ModifyDamageAdditive(target, num, props, dealer, cardSource);
+				decimal delta = item.ModifyDamageAdditive(target, num, props, dealer, cardSource, cardPlay);
 				num += delta;
 				if (delta != 0m)
 				{
@@ -421,7 +422,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 		{
 			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
-				decimal mult = item.ModifyDamageMultiplicative(target, num, props, dealer, cardSource);
+				decimal mult = item.ModifyDamageMultiplicative(target, num, props, dealer, cardSource, cardPlay);
 				if (ignoreEnemyReductions && ShouldSkipTargetOwnedReduction(item, target, mult))
 				{
 					continue;
@@ -439,7 +440,7 @@ internal static class Hook_ModifyDamageInternal_IgnoreCaps_Patch
 			decimal cap = decimal.MaxValue;
 			foreach (AbstractModel item in runState.IterateHookListenersCompat(combatState))
 			{
-				decimal candidate = item.ModifyDamageCap(target, props, dealer, cardSource);
+				decimal candidate = item.ModifyDamageCap(target, props, dealer, cardSource, cardPlay);
 				bool skipAsEnemyReduction = ignoreEnemyReductions && ShouldSkipTargetOwnedCap(item, target, candidate);
 				if (debug && candidate < decimal.MaxValue)
 				{

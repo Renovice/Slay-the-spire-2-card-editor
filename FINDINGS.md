@@ -1,4 +1,14 @@
-﻿## 2026-07-19 - P1.5 PhraseComposer consolidation (pre-release hygiene)
+﻿## 2026-07-20 - Cards freeze on beta: retargeted mod back to v0.109 beta APIs
+
+User on public beta v0.109.0 (2026.07.17); cards froze mid-play.
+Hypothesis: the deployed DLL targets the 2026-07-18 PUBLIC build's APIs, but the game is now the v0.109 beta with the older signatures.
+Finding: True. godot.log: repeated MissingMethodException 'AbstractModel.ModifyDamageCap(Creature, ValueProp, Creature, CardModel)' (my 4-arg public-targeted call) in the damage path; game sts2.dll (9,609,216 bytes) HAS set_Player/CardLocation/BeforeSideTurnEnd + the 5-arg ModifyDamage family = beta. The 07-19 compat pass had retargeted to public.
+Decision (user): beta only. C# override signatures (Marked power ModifyDamageMultiplicative) can't be adaptive in one DLL, so one build must pick a branch.
+Fix: git revert of the compat commit 556ed3b (code files only; FINDINGS kept via checkout --ours), restoring all beta signatures while keeping every feature commit after it (Chainboard C4/C5, chain-aware text, P1.5). Build vs the beta sts2.dll: 0 errors / 278 warnings = the ORIGINAL beta baseline (compat pass had made it 274 by deleting beta-only code), confirming exact known-good restore.
+CHANGELOG compat line changed from "2026-07-18 update" to "public beta branch (v0.109.0)".
+Deploy blocked while game running (loaded DLL lock) - user must close the game.
+Next Step: deploy to unfreeze; rebuild the 8.0 release zip from the beta DLL; if the public branch ever matters, a conditional-compilation dual build is the real fix.
+## 2026-07-19 - P1.5 PhraseComposer consolidation (pre-release hygiene)
 
 Hypothesis: the P1 multiplayer-wording pass left byte-identical phrase arms duplicated across formatters, consolidatable with zero text drift.
 Finding: Partially true - 3 switch pairs (applyDebuff, signedPower, apply-equal-to; 8 arms each, character-identical) + 4 self-contained helpers were true duplicates; the bulk of per-target switches differ per-kind (verbs/loc keys, each exists once) and were correctly left alone.

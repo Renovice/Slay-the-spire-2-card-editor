@@ -18,7 +18,8 @@ namespace SlayTheSpire2Mod.CardEditor;
 	typeof(decimal),
 	typeof(ValueProp),
 	typeof(Creature),
-	typeof(CardModel)
+	typeof(CardModel),
+	typeof(CardPlay)
 })]
 internal static class CreatureCmd_Damage_IgnoreProps_Patch
 {
@@ -39,14 +40,13 @@ internal static class CreatureCmd_Damage_IgnoreProps_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.ModifyDamage))]
 internal static class Hook_ModifyDamage_IgnoreProps_Patch
 {
-	public static void Prefix(ICombatState? combatState, Creature? target, Creature? dealer, ref ValueProp props, CardModel? cardSource)
+	public static void Prefix(CombatState? combatState, Creature? target, Creature? dealer, ref ValueProp props, CardModel? cardSource)
 	{
-		CombatState? concreteCombatState = combatState.GetConcreteCombatState();
-		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, concreteCombatState, target))
+		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target))
 		{
 			props |= ValueProp.Unblockable;
 		}
-		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageModifiers, cardSource, dealer, concreteCombatState, target))
+		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageModifiers, cardSource, dealer, combatState, target))
 		{
 			props |= ValueProp.Unpowered;
 		}
