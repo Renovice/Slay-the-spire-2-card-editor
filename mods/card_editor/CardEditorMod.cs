@@ -3036,6 +3036,7 @@ public static class Hook_AfterPlayerTurnStart_Patch
 			await CardEditorExtraEffectScheduler.RunAfterPlayerTurnStart(combatState, choiceContext, player);
 			CardEditorCreatedCardsCostController.OnAfterPlayerTurnStart(combatState, player);
 			await CardEditorPowerTurnBoundaryRunner.RunForObservedSide(combatState, choiceContext, CardExtraEffectTurnBoundary.StartAfterDraw, CombatSide.Player);
+			await CardEditorQuestEffects.RunInstalledPassivesForTurnBoundary(combatState, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.YourTurn);
 			Creature? creature = player?.Creature;
 			if (creature != null)
 			{
@@ -3073,6 +3074,7 @@ public static class Hook_BeforeHandDraw_CardEditorTurnBoundaryPower_Patch
 		{
 			await CardEditorPowerDurationTrackerPower.RunDurationBoundary(combatState, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.YourTurn);
 			await CardEditorPowerTurnBoundaryRunner.RunForObservedSide(combatState, choiceContext, CardExtraEffectTurnBoundary.Start, CombatSide.Player);
+			await CardEditorQuestEffects.RunInstalledPassivesForTurnBoundary(combatState, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.YourTurn);
 		}
 		catch (Exception ex)
 		{
@@ -3122,6 +3124,7 @@ public static class Hook_AfterSideTurnStart_Patch
 			}
 
 			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.StartAfterDraw, CombatSide.Enemy);
+			await CardEditorQuestEffects.RunInstalledPassivesForTurnBoundary(combatState, CardExtraEffectTurnBoundary.StartAfterDraw, CardExtraEffectTurnBoundarySide.EnemyTurn);
 
 			foreach (Player player in combatState.Players)
 			{
@@ -3174,6 +3177,7 @@ public static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryPower_Patch
 			}
 
 			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.Start, CombatSide.Enemy);
+			await CardEditorQuestEffects.RunInstalledPassivesForTurnBoundary(combatState, CardExtraEffectTurnBoundary.Start, CardExtraEffectTurnBoundarySide.EnemyTurn);
 		}
 		catch (Exception ex)
 		{
@@ -3219,6 +3223,7 @@ public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 			}
 
 			await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.End, side, participantSet);
+			await CardEditorQuestEffects.RunInstalledPassivesForTurnBoundary(combatState, CardExtraEffectTurnBoundary.End, boundarySide);
 			await CardEditorPowerTurnBoundaryRunner.RunEndOfTurnTimedWithHookContexts(combatState, side, participantSet);
 		}
 		catch (Exception ex)
@@ -3256,6 +3261,7 @@ public static class Hook_AfterTurnEnd_Patch
 			{
 				await CardEditorPowerTurnBoundaryRunner.RunForObservedSideWithHookContexts(combatState, CardExtraEffectTurnBoundary.EndAfterDiscard, side);
 			}
+			await CardEditorQuestEffects.RunInstalledPassivesForTurnBoundary(combatState, CardExtraEffectTurnBoundary.EndAfterDiscard, boundarySide);
 			if (side == CombatSide.Player)
 			{
 				CardEditorTemporaryKeywordController.OnAfterPlayerTurnEnd(combatState);

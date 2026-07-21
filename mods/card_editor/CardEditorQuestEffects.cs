@@ -305,7 +305,10 @@ internal static class CardEditorQuestEffects
 
 		try
 		{
-			List<CardExtraEffect> rewardEffects = ResolveQuestRewardEffects(questCard, questEffect);
+			List<CardExtraEffect> rewardEffects = ResolveQuestRewardEffects(
+				questCard,
+				questEffect,
+				keepTriggers: questEffect.QuestRewardStyle != CardExtraEffectQuestRewardStyle.Instant);
 			CardEditorRunCardCounterState.Clear(combatState, questCard, BuildQuestCounterKey(questEffect), QuestCountersArePersistent);
 			int completionCount = CardEditorRunCardCounterState.Add(combatState, questCard, BuildQuestCompletionCounterKey(questEffect), 1, QuestCountersArePersistent);
 			bool finalCompletion = IsFinalQuestCompletion(questEffect, completionCount);
@@ -367,6 +370,19 @@ internal static class CardEditorQuestEffects
 			int amount = Math.Max(0, rewardEffect.Amount);
 			if (amount <= 0 && rewardEffect.Kind is not CardExtraEffectKind.LoseGold)
 			{
+				continue;
+			}
+
+			// Persisted reward rows keep their recurring trigger instead of firing once; combat-scope
+			// installs live for this combat only while run-scope installs are re-derived from the
+			// persistent completion counters, so only the current combat needs an explicit install.
+			if (questEffect.QuestRewardStyle != CardExtraEffectQuestRewardStyle.Instant
+				&& IsRecurringRewardTrigger(rewardEffect.Trigger))
+			{
+				if (combatState != null)
+				{
+					CardEditorQuestPassiveStore.InstallCombat(combatState, owner, questCard, questEffect, rewardEffect);
+				}
 				continue;
 			}
 
@@ -472,6 +488,135 @@ internal static class CardEditorQuestEffects
 		}
 	}
 
+	internal static async Task RunInstalledPassivesForCombatStart(CombatState combatState, PlayerChoiceContext? choiceContext)
+	{
+		_ = choiceContext;
+		if (combatState == null)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (CardEditorQuestPassiveStore.InstalledPassive install in CardEditorQuestPassiveStore.GetActiveInstalls(combatState))
+			{
+				if (install?.RewardRow?.Trigger != CardExtraEffectTrigger.DeckPassiveCombatStart)
+				{
+					continue;
+				}
+				if (!CardEditorQuestPassiveStore.TryMarkCombatStartFired(combatState, install))
+				{
+					continue;
+				}
+
+				await FireInstalledPassive(combatState, install);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Installed quest passive combat-start dispatch failed: {ex}");
+		}
+	}
+
+	internal static async Task RunInstalledPassivesForTurnBoundary(CombatState combatState, CardExtraEffectTurnBoundary edge, CardExtraEffectTurnBoundarySide side)
+	{
+		if (combatState == null)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (CardEditorQuestPassiveStore.InstalledPassive install in CardEditorQuestPassiveStore.GetActiveInstalls(combatState))
+			{
+				if (install?.RewardRow == null || !MatchesTurnBoundary(install.RewardRow, edge, side))
+				{
+					continue;
+				}
+
+				await FireInstalledPassive(combatState, install);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Installed quest passive turn-boundary dispatch failed: {ex}");
+		}
+	}
+
+	private static bool MatchesTurnBoundary(CardExtraEffect rewardRow, CardExtraEffectTurnBoundary edge, CardExtraEffectTurnBoundarySide side)
+	{
+		return rewardRow.Trigger switch
+		{
+			CardExtraEffectTrigger.TurnBoundary => rewardRow.TurnBoundary == edge
+				&& (rewardRow.TurnBoundarySide == CardExtraEffectTurnBoundarySide.Both || rewardRow.TurnBoundarySide == side),
+			CardExtraEffectTrigger.StartOfTurn =>
+				edge == CardExtraEffectTurnBoundary.Start && side == CardExtraEffectTurnBoundarySide.YourTurn,
+			CardExtraEffectTrigger.EndOfTurn or CardExtraEffectTrigger.EndOfTurnInHand =>
+				edge == CardExtraEffectTurnBoundary.End && side == CardExtraEffectTurnBoundarySide.YourTurn,
+			CardExtraEffectTrigger.StartOfEnemyTurn =>
+				edge == CardExtraEffectTurnBoundary.Start && side == CardExtraEffectTurnBoundarySide.EnemyTurn,
+			CardExtraEffectTrigger.EndOfEnemyTurn =>
+				edge == CardExtraEffectTurnBoundary.End && side == CardExtraEffectTurnBoundarySide.EnemyTurn,
+			_ => false
+		};
+	}
+
+	private static async Task FireInstalledPassive(CombatState combatState, CardEditorQuestPassiveStore.InstalledPassive install)
+	{
+		try
+		{
+			Player? owner = install.Owner ?? install.QuestCard?.Owner;
+			CardModel? questCard = install.QuestCard;
+			if (combatState == null || owner == null || questCard == null || install.QuestEffect == null || install.RewardRow == null)
+			{
+				return;
+			}
+
+			if (!CardEditorAutoPlayLoopGuard.TryEnterAutoPlayEffect(combatState, owner, questCard, install.QuestEffect, out IDisposable rewardScope))
+			{
+				return;
+			}
+
+			using (rewardScope)
+			{
+				if (CardEditorAutoPlayLoopGuard.ShouldSuppressEffect(questCard, install.RewardRow))
+				{
+					return;
+				}
+
+				CardPlay syntheticPlay = new CardPlay
+				{
+					Card = questCard,
+					Player = questCard.Owner ?? owner,
+					Target = null,
+					ResultPile = questCard.Pile?.Type ?? PileType.None,
+					Resources = new ResourceInfo
+					{
+						EnergySpent = 0,
+						EnergyValue = 0,
+						StarsSpent = 0,
+						StarValue = 0
+					},
+					IsAutoPlay = true,
+					PlayIndex = 0,
+					PlayCount = 1
+				};
+
+				// The installed row keeps its recurring trigger for matching; flatten a per-fire clone
+				// so ExecuteEffect treats it as an immediate effect.
+				CardExtraEffect fired = CardEditorExtraEffects.CloneEffect(install.RewardRow);
+				fired.Trigger = CardExtraEffectTrigger.OnPlay;
+				fired.Timing = CardExtraEffectTiming.Immediate;
+				fired.Turns = 0;
+				await CardEditorExtraEffects.ExecuteEffect(combatState, new BlockingPlayerChoiceContext(), syntheticPlay, fired);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Installed quest passive failed for {install?.QuestCard?.Id}: {ex}");
+		}
+	}
+
 	private static void AddPotionRewards(Player owner, CardExtraEffect effect, int amount, List<Reward> rewards)
 	{
 		if (amount <= 0)
@@ -540,7 +685,7 @@ internal static class CardEditorQuestEffects
 		rewards.Add(reward);
 	}
 
-	private static List<CardExtraEffect> ResolveQuestRewardEffects(CardModel questCard, CardExtraEffect questEffect)
+	internal static List<CardExtraEffect> ResolveQuestRewardEffects(CardModel questCard, CardExtraEffect questEffect, bool keepTriggers = false)
 	{
 		List<string> selectedIds = ParseEffectIds(questEffect.AutoActionEffectIds);
 		if (selectedIds.Count == 0)
@@ -561,13 +706,27 @@ internal static class CardEditorQuestEffects
 			CardExtraEffect clone = CardEditorExtraEffects.CloneEffect(row);
 			clone.PayloadOnly = false;
 			clone.AsPower = false;
-			clone.Trigger = CardExtraEffectTrigger.OnPlay;
-			clone.Timing = CardExtraEffectTiming.Immediate;
-			clone.Turns = 0;
+			if (!keepTriggers || !IsRecurringRewardTrigger(clone.Trigger))
+			{
+				clone.Trigger = CardExtraEffectTrigger.OnPlay;
+				clone.Timing = CardExtraEffectTiming.Immediate;
+				clone.Turns = 0;
+			}
 			result.Add(clone);
 		}
 
 		return result;
+	}
+
+	internal static bool IsRecurringRewardTrigger(CardExtraEffectTrigger trigger)
+	{
+		return trigger is CardExtraEffectTrigger.DeckPassiveCombatStart
+			or CardExtraEffectTrigger.TurnBoundary
+			or CardExtraEffectTrigger.StartOfTurn
+			or CardExtraEffectTrigger.EndOfTurn
+			or CardExtraEffectTrigger.StartOfEnemyTurn
+			or CardExtraEffectTrigger.EndOfEnemyTurn
+			or CardExtraEffectTrigger.EndOfTurnInHand;
 	}
 
 	private static List<string> ParseEffectIds(string? text)
@@ -753,7 +912,7 @@ internal static class CardEditorQuestEffects
 		return false;
 	}
 
-	private static string BuildQuestCompletionCounterKey(CardExtraEffect effect)
+	internal static string BuildQuestCompletionCounterKey(CardExtraEffect effect)
 	{
 		return $"{BuildQuestCounterKey(effect)}:completed";
 	}

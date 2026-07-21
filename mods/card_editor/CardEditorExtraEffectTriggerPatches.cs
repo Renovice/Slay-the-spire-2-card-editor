@@ -223,6 +223,8 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 					}
 				}
 			}
+
+			await CardEditorQuestEffects.RunInstalledPassivesForCombatStart(combatState, null);
 		}
 		catch (Exception ex)
 		{
@@ -271,6 +273,8 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 		{
 			DeferredChoiceCardsByCombat.Remove(combatState);
 		}
+
+		await CardEditorQuestEffects.RunInstalledPassivesForCombatStart(combatState, choiceContext);
 	}
 
 	private sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class

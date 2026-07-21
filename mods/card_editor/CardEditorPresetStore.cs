@@ -1606,6 +1606,7 @@ internal static class CardEditorPresetStore
 		public string? QuestEventId { get; set; }
 		public string? QuestActiveScope { get; set; }
 		public int QuestCompletionLimit { get; set; } = 1;
+		public string? QuestRewardStyle { get; set; }
 		public string? ConsumedCardAction { get; set; }
 		public string? ConsumedCardValueSource { get; set; }
 		public string? PotionMode { get; set; }
@@ -1963,6 +1964,7 @@ internal static class CardEditorPresetStore
 				QuestEventId = effect.QuestEventId,
 				QuestActiveScope = effect.QuestActiveScope.ToString(),
 				QuestCompletionLimit = Math.Clamp(effect.QuestCompletionLimit, 0, 999),
+				QuestRewardStyle = effect.QuestRewardStyle.ToString(),
 				ConsumedCardAction = effect.ConsumedCardAction.ToString(),
 				ConsumedCardValueSource = effect.ConsumedCardValueSource.ToString(),
 				PotionMode = effect.PotionMode.ToString(),
@@ -2426,6 +2428,12 @@ internal static class CardEditorPresetStore
 				effect.QuestActiveScope = parsedQuestActiveScope;
 			}
 			effect.QuestCompletionLimit = Math.Clamp(QuestCompletionLimit, 0, 999);
+			effect.QuestRewardStyle = CardExtraEffectQuestRewardStyle.Instant;
+			if (!string.IsNullOrWhiteSpace(QuestRewardStyle)
+				&& Enum.TryParse(QuestRewardStyle, out CardExtraEffectQuestRewardStyle parsedQuestRewardStyle))
+			{
+				effect.QuestRewardStyle = parsedQuestRewardStyle;
+			}
 			effect.ConsumedCardAction = CardExtraEffectConsumedCardAction.Exhaust;
 			if (!string.IsNullOrWhiteSpace(ConsumedCardAction)
 				&& Enum.TryParse(ConsumedCardAction, out CardExtraEffectConsumedCardAction parsedConsumedCardAction))

@@ -237,6 +237,13 @@ public enum CardExtraEffectQuestMode
 	SpoilsMap = 3
 }
 
+public enum CardExtraEffectQuestRewardStyle
+{
+	Instant = 0,
+	KeepTriggerCombat = 1,
+	KeepTriggerRun = 2
+}
+
 public enum CardExtraEffectSelfScalingOperation
 {
 	Increase = 0,
@@ -1469,6 +1476,7 @@ public sealed class CardExtraEffect
 	public string? QuestEventId { get; set; }
 	public CardExtraEffectQuestActiveScope QuestActiveScope { get; set; } = CardExtraEffectQuestActiveScope.RunDeck;
 	public int QuestCompletionLimit { get; set; } = 1;
+	public CardExtraEffectQuestRewardStyle QuestRewardStyle { get; set; } = CardExtraEffectQuestRewardStyle.Instant;
 	public CardExtraEffectChooseOneExecutionMode ChooseOneExecutionMode { get; set; } = CardExtraEffectChooseOneExecutionMode.BorrowEffectsOnly;
 	public CardExtraEffectChooseOneResolveMode ChooseOneResolveMode { get; set; } = CardExtraEffectChooseOneResolveMode.PlayerChoice;
 	public CardExtraEffectChooseOneChoiceRule ChooseOneChoiceRule { get; set; } = CardExtraEffectChooseOneChoiceRule.Exactly;
@@ -4699,6 +4707,17 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			_ => "Run Progress"
 		};
 		return CardEditorLoc.Enum("questMode", mode, fallback);
+	}
+
+	public static string QuestRewardStyleLabel(CardExtraEffectQuestRewardStyle style)
+	{
+		string fallback = style switch
+		{
+			CardExtraEffectQuestRewardStyle.KeepTriggerCombat => "Keep trigger — this combat",
+			CardExtraEffectQuestRewardStyle.KeepTriggerRun => "Keep trigger — rest of run",
+			_ => "Instant (default)"
+		};
+		return CardEditorLoc.Enum("questRewardStyle", style, fallback);
 	}
 
 	public static string QuestActiveScopeLabel(CardExtraEffectQuestActiveScope scope)
@@ -15979,6 +15998,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		string rewardSuffix = string.IsNullOrWhiteSpace(reward)
 			? string.Empty
 			: $" Reward: {reward}.";
+		rewardSuffix += FormatQuestRewardStyleSuffix(effect);
 		string lifetimeSuffix = FormatQuestLifetimeSuffix(effect);
 		string actText = FormatQuestActName(effect.QuestActIndex);
 
@@ -15992,6 +16012,18 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				$"Quest: Replace {actText} with a treasure quest map.{rewardSuffix}{lifetimeSuffix}",
 			_ =>
 				$"Quest: {FormatQuestRunProgressObjective(card, effect)}.{rewardSuffix}{lifetimeSuffix}"
+		};
+	}
+
+	private static string FormatQuestRewardStyleSuffix(CardExtraEffect effect)
+	{
+		return effect?.QuestRewardStyle switch
+		{
+			CardExtraEffectQuestRewardStyle.KeepTriggerCombat =>
+				CardEditorLoc.T("cardText.quest.rewardStyle.combat", " Triggered rewards persist this combat."),
+			CardExtraEffectQuestRewardStyle.KeepTriggerRun =>
+				CardEditorLoc.T("cardText.quest.rewardStyle.run", " Triggered rewards persist for the rest of the run."),
+			_ => string.Empty
 		};
 	}
 

@@ -4821,6 +4821,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		public OptionButton QuestEventSelect { get; init; } = null!;
 		public OptionButton QuestScopeSelect { get; init; } = null!;
 		public LineEdit QuestCompletionLimitField { get; init; } = null!;
+		public OptionButton QuestRewardStyleSelect { get; init; } = null!;
 
 		public Control RepeatRow { get; init; } = null!;
 		public Label RepeatLabel { get; init; } = null!;
@@ -7338,6 +7339,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		return Enum.IsDefined(typeof(CardExtraEffectQuestMode), selectedId)
 			? (CardExtraEffectQuestMode)selectedId
 			: CardExtraEffectQuestMode.RunProgress;
+	}
+
+	private static CardExtraEffectQuestRewardStyle GetSelectedQuestRewardStyle(ExtraEffectRow row)
+	{
+		int selectedId = GetSelectedItemId(row?.QuestRewardStyleSelect, (int)CardExtraEffectQuestRewardStyle.Instant);
+		return Enum.IsDefined(typeof(CardExtraEffectQuestRewardStyle), selectedId)
+			? (CardExtraEffectQuestRewardStyle)selectedId
+			: CardExtraEffectQuestRewardStyle.Instant;
 	}
 
 	private static int GetSelectedQuestActIndex(ExtraEffectRow row)
@@ -20619,12 +20628,28 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		Control questCompletionLimitSpin = CreateSpinButtons(questCompletionLimitField, step: 1m, minValue: 0m, maxValue: 999m, isInteger: true);
 		Control questCompletionLimitControl = CreateEffectCompactValueSpinPair(questCompletionLimitField, questCompletionLimitSpin);
 
+		OptionButton questRewardStyleSelect = new OptionButton
+		{
+			CustomMinimumSize = new Vector2(_effectFormColumnWidths[1], _fieldMinSize.Y),
+			SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin
+		};
+		StyleInput(questRewardStyleSelect);
+		ConstrainOptionButtonPopup(questRewardStyleSelect);
+		questRewardStyleSelect.TooltipText = CardEditorLoc.T("tooltip.questRewardStyle", "How absorbed reward rows with recurring triggers behave after the quest completes: fire once instantly, or keep triggering for this combat or the rest of the run.");
+		foreach (CardExtraEffectQuestRewardStyle style in Enum.GetValues<CardExtraEffectQuestRewardStyle>())
+		{
+			questRewardStyleSelect.AddItem(CardEditorExtraEffects.QuestRewardStyleLabel(style), (int)style);
+		}
+		SelectOptionButtonById(questRewardStyleSelect, (int)(effect?.QuestRewardStyle ?? CardExtraEffectQuestRewardStyle.Instant));
+		questRewardStyleSelect.ItemSelected += _ => QueuePreviewUpdate();
+
 		HBoxContainer questRow = CreateEffectFormRow(
 			CardEditorLoc.T("row.quest", "Quest"),
 			questModeSelect,
 			CreateEffectInlineValuePair(CardEditorLoc.T("label.act", "Act"), questActSelect, _effectFormColumnWidths[1]),
 			questEventSelect,
 			questScopeSelect,
+			questRewardStyleSelect,
 			CreateEffectInlineValuePair(CardEditorLoc.T("label.uses", "Uses"), questCompletionLimitControl, 58f));
 		SetEffectFormRowLabelTooltip(questRow, questModeSelect.TooltipText);
 		questRow.Visible = false;
@@ -20869,6 +20894,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			QuestEventSelect = questEventSelect,
 			QuestScopeSelect = questScopeSelect,
 			QuestCompletionLimitField = questCompletionLimitField,
+			QuestRewardStyleSelect = questRewardStyleSelect,
 			GrantRow = grantRow,
 			GrantPileSelect = grantPileSelect,
 			GrantModeSelect = grantModeSelect,
@@ -25978,6 +26004,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		DisableOptionButton(row.QuestEventSelect);
 		DisableOptionButton(row.QuestScopeSelect);
 		DisableLineEdit(row.QuestCompletionLimitField);
+		DisableOptionButton(row.QuestRewardStyleSelect);
 
 		DisableOptionButton(row.UpgradeVariantSelect);
 		DisableOptionButton(row.UpgradePileSelect);
@@ -34234,6 +34261,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					QuestCompletionLimit = resolvedKind == CardExtraEffectKind.Quest
 						? GetSelectedQuestCompletionLimit(row)
 						: 1,
+					QuestRewardStyle = resolvedKind == CardExtraEffectKind.Quest
+						? GetSelectedQuestRewardStyle(row)
+						: CardExtraEffectQuestRewardStyle.Instant,
 					ChooseOneExecutionMode = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
 						? GetSelectedChooseOneExecutionMode(row)
 						: CardExtraEffectChooseOneExecutionMode.BorrowEffectsOnly,
@@ -35736,6 +35766,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					QuestCompletionLimit = resolvedKind == CardExtraEffectKind.Quest
 						? GetSelectedQuestCompletionLimit(row)
 						: 1,
+					QuestRewardStyle = resolvedKind == CardExtraEffectKind.Quest
+						? GetSelectedQuestRewardStyle(row)
+						: CardExtraEffectQuestRewardStyle.Instant,
 					ChooseOneExecutionMode = resolvedKind == CardExtraEffectKind.ChooseOneEffectSource
 						? GetSelectedChooseOneExecutionMode(row)
 						: CardExtraEffectChooseOneExecutionMode.BorrowEffectsOnly,

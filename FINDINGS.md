@@ -1,4 +1,16 @@
-﻿## 2026-07-20 - Cards freeze on beta: retargeted mod back to v0.109 beta APIs
+﻿## 2026-07-20 - Quest Reward Persistence: absorbed rows keep their triggers
+
+User: quest rewards flatten the absorbed row ("start of combat: gain 7 block" fired once on completion). Root cause: ResolveQuestRewardEffects:564 hard-set Trigger=OnPlay/Timing=Immediate on every absorbed clone.
+Built (agent af275ea9, verified build):
+- QuestRewardStyle on quest rows: Instant (old) | Keep trigger - this combat | Keep trigger - rest of run. New enum + CardExtraEffect field + DTO (string, default-safe) + both save builders + hydration; SyncProtocolVersion 2 -> 3.
+- Recurring triggers supported: Deck Passive Combat Start, Turn Boundary (all 4 edges x your/enemy incl. legacy Start/EndOfTurn variants).
+- ZERO new run storage: run-scoped installs are DERIVED - deck-resident quest cards via the persistent completion counter; removed quest cards (final completion removes them!) via the game's own save-persistent map history (PlayerMapPointHistoryEntry.CompletedQuests + CardsRemoved snapshots rebuilt with CardModel.FromSerializable). Combat scope: ConditionalWeakTable per CombatState.
+- Dispatch at 8 sites: combat-start deck-passive loops (x2, idempotent) + six turn-boundary wrappers; fires via the quest synthetic-play pattern with loop guard, per-fire flattened clone, try/catch so a bad passive never crashes combat.
+- Quest card text appends "Triggered rewards persist this combat / for the rest of the run."
+Known edges (logged, acceptable): completing a KeepTriggerCombat quest OUT of combat installs nothing that fight; a removed card with multiple KeepTriggerRun quest effects derives all of them (history stores card id only); upgrade-fusion equality ignores the new field.
+Build: 0 errors / 278 warnings (beta baseline). NOT deployed.
+Next Step: deploy on request; in-game test = quest "exhaust 10 cards" + reward row "Combat Start: Gain 7 Block" style=rest-of-run -> complete it, verify block at start of every later combat and after save/reload.
+## 2026-07-20 - Cards freeze on beta: retargeted mod back to v0.109 beta APIs
 
 User on public beta v0.109.0 (2026.07.17); cards froze mid-play.
 Hypothesis: the deployed DLL targets the 2026-07-18 PUBLIC build's APIs, but the game is now the v0.109 beta with the older signatures.

@@ -35,7 +35,10 @@ internal sealed class CardEditorMultiplayerStateDto
 	// v2: Card Engine P2 (selection bus) - DrawCards consumes SelectedByEffect chains, Fetch
 	// publishes selections, generators offered as chain sources. An older DLL parses these rows
 	// cleanly but executes them with old semantics, so mixed builds must refuse to sync.
-	public const int SyncProtocolVersion = 2;
+	// v3: Quest reward persistence - QuestRewardStyle keeps recurring reward triggers installed
+	// per combat/run instead of flattening them to a one-shot at completion. Old DLLs drop the
+	// field and fire rewards once, so mixed builds must refuse to sync.
+	public const int SyncProtocolVersion = 3;
 
 	public int Version { get; set; } = SyncProtocolVersion;
 	public string? ModVersion { get; set; }
