@@ -164,19 +164,29 @@ internal static class CardEditorRunSelfScalingState
 			? string.Empty
 			: JsonSerializer.Serialize(SelfScalingDiffDto.FromDiff(combined));
 		SetAppliedMarker(card, BuildSavedCardMarker(card.CardEditorSelfScalingDiff));
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	private static bool TryRestoreCreatedCard(CardModel card, CardEditorCreatedCardBase createdCard, bool cardAlreadyRebased)
 	{
-		if (!TryReadCreatedCardDiff(createdCard, out CardEditorExtraEffects.SelfScalingMutationDiff diff, out string payload) || diff.IsEmpty)
+		string payload = createdCard.CardEditorSelfScalingDiff ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(payload))
 		{
 			return false;
 		}
 
+		// Marker fast path BEFORE the JSON parse: the marker is derived solely from the raw
+		// payload string, so a current marker means this exact payload is already applied
+		// and the (expensive) deserialize can be skipped entirely.
 		string marker = BuildSavedCardMarker(payload);
 		if (IsAppliedMarkerCurrent(card, marker))
 		{
 			return true;
+		}
+
+		if (!TryReadCreatedCardDiff(createdCard, out CardEditorExtraEffects.SelfScalingMutationDiff diff, out _) || diff.IsEmpty)
+		{
+			return false;
 		}
 
 		try
@@ -202,15 +212,22 @@ internal static class CardEditorRunSelfScalingState
 
 	private static bool TryRestoreSerializedCard(CardModel card, bool cardAlreadyRebased)
 	{
-		if (!TryReadStoredCardDiff(card, out CardEditorExtraEffects.SelfScalingMutationDiff diff, out string payload) || diff.IsEmpty)
+		string payload = GetSerializedMutationPayload(card);
+		if (string.IsNullOrWhiteSpace(payload))
 		{
 			return false;
 		}
 
+		// Marker fast path BEFORE the JSON parse (see TryRestoreCreatedCard).
 		string marker = BuildSavedCardMarker(payload);
 		if (IsAppliedMarkerCurrent(card, marker))
 		{
 			return true;
+		}
+
+		if (!TryReadStoredCardDiff(card, out CardEditorExtraEffects.SelfScalingMutationDiff diff, out _) || diff.IsEmpty)
+		{
+			return false;
 		}
 
 		try
@@ -302,6 +319,25 @@ internal static class CardEditorRunSelfScalingState
 	private static string BuildSavedCardMarker(string payload)
 		=> "card-prop:" + (payload ?? string.Empty);
 
+	// Cheap payload probe for the runtime-cache gate: true when this card carries a
+	// serialized self-scaling payload (created cards store theirs on the card itself and
+	// are already covered by the created-card branch of the gate).
+	internal static bool HasStoredSelfScalingPayload(CardModel? card)
+	{
+		if (card == null)
+		{
+			return false;
+		}
+
+		if (card is CardEditorCreatedCardBase createdCard)
+		{
+			return !string.IsNullOrWhiteSpace(createdCard.CardEditorSelfScalingDiff);
+		}
+
+		return _serializedMutationPayloads.TryGetValue(card, out SerializedMutationPayload? payload)
+			&& !string.IsNullOrWhiteSpace(payload.Value);
+	}
+
 	private static string GetSerializedMutationPayload(CardModel card)
 	{
 		return card != null && _serializedMutationPayloads.TryGetValue(card, out SerializedMutationPayload? payload)
@@ -318,10 +354,12 @@ internal static class CardEditorRunSelfScalingState
 		if (string.IsNullOrWhiteSpace(payload))
 		{
 			_serializedMutationPayloads.Remove(card);
+			CardEditorRuntimeCacheVersion.Bump();
 			return;
 		}
 
 		_serializedMutationPayloads.GetOrCreateValue(card).Value = payload;
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	private static bool TryReadSerializedMutationPayload(SerializableCard save, out string payload)
@@ -768,12 +806,14 @@ internal static class CardEditorRunSelfScalingState
 		return ProjectSettings.GlobalizePath(StorePath);
 	}
 
+	private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		WriteIndented = true
+	};
+
 	private static JsonSerializerOptions CreateJsonOptions()
 	{
-		return new JsonSerializerOptions
-		{
-			WriteIndented = true
-		};
+		return _jsonOptions;
 	}
 
 	private sealed class FileDto

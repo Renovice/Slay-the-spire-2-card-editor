@@ -18,30 +18,48 @@ internal static class CardEditorVanillaDescriptionOverrideSupport
 			return;
 		}
 
-		SealedThroneDescriptionFix.TryFix(card, ref description);
-		KinglyKickDescriptionFix.TryFix(card, ref description);
-		ResonanceEnemyStrengthLossDescriptionFix.TryFix(card, ref description);
-		HardcodedPowerAmountDescriptionFix.TryFix(card, ref description);
-		RetainHandDurationDescriptionFix.TryFix(card, ref description);
-		NoDrawDurationDescriptionFix.TryFix(card, ref description);
-		ConquerorDurationDescriptionFix.TryFix(card, ref description);
-		ReflectDurationDescriptionFix.TryFix(card, ref description);
-		ColossusDurationDescriptionFix.TryFix(card, ref description);
-		BlurDurationDescriptionFix.TryFix(card, ref description);
-		HandTrickSlyDurationDescriptionFix.TryFix(card, ref description);
-		TemporaryStatDurationDescriptionFix.TryFix(card, ref description);
-		TargetTypeOverrideDescriptionFix.TryFix(card, ref description);
-
-		bool modifiedBaseTextApplied = false;
-		if (!SuppressModifiedBaseTextOverride)
+		// Front gate: every skipped pass below requires a draft/stored/instance override,
+		// a created-card/transform surface, or granted effects to change anything, so for
+		// untouched vanilla cards they are provably no-ops. Only the three fixes that can
+		// also key off the card's own DynamicVars run outside the gate (cheap early-outs:
+		// a ModelId compare + string.Contains). FormatDescription and the preview-marker
+		// resolve still run for every card because custom keywords can highlight vanilla
+		// text.
+		if (CardEditorRuntimeCaches.HasAnyModSurface(card, card.GetConcreteCombatState()))
 		{
-			modifiedBaseTextApplied = TryApplyModifiedBaseText(card, ref description, target, isUpgradePreview);
+			SealedThroneDescriptionFix.TryFix(card, ref description);
+			KinglyKickDescriptionFix.TryFix(card, ref description);
+			ResonanceEnemyStrengthLossDescriptionFix.TryFix(card, ref description);
+			HardcodedPowerAmountDescriptionFix.TryFix(card, ref description);
+			RetainHandDurationDescriptionFix.TryFix(card, ref description);
+			NoDrawDurationDescriptionFix.TryFix(card, ref description);
+			ConquerorDurationDescriptionFix.TryFix(card, ref description);
+			ReflectDurationDescriptionFix.TryFix(card, ref description);
+			ColossusDurationDescriptionFix.TryFix(card, ref description);
+			BlurDurationDescriptionFix.TryFix(card, ref description);
+			HandTrickSlyDurationDescriptionFix.TryFix(card, ref description);
+			TemporaryStatDurationDescriptionFix.TryFix(card, ref description);
+			TargetTypeOverrideDescriptionFix.TryFix(card, ref description);
+
+			bool modifiedBaseTextApplied = false;
+			if (!SuppressModifiedBaseTextOverride)
+			{
+				modifiedBaseTextApplied = TryApplyModifiedBaseText(card, ref description, target, isUpgradePreview);
+			}
+
+			if (!SuppressExtraEffectDescriptionAppend
+				&& !ShouldTreatModifiedBaseTextAsFullDescription(card, description, target, isUpgradePreview, modifiedBaseTextApplied))
+			{
+				CardEditorExtraEffects.TryAppendDescription(card, ref description, target, isUpgradePreview);
+			}
 		}
-
-		if (!SuppressExtraEffectDescriptionAppend
-			&& !ShouldTreatModifiedBaseTextAsFullDescription(card, description, target, isUpgradePreview, modifiedBaseTextApplied))
+		else
 		{
-			CardEditorExtraEffects.TryAppendDescription(card, ref description, target, isUpgradePreview);
+			// These can rewrite text from the card's own DynamicVars even without any
+			// override (vanilla-upgraded Equilibrium/Colossus/Blur turn counts).
+			RetainHandDurationDescriptionFix.TryFix(card, ref description);
+			ColossusDurationDescriptionFix.TryFix(card, ref description);
+			BlurDurationDescriptionFix.TryFix(card, ref description);
 		}
 
 		description = CardEditorVanillaKeywordSupport.FormatDescription(description);

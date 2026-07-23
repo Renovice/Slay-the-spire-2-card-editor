@@ -384,6 +384,8 @@ public static class CardEditorOverrides
 			_instanceOverrides.Add(card, CloneOverride(overrideData));
 			CardEditorOverrideOnPlayPatcher.EnsureForCardType(card.GetType());
 		}
+
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	internal static CardOverride Clone(CardOverride source)
@@ -398,11 +400,13 @@ public static class CardEditorOverrides
 			if (_overrides.Remove(id))
 			{
 				Revision++;
+				CardEditorRuntimeCacheVersion.Bump();
 			}
 			return;
 		}
 		_overrides[id] = overrideData;
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		// Overridden vanilla cards get an OnPlay postfix so their rows run with the play.
 		CardEditorOverrideOnPlayPatcher.EnsureForCardId(id);
 	}
@@ -412,6 +416,7 @@ public static class CardEditorOverrides
 		if (_overrides.Remove(id))
 		{
 			Revision++;
+			CardEditorRuntimeCacheVersion.Bump();
 		}
 	}
 
@@ -421,6 +426,7 @@ public static class CardEditorOverrides
 		{
 			_overrides.Clear();
 			Revision++;
+			CardEditorRuntimeCacheVersion.Bump();
 		}
 	}
 
@@ -456,6 +462,7 @@ public static class CardEditorOverrides
 		TryMergeCreatedCardOverrides();
 
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 
 		// Preset loads / multiplayer sync can introduce overrides for card types not patched yet.
 		CardEditorOverrideOnPlayPatcher.EnsureForAllStoredOverrides();

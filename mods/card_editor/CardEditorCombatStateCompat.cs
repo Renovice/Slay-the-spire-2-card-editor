@@ -11,14 +11,19 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorCombatStateCompat
 {
-	private static readonly ConcurrentDictionary<Type, PropertyInfo?> CombatStatePropertyCache = new();
-	private static readonly ConcurrentDictionary<Type, MethodInfo?> IterateHookListenersCache = new();
+	// Compiled getters/invokers replace per-call PropertyInfo.GetValue / MethodInfo.Invoke
+	// reflection on these hot paths. Built once per type; a reflection closure is used as
+	// fallback if expression compilation is unavailable. Same values, same exceptions
+	// swallowed by the existing try/catch wrappers.
+	private static readonly ConcurrentDictionary<Type, Func<object, CombatState?>?> CombatStateGetterCache = new();
+	private static readonly ConcurrentDictionary<Type, Func<object, object?, object?>?> IterateHookListenersCache = new();
 	private static readonly Lazy<ConstructorInfo?> HookChoiceSourceCtor = new(FindHookChoiceSourceCtor);
 	private static readonly Lazy<ConstructorInfo?> HookChoicePlayerCtor = new(FindHookChoicePlayerCtor);
 
@@ -110,13 +115,13 @@ internal static class CardEditorCombatStateCompat
 			return Array.Empty<AbstractModel>();
 		}
 
-		MethodInfo? method = IterateHookListenersCache.GetOrAdd(runState.GetType(), FindIterateHookListeners);
-		if (method == null)
+		Func<object, object?, object?>? invoker = IterateHookListenersCache.GetOrAdd(runState.GetType(), BuildIterateHookListenersInvoker);
+		if (invoker == null)
 		{
 			return Array.Empty<AbstractModel>();
 		}
 
-		object? result = method.Invoke(runState, new object?[] { combatState });
+		object? result = invoker(runState, combatState);
 		if (result is IEnumerable<AbstractModel> typed)
 		{
 			return typed.ToList();
@@ -127,6 +132,33 @@ internal static class CardEditorCombatStateCompat
 		}
 
 		return Array.Empty<AbstractModel>();
+	}
+
+	private static Func<object, object?, object?>? BuildIterateHookListenersInvoker(Type runStateType)
+	{
+		MethodInfo? method = FindIterateHookListeners(runStateType);
+		if (method == null)
+		{
+			return null;
+		}
+
+		try
+		{
+			ParameterExpression instance = Expression.Parameter(typeof(object), "instance");
+			ParameterExpression arg = Expression.Parameter(typeof(object), "combatState");
+			Type declaringType = method.DeclaringType ?? runStateType;
+			Type parameterType = method.GetParameters()[0].ParameterType;
+			Expression call = Expression.Call(
+				Expression.Convert(instance, declaringType),
+				method,
+				Expression.Convert(arg, parameterType));
+			Expression body = Expression.Convert(call, typeof(object));
+			return Expression.Lambda<Func<object, object?, object?>>(body, instance, arg).Compile();
+		}
+		catch
+		{
+			return (instance, arg) => method.Invoke(instance, new object?[] { arg });
+		}
 	}
 
 	internal static bool IsMutableSafe(this AbstractModel? model)
@@ -235,14 +267,36 @@ internal static class CardEditorCombatStateCompat
 	{
 		try
 		{
-			PropertyInfo? property = CombatStatePropertyCache.GetOrAdd(
+			Func<object, CombatState?>? getter = CombatStateGetterCache.GetOrAdd(
 				source.GetType(),
-				static type => type.GetProperty("CombatState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
-			return property?.GetValue(source) as CombatState;
+				static type => BuildCombatStateGetter(type));
+			return getter?.Invoke(source);
 		}
 		catch
 		{
 			return null;
+		}
+	}
+
+	private static Func<object, CombatState?>? BuildCombatStateGetter(Type type)
+	{
+		PropertyInfo? property = type.GetProperty("CombatState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+		if (property == null || property.GetGetMethod(true) == null || property.GetIndexParameters().Length != 0)
+		{
+			return null;
+		}
+
+		try
+		{
+			ParameterExpression source = Expression.Parameter(typeof(object), "source");
+			Expression body = Expression.TypeAs(
+				Expression.Property(Expression.Convert(source, type), property),
+				typeof(CombatState));
+			return Expression.Lambda<Func<object, CombatState?>>(body, source).Compile();
+		}
+		catch
+		{
+			return source => property.GetValue(source) as CombatState;
 		}
 	}
 

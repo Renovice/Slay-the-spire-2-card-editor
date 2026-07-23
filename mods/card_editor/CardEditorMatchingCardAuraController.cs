@@ -67,6 +67,7 @@ internal static class CardEditorMatchingCardAuraController
 		}
 
 		_schedules.Remove(combatState);
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	public static bool HasAny(CombatState combatState)
@@ -131,6 +132,8 @@ internal static class CardEditorMatchingCardAuraController
 		{
 			_schedules.Remove(combatState);
 		}
+
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	public static void OnAfterCardPlayed(CombatState combatState, CardModel card)
@@ -162,6 +165,8 @@ internal static class CardEditorMatchingCardAuraController
 				grant.AppliedCards.Remove(card);
 			}
 		}
+
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	public static void ApplyExtraEffectAura(CombatState combatState, Player owner, CardExtraEffect effect, CardModel? sourceCard, IReadOnlyList<CardModel>? currentCards)
@@ -319,10 +324,12 @@ internal static class CardEditorMatchingCardAuraController
 			{
 				existing.RemainingTurns = Math.Max(existing.RemainingTurns, grant.RemainingTurns);
 			}
+			CardEditorRuntimeCacheVersion.Bump();
 			return;
 		}
 
 		state.Grants.Add(grant);
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	private static void ApplyToCurrentCards(CombatState combatState, Player owner, AuraGrant grant, IReadOnlyList<CardModel>? currentCards)
@@ -390,6 +397,7 @@ internal static class CardEditorMatchingCardAuraController
 		}
 
 		grant.AppliedCards.Add(card);
+		CardEditorRuntimeCacheVersion.Bump();
 		RefreshCardVisuals(card);
 	}
 

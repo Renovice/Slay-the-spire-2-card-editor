@@ -160,6 +160,7 @@ internal static class CardEditorDefinitionStore
 		}
 
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -214,6 +215,7 @@ internal static class CardEditorDefinitionStore
 		}
 
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -241,6 +243,7 @@ internal static class CardEditorDefinitionStore
 			Effects = CloneEffects(effects)
 		};
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 		return id;
 	}
@@ -284,6 +287,7 @@ internal static class CardEditorDefinitionStore
 			CustomBigIconPath = NormalizeOptional(customBigIconPath)
 		};
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 		return id;
 	}
@@ -297,6 +301,7 @@ internal static class CardEditorDefinitionStore
 		}
 
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 		return true;
 	}
@@ -310,6 +315,7 @@ internal static class CardEditorDefinitionStore
 		}
 
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 		return true;
 	}

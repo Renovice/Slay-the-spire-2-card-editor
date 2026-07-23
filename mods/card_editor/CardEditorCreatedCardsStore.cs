@@ -176,11 +176,15 @@ internal static class CardEditorCreatedCardsStore
 		draft.CustomRewardPoolIds = NormalizeRewardPoolIds(customRewardPoolIds);
 		draft.RewardPoolBucket = rewardPoolBucket;
 		draft.RewardPoolInjectionMode = rewardPoolInjectionMode;
+		// Drafts are part of the effective runtime effect list (effect-source borrows resolve
+		// draft-first) - live editor edits must invalidate the runtime caches like stores do.
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	public static void ClearDraftMeta(ModelId cardId)
 	{
 		_draftDefinitions.Remove(cardId);
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	public static bool IsCreatedCardId(ModelId id)
@@ -540,6 +544,7 @@ internal static class CardEditorCreatedCardsStore
 		}
 		def.Enabled = enabled;
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -580,6 +585,7 @@ internal static class CardEditorCreatedCardsStore
 		def.RewardPoolBucket = rewardPoolBucket;
 		def.RewardPoolInjectionMode = rewardPoolInjectionMode;
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -748,6 +754,7 @@ internal static class CardEditorCreatedCardsStore
 		def.CustomTextUpgradedEnabled = enabled;
 		def.CustomTextUpgraded = customTextUpgraded == null ? null : (string.IsNullOrWhiteSpace(customTextUpgraded) ? string.Empty : customTextUpgraded);
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -777,6 +784,7 @@ internal static class CardEditorCreatedCardsStore
 		def.CustomUpgradePreviewTextEnabled = enabled;
 		def.CustomUpgradePreviewText = text == null ? null : (string.IsNullOrWhiteSpace(text) ? string.Empty : text);
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -791,6 +799,7 @@ internal static class CardEditorCreatedCardsStore
 		def.Override = overrideData ?? new CardOverride();
 		CardEditorOverrides.Set(cardId, def.Override);
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 
 		// The canonical instance's vanilla-parity DynamicVars (Damage/Block mirrors for Thrash-style
@@ -936,6 +945,7 @@ internal static class CardEditorCreatedCardsStore
 
 		EnsureDefaultDefinitions();
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -952,6 +962,7 @@ internal static class CardEditorCreatedCardsStore
 		_draftDefinitions.Clear();
 		EnsureDefaultDefinitions();
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 
@@ -1039,6 +1050,7 @@ internal static class CardEditorCreatedCardsStore
 		EnsureLoaded();
 		ConfiguredSlotCount = Math.Clamp(desiredSlotCount, 1, MaxSlotCount);
 		Revision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		Save();
 	}
 

@@ -687,6 +687,9 @@ internal static class Hook_AfterCardDrawn_CardEditorExtraEffects_Patch
 				foreach (Player player in combatState.Players)
 				{
 					if (player == null) continue;
+					// No candidate cards -> the sweeps could not do anything; skip the
+					// two HookPlayerChoiceContext allocations and pile sweeps entirely.
+					if (!CardEditorExtraEffects.HasAnySelfPileAutoCandidates(combatState, player)) continue;
 					HookPlayerChoiceContext playCtx = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
 					Task playTask = CardEditorExtraEffects.RunAutoPlaySelfFromPile(combatState, playCtx, player, CardExtraEffectTrigger.OnDraw);
 					bool playDone = await playCtx.AssignTaskAndWaitForPauseOrCompletion(playTask);
@@ -736,6 +739,9 @@ internal static class Hook_AfterCardDiscarded_CardEditorExtraEffects_Patch
 				foreach (Player player in combatState.Players)
 				{
 					if (player == null) continue;
+					// No candidate cards -> the sweeps could not do anything; skip the
+					// two HookPlayerChoiceContext allocations and pile sweeps entirely.
+					if (!CardEditorExtraEffects.HasAnySelfPileAutoCandidates(combatState, player)) continue;
 					HookPlayerChoiceContext playCtx = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
 					Task playTask = CardEditorExtraEffects.RunAutoPlaySelfFromPile(combatState, playCtx, player, CardExtraEffectTrigger.OnDiscard);
 					bool playDone = await playCtx.AssignTaskAndWaitForPauseOrCompletion(playTask);
@@ -785,6 +791,9 @@ internal static class Hook_AfterCardExhausted_CardEditorExtraEffects_Patch
 				foreach (Player player in combatState.Players)
 				{
 					if (player == null) continue;
+					// No candidate cards -> the sweeps could not do anything; skip the
+					// two HookPlayerChoiceContext allocations and pile sweeps entirely.
+					if (!CardEditorExtraEffects.HasAnySelfPileAutoCandidates(combatState, player)) continue;
 					HookPlayerChoiceContext playCtx = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
 					Task playTask = CardEditorExtraEffects.RunAutoPlaySelfFromPile(combatState, playCtx, player, CardExtraEffectTrigger.OnExhaust);
 					bool playDone = await playCtx.AssignTaskAndWaitForPauseOrCompletion(playTask);

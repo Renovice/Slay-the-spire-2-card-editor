@@ -159,11 +159,14 @@ public static class CardEditorMod
 				typeof(AttackCommand_Execute_ApplyIgnoreDamageProps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
 				label: "AttackCommand.Execute");
 
+			// These two prefixes open ThreadStatic flag scopes that ONLY their Finalizers close -
+			// registering the prefix alone would leak the scope permanently.
 			EnsurePatched(
 				harmony,
 				AccessTools.Method(typeof(Hook), "ModifyDamageInternal"),
 				typeof(Hook_ModifyDamageInternal_IgnoreCaps_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
-				label: "Hook.ModifyDamageInternal");
+				label: "Hook.ModifyDamageInternal",
+				finalizer: typeof(Hook_ModifyDamageInternal_IgnoreCaps_Patch).GetMethod("Finalizer", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic));
 
 			MethodInfo? modifyHpLost = AccessTools.Method(typeof(Hook), nameof(Hook.ModifyHpLost));
 			if (modifyHpLost != null)
@@ -172,7 +175,8 @@ public static class CardEditorMod
 					harmony,
 					modifyHpLost,
 					typeof(Hook_ModifyHpLost_IgnoreNegation_Patch).GetMethod("Prefix", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic),
-					label: "Hook.ModifyHpLost");
+					label: "Hook.ModifyHpLost",
+					finalizer: typeof(Hook_ModifyHpLost_IgnoreNegation_Patch).GetMethod("Finalizer", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic));
 			}
 
 			EnsurePatched(
@@ -209,7 +213,7 @@ public static class CardEditorMod
 		}
 	}
 
-	private static void EnsurePatched(Harmony harmony, MethodBase? target, MethodInfo? prefix, string label)
+	private static void EnsurePatched(Harmony harmony, MethodBase? target, MethodInfo? prefix, string label, MethodInfo? finalizer = null)
 	{
 		if (target == null || prefix == null)
 		{
@@ -232,7 +236,10 @@ public static class CardEditorMod
 			bool alreadyPatched = infoBefore?.Owners.Contains(HarmonyId) == true;
 			if (!alreadyPatched)
 			{
-				harmony.Patch(target, prefix: new HarmonyMethod(prefix));
+				harmony.Patch(
+					target,
+					prefix: new HarmonyMethod(prefix),
+					finalizer: finalizer != null ? new HarmonyMethod(finalizer) : null);
 			}
 
 			Patches? infoAfter = Harmony.GetPatchInfo(target);
@@ -1803,7 +1810,32 @@ public static class MainMenu_Ready_Patch
 		TryAddRelicButton(__instance);
 		RefreshCustomButtons(__instance);
 		TryApplyStartupPresetsOnce();
+		TryRunDescriptionAuditOnceAtMenu();
 		NCardEditorPopup.TryQueueUiWarmup(__instance);
+	}
+
+	// The one-shot description/text-snapshot audit used to fire on the first description
+	// build of a created card - typically the first combat frame - producing a perceptible
+	// mid-gameplay hitch. Run it here (first post-ModelDb menu seam) instead; the call in
+	// CreatedCardTextBuilder.Build remains as a no-op fallback via its one-shot guard.
+	private static void TryRunDescriptionAuditOnceAtMenu()
+	{
+		try
+		{
+			foreach (ModelId id in CardEditorCreatedCardsStore.ExportSnapshot().Keys)
+			{
+				CardModel? card = ModelDb.GetByIdOrNull<CardModel>(id);
+				if (card is CardEditorCreatedCardBase)
+				{
+					CardEditorConsistencyAudit.RunDescriptionAuditOnce(card);
+					return;
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Menu-time description audit failed: {ex}");
+		}
 	}
 
 	private static void TryApplyStartupPresetsOnce()
@@ -3266,6 +3298,9 @@ public static class Hook_AfterTurnEnd_Patch
 			{
 				CardEditorTemporaryKeywordController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryExtraEffectController.OnAfterPlayerTurnEnd(combatState);
+				// Bound batched-counter loss to one turn: quitting or crashing mid-combat now
+				// loses at most the current turn's increments, not the whole combat's.
+				CardEditorRunCardCounterState.FlushIfDirty();
 				CardEditorTemporaryEnchantmentController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryReplayController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporarySelfScalingController.OnAfterPlayerTurnEnd(combatState);
@@ -3326,6 +3361,10 @@ public static class Hook_AfterCombatEnd_ClearScheduledEffects_Patch
 				CardEditorExtraEffects.ClearOrbCountHistory(combatState);
 				CardEditorExtraEffects.ClearResourceCountHistory(combatState);
 			}
+
+			// Persist any quest counters batched during this combat (in-memory store is
+			// authoritative; this only flushes the pending disk write).
+			CardEditorRunCardCounterState.FlushIfDirty();
 		}
 	}
 }

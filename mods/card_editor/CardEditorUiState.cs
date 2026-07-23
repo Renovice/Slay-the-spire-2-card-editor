@@ -45,11 +45,13 @@ public static class CardEditorUiState
 			if (_draftOverrides.Remove(cardId))
 			{
 				DraftRevision++;
+				CardEditorRuntimeCacheVersion.Bump();
 			}
 			return;
 		}
 		_draftOverrides[cardId] = overrideData;
 		DraftRevision++;
+		CardEditorRuntimeCacheVersion.Bump();
 		// Drafts are consulted first by TryGetEffectiveOverride, so a live-edit on a vanilla
 		// card mid-combat needs the OnPlay timing patch just like a stored override.
 		CardEditorOverrideOnPlayPatcher.EnsureForCardId(cardId);
@@ -65,6 +67,7 @@ public static class CardEditorUiState
 		if (_draftOverrides.Remove(cardId))
 		{
 			DraftRevision++;
+			CardEditorRuntimeCacheVersion.Bump();
 		}
 	}
 

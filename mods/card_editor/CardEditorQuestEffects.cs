@@ -41,6 +41,95 @@ internal static class CardEditorQuestEffects
 	private static readonly HashSet<string> _completing = new(StringComparer.Ordinal);
 	private static readonly Regex _unsafeOptionIdChars = new("[^A-Z0-9_]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+	// Per-player cache of "does the deck contain ANY RunProgress quest row" (scope/act
+	// filters deliberately ignored -> superset of the active quests). Keyed on the runtime
+	// cache version (covers override/draft/created/grant changes) plus a reference stamp of
+	// the deck contents (covers cards added/removed/transformed mid-run). Lets the per-event
+	// quest recorders skip the full deck rescan when the run has no quests at all, which is
+	// exactly behavior-preserving because GetActiveQuests would have yielded nothing.
+	private sealed class QuestPresenceEntry
+	{
+		internal long Version = long.MinValue;
+		internal int DeckStamp;
+		internal bool HasAny;
+	}
+
+	private static readonly ConditionalWeakTable<Player, QuestPresenceEntry> _questPresenceCache = new();
+
+	private static int ComputeDeckStamp(Player player)
+	{
+		IReadOnlyList<CardModel>? deckCards = player?.Deck?.Cards;
+		if (deckCards == null)
+		{
+			return 0;
+		}
+
+		int stamp = 17;
+		unchecked
+		{
+			stamp = (stamp * 31) + deckCards.Count;
+			for (int i = 0; i < deckCards.Count; i++)
+			{
+				CardModel? card = deckCards[i];
+				stamp = (stamp * 31) + (card == null ? 0 : RuntimeHelpers.GetHashCode(card));
+				// Upgrade level changes in place with no version bump, and upgraded overrides can
+				// carry quest rows the base list lacks - it must be part of the stamp.
+				stamp = (stamp * 31) + (card == null ? 0 : card.GetSafeCurrentUpgradeLevel());
+			}
+		}
+
+		return stamp;
+	}
+
+	private static bool HasAnyRunProgressQuestRows(Player? owner)
+	{
+		if (owner?.Deck?.Cards == null)
+		{
+			return false;
+		}
+
+		try
+		{
+			QuestPresenceEntry entry = _questPresenceCache.GetOrCreateValue(owner);
+			long version = CardEditorRuntimeCacheVersion.Current;
+			int stamp = ComputeDeckStamp(owner);
+			if (entry.Version != version || entry.DeckStamp != stamp)
+			{
+				entry.HasAny = ComputeHasAnyRunProgressQuestRows(owner);
+				entry.DeckStamp = stamp;
+				entry.Version = version;
+			}
+
+			return entry.HasAny;
+		}
+		catch
+		{
+			// Conservative: on failure fall through to the full quest scan.
+			return true;
+		}
+	}
+
+	private static bool ComputeHasAnyRunProgressQuestRows(Player owner)
+	{
+		foreach (CardModel card in owner.Deck.Cards.ToList())
+		{
+			if (card == null)
+			{
+				continue;
+			}
+
+			foreach (CardExtraEffect effect in CardEditorExtraEffects.GetEffectsForDescription(card, isUpgradePreview: false))
+			{
+				if (effect?.Kind == CardExtraEffectKind.Quest && effect.QuestMode == CardExtraEffectQuestMode.RunProgress)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	internal static async Task RecordCardPlayed(CombatState combatState, CardPlay cardPlay)
 	{
 		CardModel? playedCard = cardPlay?.Card;
@@ -154,6 +243,13 @@ internal static class CardEditorQuestEffects
 			return;
 		}
 
+		// No RunProgress quest rows anywhere in the deck -> GetActiveQuests below would
+		// yield nothing; skip the per-event full deck rescan.
+		if (!HasAnyRunProgressQuestRows(owner))
+		{
+			return;
+		}
+
 		foreach (QuestRuntime quest in GetActiveQuests(owner, CardExtraEffectQuestMode.RunProgress).ToList())
 		{
 			CardExtraEffect effect = quest.Effect;
@@ -205,6 +301,12 @@ internal static class CardEditorQuestEffects
 		CardExtraEffectCountEvent? thisCardEvent)
 	{
 		if (combatState == null || eventCard == null || owner == null)
+		{
+			return;
+		}
+
+		// See RecordRunProgress: skip the deck rescan when no quest rows exist at all.
+		if (!HasAnyRunProgressQuestRows(owner))
 		{
 			return;
 		}
@@ -331,6 +433,10 @@ internal static class CardEditorQuestEffects
 			{
 				_completing.Remove(completionKey);
 			}
+
+			// Quest completions rewrite persistent counters; make sure the batched store
+			// hits disk at this milestone even mid-combat.
+			CardEditorRunCardCounterState.FlushIfDirty();
 		}
 	}
 

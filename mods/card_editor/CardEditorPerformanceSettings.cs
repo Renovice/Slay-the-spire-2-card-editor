@@ -28,7 +28,9 @@ internal static class CardEditorPerformanceSettings
 
 	private static readonly object _lock = new();
 	private static CardEditorPerformanceSettingsData _data = new();
-	private static bool _loaded;
+	// volatile + fast-path check in EnsureLoaded: settings getters run on damage-preview
+	// hot paths, so the uncontended lock acquisition per read is skipped once loaded.
+	private static volatile bool _loaded;
 
 	public static bool PreloadEditorPopupsOnLaunch
 	{
@@ -125,6 +127,12 @@ internal static class CardEditorPerformanceSettings
 
 	public static void EnsureLoaded()
 	{
+		// Double-checked fast path: after the first load this is a single volatile read.
+		if (_loaded)
+		{
+			return;
+		}
+
 		lock (_lock)
 		{
 			if (_loaded)
@@ -132,7 +140,6 @@ internal static class CardEditorPerformanceSettings
 				return;
 			}
 
-			_loaded = true;
 			string path = GetSettingsPath();
 			try
 			{
@@ -153,6 +160,12 @@ internal static class CardEditorPerformanceSettings
 			catch (Exception ex)
 			{
 				Log.Warn($"[CardEditor] Failed loading performance settings from '{path}': {ex}");
+			}
+			finally
+			{
+				// Publish only after _data is fully assigned so the lock-free fast path
+				// can never observe a half-initialized settings object.
+				_loaded = true;
 			}
 		}
 	}

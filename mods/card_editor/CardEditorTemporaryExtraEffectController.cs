@@ -159,6 +159,7 @@ internal static class CardEditorTemporaryExtraEffectController
 			{
 				grant.RemainingTurns = Math.Max(grant.RemainingTurns, remainingTurns);
 			}
+			CardEditorRuntimeCacheVersion.Bump();
 			return true;
 		}
 
@@ -275,6 +276,7 @@ internal static class CardEditorTemporaryExtraEffectController
 			RemainingTurns = remainingTurns
 		});
 		state.Effects.Add(stored);
+		CardEditorRuntimeCacheVersion.Bump();
 
 		CardEditorMod.VerboseLog($"[CardEditor][TempCostGrant] card={card.Id} key={key?.Id} sameKey={ReferenceEquals(card, key)} pile={card.Pile?.Type} mutableCard={card.IsMutable} mutableKey={key?.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration={duration} turns={remainingTurns} amount={stored.Amount} modifier={stored.CardCostsLessModifier}");
 	}
@@ -323,6 +325,8 @@ internal static class CardEditorTemporaryExtraEffectController
 				_schedules.Remove(combatState);
 			}
 		}
+
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	public static void OnAfterPlayerTurnEnd(CombatState combatState)
@@ -385,6 +389,8 @@ internal static class CardEditorTemporaryExtraEffectController
 		{
 			_schedules.Remove(combatState);
 		}
+
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	public static void Clear(CombatState combatState)
@@ -394,5 +400,6 @@ internal static class CardEditorTemporaryExtraEffectController
 			return;
 		}
 		_schedules.Remove(combatState);
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 }

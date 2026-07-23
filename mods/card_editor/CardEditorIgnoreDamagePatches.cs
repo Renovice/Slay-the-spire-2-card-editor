@@ -26,11 +26,18 @@ internal static class CreatureCmd_Damage_IgnoreProps_Patch
 	public static void Prefix(ref ValueProp props, Creature? dealer, CardModel? cardSource)
 	{
 		CombatState? combatState = CardEditorCardPlayContext.Current?.Card.GetConcreteCombatState() ?? cardSource.GetConcreteCombatState() ?? dealer.GetConcreteCombatState();
-		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target: null))
+		(bool ignoreBlock, bool ignoreDamageModifiers) = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffectPair(
+			CardExtraEffectKind.IgnoreBlock,
+			CardExtraEffectKind.IgnoreDamageModifiers,
+			cardSource,
+			dealer,
+			combatState,
+			target: null);
+		if (ignoreBlock)
 		{
 			props |= ValueProp.Unblockable;
 		}
-		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageModifiers, cardSource, dealer, combatState, target: null))
+		if (ignoreDamageModifiers)
 		{
 			props |= ValueProp.Unpowered;
 		}
@@ -42,11 +49,18 @@ internal static class Hook_ModifyDamage_IgnoreProps_Patch
 {
 	public static void Prefix(CombatState? combatState, Creature? target, Creature? dealer, ref ValueProp props, CardModel? cardSource)
 	{
-		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreBlock, cardSource, dealer, combatState, target))
+		(bool ignoreBlock, bool ignoreDamageModifiers) = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffectPair(
+			CardExtraEffectKind.IgnoreBlock,
+			CardExtraEffectKind.IgnoreDamageModifiers,
+			cardSource,
+			dealer,
+			combatState,
+			target);
+		if (ignoreBlock)
 		{
 			props |= ValueProp.Unblockable;
 		}
-		if (CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(CardExtraEffectKind.IgnoreDamageModifiers, cardSource, dealer, combatState, target))
+		if (ignoreDamageModifiers)
 		{
 			props |= ValueProp.Unpowered;
 		}

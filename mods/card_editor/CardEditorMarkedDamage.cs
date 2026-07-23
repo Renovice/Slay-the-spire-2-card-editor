@@ -44,12 +44,35 @@ internal sealed class CardEditorMarkedPower : PowerModel
 		return 1m + (PerStackMultiplier * Math.Max(0, base.Amount));
 	}
 
+	// Vulnerable's textures are immutable session resources; cache them after the first
+	// successful ModelDb lookup so per-frame icon reads stop hitting the database.
+	private static Texture2D? _cachedIcon;
+	private static Texture2D? _cachedBigIcon;
+
 	internal static Texture2D? ResolveSharedIcon(bool bigIcon)
 	{
+		Texture2D? cached = bigIcon ? _cachedBigIcon : _cachedIcon;
+		if (cached != null)
+		{
+			return cached;
+		}
+
 		try
 		{
 			PowerModel? vulnerable = ModelDb.Power<VulnerablePower>();
-			return bigIcon ? vulnerable?.BigIcon : vulnerable?.Icon;
+			Texture2D? resolved = bigIcon ? vulnerable?.BigIcon : vulnerable?.Icon;
+			if (resolved != null)
+			{
+				if (bigIcon)
+				{
+					_cachedBigIcon = resolved;
+				}
+				else
+				{
+					_cachedIcon = resolved;
+				}
+			}
+			return resolved;
 		}
 		catch
 		{

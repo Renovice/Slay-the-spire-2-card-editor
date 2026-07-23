@@ -7336,6 +7336,13 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return false;
 		}
 
+		// Unmodified cards have an empty runtime-effects list, so the loop below could
+		// never match; skip the CardPlay allocation and full effects rebuild for them.
+		if (!CardEditorRuntimeCaches.HasAnyModSurface(card, combatState))
+		{
+			return false;
+		}
+
 		CardPlay playForConditions = GetPreviewConditionCardPlay(card);
 		foreach (CardExtraEffect effect in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
@@ -7359,6 +7366,12 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		CombatState? combatState = ResolveCardCombatState(card);
 		Creature? ownerCreature = card.TryGetOwnerCreature();
 		if (combatState == null || ownerCreature == null)
+		{
+			return false;
+		}
+
+		// Unmodified cards have an empty runtime-effects list (see ShouldGlowGoldForConditionalEffects).
+		if (!CardEditorRuntimeCaches.HasAnyModSurface(card, combatState))
 		{
 			return false;
 		}
@@ -7567,6 +7580,14 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			Creature? ownerCreature = card.TryGetOwnerCreature();
 			return CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffect(kind, card, ownerCreature, combatState, target);
+		}
+
+		// Version-cached prefilter (same contract as HasActiveIgnoreEffect's): skip the
+		// full effects rebuild when the card provably has no row of this kind.
+		ulong kindBit = CardEditorRuntimeCaches.MapKindToBit(kind);
+		if (kindBit != 0UL && !CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(null, card, kindBit))
+		{
+			return false;
 		}
 
 		return GetRuntimeEffectsIncludingBorrowedSources(null, card).Any(effect =>
@@ -9460,17 +9481,24 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return false;
 		}
 
-		foreach (CardExtraEffect effect in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
+		// Version-cached prefilters: only build the effect list for cards that might
+		// actually carry PlayPermission/PlayPrevention rows. When the combat has any
+		// granted/aura effects the gates conservatively report "might have" and the
+		// original full evaluation below runs unchanged.
+		if (CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(combatState, card, CardEditorRuntimeCaches.PlayPermissionBit))
 		{
-			if (!IsActivePassiveBehavior(effect, CardExtraEffectKind.PlayPermission))
+			foreach (CardExtraEffect effect in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 			{
-				continue;
-			}
+				if (!IsActivePassiveBehavior(effect, CardExtraEffectKind.PlayPermission))
+				{
+					continue;
+				}
 
-			if (!DoesBehaviorConditionPass(combatState, card, card, effect))
-			{
-				preventer = card;
-				return true;
+				if (!DoesBehaviorConditionPass(combatState, card, card, effect))
+				{
+					preventer = card;
+					return true;
+				}
 			}
 		}
 
@@ -9483,6 +9511,11 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		foreach (CardModel? sourceCard in hand.Cards)
 		{
 			if (sourceCard == null)
+			{
+				continue;
+			}
+
+			if (!CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(combatState, sourceCard, CardEditorRuntimeCaches.PlayPreventionBit))
 			{
 				continue;
 			}
@@ -9799,6 +9832,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			Original = original,
 			Effect = CloneEffect(effect)
 		});
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	private static void UnmarkDynamicTransformReplacement(CardModel? replacement)
@@ -9806,7 +9840,15 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		if (replacement != null)
 		{
 			_dynamicTransformMarkers.Remove(replacement);
+			CardEditorRuntimeCacheVersion.Bump();
 		}
+	}
+
+	// Cheap probe for the runtime-cache gate: dynamic-transform replacements borrow their
+	// identity from another card, so treat them as mod-touched everywhere.
+	internal static bool HasDynamicTransformMarker(CardModel? card)
+	{
+		return card != null && _dynamicTransformMarkers.TryGetValue(card, out _);
 	}
 
 	internal static void RefreshCardVisuals(CardModel? card)
@@ -10079,6 +10121,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 		UnmarkStatefulTransformReplacement(replacement);
 		_statefulTransformMarkers.Add(replacement, new StatefulTransformMarker { Entry = entry });
+		CardEditorRuntimeCacheVersion.Bump();
 	}
 
 	private static void UnmarkStatefulTransformReplacement(CardModel? replacement)
@@ -10086,7 +10129,15 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		if (replacement != null)
 		{
 			_statefulTransformMarkers.Remove(replacement);
+			CardEditorRuntimeCacheVersion.Bump();
 		}
+	}
+
+	// Cheap probe for the runtime-cache gate: does this card carry a stateful-transform
+	// marker (which injects a marker effect row into its runtime effect list)?
+	internal static bool HasStatefulTransformMarker(CardModel? card)
+	{
+		return card != null && _statefulTransformMarkers.TryGetValue(card, out _);
 	}
 
 	private static void RefreshStatefulTransformDuration(StatefulTransformEntry entry, CardExtraEffect effect)
@@ -14146,6 +14197,43 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		return cards;
 	}
 
+	// Cheap pre-scan for the drawn/discarded/exhausted trigger patches: true when any card
+	// in the swept piles might carry a self-pile auto row (AutoPlay/AutoDraw/AutoRun kinds).
+	// Conservative (never false while a candidate exists): per-card answers are version-
+	// cached and any combat grant flips the whole check to true.
+	internal static bool HasAnySelfPileAutoCandidates(CombatState combatState, Player player)
+	{
+		if (combatState == null || player == null)
+		{
+			return false;
+		}
+
+		if (CardEditorRuntimeCaches.CombatHasAnyGrantedEffects(combatState))
+		{
+			return true;
+		}
+
+		foreach (PileType pileType in SelfPileAutoPileTypes)
+		{
+			CardPile? pile = pileType.GetPile(player);
+			if (pile?.Cards == null || pile.Cards.Count == 0)
+			{
+				continue;
+			}
+
+			foreach (CardModel? card in pile.Cards)
+			{
+				if (card != null
+					&& CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(combatState, card, CardEditorRuntimeCaches.SelfPileAutoBits))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	public static async Task RunAutoPlaySelfFromPile(CombatState combatState, PlayerChoiceContext choiceContext, Player player, CardExtraEffectTrigger trigger)
 	{
 		if (combatState == null || choiceContext == null || player == null)
@@ -14164,6 +14252,13 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		// Card may have been moved by a previous auto-play
 		CardPile? cardPile = card.Pile;
 		if (cardPile == null || cardPile.Type == PileType.Play)
+		{
+			return;
+		}
+
+		// Version-cached prefilter: skip the effects rebuild for cards that provably
+		// carry no self-pile auto rows (the overwhelmingly common case).
+		if (!CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(combatState, card, CardEditorRuntimeCaches.SelfPileAutoBits))
 		{
 			return;
 		}
@@ -14234,6 +14329,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return;
 		}
 
+		// Version-cached prefilter (see TryAutoPlaySelfFromPile).
+		if (!CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(combatState, card, CardEditorRuntimeCaches.SelfPileAutoBits))
+		{
+			return;
+		}
+
 		List<CardExtraEffect> effects = new List<CardExtraEffect>();
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
@@ -14267,6 +14368,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 	{
 		CardPile? cardPile = card.Pile;
 		if (cardPile == null || cardPile.Type == PileType.Hand || cardPile.Type == PileType.Play)
+		{
+			return;
+		}
+
+		// Version-cached prefilter (see TryAutoPlaySelfFromPile).
+		if (!CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(combatState, card, CardEditorRuntimeCaches.SelfPileAutoBits))
 		{
 			return;
 		}
@@ -33683,7 +33790,16 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			return 0;
 		}
 
-		CardPlay playForHistory = BuildCardDamageBonusPlayContext(card, target);
+		// Version-cached prefilter: skip the full effects rebuild (and the CardPlay
+		// allocation) when the card provably has no CardDealsExtraDamage rows.
+		if (!CardEditorRuntimeCaches.CardMightHaveRuntimeEffectKind(combatState, card, CardEditorRuntimeCaches.CardDealsExtraDamageBit))
+		{
+			return 0;
+		}
+
+		// The play context is only consumed inside the loop; build it after the first
+		// matching row so misses allocate nothing.
+		CardPlay? playForHistory = null;
 		long totalBonus = 0L;
 		foreach (CardExtraEffect effect in GetRuntimeEffectsForModifierInspection(combatState, card))
 		{
@@ -33696,6 +33812,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 				continue;
 			}
 
+			playForHistory ??= BuildCardDamageBonusPlayContext(card, target);
 			totalBonus += ResolveCardDamageBonusAmount(combatState, ownerCreature, playForHistory, effect);
 			if (totalBonus >= int.MaxValue)
 			{
@@ -33934,6 +34051,13 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			return;
 		}
 
+		// CardHasDynamicCardCostAdjustment only consults stored overrides and granted
+		// effects; with neither present no card can match, so skip the pile walk.
+		if (!CardEditorOverrides.HasAnyOverrides && !CardEditorRuntimeCaches.CombatHasAnyGrantedEffects(combatState))
+		{
+			return;
+		}
+
 		HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
 		foreach (CardPile pile in player.PlayerCombatState.AllPiles)
 		{
@@ -33978,6 +34102,16 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 		}
 	}
 
+	private sealed class DynamicCostAdjustEntry
+	{
+		internal long Version = long.MinValue;
+		internal int UpgradeLevel = -1;
+		internal bool AnyRows;
+		internal HashSet<CardExtraEffectCountEvent>? Events;
+	}
+
+	private static readonly ConditionalWeakTable<CardModel, DynamicCostAdjustEntry> _dynamicCostAdjustCache = new();
+
 	private static bool CardHasDynamicCardCostAdjustment(CombatState combatState, CardModel card, CardExtraEffectCountEvent? changedCountEvent)
 	{
 		if (combatState == null || card == null)
@@ -34004,13 +34138,62 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			return includeTimedIntrinsic || IsDynamicTimedPassiveCardCostsLessDefinition(effect);
 		}
 
-		if (CardEditorOverrides.TryGet(card.Id, out CardOverride overrideData)
-			&& GetEffectiveExtraEffects(card, overrideData, card.GetSafeCurrentUpgradeLevel() > 0).Any(effect => Matches(effect, includeTimedIntrinsic: false)))
+		if (OverrideHasDynamicCardCostAdjustment(card, changedCountEvent))
 		{
 			return true;
 		}
 
+		if (!CardEditorRuntimeCaches.CombatHasAnyGrantedEffects(combatState))
+		{
+			return false;
+		}
+
 		return GetActiveGrantedExtraEffects(combatState, card).Any(effect => Matches(effect, includeTimedIntrinsic: true));
+	}
+
+	// Version-cached equivalent of the stored-override half of CardHasDynamicCardCostAdjustment:
+	// caches the set of CountEvents the card's (stored) override cost-adjust rows react to,
+	// keyed on the runtime cache version + upgrade level, so the per-count-event refresh does
+	// a set lookup instead of re-fusing the override's effect list every time.
+	private static bool OverrideHasDynamicCardCostAdjustment(CardModel card, CardExtraEffectCountEvent? changedCountEvent)
+	{
+		DynamicCostAdjustEntry entry = _dynamicCostAdjustCache.GetOrCreateValue(card);
+		long version = CardEditorRuntimeCacheVersion.Current;
+		int upgradeLevel = card.GetSafeCurrentUpgradeLevel();
+		if (entry.Version != version || entry.UpgradeLevel != upgradeLevel)
+		{
+			HashSet<CardExtraEffectCountEvent>? events = null;
+			if (CardEditorOverrides.TryGet(card.Id, out CardOverride overrideData))
+			{
+				foreach (CardExtraEffect effect in GetEffectiveExtraEffects(card, overrideData, upgradeLevel > 0))
+				{
+					if (effect == null
+						|| IsPowerEffect(effect)
+						|| effect.GrantToCard
+						|| effect.Kind is not (CardExtraEffectKind.CardCostsLess or CardExtraEffectKind.CardStarCostsLess)
+						|| !IsValidEffectAmount(effect.Kind, effect.Amount)
+						|| !IsDynamicTimedPassiveCardCostsLessDefinition(effect))
+					{
+						continue;
+					}
+
+					events ??= new HashSet<CardExtraEffectCountEvent>();
+					events.Add(effect.CountEvent);
+				}
+			}
+
+			entry.Events = events;
+			entry.AnyRows = events != null && events.Count > 0;
+			entry.UpgradeLevel = upgradeLevel;
+			entry.Version = version;
+		}
+
+		if (!entry.AnyRows)
+		{
+			return false;
+		}
+
+		return !changedCountEvent.HasValue || (entry.Events?.Contains(changedCountEvent.Value) ?? false);
 	}
 
 	internal static void ApplyIntrinsicTimedCardCostsLessOnEnterHand(CombatState combatState, CardModel card)
