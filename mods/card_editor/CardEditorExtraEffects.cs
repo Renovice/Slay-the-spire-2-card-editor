@@ -39391,17 +39391,30 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 		fused.PowerTargeting = upgradeEffect.PowerTargeting;
 		fused.CardReferenceDisplayMode = upgradeEffect.CardReferenceDisplayMode;
 		fused.SpecificCardUpgradeMode = upgradeEffect.SpecificCardUpgradeMode;
-		fused.AmountSourceMode = upgradeEffect.AmountSourceMode;
-		fused.AmountSourceEffectId = upgradeEffect.AmountSourceEffectId;
-		fused.AmountSourceMultiplier = upgradeEffect.AmountSourceMultiplier;
-		fused.ValueSourceMode = upgradeEffect.ValueSourceMode;
-		fused.ValueSourceActor = upgradeEffect.ValueSourceActor;
-		fused.ValueSourceAggregation = upgradeEffect.ValueSourceAggregation;
-		fused.ValueSourceKind = upgradeEffect.ValueSourceKind;
-		fused.ValueSourcePowerId = upgradeEffect.ValueSourcePowerId;
-		fused.MultiplierSourceMode = upgradeEffect.MultiplierSourceMode;
-		fused.MultiplierPowerId = upgradeEffect.MultiplierPowerId;
-		fused.CardSelectionSourceEffectId = upgradeEffect.CardSelectionSourceEffectId;
+		// Fixed/blank is the unset default: an upgrade row with no amount link authored inherits
+		// the base row's amount/value sources instead of erasing them (same rule as CardMatch*) -
+		// "Deal damage equal to the Poison applied" must survive upgrading.
+		if (upgradeEffect.AmountSourceMode != CardExtraEffectAmountSourceMode.Fixed
+			|| !string.IsNullOrWhiteSpace(upgradeEffect.AmountSourceEffectId))
+		{
+			fused.AmountSourceMode = upgradeEffect.AmountSourceMode;
+			fused.AmountSourceEffectId = upgradeEffect.AmountSourceEffectId;
+			fused.AmountSourceMultiplier = upgradeEffect.AmountSourceMultiplier;
+			fused.ValueSourceMode = upgradeEffect.ValueSourceMode;
+			fused.ValueSourceActor = upgradeEffect.ValueSourceActor;
+			fused.ValueSourceAggregation = upgradeEffect.ValueSourceAggregation;
+			fused.ValueSourceKind = upgradeEffect.ValueSourceKind;
+			fused.ValueSourcePowerId = upgradeEffect.ValueSourcePowerId;
+		}
+		if (upgradeEffect.MultiplierSourceMode != default)
+		{
+			fused.MultiplierSourceMode = upgradeEffect.MultiplierSourceMode;
+			fused.MultiplierPowerId = upgradeEffect.MultiplierPowerId;
+		}
+		if (!string.IsNullOrWhiteSpace(upgradeEffect.CardSelectionSourceEffectId))
+		{
+			fused.CardSelectionSourceEffectId = upgradeEffect.CardSelectionSourceEffectId;
+		}
 		fused.IncludeSourceCardInSelection = upgradeEffect.IncludeSourceCardInSelection;
 		fused.FutureMatchingCards = upgradeEffect.FutureMatchingCards;
 		fused.ResourceConsumptionMode = upgradeEffect.ResourceConsumptionMode;

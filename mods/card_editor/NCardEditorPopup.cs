@@ -33206,10 +33206,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				overrideData.TitleOverride = desiredTitle;
 			}
 
-			if (_endlessUpgradesTickbox?.IsTicked == true)
-			{
-				overrideData.EndlessUpgrades = true;
-			}
+			// Explicit null on untick so a reused/cloned override can never keep a stale 'true'.
+			overrideData.EndlessUpgrades = _endlessUpgradesTickbox?.IsTicked == true ? true : null;
 
 			if (!_isBatchEdit && _vanillaModifiedBaseTextTickbox?.IsTicked == true)
 			{
@@ -33259,9 +33257,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		}
 
-		if (_isCreatedCard && !_isUpgradeEditor && _endlessUpgradesTickbox?.IsTicked == true)
+		if (_isCreatedCard && !_isUpgradeEditor)
 		{
-			overrideData.EndlessUpgrades = true;
+			overrideData.EndlessUpgrades = _endlessUpgradesTickbox?.IsTicked == true ? true : null;
 		}
 
 		if (!_isUpgradeEditor)

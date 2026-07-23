@@ -1,4 +1,13 @@
-﻿## 2026-07-20 - Quest Reward Persistence: absorbed rows keep their triggers
+﻿## 2026-07-20 - Upgrade fuse also erased AMOUNT-source links ("equal to Poison" -> "Deal 4")
+
+User: base card "Deal damage equal to the Poison applied" turned into "Deal 4 damage to ALL enemies" once upgraded in gameplay (editor showed the link fine - it hydrates base rows; the runtime fuse lost it).
+Hypothesis: same disease as the 07-19 Pierce fix - MergeUpgradeBaseSlotEffect stomps link fields with the upgrade row's defaults.
+Finding: True. :39394-39404 unconditionally copied AmountSourceMode/EffectId/Multiplier + ValueSource* + MultiplierSource* + CardSelectionSourceEffectId from the upgrade row; an upgrade row authored as a plain "+4 damage" delta carries Fixed/blank and erased the base link.
+Fix: inherit-from-base rules matching the CardMatch*/CustomKeywordName precedent - amount group copied only when the upgrade row actually authors a link (mode != Fixed or id non-blank); multiplier group only when MultiplierSourceMode != default; CardSelectionSourceEffectId only when non-blank.
+Also: EndlessUpgrades untick now writes an explicit null in both save builders (was set-true-only; fresh-override path was safe but any cloned-override path could keep a stale true). NOTE for user: the reported "endless upgrades while tag disabled" screenshot actually shows the tag TICKED - the 4->8->12 growth was the flag working on the raw +4 delta after the link was lost. Untick + Apply should stop it post-fix; if not, reopen as a bug.
+Build: 0 errors / 278 warnings (beta baseline). NOT deployed. Perf audit running separately (wf_705c7bbc-8f8).
+Next Step: deploy on request; test = upgrade the Poison card in a run -> text stays "equal to the Poison applied", damage scales with poison, and unticking Endless Upgrades stops repeat upgrades.
+## 2026-07-20 - Quest Reward Persistence: absorbed rows keep their triggers
 
 User: quest rewards flatten the absorbed row ("start of combat: gain 7 block" fired once on completion). Root cause: ResolveQuestRewardEffects:564 hard-set Trigger=OnPlay/Timing=Immediate on every absorbed clone.
 Built (agent af275ea9, verified build):
