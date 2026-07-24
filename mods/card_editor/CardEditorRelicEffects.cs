@@ -180,7 +180,6 @@ internal static class CardEditorRelicEffects
 			CardPlay play = new CardPlay
 			{
 				Card = proxy,
-				Player = proxy.Owner,
 				Target = null,
 				ResultPile = PileType.None,
 				Resources = new ResourceInfo
@@ -354,12 +353,12 @@ internal static class Hook_AfterPlayerTurnStart_CardEditorRelicEffects_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.AfterSideTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterTurnEnd))]
 internal static class Hook_AfterTurnEnd_CardEditorRelicEffects_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
+	public static void Postfix(ICombatState combatStateArg, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
 	{
-		if (__result == null || combatState == null || !CardEditorRelicOverrides.HasAnyOverrides)
+		if (__result == null || combatStateArg is not CombatState combatState || !CardEditorRelicOverrides.HasAnyOverrides)
 		{
 			return;
 		}

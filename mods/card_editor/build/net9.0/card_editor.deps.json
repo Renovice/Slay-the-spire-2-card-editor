@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v9.0": {
-      "card_editor/1.0.0": {
+      "card_editor/10.0.0": {
         "dependencies": {
           "0Harmony": "2.4.2.0",
           "GodotSharp": "4.5.1.0",
@@ -123,7 +123,7 @@
     }
   },
   "libraries": {
-    "card_editor/1.0.0": {
+    "card_editor/10.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

@@ -18,8 +18,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 	typeof(decimal),
 	typeof(ValueProp),
 	typeof(Creature),
-	typeof(CardModel),
-	typeof(CardPlay)
+	typeof(CardModel)
 })]
 internal static class CreatureCmd_Damage_IgnoreProps_Patch
 {
@@ -47,14 +46,17 @@ internal static class CreatureCmd_Damage_IgnoreProps_Patch
 [HarmonyPatch(typeof(Hook), nameof(Hook.ModifyDamage))]
 internal static class Hook_ModifyDamage_IgnoreProps_Patch
 {
-	public static void Prefix(CombatState? combatState, Creature? target, Creature? dealer, ref ValueProp props, CardModel? cardSource)
+	public static void Prefix(ICombatState? combatState, Creature? target, Creature? dealer, ref ValueProp props, CardModel? cardSource)
 	{
+		// Public-build signature gives ICombatState; the pair-fetch (one effects build for both
+		// kinds) is the perf-pass optimisation and is kept.
+		CombatState? concreteCombatState = combatState.GetConcreteCombatState();
 		(bool ignoreBlock, bool ignoreDamageModifiers) = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffectPair(
 			CardExtraEffectKind.IgnoreBlock,
 			CardExtraEffectKind.IgnoreDamageModifiers,
 			cardSource,
 			dealer,
-			combatState,
+			concreteCombatState,
 			target);
 		if (ignoreBlock)
 		{

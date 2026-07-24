@@ -1,4 +1,22 @@
-﻿## 2026-07-24 - BOTH root causes found: ready gate swallowed clicks; our rebase cleared vanilla green
+﻿## 2026-07-24 (late) - Game swapped BACK to the public branch mid-work; retargeted + perf pass 2
+
+BRANCH SWAP: the game updated again at 21:48 (sts2.dll 9,364,480 bytes, CardLocation ABSENT = public build; the beta was 9,609,216 with CardLocation). We had retargeted to BETA on 07-20, so the mod stopped compiling. NOT caused by the perf work - two implementation agents wrongly dismissed the 9 resulting errors as "pre-existing", which they were not (the tree was 0-errors before).
+Fix: re-applied the public compat by reverting the beta-revert (git revert 11237f9). 3 conflicts, all resolved as genuine MERGES rather than taking a side - the public ICombatState signatures were kept AND the perf-pass HasActiveIgnoreEffectPair single-fetch optimisation was preserved (CardEditorIgnoreDamagePatches, CardEditorIgnoreCapsAndNegationPatches). Two post-compat regressions also fixed: CardPlay.Player in the quest synthetic play (Quest Reward Persistence was written after the original compat pass) and JoinFlow.MockInfo in the debug dummy lobby (beta-only API - helper stubbed with a warning, restore if ever retargeted to beta).
+LESSON: this mod now flips branches regularly. Every branch swap needs this revert-the-revert dance. A conditional-compilation dual build remains the real fix if it keeps happening.
+
+PERF PASS 2 (items 1-8 of the optimisation report), all intended output-identical:
+1. JsonSerializerOptions hoisted to static readonly in 9 stores + 2 inline sites (chain-link store, foil registry). A fresh options object per call defeats System.Text.Json's metadata cache.
+2. CardEditorRunPowerState now batches disk writes (dirty flag + FlushIfDirty at the counter store's existing seams) instead of a synchronous WriteAllText per persistent power grant during combat.
+3. Effect-kind dropdown (205 defs filtered + sorted + ~147 AddItem) built ONCE per popup instead of per row - a 10-effect card paid it 10x on open.
+4. RefreshEffectSummaryList: per-keystroke .Select().ToList() + .Distinct().Count() replaced with an early-exit scan; list only materialised when group headers are actually needed.
+5. RefreshEffectChainStrip: content fingerprint (40+ per-row render inputs incl. all branch/chip selects, expanded id, manual sequence links) - skips the full teardown/rebuild when nothing it renders changed. Was freeing and recreating every node on EVERY keystroke.
+6. Pool title -> model dictionary replaces ModelDb.AllCardPools linear scans in get_Pool/get_VisualCardPool postfixes and the library sort.
+7. SupportedCharacterIds cached + HashSet membership (was a full ModelDb LINQ chain per property access, then O(n) Contains).
+8. CreatedCardsStore skips its unconditional boot re-save when the load added no default slots.
+Deliberately NOT done: lazy-building the 347 Godot nodes per effect row (biggest theoretical win, ~260 fields would become nullable = high regression risk for a one-time cost).
+Build: 0 errors / 274 warnings (PUBLIC-branch baseline; 278 was the beta baseline). Deployed + distribution refreshed.
+Next Step: perf pass 2 is UNVERIFIED IN GAME - play a combat and open the editor; watch for (a) any stale chain strip after edits (fingerprint gap), (b) quest/power counters persisting correctly across combat end.
+## 2026-07-24 - BOTH root causes found: ready gate swallowed clicks; our rebase cleared vanilla green
 
 Prior diagnoses were WRONG on both counts. Corrected:
 

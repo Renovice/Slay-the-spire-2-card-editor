@@ -3222,12 +3222,12 @@ public static class Hook_BeforeSideTurnStart_CardEditorTurnBoundaryPower_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeSideTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeTurnEnd))]
 public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
+	public static void Postfix(ICombatState combatStateArg, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
 	{
-		if (__result == null)
+		if (__result == null || combatStateArg is not CombatState combatState)
 		{
 			return;
 		}
@@ -3269,12 +3269,12 @@ public static class Hook_BeforeTurnEnd_CardEditorTurnBoundaryPower_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.AfterSideTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterTurnEnd))]
 public static class Hook_AfterTurnEnd_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	public static void Postfix(ICombatState combatStateArg, CombatSide side, ref Task __result)
 	{
-		if (__result == null)
+		if (__result == null || combatStateArg is not CombatState combatState)
 		{
 			return;
 		}

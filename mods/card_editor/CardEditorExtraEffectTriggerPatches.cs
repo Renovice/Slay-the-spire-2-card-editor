@@ -20,13 +20,13 @@ using MegaCrit.Sts2.Core.Runs;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
-// v0.109.0 folded the (PileType, CardPilePosition) result into the CardLocation record struct.
-[HarmonyPatch(typeof(Hook), nameof(Hook.ModifyCardPlayResultLocation))]
+// The 2026-07-18 update un-folded v0.109's CardLocation back into a (PileType, CardPilePosition) result.
+[HarmonyPatch(typeof(Hook), nameof(Hook.ModifyCardPlayResultPileTypeAndPosition))]
 internal static class Hook_ModifyCardPlayResultLocation_CardEditorExtraEffects_Patch
 {
 	public static void Postfix(
 		CardModel card,
-		ref CardLocation __result)
+		ref (PileType, CardPilePosition) __result)
 	{
 		if (card == null)
 		{
@@ -35,7 +35,7 @@ internal static class Hook_ModifyCardPlayResultLocation_CardEditorExtraEffects_P
 
 		if (CardEditorExtraEffects.TryGetCardPlayResultPileOverride(card, out PileType overridePile, out CardPilePosition overridePosition))
 		{
-			__result = new CardLocation(__result.player, overridePile, overridePosition);
+			__result = (overridePile, overridePosition);
 		}
 	}
 }
@@ -415,12 +415,12 @@ internal static class Hook_AfterCardEnteredCombat_CardEditorExtraEffects_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeSideTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeTurnEnd))]
 internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
+	public static void Postfix(ICombatState combatStateArg, CombatSide side, IEnumerable<Creature> participants, ref Task __result)
 	{
-		if (__result == null || combatState == null || side != CombatSide.Player)
+		if (__result == null || combatStateArg is not CombatState combatState || side != CombatSide.Player)
 		{
 			return;
 		}
@@ -574,12 +574,12 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeSideTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.BeforeTurnEnd))]
 internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_EnemyTurnBoundary_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	public static void Postfix(ICombatState combatStateArg, CombatSide side, ref Task __result)
 	{
-		if (__result == null || combatState == null || side != CombatSide.Enemy)
+		if (__result == null || combatStateArg is not CombatState combatState || side != CombatSide.Enemy)
 		{
 			return;
 		}
@@ -1586,12 +1586,12 @@ internal static class Hook_AfterSideTurnStart_CardEditorTurnBoundaryEnemyAfterSt
 	}
 }
 
-[HarmonyPatch(typeof(Hook), nameof(Hook.AfterSideTurnEnd))]
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterTurnEnd))]
 internal static class Hook_AfterTurnEnd_CardEditorTurnBoundaryAfterDiscard_Patch
 {
-	public static void Postfix(CombatState combatState, CombatSide side, ref Task __result)
+	public static void Postfix(ICombatState combatStateArg, CombatSide side, ref Task __result)
 	{
-		if (__result == null || combatState == null || side == CombatSide.None)
+		if (__result == null || combatStateArg is not CombatState combatState || side == CombatSide.None)
 		{
 			return;
 		}
