@@ -1,4 +1,13 @@
-﻿## 2026-07-24 - Green upgrade-text investigation: our code exonerated; intermittent, shelved
+﻿## 2026-07-24 - Debug dummy co-op host toggle (ENet loopback) for solo ready-check testing
+
+Feasibility workflow (wf_2efeadf0) verified the game supports in-process ENet loopback (two ENet sockets coexist; NMultiplayerTest is the reference). Built CardEditorDebugDummyLobby.cs:
+- SimulateDummyHost (const, default false): spawns an in-process dummy co-op HOST at main-menu ready (NetHostGameService + StartENetHost(33771,4) + StartRunLobby(Standard, host, stub listener, 4) + AddLocalHostPlayer + SetLocalCharacter(Ironclad) + SetReady(true)), pumped each frame by a dedicated mod Node. Matches NMultiplayerTest.StartHost exactly. Stub IStartRunLobbyListener logs BeginRun ("Ready-check PASSED").
+- SimulateVersionMismatch (const, default false): surfaces BuildMismatchedJoinFlow(wrongVersion) helper using the game's JoinFlow MockInfo seam to prove a version mismatch is still REJECTED solo (negative test).
+Off-by-default = provably inert: no [HarmonyPatch] in the file, one guarded call at MainMenu ready that returns immediately, no nodes created when off. Build 0 errors / 278 baseline.
+FIDELITY/HONESTY: this is ENet loopback (not Steam) and both peers are the SAME build - it proves the fixed manifest does NOT falsely reject a MATCHING peer and the whole ready handshake completes end to end (the JoinFlow parity code we fixed is transport-agnostic, so it IS exercised). It does NOT test Steam matchmaking or genuine cross-version interop. Approach C covers the mismatch-rejection negative case.
+USAGE: flip SimulateDummyHost=true, rebuild+deploy, launch; the menu logs "Dummy co-op host listening on 127.0.0.1:33771 (ready)". Then join 127.0.0.1:33771 as a client via the game's Join-by-IP (needs the 'fastmp' launch arg to expose it). Intended solo = join from the SAME instance (two ENet peers, one process); if shared net-singletons conflict, fall back to a second game instance as the client. Watch the host log for BeginRun = ready-check works.
+NOT deployed (off by default; deploy when you flip the const).
+## 2026-07-24 - Green upgrade-text investigation: our code exonerated; intermittent, shelved
 
 User: vanilla cards (Neutralize etc.) sometimes lose upgrade-preview green, "depending on enchantments"; bisect blamed the perf-pass DLL.
 Investigation: 3-agent trace + a deployed diagnostic build logging [green] presence at the description postfix ENTRY vs EXIT (temp instrumentation, since reverted).

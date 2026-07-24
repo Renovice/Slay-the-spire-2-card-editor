@@ -1812,6 +1812,9 @@ public static class MainMenu_Ready_Patch
 		TryApplyStartupPresetsOnce();
 		TryRunDescriptionAuditOnceAtMenu();
 		NCardEditorPopup.TryQueueUiWarmup(__instance);
+
+		// DEBUG-ONLY: no-op unless CardEditorDebugDummyLobby.SimulateDummyHost is flipped to true in source.
+		CardEditorDebugDummyLobby.TryStartDummyHostOnce();
 	}
 
 	// The one-shot description/text-snapshot audit used to fire on the first description
