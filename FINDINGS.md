@@ -1,4 +1,17 @@
-﻿## 2026-07-25 - Bug-test of our own fixes: 2 blockers found and fixed
+﻿## 2026-07-25 - Reverted perf items 3,5,6,7,8 (they caused card library/creator loading hitches)
+
+User report: the editor caches and pool/character/boot-save changes made the CARD LIBRARY and CREATOR hitch while loading - i.e. the "optimisations" were a net regression on the screens they touched. Reverted per user instruction; correctness and smoothness beat micro-optimisation.
+REVERTED (restored to pre-perf-pass-2 behaviour):
+- 3 kind-dropdown cache, 4 summary-LINQ removal, 5 chain-strip fingerprint skip -> NCardEditorPopup.cs restored wholesale to dd034c3~1 (item 4 went with them; it was a tiny invisible win and not worth carrying alone). The strip once again rebuilds every refresh, which is slower but provably never stale - and it removes the whole class of fingerprint-gap bugs (two of which the bug test had just found).
+- 6a pool title dictionary in the get_Pool/get_VisualCardPool postfixes -> CardEditorVanillaClassificationPatches.cs restored wholesale.
+- 6b GetAvailablePoolTitles cache, 7 SupportedCharacterIds cache + HashSet, 8 conditional boot Save -> surgically removed from CardEditorCreatedCardsStore.cs / CardEditorBaseDeckStore.cs, keeping item 1 in those files.
+KEPT (invisible to the UI, genuine wins, no regression reported):
+- 1 JsonSerializerOptions hoisted to static readonly across 9 stores + 2 inline sites.
+- 2 CardEditorRunPowerState write batching (removes a synchronous disk write per persistent power grant during combat).
+ALSO KEPT: the green/enchanted fix in CardEditorOverrides.cs (guard inside ReapplyRuntimeModifiers) - verified still present after the reverts.
+Build: 0 errors / 278 warnings (beta baseline). Deployed.
+LESSON: caching on UI/loading paths in this codebase has repeatedly cost more than it saved (stale-state bugs plus first-touch build hitches). Future perf work should stay on invisible paths (I/O, serialization, combat hooks) unless there is a measured profile showing the UI path is the bottleneck.
+## 2026-07-25 - Bug-test of our own fixes: 2 blockers found and fixed
 
 Two hostile review agents were pointed at the recent fixes (perf pass 2 dd034c3, gate/green ec0ee76, the branch-retarget merges). They found real bugs - both of my earlier fixes were INCOMPLETE:
 

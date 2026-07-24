@@ -101,10 +101,6 @@ internal static class CardEditorCreatedCardsStore
 	public static int Revision { get; private set; }
 	internal static bool PersistenceSuspended { get; set; }
 
-	// Lazy cache for the available pool title list. ModelDb.AllCardPools is fixed for the
-	// session (no runtime pool-mutation API exists), so this result is stable once populated.
-	private static IReadOnlyList<string>? _availablePoolTitlesCache;
-
 	public static void SetDraftMeta(ModelId cardId, bool enabled, string? title, CardEditorCreatedCardPool pool, string? poolTitle, CardRarity rarity, CardType type, TargetType targetType, List<ModelId>? effectSourceCardIds, CardEditorEffectSourcePlacement effectSourcePlacement, ModelId? portraitSourceCardId, string? customPortraitFile, bool fullArt, CardEditorVisualFinish finish, string? customText, bool customTextEnabled, Dictionary<string, float>? finishParams = null, bool customRewardPoolsEnabled = false, List<string>? customRewardPoolIds = null, CardEditorRewardPoolBucket rewardPoolBucket = CardEditorRewardPoolBucket.SameAsCard, CardEditorRewardPoolInjectionMode rewardPoolInjectionMode = CardEditorRewardPoolInjectionMode.AddToPool, string? customFinishId = null, Dictionary<string, string>? customFinishParams = null, CardEditorVisualFinish borderFinish = CardEditorVisualFinish.None, Dictionary<string, float>? borderFinishParams = null)
 	{
 		EnsureLoaded();
@@ -241,21 +237,14 @@ internal static class CardEditorCreatedCardsStore
 
 	public static IReadOnlyList<string> GetAvailablePoolTitles()
 	{
-		// ModelDb.AllCardPools is fixed for a session; cache the result on first call.
-		if (_availablePoolTitlesCache != null)
-		{
-			return _availablePoolTitlesCache;
-		}
-
 		try
 		{
-			_availablePoolTitlesCache = ModelDb.AllCardPools
+			return ModelDb.AllCardPools
 				.Where(pool => pool != null && !string.IsNullOrWhiteSpace(pool.Title))
 				.Select(pool => pool.Title.Trim())
 				.Distinct(StringComparer.OrdinalIgnoreCase)
 				.OrderBy(title => title, StringComparer.OrdinalIgnoreCase)
 				.ToList();
-			return _availablePoolTitlesCache;
 		}
 		catch
 		{
@@ -894,9 +883,7 @@ internal static class CardEditorCreatedCardsStore
 			ConfiguredSlotCount = DefaultSlotCount;
 		}
 
-		int definitionCountBeforeDefaults = _definitions.Count;
 		EnsureDefaultDefinitions();
-		bool defaultsAdded = _definitions.Count > definitionCountBeforeDefaults;
 
 		if (preserveUnreadFile)
 		{
@@ -906,13 +893,7 @@ internal static class CardEditorCreatedCardsStore
 			return;
 		}
 
-		// Only write to disk if EnsureDefaultDefinitions created new entries (i.e. the persisted
-		// file was missing slots). When nothing changed the serialized output would be byte-identical
-		// to what was just read, so writing it is a no-op that wastes CPU and disk I/O at every boot.
-		if (defaultsAdded)
-		{
-			Save();
-		}
+		Save();
 	}
 
 	private static void TryBackupUnreadStoreFile()

@@ -7,33 +7,6 @@ using MegaCrit.Sts2.Core.Models;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
-// Lazy title-to-pool dictionary shared by the get_Pool and get_VisualCardPool patches.
-// ModelDb.AllCardPools is fixed for a session (no runtime pool-mutation API exists),
-// so building this once per session is safe. The O(1) TryGetValue replaces the O(pools)
-// FirstOrDefault that ran on every card render.
-internal static class CardPoolTitleCache
-{
-	private static Dictionary<string, CardPoolModel>? _byTitle;
-
-	internal static bool TryGet(string title, out CardPoolModel? pool)
-	{
-		if (_byTitle == null)
-		{
-			var dict = new Dictionary<string, CardPoolModel>(StringComparer.OrdinalIgnoreCase);
-			foreach (CardPoolModel p in ModelDb.AllCardPools)
-			{
-				if (p != null && !string.IsNullOrWhiteSpace(p.Title))
-				{
-					dict.TryAdd(p.Title, p);
-				}
-			}
-			_byTitle = dict;
-		}
-
-		return _byTitle.TryGetValue(title, out pool);
-	}
-}
-
 [HarmonyPatch(typeof(CardModel), "get_Pool")]
 internal static class CardModel_get_Pool_VanillaOverride_Patch
 {
@@ -51,7 +24,8 @@ internal static class CardModel_get_Pool_VanillaOverride_Patch
 			&& !string.IsNullOrWhiteSpace(overrideData.PoolTitle))
 		{
 			string desired = overrideData.PoolTitle.Trim();
-			if (CardPoolTitleCache.TryGet(desired, out CardPoolModel? pool) && pool != null)
+			CardPoolModel? pool = ModelDb.AllCardPools.FirstOrDefault(p => string.Equals(p.Title, desired, StringComparison.OrdinalIgnoreCase));
+			if (pool != null)
 			{
 				__result = pool;
 			}
@@ -81,7 +55,8 @@ internal static class CardModel_get_VisualCardPool_VanillaOverride_Patch
 			&& !string.IsNullOrWhiteSpace(overrideData.PoolTitle))
 		{
 			string desired = overrideData.PoolTitle.Trim();
-			if (CardPoolTitleCache.TryGet(desired, out CardPoolModel? pool) && pool != null)
+			CardPoolModel? pool = ModelDb.AllCardPools.FirstOrDefault(p => string.Equals(p.Title, desired, StringComparison.OrdinalIgnoreCase));
+			if (pool != null)
 			{
 				__result = pool;
 			}
