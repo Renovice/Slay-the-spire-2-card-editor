@@ -1,4 +1,20 @@
-﻿## 2026-07-24 - Debug dummy co-op host toggle (ENet loopback) for solo ready-check testing
+﻿## 2026-07-24 - BOTH root causes found: ready gate swallowed clicks; our rebase cleared vanilla green
+
+Prior diagnoses were WRONG on both counts. Corrected:
+
+GATE (MP ready). Old theory: invalid SemVer manifest broke mod parity. WRONG - the game's version/mod parity check runs in JoinFlow.Begin at JOIN time; players already IN a lobby seeing each other have passed it. Real cause: OUR Harmony prefix on StartRunLobby.SetReady (CardEditorStartRunLobbySetReadyPatch) -> AllowClientReady returned FALSE to "hold" the ready until the host snapshot applied. Returning false suppresses the game's SetReady, which is what SENDS LobbyPlayerSetReadyMessage - so the HOST never learned the client was ready and IsAboutToBeginGame() stayed false forever. Any hole in the deferred re-fire (FirePendingReadyIfNeeded ClearPendingReady() on a transient _netService null/rebind; a pump that stopped ticking on scene change) ate the click permanently with zero UI feedback. Decisive argument: the hold ALREADY failed open after 3s regardless of sync state, so it never prevented an unsynced ready - it only DELAYED one. Near-zero safety, catastrophic downside.
+FIX: AllowClientReady now ALWAYS returns true (never blocks); when a client readies pre-snapshot it re-arms the sync request and logs a warning. Dead _bypassReadyGate field + empty finally removed.
+
+GREEN (vanilla upgrade preview). Old status: shelved as "intermittent, our postfix exonerated". The postfix WAS innocent (measured greenIn==greenOut) - the culprit was a PREFIX. Chain, fully proven in source:
+- DynamicVar.ToHighlightedString (DynamicVar.cs:175) renders green when WasJustUpgraded is true.
+- FinalizeUpgradeInternal (CardModel.cs:2143-2148) -> DynamicVars.FinalizeUpgrade() -> DynamicVar.cs:154 sets WasJustUpgraded = false. Finalize CLEARS green.
+- Vanilla's campfire preview clones the card and calls UpgradeInternal WITHOUT Finalize, so the flag stays set = green.
+- OUR CardEditorOverrides.RefreshCardAfterUpgradeStateChanged (:1449-1460) rebuilt the card with UpgradeInternal() + FinalizeUpgradeInternal() -> flag cleared -> green gone. Reached via the GetDescriptionForUpgradePreview PREFIX -> TryRestoreCard -> RebaseCardToCurrentDefinition, which only does real work when the card has a stored mutation payload - ENCHANTING creates one, hence "sometimes depending on enchantments", and hence greenIn=False in the live trace (vanilla built its string AFTER we wiped the flag).
+FIX: capture CardHasJustUpgradedFlag(card) before the rebuild; skip FinalizeUpgradeInternal in the re-upgrade loop when the card arrived already flagged (a preview clone), preserving vanilla's green. Non-preview cards finalize exactly as before. Honors the user constraint: our machinery must never alter vanilla/pre-baked text.
+
+Build: 0 errors / 278 warnings (baseline). Deployed + built cfiles + release zip refreshed.
+Next Step: (1) MP - both players retry Ready in a real lobby; it must register immediately now. (2) GREEN - enchant a card, then open a campfire upgrade preview on a vanilla card; changed numbers must be green.
+## 2026-07-24 - Debug dummy co-op host toggle (ENet loopback) for solo ready-check testing
 
 Feasibility workflow (wf_2efeadf0) verified the game supports in-process ENet loopback (two ENet sockets coexist; NMultiplayerTest is the reference). Built CardEditorDebugDummyLobby.cs:
 - SimulateDummyHost (const, default false): spawns an in-process dummy co-op HOST at main-menu ready (NetHostGameService + StartENetHost(33771,4) + StartRunLobby(Standard, host, stub listener, 4) + AddLocalHostPlayer + SetLocalCharacter(Ironclad) + SetReady(true)), pumped each frame by a dedicated mod Node. Matches NMultiplayerTest.StartHost exactly. Stub IStartRunLobbyListener logs BeginRun ("Ready-check PASSED").

@@ -1402,6 +1402,32 @@ public static class CardEditorOverrides
 		CardEditorExtraEffects.InvalidateVanillaParityVars(card);
 	}
 
+	// True when the card is carrying vanilla's "just upgraded" marks - i.e. it is an upgrade-preview
+	// clone whose changed numbers should render green. Read-only probe; never throws.
+	private static bool CardHasJustUpgradedFlag(CardModel card)
+	{
+		try
+		{
+			if (card.EnergyCost?.WasJustUpgraded == true)
+			{
+				return true;
+			}
+
+			foreach ((string _, var dynamicVar) in card.DynamicVars)
+			{
+				if (dynamicVar?.WasJustUpgraded == true)
+				{
+					return true;
+				}
+			}
+		}
+		catch
+		{
+		}
+
+		return false;
+	}
+
 	internal static void RefreshCardAfterUpgradeStateChanged(CardModel card)
 	{
 		if (card == null || !card.IsMutable)
@@ -1410,6 +1436,15 @@ public static class CardEditorOverrides
 		}
 
 		int desiredUpgradeLevel = Math.Max(0, card.CurrentUpgradeLevel);
+
+		// Vanilla renders an upgrade PREVIEW's changed numbers green off DynamicVar.WasJustUpgraded
+		// (set by UpgradeInternal, cleared by FinalizeUpgradeInternal). The upgrade-preview clone is
+		// handed to us mid-preview with that flag SET; rebuilding the card below re-upgrades it and
+		// would Finalize, silently clearing the flag and killing vanilla's green on any card we touch
+		// (only cards with a stored mutation - e.g. enchanted ones - reach this path, which is why the
+		// green loss looked intermittent). Preserve whatever state the card arrived in.
+		bool wasJustUpgraded = CardHasJustUpgradedFlag(card);
+
 		bool prevSuppressAll = SuppressAllOverrides;
 		SuppressAllOverrides = true;
 
@@ -1451,7 +1486,13 @@ public static class CardEditorOverrides
 			try
 			{
 				card.UpgradeInternal();
-				card.FinalizeUpgradeInternal();
+
+				// Only finalize when the card was NOT already in a just-upgraded (preview) state -
+				// finalizing there would clear vanilla's green highlight flag.
+				if (!wasJustUpgraded)
+				{
+					card.FinalizeUpgradeInternal();
+				}
 			}
 			catch
 			{

@@ -203,7 +203,6 @@ internal static class CardEditorMultiplayerSync
 	private static bool _pendingClientReady;
 	private static Action? _pendingReadyAction;
 	private static ulong _pendingReadyStartMs;
-	private static bool _bypassReadyGate;
 	private static ulong _lastSyncRequestMs;
 	private static bool _runnerAddQueued;
 	private const double ReadyGateTimeoutSeconds = 3.0;
@@ -301,44 +300,30 @@ internal static class CardEditorMultiplayerSync
 			return true;
 		}
 
-		if (_bypassReadyGate || _netService == null || _netService.Type != NetGameType.Client)
+		// NEVER block the ready click. Blocking suppressed the game's own SetReady, which is what sends
+		// LobbyPlayerSetReadyMessage - so the HOST never learned this client was ready and the run could
+		// never start. Any hole in the deferred re-fire (a transient net-service rebind clearing the
+		// pending action, a pump that stopped ticking on a scene change) ate the click permanently, with
+		// no UI feedback: exactly the reported "can't click ready" symptom.
+		//
+		// The old hold also failed open after ReadyGateTimeoutSeconds REGARDLESS of sync state, so it only
+		// ever DELAYED an unsynced ready rather than preventing one - near-zero safety for a catastrophic
+		// downside. We now always pass the ready through and just make sure the snapshot request is in
+		// flight; a late snapshot still applies normally.
+		ClearPendingReady();
+
+		if (_netService != null
+			&& _netService.Type == NetGameType.Client
+			&& CardEditorMultiplayerSettings.MultiplayerSyncEnabled
+			&& !IsClientSnapshotApplied())
 		{
-			return true;
+			// Re-arm the request so Update() asks the host again on its next tick.
+			_requestedInitialSync = false;
+			Log.Warn("[CardEditor][MultiplayerSync] Readying before the host card-editor snapshot has been applied; "
+				+ "requesting it now. Card/relic definitions may differ until it lands.");
 		}
 
-		// If sync is off locally there is nothing to wait for - don't stall the lobby.
-		if (!CardEditorMultiplayerSettings.MultiplayerSyncEnabled)
-		{
-			return true;
-		}
-
-		if (IsClientSnapshotApplied())
-		{
-			// Snapshot already synced: the gate is satisfied. Drop any still-held ready so a manual
-			// re-click cannot also trigger a deferred re-fire (duplicate ready message).
-			ClearPendingReady();
-			return true;
-		}
-
-		// The deferred re-fire runs from the runner node's _Process. If that pump is not verifiably
-		// alive, holding would eat the click forever - let it through instead (worst case is the old
-		// pre-gate behavior: readying with possibly unsynced definitions).
-		EnsureRunner();
-		if (_runner == null || !GodotObject.IsInstanceValid(_runner) || !_runner.IsInsideTree())
-		{
-			Log.Warn("[CardEditor][MultiplayerSync] Sync pump unavailable; sending lobby ready without waiting for the host snapshot.");
-			return true;
-		}
-
-		_pendingClientReady = true;
-		_pendingReadyAction = fireReadyTrue;
-		if (_pendingReadyStartMs == 0)
-		{
-			_pendingReadyStartMs = Time.GetTicksMsec();
-			Log.Info($"[CardEditor][MultiplayerSync] Holding lobby ready until the card-editor snapshot is applied (fails open after {ReadyGateTimeoutSeconds:0}s).");
-		}
-		_requestedInitialSync = false;
-		return false;
+		return true;
 	}
 
 	private static void ClearPendingReady()
@@ -387,7 +372,6 @@ internal static class CardEditorMultiplayerSync
 			return;
 		}
 
-		_bypassReadyGate = true;
 		try
 		{
 			fire();
@@ -395,10 +379,6 @@ internal static class CardEditorMultiplayerSync
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor][MultiplayerSync] Failed firing deferred lobby ready: {ex}");
-		}
-		finally
-		{
-			_bypassReadyGate = false;
 		}
 	}
 
@@ -430,7 +410,6 @@ internal static class CardEditorMultiplayerSync
 		_remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
 		_remoteSyncActive = false;
 		ClearPendingReady();
-		_bypassReadyGate = false;
 		_lastSyncRequestMs = 0;
 		CaptureRevisionCheckpoint();
 		CardEditorMod.VerboseLog($"[CardEditor][MultiplayerSync] Bound to {_netService.Type} service netId={_netService.NetId}");
@@ -1196,7 +1175,6 @@ internal static class CardEditorMultiplayerSync
 		_remoteAuthorityMode = CardEditorMultiplayerAuthorityMode.HostOnly;
 		_remoteSyncActive = false;
 		ClearPendingReady();
-		_bypassReadyGate = false;
 		_lastSyncRequestMs = 0;
 	}
 
