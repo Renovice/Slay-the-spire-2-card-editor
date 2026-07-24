@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Godot;
+using HarmonyLib;
+using MegaCrit.Sts2.addons.mega_text;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
@@ -11,6 +14,8 @@ using MegaCrit.Sts2.Core.Multiplayer.Connection;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Runs;
@@ -71,19 +76,17 @@ internal static class CardEditorDebugDummyLobby
 	private static StartRunLobby? _dummyLobby;
 	private static CardEditorDebugDummyLobbyPump? _pump;
 
-	// The live main menu captured at ready-time (only on the enabled path); source of the JoinGame call.
+	// The live main menu captured at ready-time (only on the enabled path). Kept as a diagnostic handle;
+	// the actual join is driven from the fake friend-list entry (see NJoinFriendScreen_ShowFriends_DummyEntry_Patch).
 	private static NMainMenu? _mainMenu;
-
-	// Mod-owned CanvasLayer hosting the one-click debug join button. Only ever created on the enabled path.
-	private static CanvasLayer? _joinButtonLayer;
 
 	/// <summary>
 	/// Called once from <c>MainMenu_Ready_Patch.Postfix</c>. Returns immediately (zero cost) unless
 	/// <see cref="SimulateDummyHost"/> is enabled. Never throws into game code.
 	/// </summary>
 	/// <param name="mainMenu">
-	/// The live <see cref="NMainMenu"/> from the ready patch. Captured only on the enabled path so the
-	/// one-click debug join button can drive the real join flow (<see cref="NMainMenu.JoinGame"/>).
+	/// The live <see cref="NMainMenu"/> from the ready patch. Captured only on the enabled path as a
+	/// diagnostic handle.
 	/// </param>
 	internal static void TryStartDummyHostOnce(NMainMenu? mainMenu = null)
 	{
@@ -151,13 +154,13 @@ internal static class CardEditorDebugDummyLobby
 			_pump = new CardEditorDebugDummyLobbyPump();
 			tree.Root.CallDeferred(Node.MethodName.AddChild, _pump);
 
-			// One-click join: since the dummy host started, add an always-visible debug button that fires
-			// the real join flow against 127.0.0.1:33771 - no 'fastmp' arg or manual IP entry required.
-			TryAddJoinButton(tree);
-
+			// One-click join: since the dummy host started, the ShowFriends postfix patch injects a fake
+			// "Dummy Host [debug]" entry into the game's own "Choose Friend to Join" list (NJoinFriendScreen).
+			// Clicking that entry fires the real join flow against 127.0.0.1:33771 - no 'fastmp' arg or manual
+			// IP entry required. The F9 key fallback (in the pump node) still works if that screen isn't open.
 			Log.Info($"[CardEditor][DummyLobby] Dummy co-op host listening on 127.0.0.1:{DummyHostPort} (ready). " +
-				"Click the 'Join Dummy Host [debug]' button (top-left) or press F9 to join as a client and test the ready-check. " +
-				"The 'fastmp' arg / manual Join-by-IP path still works too.");
+				"Open 'Join Friend' and click the 'Dummy Host [debug]' entry (or press F9) to join as a client and " +
+				"test the ready-check. The 'fastmp' arg / manual Join-by-IP path still works too.");
 		}
 		catch (Exception ex)
 		{
@@ -187,55 +190,15 @@ internal static class CardEditorDebugDummyLobby
 	}
 
 	/// <summary>
-	/// Builds a mod-owned <see cref="CanvasLayer"/> (high layer, added straight to the SceneTree root) with
-	/// a single Godot <see cref="Button"/> anchored top-left. Living on its own layer at the root makes the
-	/// button robust against the main menu's own layout/containers. Pressing it fires <see cref="JoinDummyHost"/>.
-	/// Only ever called on the enabled path (guarded by the const at the call site).
-	/// </summary>
-	private static void TryAddJoinButton(SceneTree tree)
-	{
-		try
-		{
-			if (_joinButtonLayer != null)
-			{
-				return;
-			}
-
-			CanvasLayer layer = new CanvasLayer
-			{
-				Name = "CardEditorDebugDummyLobbyJoinLayer",
-				Layer = 128
-			};
-
-			Button button = new Button
-			{
-				Name = "CardEditorDebugDummyLobbyJoinButton",
-				Text = "Join Dummy Host [debug]",
-				Position = new Vector2(20, 20)
-			};
-
-			button.Pressed += () => JoinDummyHost("button");
-			layer.AddChild(button);
-
-			_joinButtonLayer = layer;
-			tree.Root.CallDeferred(Node.MethodName.AddChild, layer);
-		}
-		catch (Exception ex)
-		{
-			// A debug button must NEVER crash the game.
-			Log.Warn($"[CardEditor][DummyLobby] Failed adding Join Dummy Host button: {ex}");
-		}
-	}
-
-	/// <summary>
 	/// Fires the REAL join flow: <see cref="NMainMenu.JoinGame"/> with an
 	/// <see cref="ENetClientConnectionInitializer"/> pointed at the in-process dummy host
 	/// (<see cref="DummyHostIp"/>:<see cref="DummyHostPort"/>). Routed through
 	/// <see cref="TaskHelper.RunSafely"/> so the async task's exceptions are logged, and fully try/catch
-	/// guarded so neither the button nor the key fallback can crash the game. Invoked by the button and by
-	/// the F9 key fallback in <see cref="CardEditorDebugDummyLobbyPump"/>.
+	/// guarded so it can never crash the game. Invoked by the F9 key fallback in
+	/// <see cref="CardEditorDebugDummyLobbyPump"/> (the primary path is the fake friend-list entry, which
+	/// drives NJoinFriendScreen's own JoinGame instead).
 	/// </summary>
-	/// <param name="source">Where the join was triggered from ("button" or "key"), for the log line.</param>
+	/// <param name="source">Where the join was triggered from ("key"), for the log line.</param>
 	internal static void JoinDummyHost(string source)
 	{
 		if (!SimulateDummyHost)
@@ -254,10 +217,8 @@ internal static class CardEditorDebugDummyLobby
 
 			Log.Info($"[CardEditor][DummyLobby] Join Dummy Host clicked ({source}) -> connecting to {DummyHostIp}:{DummyHostPort}");
 
-			ENetClientConnectionInitializer initializer = new ENetClientConnectionInitializer(DummyClientNetId, DummyHostIp, DummyHostPort);
-
 			// JoinGame is public async Task; RunSafely fires it without awaiting and logs any exception.
-			TaskHelper.RunSafely(menu.JoinGame(initializer));
+			TaskHelper.RunSafely(menu.JoinGame(BuildDummyClientInitializer()));
 		}
 		catch (Exception ex)
 		{
@@ -298,6 +259,16 @@ internal static class CardEditorDebugDummyLobby
 		};
 
 		return new JoinFlow(new NetClientGameService(), mockInfo);
+	}
+
+	/// <summary>
+	/// Builds the <see cref="ENetClientConnectionInitializer"/> that points at the in-process dummy host
+	/// (<see cref="DummyHostIp"/>:<see cref="DummyHostPort"/> as <see cref="DummyClientNetId"/>). Used by
+	/// both the F9 key fallback and the fake friend-list entry so the connection details live in one place.
+	/// </summary>
+	internal static ENetClientConnectionInitializer BuildDummyClientInitializer()
+	{
+		return new ENetClientConnectionInitializer(DummyClientNetId, DummyHostIp, DummyHostPort);
 	}
 
 	/// <summary>
@@ -370,8 +341,9 @@ internal sealed partial class CardEditorDebugDummyLobbyPump : Node
 	}
 
 	/// <summary>
-	/// Key fallback for the one-click join: pressing F9 fires the same real join flow as the debug button,
-	/// in case the button is obscured by menu UI. Fully guarded; a debug key must never crash the game.
+	/// Key fallback for the one-click join: pressing F9 fires the same real join flow as the fake
+	/// friend-list entry, in case the "Join Friend" screen isn't open. Fully guarded; a debug key must
+	/// never crash the game.
 	/// </summary>
 	public override void _UnhandledInput(InputEvent @event)
 	{
@@ -385,6 +357,119 @@ internal sealed partial class CardEditorDebugDummyLobbyPump : Node
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor][DummyLobby] Dummy host key fallback failed: {ex}");
+		}
+	}
+}
+
+/// <summary>
+/// DEBUG-ONLY Harmony postfix on <see cref="NJoinFriendScreen"/>.ShowFriends that injects a fake
+/// "Dummy Host [debug]" entry into the game's own "Choose Friend to Join" list, wired to join the
+/// in-process dummy host on 127.0.0.1:33771. This replaces the old floating CanvasLayer button so the
+/// entry lives IN the friend list, exactly where a real joinable friend would appear.
+///
+/// <para>
+/// <b>Zero-cost when disabled:</b> <see cref="Prepare"/> returns
+/// <see cref="CardEditorDebugDummyLobby.SimulateDummyHost"/>. When the const is <c>false</c> Harmony
+/// skips the patch entirely - it is never applied, so ShowFriends runs completely unmodified and there
+/// is no runtime cost or behavioral change whatsoever.
+/// </para>
+///
+/// <para>
+/// The postfix runs at ShowFriends' first <c>await</c>, which is AFTER the synchronous clear of
+/// <c>_buttonContainer</c> (NJoinFriendScreen L149-152) - so the fake entry survives that clear and
+/// coexists with any real Steam friends added later in the same method.
+/// </para>
+/// </summary>
+[HarmonyPatch(typeof(NJoinFriendScreen), "ShowFriends")]
+internal static class NJoinFriendScreen_ShowFriends_DummyEntry_Patch
+{
+	// NetId used for the fake list entry's NJoinFriendButton. Distinct from real Steam ids (2000UL is the
+	// same debug client id the dummy host expects) so its blank Steam name is overridden below.
+	private const ulong DummyEntryPlayerId = 2000UL;
+
+	private static readonly FieldInfo? _buttonContainerField =
+		AccessTools.Field(typeof(NJoinFriendScreen), "_buttonContainer");
+
+	private static readonly FieldInfo? _noFriendsLabelField =
+		AccessTools.Field(typeof(NJoinFriendScreen), "_noFriendsLabel");
+
+	private static readonly MethodInfo? _joinGameMethod =
+		AccessTools.Method(typeof(NJoinFriendScreen), "JoinGame", new[] { typeof(IClientConnectionInitializer) });
+
+	// When SimulateDummyHost is false this returns false, so Harmony NEVER applies the patch: truly inert.
+	private static bool Prepare()
+	{
+		return CardEditorDebugDummyLobby.SimulateDummyHost;
+	}
+
+	private static void Postfix(NJoinFriendScreen __instance)
+	{
+		try
+		{
+			if (_buttonContainerField?.GetValue(__instance) is not Control buttonContainer)
+			{
+				Log.Warn("[CardEditor][DummyLobby] ShowFriends postfix: _buttonContainer unavailable; cannot add fake entry.");
+				return;
+			}
+
+			// Build the same NJoinFriendButton scene the real friend entries use, then parent it into the
+			// list. AddChildSafely mirrors what ShowFriends itself does for real friends.
+			NJoinFriendButton btn = NJoinFriendButton.Create(DummyEntryPlayerId);
+			buttonContainer.AddChildSafely(btn);
+
+			// The button's _Ready sets its %Text label to the (blank/garbage) Steam name for id 2000. Override
+			// it AFTER _Ready runs by deferring the label write to the end of the current frame.
+			Callable.From(delegate
+			{
+				try
+				{
+					if (GodotObject.IsInstanceValid(btn))
+					{
+						MegaRichTextLabel label = btn.GetNode<MegaRichTextLabel>("%Text");
+						label.Text = "[center]Dummy Host [debug][/center]";
+					}
+				}
+				catch (Exception ex)
+				{
+					Log.Warn($"[CardEditor][DummyLobby] ShowFriends postfix: failed overriding fake entry label: {ex}");
+				}
+			}).CallDeferred();
+
+			// Wire the click to the screen's own private JoinGame(IClientConnectionInitializer), driving the
+			// REAL join flow against the in-process dummy host - identical to how real friend entries join.
+			btn.Connect(NClickableControl.SignalName.Released, Callable.From<NButton>(delegate
+			{
+				try
+				{
+					Log.Info("[CardEditor][DummyLobby] Fake lobby entry clicked -> joining 127.0.0.1:33771");
+					ENetClientConnectionInitializer initializer = CardEditorDebugDummyLobby.BuildDummyClientInitializer();
+					if (_joinGameMethod != null)
+					{
+						_joinGameMethod.Invoke(__instance, new object[] { initializer });
+					}
+					else
+					{
+						// Fallback: JoinGame is a one-liner over the public JoinGameAsync.
+						TaskHelper.RunSafely(__instance.JoinGameAsync(initializer));
+					}
+				}
+				catch (Exception ex)
+				{
+					Log.Warn($"[CardEditor][DummyLobby] Fake lobby entry click failed: {ex}");
+				}
+			}));
+
+			// Hide the "No friends" label: with a joinable (fake) entry present the list is not empty.
+			if (_noFriendsLabelField?.GetValue(__instance) is MegaLabel noFriendsLabel
+				&& GodotObject.IsInstanceValid(noFriendsLabel))
+			{
+				noFriendsLabel.Visible = false;
+			}
+		}
+		catch (Exception ex)
+		{
+			// A debug entry must NEVER crash the join screen.
+			Log.Warn($"[CardEditor][DummyLobby] Failed injecting fake friend-list entry: {ex}");
 		}
 	}
 }
