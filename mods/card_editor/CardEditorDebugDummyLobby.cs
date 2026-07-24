@@ -72,6 +72,7 @@ internal static class CardEditorDebugDummyLobby
 	private const ulong DummyClientNetId = 2000UL;
 
 	private static bool _started;
+	private static bool _dummyClientConnected;
 	private static NetHostGameService? _dummyHost;
 	private static StartRunLobby? _dummyLobby;
 	private static CardEditorDebugDummyLobbyPump? _pump;
@@ -209,7 +210,29 @@ internal static class CardEditorDebugDummyLobby
 
 		try
 		{
-			_dummyHost?.Update();
+			NetHostGameService? host = _dummyHost;
+			if (host == null)
+			{
+				return;
+			}
+
+			if (_dummyClientConnected)
+			{
+				// A client is connected; a single non-blocking service per frame is enough.
+				host.Update();
+				return;
+			}
+
+			// No client yet. The ENet connect handshake (CONNECT -> VERIFY_CONNECT -> Connect event)
+			// can't complete in one process because both ends do isolated 0ms service passes at coarse,
+			// unsynchronized cadences (the client only polls ~10x/sec behind Task.Delay(100)). Burst-drain
+			// the host for ~one frame with 1ms gaps so the OS delivers the CONNECT between passes and the
+			// host flushes VERIFY_CONNECT inside the client's 100ms poll window. Stops once connected.
+			for (int i = 0; i < 16; i++)
+			{
+				host.Update();
+				System.Threading.Thread.Sleep(1);
+			}
 		}
 		catch (Exception ex)
 		{
@@ -249,6 +272,9 @@ internal static class CardEditorDebugDummyLobby
 				return;
 			}
 
+			// A real remote client is now connected - stop the burst-pump (see PumpDummyHost) and
+			// fall back to a single service per frame.
+			_dummyClientConnected = true;
 			Log.Info("[CardEditor][DummyLobby] Client connected - re-affirming dummy character + ready");
 
 			// Re-affirm character only if we captured a valid one; always re-affirm ready.
