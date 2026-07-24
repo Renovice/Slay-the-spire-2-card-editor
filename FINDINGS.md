@@ -1,4 +1,10 @@
-﻿## 2026-07-20 - Perf pass shipped: 20/22 audit findings + 6 review fixes (user: "choppy on occasion")
+﻿## 2026-07-24 - MP ready-check: manifest version was not valid SemVer
+
+godot.log line 16: "[WARN] Mod card_editor declares version 10.0 which is not a valid Semantic Version" - the GAME validates manifest versions as SemVer and uses mod identity/version for the multiplayer mod-parity check ("MODDED (n)" + lobby checkmark). An unparseable version plausibly breaks the between-players mod match, leaving the ready checkmark stuck. ("7.7" was equally invalid, so the weird checkmark may predate us; making it valid is correct regardless.)
+Fix: card_editor.json version "10.0" -> "10.0.0" (repo + deployed + built cfiles + release zip). No DLL change needed. BOTH players need the fixed manifest AND the same DLL.
+Green-text upgrade-preview regression: perf-pass gate, self-scaling restore reorder, and fuse inherit all examined and provably innocent for untouched cards (gated passes are override-guarded no-ops; old code checked the same marker post-parse). Root cause NOT yet identified - needs a bisect data point (does green break on a fresh un-edited card? which dated DLL backup last showed green?).
+Next Step: user retests MP with matched builds; user bisects green via bak-2026-07-19b/20a/20c/20d or reports whether an untouched card also loses green.
+## 2026-07-20 - Perf pass shipped: 20/22 audit findings + 6 review fixes (user: "choppy on occasion")
 
 2-agent audit (wf_705c7bbc-8f8, 22 verified findings) then implementation (agent a7b20519) then 2-agent adversarial review (wf_bceb33c5-336, 6 findings, all fixed):
 CORE: new CardEditorRuntimeCacheVersion (one Interlocked counter, ~30 bump seams across every store/controller that can change effective effects) + CardEditorRuntimeCaches (per-card mod-touched gate + 16-kind presence bitmask keyed on version+upgrade level; ALWAYS bypassed when the combat has temp/aura grants - over-eager by design, stale reads impossible).
