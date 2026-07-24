@@ -22622,10 +22622,22 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			sb.Append(row.AmountSourceEffectId ?? string.Empty); sb.Append(F);
 			sb.Append(row.CardSelectionSourceEffectId ?? string.Empty); sb.Append(F);
 
-			// KindSelect / TriggerSelect / TargetSelect: selected index covers label changes.
+			// Fingerprint the RENDERED TEXT, not select indices. The box title and sub-line come from
+			// these helpers, which read far more state than the three selects do: the unified
+			// variant/mode pickers, card-generation/ignore/auto-action/card-action/upgrade variants,
+			// value-source actor/kind/aggregation and the source multiplier - and some labels are
+			// mutated IN PLACE (As-Power rewrites the trigger labels; the amount-source dropdown
+			// relabels when another row's kind changes), so a stable index hid a real change. Hashing
+			// the output makes this self-maintaining: if the strip can render it, changing it
+			// invalidates the fingerprint here.
 			AppendSelectFp(sb, row.KindSelect); sb.Append(F);
-			AppendSelectFp(sb, row.TriggerSelect); sb.Append(F);
-			AppendSelectFp(sb, row.TargetSelect); sb.Append(F);
+			sb.Append(GetEffectSummaryKindText(row)); sb.Append(F);
+			sb.Append(GetEffectSummaryAmountText(row)); sb.Append(F);
+			sb.Append(GetSelectedItemText(row.TriggerSelect, string.Empty)); sb.Append(F);
+			sb.Append(GetSelectedItemText(row.TargetSelect, string.Empty)); sb.Append(F);
+			sb.Append(GetSelectedItemText(row.BranchConditionTypeSelect, string.Empty)); sb.Append(F);
+			sb.Append(GetSelectedItemText(row.AmountSourceEffectSelect, string.Empty)); sb.Append(F);
+			sb.Append(GetSelectedItemText(row.CardSelectionSourceEffectSelect, string.Empty)); sb.Append(F);
 
 			// Amount field.
 			AppendLineFp(sb, row.AmountField); sb.Append(F);

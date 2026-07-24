@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("card_editor")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("10.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("10.0.0+a78ea7f9854a8759126106a69884e33c3ca3f1b8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("10.0.0+b58b146d2ab46d29b576fba11c0746f23c354ff8")]
 [assembly: System.Reflection.AssemblyProductAttribute("card_editor")]
 [assembly: System.Reflection.AssemblyTitleAttribute("card_editor")]
 [assembly: System.Reflection.AssemblyVersionAttribute("10.0.0.0")]

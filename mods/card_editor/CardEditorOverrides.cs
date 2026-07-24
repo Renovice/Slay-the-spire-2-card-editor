@@ -1147,8 +1147,17 @@ public static class CardEditorOverrides
 		{
 			if (card.Enchantment != null)
 			{
+				// Same rule as RefreshCardAfterUpgradeStateChanged: FinalizeUpgradeInternal clears
+				// vanilla's WasJustUpgraded marks, which are what render an upgrade PREVIEW's changed
+				// numbers green. This runs on the preview clone too (both via the upgrade postfix and
+				// via the rebuild below), so finalizing here was silently killing the green for
+				// ENCHANTED cards even after the rebuild loop learned to preserve it.
+				bool wasJustUpgraded = CardHasJustUpgradedFlag(card);
 				card.Enchantment.ModifyCard();
-				card.FinalizeUpgradeInternal();
+				if (!wasJustUpgraded)
+				{
+					card.FinalizeUpgradeInternal();
+				}
 				changed = true;
 			}
 		}
