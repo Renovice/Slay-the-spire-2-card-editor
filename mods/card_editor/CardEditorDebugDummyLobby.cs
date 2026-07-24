@@ -76,6 +76,15 @@ internal static class CardEditorDebugDummyLobby
 	private static StartRunLobby? _dummyLobby;
 	private static CardEditorDebugDummyLobbyPump? _pump;
 
+	// The character the dummy host picked at startup, captured so it can be re-affirmed (re-broadcast) when a
+	// real client actually connects. See OnDummyLobbyPlayerConnected for why re-affirming is needed.
+	private static CharacterModel? _dummyCharacter;
+
+	// The dummy host's OWN NetId (NetHostGameService.NetId, which is 1). Captured after the host starts so the
+	// PlayerConnected handler can distinguish the host's own local player (fired at AddLocalHostPlayerInternal)
+	// from a real remote client joining.
+	private static ulong _dummyHostNetId;
+
 	// The live main menu captured at ready-time (only on the enabled path). Kept as a diagnostic handle;
 	// the actual join is driven from the fake friend-list entry (see NJoinFriendScreen_ShowFriends_DummyEntry_Patch).
 	private static NMainMenu? _mainMenu;
@@ -140,11 +149,30 @@ internal static class CardEditorDebugDummyLobby
 			lobby.AddLocalHostPlayer(new UnlockState(SaveManager.Instance.Progress), SaveManager.Instance.Progress.MaxMultiplayerAscension);
 
 			// Pick the first available character, matching how NMultiplayerTestCharacterPaginator
-			// enumerates (index 0 = Ironclad).
-			lobby.SetLocalCharacter(ModelDb.Character<Ironclad>());
+			// enumerates (index 0 = Ironclad). Captured so it can be re-affirmed when a client connects.
+			_dummyCharacter = ModelDb.Character<Ironclad>();
+			if (_dummyCharacter != null)
+			{
+				lobby.SetLocalCharacter(_dummyCharacter);
+			}
+			else
+			{
+				Log.Warn("[CardEditor][DummyLobby] ModelDb.Character<Ironclad>() returned null; skipping initial SetLocalCharacter.");
+			}
 
 			// Ready the host player so the only thing gating run-start is the joining client readying.
 			lobby.SetReady(true);
+
+			// Capture the host's own NetId (== 1) so the PlayerConnected handler can ignore the host's own
+			// local player and only re-affirm when a REMOTE client connects. Safe to read here: the host has
+			// started successfully, so NetHostGameService.NetId will not throw.
+			_dummyHostNetId = host.NetId;
+
+			// When a client actually connects, re-affirm character + ready so the (now-connected) client sees
+			// a ready partner. The initial SetLocalCharacter/SetReady above broadcast to nobody (no peer yet).
+			// Guarded so a double-subscribe cannot happen: this whole block only runs once (see _started guard
+			// at the top of the method) and only on the enabled SimulateDummyHost path.
+			lobby.PlayerConnected += OnDummyLobbyPlayerConnected;
 
 			_dummyHost = host;
 			_dummyLobby = lobby;
@@ -186,6 +214,54 @@ internal static class CardEditorDebugDummyLobby
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor][DummyLobby] Dummy host pump failed: {ex}");
+		}
+	}
+
+	/// <summary>
+	/// Handles <see cref="StartRunLobby.PlayerConnected"/> for the dummy host. This event fires both for the
+	/// host's OWN local player (from <c>AddLocalHostPlayerInternal</c>, id == host NetId) and for a real remote
+	/// client joining (from <c>HandleClientLobbyJoinRequestMessage</c>, AFTER the join response is sent and the
+	/// peer is marked ready for broadcasting). We ignore the former and, for the latter, re-affirm the dummy
+	/// host's character + ready so those state messages actually reach the now-connected client - the initial
+	/// SetLocalCharacter/SetReady at startup broadcast to nobody because no peer existed yet.
+	///
+	/// Re-affirming is safe: the joining client is not yet ready, so <c>IsAboutToBeginGame</c> is false and
+	/// re-calling SetReady(true) will not prematurely start the run. Fully guarded; must never crash the lobby.
+	/// </summary>
+	private static void OnDummyLobbyPlayerConnected(LobbyPlayer p)
+	{
+		if (!SimulateDummyHost)
+		{
+			return;
+		}
+
+		try
+		{
+			// Ignore the host's own local player (fired when AddLocalHostPlayer added us before any client).
+			if (p.id == _dummyHostNetId)
+			{
+				return;
+			}
+
+			StartRunLobby? lobby = _dummyLobby;
+			if (lobby == null)
+			{
+				return;
+			}
+
+			Log.Info("[CardEditor][DummyLobby] Client connected - re-affirming dummy character + ready");
+
+			// Re-affirm character only if we captured a valid one; always re-affirm ready.
+			if (_dummyCharacter != null)
+			{
+				lobby.SetLocalCharacter(_dummyCharacter);
+			}
+			lobby.SetReady(true);
+		}
+		catch (Exception ex)
+		{
+			// A debug re-affirm must NEVER crash the lobby.
+			Log.Warn($"[CardEditor][DummyLobby] Failed re-affirming dummy character/ready on client connect: {ex}");
 		}
 	}
 
