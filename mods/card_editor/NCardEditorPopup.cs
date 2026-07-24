@@ -227,6 +227,14 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	// Persisted per card via CardEditorChainLinkStore so drag-built chains survive reopening.
 	private readonly Dictionary<string, string> _chainManualSequenceLinks = new(StringComparer.Ordinal);
 	private string? _chainLinksLoadedForCardKey;
+	// Item 3: filtered+sorted kind-dropdown list, keyed by _isEmbeddedEffectHost.
+	// Two slots (false=normal, true=embedded) so we never mix filter results.
+	private List<(int DefinitionIndex, string Label)>? _kindDropdownCacheNormal;
+	private List<(int DefinitionIndex, string Label)>? _kindDropdownCacheEmbedded;
+	// Item 5: fingerprint of the last chain strip we rendered; empty string = never rendered.
+	private string _effectChainStripFingerprint = string.Empty;
+	// Item 5: cached string form of _cardId to avoid per-call allocation.
+	private string _cardIdString = string.Empty;
 	private ScrollContainer? _rightColumnScroll;
 	private Label? _extraEffectsLoadingLabel;
 	private Label? _effectSummaryLoadingLabel;
@@ -2601,6 +2609,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_effectChainContainer);
 		_expandedChainEffectId = null;
 		_chainLinksLoadedForCardKey = null;
+		_cardIdString = string.Empty; // Item 5: re-cache on next call
+		_effectChainStripFingerprint = string.Empty; // Item 5: force rebuild
 
 		if (_localizedSharedCreatedRowsCache.TryGetValue(cacheKey, out LocalizedSharedCreatedRowsCacheEntry? oldEntry)
 			&& oldEntry != null
@@ -2648,6 +2658,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_effectChainContainer);
 		_expandedChainEffectId = null;
 		_chainLinksLoadedForCardKey = null;
+		_cardIdString = string.Empty; // Item 5: re-cache on next call
+		_effectChainStripFingerprint = string.Empty; // Item 5: force rebuild
 		_extraEffectRows.Clear();
 		// Restore the preservation state captured with these rows - saving with an empty stash would
 		// delete the unrepresentable (keyword-carrying) stored effects this row set never showed.
@@ -2753,6 +2765,8 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		RemoveChildrenSafely(_effectChainContainer);
 		_expandedChainEffectId = null;
 		_chainLinksLoadedForCardKey = null;
+		_cardIdString = string.Empty; // Item 5: re-cache on next call
+		_effectChainStripFingerprint = string.Empty; // Item 5: force rebuild
 		_extraEffectRows.Clear();
 	}
 
@@ -14690,49 +14704,59 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(kindSelect);
 		ConstrainOptionButtonPopup(kindSelect);
 
-		List<(int DefinitionIndex, string Label)> kindOptions = new List<(int DefinitionIndex, string Label)>();
-		for (int definitionIndex = 0; definitionIndex < CardEditorExtraEffects.Definitions.Count; definitionIndex++)
+		// Item 3: build the filtered+sorted kind list once per popup instance (keyed on
+		// _isEmbeddedEffectHost, the only per-popup filter variable). Subsequent rows reuse it.
+		ref List<(int DefinitionIndex, string Label)>? kindOptionsRef =
+			ref _isEmbeddedEffectHost ? ref _kindDropdownCacheEmbedded : ref _kindDropdownCacheNormal;
+		if (kindOptionsRef == null)
 		{
-			CardExtraEffectDefinition def = CardEditorExtraEffects.Definitions[definitionIndex];
-			if (CardEditorExtraEffects.IsLegacyOrbChannelKind(def.Kind)
-				|| CardEditorExtraEffects.IsLegacyEvokeOrbsKind(def.Kind)
-				|| CardEditorExtraEffects.IsLegacyOrbSlotKind(def.Kind)
-				|| CardEditorExtraEffects.IsLegacySelfPileAutoKind(def.Kind)
-				|| IsHiddenUnifiedEffectGroupKind(def.Kind)
-				|| IsHiddenUnifiedCardCostKind(def.Kind)
-				|| IsHiddenUnifiedDrawKind(def.Kind)
-				|| IsHiddenUnifiedCardGenerationKind(def.Kind)
-				|| IsHiddenUnifiedIgnoreKind(def.Kind)
-				|| IsHiddenUnifiedAutoActionKind(def.Kind)
-				|| IsHiddenUnifiedCardActionKind(def.Kind)
-				|| IsHiddenUnifiedUpgradeKind(def.Kind)
-				|| IsHiddenUnifiedSelfScalingKind(def.Kind)
-				|| def.Kind == CardExtraEffectKind.DynamicIdentity
-				|| (_isEmbeddedEffectHost && RelicUnsupportedEffectKinds.Contains(def.Kind)))
+			List<(int DefinitionIndex, string Label)> kindOptions = new List<(int DefinitionIndex, string Label)>();
+			for (int definitionIndex = 0; definitionIndex < CardEditorExtraEffects.Definitions.Count; definitionIndex++)
 			{
-				continue;
+				CardExtraEffectDefinition def = CardEditorExtraEffects.Definitions[definitionIndex];
+				if (CardEditorExtraEffects.IsLegacyOrbChannelKind(def.Kind)
+					|| CardEditorExtraEffects.IsLegacyEvokeOrbsKind(def.Kind)
+					|| CardEditorExtraEffects.IsLegacyOrbSlotKind(def.Kind)
+					|| CardEditorExtraEffects.IsLegacySelfPileAutoKind(def.Kind)
+					|| IsHiddenUnifiedEffectGroupKind(def.Kind)
+					|| IsHiddenUnifiedCardCostKind(def.Kind)
+					|| IsHiddenUnifiedDrawKind(def.Kind)
+					|| IsHiddenUnifiedCardGenerationKind(def.Kind)
+					|| IsHiddenUnifiedIgnoreKind(def.Kind)
+					|| IsHiddenUnifiedAutoActionKind(def.Kind)
+					|| IsHiddenUnifiedCardActionKind(def.Kind)
+					|| IsHiddenUnifiedUpgradeKind(def.Kind)
+					|| IsHiddenUnifiedSelfScalingKind(def.Kind)
+					|| def.Kind == CardExtraEffectKind.DynamicIdentity
+					|| (_isEmbeddedEffectHost && RelicUnsupportedEffectKinds.Contains(def.Kind)))
+				{
+					continue;
+				}
+
+				string label = TryGetUnifiedEffectGroup(def.Kind, out UnifiedEffectGroup group)
+					? GetUnifiedEffectGroupLabel(group)
+					: CardEditorExtraEffects.DefinitionDisplayLabel(def);
+				kindOptions.Add((definitionIndex, label));
 			}
 
-			string label = TryGetUnifiedEffectGroup(def.Kind, out UnifiedEffectGroup group)
-				? GetUnifiedEffectGroupLabel(group)
-				: CardEditorExtraEffects.DefinitionDisplayLabel(def);
-			kindOptions.Add((definitionIndex, label));
+			kindOptions.Sort((left, right) =>
+			{
+				int labelCompare = StringComparer.CurrentCultureIgnoreCase.Compare(left.Label, right.Label);
+				if (labelCompare != 0)
+				{
+					return labelCompare;
+				}
+				CardExtraEffectKind leftKind = CardEditorExtraEffects.Definitions[left.DefinitionIndex].Kind;
+				CardExtraEffectKind rightKind = CardEditorExtraEffects.Definitions[right.DefinitionIndex].Kind;
+				return StringComparer.Ordinal.Compare(leftKind.ToString(), rightKind.ToString());
+			});
+
+			kindOptionsRef = kindOptions;
 		}
+		List<(int DefinitionIndex, string Label)> cachedKindOptions = kindOptionsRef;
 
-		kindOptions.Sort((left, right) =>
-		{
-			int labelCompare = StringComparer.CurrentCultureIgnoreCase.Compare(left.Label, right.Label);
-			if (labelCompare != 0)
-			{
-				return labelCompare;
-			}
-			CardExtraEffectKind leftKind = CardEditorExtraEffects.Definitions[left.DefinitionIndex].Kind;
-			CardExtraEffectKind rightKind = CardEditorExtraEffects.Definitions[right.DefinitionIndex].Kind;
-			return StringComparer.Ordinal.Compare(leftKind.ToString(), rightKind.ToString());
-		});
-
-		List<int> kindDefinitionIndices = new List<int>(kindOptions.Count);
-		foreach ((int definitionIndex, string label) in kindOptions)
+		List<int> kindDefinitionIndices = new List<int>(cachedKindOptions.Count);
+		foreach ((int definitionIndex, string label) in cachedKindOptions)
 		{
 			kindDefinitionIndices.Add(definitionIndex);
 			kindSelect.AddItem(label);
@@ -22572,6 +22596,111 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return header;
 	}
 
+	// Item 5: Build a cheap fingerprint of everything RefreshEffectChainStrip renders so we
+	// can skip the teardown+rebuild when nothing has changed.
+	private string BuildEffectChainStripFingerprint()
+	{
+		// Use unit-separator (\x1F) inside a row and record-separator (\x1E) between rows
+		// so field values that contain normal punctuation cannot collide across boundaries.
+		const char F = '\x1F';
+		const char R = '\x1E';
+
+		System.Text.StringBuilder sb = new System.Text.StringBuilder(256);
+
+		// Global state that affects the whole strip.
+		sb.Append(_expandedChainEffectId ?? string.Empty); sb.Append(F);
+		sb.Append(_pendingExistingExtraEffectRows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)); sb.Append(F);
+		sb.Append(_previewCard != null ? '1' : '0'); sb.Append(F);
+		sb.Append(_isUpgradeEditor ? '1' : '0'); sb.Append(F);
+		sb.Append(_isEmbeddedEffectHost ? '1' : '0'); sb.Append(R);
+
+		// Per-row state.
+		foreach (ExtraEffectRow row in _extraEffectRows)
+		{
+			sb.Append(row.StableEffectId); sb.Append(F);
+			sb.Append(row.IsUpgradeDeltaRow ? '1' : '0'); sb.Append(F);
+			sb.Append(row.AmountSourceEffectId ?? string.Empty); sb.Append(F);
+			sb.Append(row.CardSelectionSourceEffectId ?? string.Empty); sb.Append(F);
+
+			// KindSelect / TriggerSelect / TargetSelect: selected index covers label changes.
+			AppendSelectFp(sb, row.KindSelect); sb.Append(F);
+			AppendSelectFp(sb, row.TriggerSelect); sb.Append(F);
+			AppendSelectFp(sb, row.TargetSelect); sb.Append(F);
+
+			// Amount field.
+			AppendLineFp(sb, row.AmountField); sb.Append(F);
+
+			// Expanded-box chips (visibility controls whether the chip appears at all).
+			AppendSelectFp(sb, row.AmountSourceModeSelect); sb.Append(F);
+			AppendSelectFp(sb, row.AmountSourceEffectSelect); sb.Append(F);
+			AppendSelectFp(sb, row.MoveFromPileSelect); sb.Append(F);
+			AppendSelectFp(sb, row.MoveToPileSelect); sb.Append(F);
+			AppendSelectFp(sb, row.MoveSelectionModeSelect); sb.Append(F);
+			AppendSelectFp(sb, row.CardSelectionSourceEffectSelect); sb.Append(F);
+			AppendSelectFp(sb, row.GrantPileSelect); sb.Append(F);
+			AppendSelectFp(sb, row.GrantModeSelect); sb.Append(F);
+
+			// Branch / IF section.
+			bool branchTicked = row.BranchTickbox != null && GodotObject.IsInstanceValid(row.BranchTickbox) && row.BranchTickbox.IsTicked;
+			sb.Append(branchTicked ? '1' : '0'); sb.Append(F);
+			bool scalingVisible = row.ScalingToggleRow != null && GodotObject.IsInstanceValid(row.ScalingToggleRow) && row.ScalingToggleRow.Visible;
+			sb.Append(scalingVisible ? '1' : '0'); sb.Append(F);
+			AppendSelectFp(sb, row.BranchConditionTypeSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchModeSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchConditionSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchStatusModeSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchEnemyStatusSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchPowerSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchEnemyIntentSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchCountEventSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchCountWindowSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchCountPileSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchCountComparisonSelect); sb.Append(F);
+			AppendLineFp(sb, row.BranchCountConditionField); sb.Append(F);
+			AppendSelectFp(sb, row.BranchPayloadStyleSelect); sb.Append(F);
+			AppendSelectFp(sb, row.BranchInlineKindSelect); sb.Append(F);
+			AppendLineFp(sb, row.BranchInlineAmountField); sb.Append(F);
+			AppendSelectFp(sb, row.BranchInlineTargetSelect); sb.Append(R);
+		}
+
+		// Chain manual sequence links (all of them, sorted so order doesn't matter).
+		if (_chainManualSequenceLinks.Count > 0)
+		{
+			List<string> linkKeys = new List<string>(_chainManualSequenceLinks.Keys);
+			linkKeys.Sort(StringComparer.Ordinal);
+			foreach (string k in linkKeys)
+			{
+				sb.Append(k); sb.Append(F); sb.Append(_chainManualSequenceLinks[k]); sb.Append(R);
+			}
+		}
+
+		return sb.ToString();
+	}
+
+	// Item 5 helpers: append selected-index + Visible for an OptionButton (null-safe).
+	private static void AppendSelectFp(System.Text.StringBuilder sb, OptionButton? btn)
+	{
+		if (btn == null || !GodotObject.IsInstanceValid(btn))
+		{
+			sb.Append("n");
+			return;
+		}
+		sb.Append(btn.Visible ? '1' : '0');
+		sb.Append(btn.Selected.ToString(System.Globalization.CultureInfo.InvariantCulture));
+	}
+
+	// Item 5 helper: append Text + Visible for a LineEdit (null-safe).
+	private static void AppendLineFp(System.Text.StringBuilder sb, LineEdit? field)
+	{
+		if (field == null || !GodotObject.IsInstanceValid(field))
+		{
+			sb.Append("n");
+			return;
+		}
+		sb.Append(field.Visible ? '1' : '0');
+		sb.Append(field.Text ?? string.Empty);
+	}
+
 	// Chainboard C1: render the live rows as chain strips. Rows connected by card links
 	// (SelectedByEffect) or amount links group into one strip; unlinked rows are singleton boxes.
 	// Connectors: "──▶" card link from the previous box, "─ ─▶" amount link, "#n ▶" link to a
@@ -22584,7 +22713,12 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		// Per-card persisted sequence links: (re)load when the cached popup targets a new card.
-		string chainCardKey = _cardId.ToString();
+		// Item 5: cache _cardId.ToString() so we don't allocate on every call.
+		if (string.IsNullOrEmpty(_cardIdString))
+		{
+			_cardIdString = _cardId.ToString();
+		}
+		string chainCardKey = _cardIdString;
 		if (!string.Equals(_chainLinksLoadedForCardKey, chainCardKey, StringComparison.Ordinal))
 		{
 			_chainManualSequenceLinks.Clear();
@@ -22593,7 +22727,20 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				_chainManualSequenceLinks[linkedEffectId] = linkSourceId;
 			}
 			_chainLinksLoadedForCardKey = chainCardKey;
+			// Card changed — always rebuild so the new card's links are reflected.
+			_effectChainStripFingerprint = string.Empty;
 		}
+
+		// Item 5: skip the expensive teardown+rebuild when nothing that changes the strip's
+		// appearance has changed. The fingerprint covers all row fields read by BuildEffectChainBox
+		// / BuildEffectChainIfChip / BuildChainIfSection as well as global state. The card-key
+		// load above already ran, so chain links are current and included in the fingerprint.
+		string newFingerprint = BuildEffectChainStripFingerprint();
+		if (string.Equals(newFingerprint, _effectChainStripFingerprint, StringComparison.Ordinal))
+		{
+			return;
+		}
+		_effectChainStripFingerprint = newFingerprint;
 
 		// Typing in a chip triggers this rebuild every keystroke (via the classic handler's
 		// queued preview refresh); capture the focused mirror so it can be restored after.
@@ -23580,16 +23727,38 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 		// Event-first reading: group consecutive same-trigger rows under a trigger header,
 		// shown only when the card actually uses more than one trigger. Row order is preserved.
-		List<string> rowTriggerTexts = _extraEffectRows
-			.Select(row => GetSelectedItemText(row.TriggerSelect, CardEditorLoc.T("effectList.noTrigger", "No trigger")))
-			.ToList();
-		bool showGroupHeaders = rowTriggerTexts.Distinct(StringComparer.Ordinal).Count() > 1;
+		// Item 4: determine showGroupHeaders with an early-exit loop (no LINQ allocation).
+		string noTriggerLabel = CardEditorLoc.T("effectList.noTrigger", "No trigger");
+		bool showGroupHeaders = false;
+		if (_extraEffectRows.Count > 1)
+		{
+			string firstTrigger = GetSelectedItemText(_extraEffectRows[0].TriggerSelect, noTriggerLabel);
+			for (int gi = 1; gi < _extraEffectRows.Count; gi++)
+			{
+				if (!string.Equals(GetSelectedItemText(_extraEffectRows[gi].TriggerSelect, noTriggerLabel), firstTrigger, StringComparison.Ordinal))
+				{
+					showGroupHeaders = true;
+					break;
+				}
+			}
+		}
+
+		// Only materialise the per-row trigger text array when we actually need group headers.
+		List<string>? rowTriggerTexts = null;
+		if (showGroupHeaders)
+		{
+			rowTriggerTexts = new List<string>(_extraEffectRows.Count);
+			foreach (ExtraEffectRow trigRow in _extraEffectRows)
+			{
+				rowTriggerTexts.Add(GetSelectedItemText(trigRow.TriggerSelect, noTriggerLabel));
+			}
+		}
 
 		List<Node> desiredChildren = new List<Node>(panels.Count * 2);
 		int headerIndex = 0;
 		for (int i = 0; i < panels.Count; i++)
 		{
-			if (showGroupHeaders
+			if (showGroupHeaders && rowTriggerTexts != null
 				&& (i == 0 || !string.Equals(rowTriggerTexts[i], rowTriggerTexts[i - 1], StringComparison.Ordinal)))
 			{
 				Label header = EnsureEffectSummaryGroupHeader(headerIndex++);

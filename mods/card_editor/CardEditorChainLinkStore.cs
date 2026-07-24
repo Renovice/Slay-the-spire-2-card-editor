@@ -14,6 +14,13 @@ internal static class CardEditorChainLinkStore
 {
 	private const string StorePath = "user://card_editor/chain_links.json";
 
+	// Hoisted: a fresh JsonSerializerOptions per call defeats System.Text.Json's cached
+	// serialization metadata.
+	private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		WriteIndented = true
+	};
+
 	// cardKey -> (effectId -> sourceEffectId)
 	private static Dictionary<string, Dictionary<string, string>>? _byCard;
 
@@ -77,7 +84,7 @@ internal static class CardEditorChainLinkStore
 			{
 				Directory.CreateDirectory(dir);
 			}
-			File.WriteAllText(path, JsonSerializer.Serialize(byCard, new JsonSerializerOptions { WriteIndented = true }));
+			File.WriteAllText(path, JsonSerializer.Serialize(byCard, _jsonOptions));
 		}
 		catch (Exception ex)
 		{

@@ -356,14 +356,18 @@ internal static class CardEditorPerformanceSettings
 		}
 	}
 
+	// Hoisted: a fresh JsonSerializerOptions per call defeats System.Text.Json's cached
+	// serialization metadata.
+	private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		PropertyNameCaseInsensitive = true,
+		ReadCommentHandling = JsonCommentHandling.Skip,
+		AllowTrailingCommas = true,
+		WriteIndented = true
+	};
+
 	private static JsonSerializerOptions CreateJsonOptions()
 	{
-		return new JsonSerializerOptions
-		{
-			PropertyNameCaseInsensitive = true,
-			ReadCommentHandling = JsonCommentHandling.Skip,
-			AllowTrailingCommas = true,
-			WriteIndented = true
-		};
+		return _jsonOptions;
 	}
 }

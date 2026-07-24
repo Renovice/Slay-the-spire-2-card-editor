@@ -65,6 +65,13 @@ internal static class CardEditorCustomFoilRegistry
 	private static IReadOnlyList<CardEditorCustomFoilDefinition> _definitions = Array.Empty<CardEditorCustomFoilDefinition>();
 	private static bool _loaded;
 
+	// Hoisted: a fresh JsonSerializerOptions per call defeats System.Text.Json's cached
+	// serialization metadata.
+	private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		PropertyNameCaseInsensitive = true
+	};
+
 	public static string CustomFoilDirectory => GetCustomFoilDirectory();
 
 	public static IReadOnlyList<CardEditorCustomFoilDefinition> GetDefinitions()
@@ -255,7 +262,7 @@ internal static class CardEditorCustomFoilRegistry
 		{
 			CustomFoilManifestDto? dto = JsonSerializer.Deserialize<CustomFoilManifestDto>(
 				File.ReadAllText(manifestPath),
-				new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+				_jsonOptions);
 			if (dto == null || string.IsNullOrWhiteSpace(dto.Shader))
 			{
 				return false;

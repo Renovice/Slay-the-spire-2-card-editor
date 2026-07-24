@@ -1072,12 +1072,16 @@ internal static class CardEditorRelicOverrideStore
 		}
 	}
 
+	// Hoisted: a fresh JsonSerializerOptions per call defeats System.Text.Json's cached
+	// serialization metadata.
+	private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		WriteIndented = true
+	};
+
 	private static JsonSerializerOptions CreateJsonOptions()
 	{
-		return new JsonSerializerOptions
-		{
-			WriteIndented = true
-		};
+		return _jsonOptions;
 	}
 
 	private sealed class RelicOverrideFileDto

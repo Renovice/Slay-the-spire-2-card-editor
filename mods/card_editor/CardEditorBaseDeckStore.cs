@@ -19,6 +19,12 @@ internal static class CardEditorBaseDeckStore
 	private static readonly Dictionary<ModelId, List<ModelId>> _overrides = new();
 	private static bool _loaded;
 
+	// Lazy cache for supported character ids and the corresponding HashSet for O(1) Contains.
+	// ModelDb.AllCharacters is fixed for the session (no runtime character-mutation API exists).
+	// Order is preserved from GetSupportedCharacters() so existing callers that depend on it are unaffected.
+	private static IReadOnlyList<ModelId>? _supportedCharacterIdsCache;
+	private static HashSet<ModelId>? _supportedCharacterIdSet;
+
 	public static IReadOnlyList<ModelId> SupportedCharacterIds => GetSupportedCharacterIds();
 	public static int Revision { get; private set; }
 
@@ -91,9 +97,14 @@ internal static class CardEditorBaseDeckStore
 
 	public static bool IsSupportedCharacterId(ModelId characterId)
 	{
-		return characterId != null
-			&& characterId != ModelId.none
-			&& SupportedCharacterIds.Contains(characterId);
+		if (characterId == null || characterId == ModelId.none)
+		{
+			return false;
+		}
+
+		// Ensure the cache is populated (idempotent), then use O(1) HashSet lookup.
+		GetSupportedCharacterIds();
+		return _supportedCharacterIdSet?.Contains(characterId) == true;
 	}
 
 	public static ModelId GetDefaultCharacterId()
@@ -333,9 +344,20 @@ internal static class CardEditorBaseDeckStore
 
 	private static IReadOnlyList<ModelId> GetSupportedCharacterIds()
 	{
-		return GetSupportedCharacters()
+		// ModelDb.AllCharacters is fixed for a session; cache to avoid re-running the LINQ
+		// chain on every SupportedCharacterIds access and every IsSupportedCharacterId call.
+		if (_supportedCharacterIdsCache != null)
+		{
+			return _supportedCharacterIdsCache;
+		}
+
+		IReadOnlyList<ModelId> ids = GetSupportedCharacters()
 			.Select(character => character.Id)
 			.ToList();
+
+		_supportedCharacterIdsCache = ids;
+		_supportedCharacterIdSet = new HashSet<ModelId>(ids);
+		return _supportedCharacterIdsCache;
 	}
 
 	private static List<CharacterModel> GetSupportedCharacters()
@@ -385,12 +407,16 @@ internal static class CardEditorBaseDeckStore
 		}
 	}
 
+	// Hoisted: a fresh JsonSerializerOptions per call defeats System.Text.Json's cached
+	// serialization metadata.
+	private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		WriteIndented = true
+	};
+
 	private static JsonSerializerOptions CreateJsonOptions()
 	{
-		return new JsonSerializerOptions
-		{
-			WriteIndented = true
-		};
+		return _jsonOptions;
 	}
 
 	private sealed class BaseDeckStoreDto

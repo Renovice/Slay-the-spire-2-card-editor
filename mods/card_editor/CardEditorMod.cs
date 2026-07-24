@@ -3305,6 +3305,7 @@ public static class Hook_AfterTurnEnd_Patch
 				// Bound batched-counter loss to one turn: quitting or crashing mid-combat now
 				// loses at most the current turn's increments, not the whole combat's.
 				CardEditorRunCardCounterState.FlushIfDirty();
+				CardEditorRunPowerState.FlushIfDirty();
 				CardEditorTemporaryEnchantmentController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporaryReplayController.OnAfterPlayerTurnEnd(combatState);
 				CardEditorTemporarySelfScalingController.OnAfterPlayerTurnEnd(combatState);
@@ -3366,9 +3367,10 @@ public static class Hook_AfterCombatEnd_ClearScheduledEffects_Patch
 				CardEditorExtraEffects.ClearResourceCountHistory(combatState);
 			}
 
-			// Persist any quest counters batched during this combat (in-memory store is
-			// authoritative; this only flushes the pending disk write).
+			// Persist any quest counters and power grants batched during this combat (in-memory
+			// store is authoritative; this only flushes the pending disk write).
 			CardEditorRunCardCounterState.FlushIfDirty();
+			CardEditorRunPowerState.FlushIfDirty();
 		}
 	}
 }

@@ -25,6 +25,45 @@ internal static class CardEditorRunPowerState
 
 	private static FileDto? _cache;
 
+	// The in-memory _cache is authoritative; disk writes are batched. In-combat grants
+	// only mark the store dirty and are flushed at combat end / quest completion; grants
+	// outside combat keep the old write-immediately durability.
+	private static bool _dirty;
+
+	// Writes any batched power-state changes to disk. Values seen by gameplay come
+	// from the in-memory cache, so flush timing never changes power results.
+	public static void FlushIfDirty()
+	{
+		if (!_dirty)
+		{
+			return;
+		}
+
+		FileDto? file = _cache;
+		if (file == null)
+		{
+			_dirty = false;
+			return;
+		}
+
+		PruneOldRuns(file);
+		// Keep the dirty flag on failure so the next flush seam retries instead of dropping
+		// the batched grants (transient IO failures happen on OneDrive-synced setups).
+		if (Save(file))
+		{
+			_dirty = false;
+		}
+	}
+
+	private static void MarkDirty(bool deferFlush)
+	{
+		_dirty = true;
+		if (!deferFlush)
+		{
+			FlushIfDirty();
+		}
+	}
+
 	public static void Add(Creature? target, string? powerId, int amount, CardExtraEffectDuration duration)
 	{
 		if (target?.Player == null || string.IsNullOrWhiteSpace(powerId) || amount <= 0)
@@ -77,8 +116,7 @@ internal static class CardEditorRunPowerState
 		}
 		entry.Amount = Math.Clamp(entry.Amount + amount, 0, 999999999);
 
-		PruneOldRuns(file);
-		Save(file);
+		MarkDirty(deferFlush: CombatManager.Instance?.IsInProgress == true);
 	}
 
 	public static async Task ApplyForCombat(CombatState? combatState)
@@ -148,7 +186,8 @@ internal static class CardEditorRunPowerState
 
 			if (prunedStaleEntries)
 			{
-				Save(file);
+				// Pruned entries are also batched; the next flush seam (combat end) persists them.
+				MarkDirty(deferFlush: true);
 			}
 		}
 	}
@@ -251,7 +290,7 @@ internal static class CardEditorRunPowerState
 		}
 	}
 
-	private static void Save(FileDto file)
+	private static bool Save(FileDto file)
 	{
 		try
 		{
@@ -259,10 +298,12 @@ internal static class CardEditorRunPowerState
 			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 			string json = JsonSerializer.Serialize(file, CreateJsonOptions());
 			File.WriteAllText(path, json);
+			return true;
 		}
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor][RunPowerState] Failed to save store: {ex}");
+			return false;
 		}
 	}
 
@@ -284,12 +325,16 @@ internal static class CardEditorRunPowerState
 		return ProjectSettings.GlobalizePath(StorePath);
 	}
 
+	// Hoisted: a fresh JsonSerializerOptions per call defeats System.Text.Json's cached
+	// serialization metadata.
+	private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
+	{
+		WriteIndented = true
+	};
+
 	private static JsonSerializerOptions CreateJsonOptions()
 	{
-		return new JsonSerializerOptions
-		{
-			WriteIndented = true
-		};
+		return _jsonOptions;
 	}
 
 	private sealed class AppliedCombatMarker

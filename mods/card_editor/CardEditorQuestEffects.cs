@@ -434,9 +434,10 @@ internal static class CardEditorQuestEffects
 				_completing.Remove(completionKey);
 			}
 
-			// Quest completions rewrite persistent counters; make sure the batched store
-			// hits disk at this milestone even mid-combat.
+			// Quest completions rewrite persistent counters and may grant run powers; make sure
+			// the batched stores hit disk at this milestone even mid-combat.
 			CardEditorRunCardCounterState.FlushIfDirty();
+			CardEditorRunPowerState.FlushIfDirty();
 		}
 	}
 
