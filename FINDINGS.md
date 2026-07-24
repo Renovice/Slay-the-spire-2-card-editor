@@ -1,4 +1,12 @@
-﻿## 2026-07-24 - MP ready-check: manifest version was not valid SemVer
+﻿## 2026-07-24 - Green upgrade-text investigation: our code exonerated; intermittent, shelved
+
+User: vanilla cards (Neutralize etc.) sometimes lose upgrade-preview green, "depending on enchantments"; bisect blamed the perf-pass DLL.
+Investigation: 3-agent trace + a deployed diagnostic build logging [green] presence at the description postfix ENTRY vs EXIT (temp instrumentation, since reverted).
+Live trace verdict: for EVERY card greenIn == greenOut - our postfix NEVER strips green. Where green was missing (BULLET_TIME) it was greenIn=False, i.e. VANILLA did not produce it before our code ran. On the tested load all unedited cards (NEUTRALIZE/SLICE/SURVIVOR/DEFEND_SILENT) showed greenIn=True greenOut=True = working. User confirmed "worked fine when I loaded it in" -> the fault is INTERMITTENT / run-state-dependent, not a deterministic code break, and the perf pass is provably output-neutral in the description path for unedited cards.
+Leading unproven theory for the intermittent case: the upgrade-preview / NCard.UpdateVisuals prefix calls CardEditorRunSelfScalingState.TryRestoreCard, which - once a run accumulates self-scaling/enchant state - RebaseCardToCurrentDefinition rebuilds the card's DynamicVars and clears vanilla's WasJustUpgraded flag (DynamicVar.ToHighlightedString greens on WasJustUpgraded). Fresh load = no state = no rebase = green survives. NOT confirmed with a broken-state trace.
+Decision (user): ship clean now, reopen if it recurs. Diagnostic logging reverted; clean 10.0.0 build deployed + built cfiles + zip refreshed.
+Next Step if it recurs: reproduce with the diagnostic build still catchable (re-add the GreenTrace line), catch a card that SHOULD be green showing greenIn=False, then guard RebaseCardToCurrentDefinition (or the UpdateVisuals prefix) to preserve WasJustUpgraded during upgrade-preview renders.
+## 2026-07-24 - MP ready-check: manifest version was not valid SemVer
 
 godot.log line 16: "[WARN] Mod card_editor declares version 10.0 which is not a valid Semantic Version" - the GAME validates manifest versions as SemVer and uses mod identity/version for the multiplayer mod-parity check ("MODDED (n)" + lobby checkmark). An unparseable version plausibly breaks the between-players mod match, leaving the ready checkmark stuck. ("7.7" was equally invalid, so the weird checkmark may predate us; making it valid is correct regardless.)
 Fix: card_editor.json version "10.0" -> "10.0.0" (repo + deployed + built cfiles + release zip). No DLL change needed. BOTH players need the fixed manifest AND the same DLL.
