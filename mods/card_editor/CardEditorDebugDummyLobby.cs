@@ -349,13 +349,18 @@ internal static class CardEditorDebugDummyLobby
 	/// </summary>
 	/// <param name="wrongVersion">A version string that intentionally does not match the host's.</param>
 	/// <returns>A single-use <see cref="JoinFlow"/> preloaded with the mismatched identity.</returns>
-	// NOTE: the JoinFlow.MockInfo seam this used exists only on the v0.109 BETA branch. The mod
-	// currently targets the PUBLIC branch, where JoinFlow has no mock constructor, so the helper is
-	// compiled out rather than deleted - restore it if the mod is ever retargeted to that beta.
-	internal static JoinFlow? BuildMismatchedJoinFlow(string wrongVersion = "v0.000-DEBUG-MISMATCH")
+	internal static JoinFlow BuildMismatchedJoinFlow(string wrongVersion = "v0.000-DEBUG-MISMATCH")
 	{
-		Log.Warn("[CardEditor][DummyLobby] BuildMismatchedJoinFlow needs JoinFlow.MockInfo, which this game build does not expose; skipping.");
-		return null;
+		JoinFlow.MockInfo mockInfo = new JoinFlow.MockInfo
+		{
+			version = wrongVersion,
+			hash = 0u,
+			branch = default(PlatformBranch),
+			gameplayAffectingMods = new List<string>(),
+			nonGameplayAffectingMods = new List<string>()
+		};
+
+		return new JoinFlow(new NetClientGameService(), mockInfo);
 	}
 
 	/// <summary>

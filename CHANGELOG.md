@@ -25,7 +25,7 @@ The biggest rework since release: effects are now a composable engine, and you c
 - Card data refresh, upgrade-diff highlighting fixes, auto number-link opt-out, and the full 15-item bug-list sweep (stacking parity, enemy copies honoring overrides, composite actions, turn-start hand picks, and more).
 
 ### Compatibility & safety
-- Compatible with the **2026-07-18 game update** (older builds crash the card library on it).
+- Built for the **public beta branch** (v0.109.0). If you play on the default (non-beta) branch, use the matching build — the two branches have incompatible internals.
 - Multiplayer sync guard: both players must run the same build — mismatches are refused loudly instead of desyncing quietly.
 - Boot-time text-snapshot and capability audits guard against silent regressions.
 
