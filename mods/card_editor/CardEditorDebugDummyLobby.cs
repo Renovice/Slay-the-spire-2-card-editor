@@ -10,6 +10,8 @@ using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Connection;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
@@ -58,17 +60,32 @@ internal static class CardEditorDebugDummyLobby
 
 	private const ushort DummyHostPort = 33771;
 	private const int DummyHostMaxClients = 4;
+	private const string DummyHostIp = "127.0.0.1";
+
+	// NetId for the local debug client. Host is NetId=1; NMultiplayerTest's default client is 1000, so
+	// 2000 is safely distinct and won't collide with either.
+	private const ulong DummyClientNetId = 2000UL;
 
 	private static bool _started;
 	private static NetHostGameService? _dummyHost;
 	private static StartRunLobby? _dummyLobby;
 	private static CardEditorDebugDummyLobbyPump? _pump;
 
+	// The live main menu captured at ready-time (only on the enabled path); source of the JoinGame call.
+	private static NMainMenu? _mainMenu;
+
+	// Mod-owned CanvasLayer hosting the one-click debug join button. Only ever created on the enabled path.
+	private static CanvasLayer? _joinButtonLayer;
+
 	/// <summary>
 	/// Called once from <c>MainMenu_Ready_Patch.Postfix</c>. Returns immediately (zero cost) unless
 	/// <see cref="SimulateDummyHost"/> is enabled. Never throws into game code.
 	/// </summary>
-	internal static void TryStartDummyHostOnce()
+	/// <param name="mainMenu">
+	/// The live <see cref="NMainMenu"/> from the ready patch. Captured only on the enabled path so the
+	/// one-click debug join button can drive the real join flow (<see cref="NMainMenu.JoinGame"/>).
+	/// </param>
+	internal static void TryStartDummyHostOnce(NMainMenu? mainMenu = null)
 	{
 		// Fast, allocation-free no-op on the shipping path: the JIT folds this const check so the
 		// whole body is dead code when the toggle is false.
@@ -80,6 +97,12 @@ internal static class CardEditorDebugDummyLobby
 					"call CardEditorDebugDummyLobby.BuildMismatchedJoinFlow(...) from your join path to prove the parity check rejects a bad version.");
 			}
 			return;
+		}
+
+		// Capture the live menu even if we've already started, so a re-fired _Ready keeps a valid handle.
+		if (mainMenu != null)
+		{
+			_mainMenu = mainMenu;
 		}
 
 		if (_started)
@@ -128,8 +151,13 @@ internal static class CardEditorDebugDummyLobby
 			_pump = new CardEditorDebugDummyLobbyPump();
 			tree.Root.CallDeferred(Node.MethodName.AddChild, _pump);
 
+			// One-click join: since the dummy host started, add an always-visible debug button that fires
+			// the real join flow against 127.0.0.1:33771 - no 'fastmp' arg or manual IP entry required.
+			TryAddJoinButton(tree);
+
 			Log.Info($"[CardEditor][DummyLobby] Dummy co-op host listening on 127.0.0.1:{DummyHostPort} (ready). " +
-				"Launch the game with the 'fastmp' arg and Join-by-IP 127.0.0.1:33771 as a client to test the ready-check.");
+				"Click the 'Join Dummy Host [debug]' button (top-left) or press F9 to join as a client and test the ready-check. " +
+				"The 'fastmp' arg / manual Join-by-IP path still works too.");
 		}
 		catch (Exception ex)
 		{
@@ -155,6 +183,86 @@ internal static class CardEditorDebugDummyLobby
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor][DummyLobby] Dummy host pump failed: {ex}");
+		}
+	}
+
+	/// <summary>
+	/// Builds a mod-owned <see cref="CanvasLayer"/> (high layer, added straight to the SceneTree root) with
+	/// a single Godot <see cref="Button"/> anchored top-left. Living on its own layer at the root makes the
+	/// button robust against the main menu's own layout/containers. Pressing it fires <see cref="JoinDummyHost"/>.
+	/// Only ever called on the enabled path (guarded by the const at the call site).
+	/// </summary>
+	private static void TryAddJoinButton(SceneTree tree)
+	{
+		try
+		{
+			if (_joinButtonLayer != null)
+			{
+				return;
+			}
+
+			CanvasLayer layer = new CanvasLayer
+			{
+				Name = "CardEditorDebugDummyLobbyJoinLayer",
+				Layer = 128
+			};
+
+			Button button = new Button
+			{
+				Name = "CardEditorDebugDummyLobbyJoinButton",
+				Text = "Join Dummy Host [debug]",
+				Position = new Vector2(20, 20)
+			};
+
+			button.Pressed += () => JoinDummyHost("button");
+			layer.AddChild(button);
+
+			_joinButtonLayer = layer;
+			tree.Root.CallDeferred(Node.MethodName.AddChild, layer);
+		}
+		catch (Exception ex)
+		{
+			// A debug button must NEVER crash the game.
+			Log.Warn($"[CardEditor][DummyLobby] Failed adding Join Dummy Host button: {ex}");
+		}
+	}
+
+	/// <summary>
+	/// Fires the REAL join flow: <see cref="NMainMenu.JoinGame"/> with an
+	/// <see cref="ENetClientConnectionInitializer"/> pointed at the in-process dummy host
+	/// (<see cref="DummyHostIp"/>:<see cref="DummyHostPort"/>). Routed through
+	/// <see cref="TaskHelper.RunSafely"/> so the async task's exceptions are logged, and fully try/catch
+	/// guarded so neither the button nor the key fallback can crash the game. Invoked by the button and by
+	/// the F9 key fallback in <see cref="CardEditorDebugDummyLobbyPump"/>.
+	/// </summary>
+	/// <param name="source">Where the join was triggered from ("button" or "key"), for the log line.</param>
+	internal static void JoinDummyHost(string source)
+	{
+		if (!SimulateDummyHost)
+		{
+			return;
+		}
+
+		try
+		{
+			NMainMenu? menu = _mainMenu;
+			if (menu == null || !GodotObject.IsInstanceValid(menu))
+			{
+				Log.Warn("[CardEditor][DummyLobby] Join Dummy Host requested but no valid NMainMenu was captured; cannot join.");
+				return;
+			}
+
+			Log.Info($"[CardEditor][DummyLobby] Join Dummy Host clicked ({source}) -> connecting to {DummyHostIp}:{DummyHostPort}");
+
+			ENetClientConnectionInitializer initializer = new ENetClientConnectionInitializer(DummyClientNetId, DummyHostIp, DummyHostPort);
+
+			// JoinGame is public async Task; RunSafely fires it without awaiting and logs any exception.
+			TaskHelper.RunSafely(menu.JoinGame(initializer));
+		}
+		catch (Exception ex)
+		{
+			// A debug join must NEVER crash the game.
+			Log.Warn($"[CardEditor][DummyLobby] Failed firing Join Dummy Host: {ex}");
 		}
 	}
 
@@ -259,6 +367,25 @@ internal sealed partial class CardEditorDebugDummyLobbyPump : Node
 	public override void _Process(double delta)
 	{
 		CardEditorDebugDummyLobby.PumpDummyHost();
+	}
+
+	/// <summary>
+	/// Key fallback for the one-click join: pressing F9 fires the same real join flow as the debug button,
+	/// in case the button is obscured by menu UI. Fully guarded; a debug key must never crash the game.
+	/// </summary>
+	public override void _UnhandledInput(InputEvent @event)
+	{
+		try
+		{
+			if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.F9 })
+			{
+				CardEditorDebugDummyLobby.JoinDummyHost("key");
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][DummyLobby] Dummy host key fallback failed: {ex}");
+		}
 	}
 }
 

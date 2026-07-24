@@ -1814,7 +1814,8 @@ public static class MainMenu_Ready_Patch
 		NCardEditorPopup.TryQueueUiWarmup(__instance);
 
 		// DEBUG-ONLY: no-op unless CardEditorDebugDummyLobby.SimulateDummyHost is flipped to true in source.
-		CardEditorDebugDummyLobby.TryStartDummyHostOnce();
+		// __instance (the live NMainMenu) is passed so the dummy-host path can wire a one-click join button.
+		CardEditorDebugDummyLobby.TryStartDummyHostOnce(__instance);
 	}
 
 	// The one-shot description/text-snapshot audit used to fire on the first description
