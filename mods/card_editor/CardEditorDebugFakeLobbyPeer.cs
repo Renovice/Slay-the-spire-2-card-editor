@@ -1,7 +1,7 @@
 // CS0162 (unreachable code) is expected and intentional here: SimulateFakeLobbyPeer /
-// TreatLocalAsClientForReadyGate / SimulateFakeJoinAsClient are compile-time consts that default
-// false, so the compiler folds the toggle-guarded branches away. That IS the design (zero-cost
-// disabled path).
+// TreatLocalAsClientForReadyGate / SimulateFakeJoinAsClient / SimulateHostBeginRun are
+// compile-time consts that default false, so the compiler folds the toggle-guarded branches away.
+// That IS the design (zero-cost disabled path).
 #pragma warning disable CS0162
 
 using System;
@@ -60,14 +60,25 @@ namespace SlayTheSpire2Mod.CardEditor;
 ///                                                    BeginRunForAllPlayers, the run will NOT begin —
 ///                                                    that is correct; we are testing the ready-register
 ///                                                    path, not the run-start path.
+///   <see cref="SimulateHostBeginRun"/>            — REQUIRES <see cref="SimulateFakeJoinAsClient"/>=true.
+///                                                    After the local client marks itself ready, delivers a
+///                                                    synthetic <see cref="LobbyBeginRunMessage"/> directly
+///                                                    to the lobby's registered handler (exactly what the
+///                                                    real host would send). The run WILL attempt to load.
+///                                                    WARNING: the session may HANG or DESYNC at the first
+///                                                    point that requires the phantom peer's input or
+///                                                    checksum, because the fake host never responds.
+///                                                    Loading in at all is the confirmation being sought —
+///                                                    this is not a playable session.
 ///
 /// NEVER SHIP ENABLED:
 ///   Any of these consts being true in a shipped build will corrupt or fake real multiplayer state.
 ///   All MUST remain false in any build delivered to players.
 ///
-/// DIAGNOSTICS (active when ANY of the three consts is true):
-///   Postfix on IsAboutToBeginGame logs all three gate conditions.
-///   Postfix on SetReady logs whether the click reached the game and the resulting isReady state.
+/// DIAGNOSTICS (active when ANY of the four consts is true):
+///   Postfix on IsAboutToBeginGame logs all gate conditions.
+///   Postfix on SetReady logs whether the click reached the game and the resulting isReady state,
+///   and (when SimulateHostBeginRun is on) triggers delivery of the fake LobbyBeginRunMessage.
 /// </summary>
 internal static class CardEditorDebugFakeLobbyPeer
 {
@@ -104,6 +115,24 @@ internal static class CardEditorDebugFakeLobbyPeer
     /// </summary>
     internal const bool SimulateFakeJoinAsClient = false;
 
+    /// <summary>
+    /// REQUIRES <see cref="SimulateFakeJoinAsClient"/> = true.
+    /// When true: after the local CLIENT player marks itself ready via SetReady, a synthetic
+    /// <see cref="LobbyBeginRunMessage"/> is delivered directly to the handler that
+    /// <see cref="StartRunLobby"/> registered on <see cref="FakeClientNetGameService"/> during
+    /// InitializeMultiplayerAsClient (StartRunLobby constructor, L129). This is exactly what the
+    /// real host would send to start the run. The message is delivered once (static guard), deferred
+    /// one frame via CallDeferred so the ready-UI settles first.
+    ///
+    /// <para><b>WARNING:</b> the run MAY load but will likely HANG or DESYNC at the first point
+    /// that requires the phantom peer's input or checksum, because the fake host never actually
+    /// exists and cannot respond. Loading in at all is the confirmation being sought — this is not
+    /// a playable session.</para>
+    ///
+    /// <para><b>NEVER SHIP ENABLED.</b></para>
+    /// </summary>
+    internal const bool SimulateHostBeginRun = false;
+
     // NetId for the injected fake peer (host-side test). Host is 1; DummyLobby client uses 2000;
     // 4242 is distinct from both. internal so patch classes (top-level in this file) can reference it.
     internal const ulong FakePeerNetId = 4242UL;
@@ -118,17 +147,17 @@ internal static class CardEditorDebugFakeLobbyPeer
     // Whether ANY diagnostic toggle is active (drives the diagnostic postfixes).
     // internal so the patch classes can access it.
     internal static bool DiagnosticsActive =>
-        SimulateFakeLobbyPeer || TreatLocalAsClientForReadyGate || SimulateFakeJoinAsClient;
+        SimulateFakeLobbyPeer || TreatLocalAsClientForReadyGate || SimulateFakeJoinAsClient || SimulateHostBeginRun;
 
     /// <summary>
     /// Called once during mod Prepare, before Harmony patches are applied. Sets the client-gate
     /// test hook if <see cref="TreatLocalAsClientForReadyGate"/> is enabled.
-    /// No-op (and zero cost) when all three consts are false.
+    /// No-op (and zero cost) when all four consts are false.
     /// </summary>
     internal static void Prepare()
     {
-        // Const-folded: JIT eliminates this body when all three toggles are false.
-        if (!SimulateFakeLobbyPeer && !TreatLocalAsClientForReadyGate && !SimulateFakeJoinAsClient)
+        // Const-folded: JIT eliminates this body when all four toggles are false.
+        if (!SimulateFakeLobbyPeer && !TreatLocalAsClientForReadyGate && !SimulateFakeJoinAsClient && !SimulateHostBeginRun)
         {
             return;
         }
@@ -151,6 +180,23 @@ internal static class CardEditorDebugFakeLobbyPeer
             Log.Info("[CardEditor][FakeJoin] SimulateFakeJoinAsClient=true: a 'Fake Lobby (client test) - debug' " +
                      "entry will appear in Join Friend. Clicking it fakes a CLIENT lobby with a pre-readied host " +
                      "peer (id=1). No real networking. Use to test the joiner-side ready path.");
+        }
+
+        if (SimulateHostBeginRun)
+        {
+            if (!SimulateFakeJoinAsClient)
+            {
+                Log.Warn("[CardEditor][FakeJoin] SimulateHostBeginRun=true but SimulateFakeJoinAsClient=false! " +
+                         "SimulateHostBeginRun requires SimulateFakeJoinAsClient to be true — no fake service " +
+                         "will exist to deliver the message. Enable SimulateFakeJoinAsClient as well.");
+            }
+            else
+            {
+                Log.Info("[CardEditor][FakeJoin] SimulateHostBeginRun=true: after the local client marks itself " +
+                         "ready, a synthetic LobbyBeginRunMessage will be delivered to the lobby's registered " +
+                         "handler, simulating a host run-start. WARNING: the run may hang/desync — loading in " +
+                         "is the test goal, not a playable session.");
+            }
         }
     }
 }
@@ -303,10 +349,17 @@ internal static class CardEditorFakePeer_IsAboutToBeginGame_Patch
 /// and what the local player's isReady state is after the call, so the developer can confirm the
 /// ready click was not eaten by an earlier patch or gate.
 ///
+/// <para>When <see cref="CardEditorDebugFakeLobbyPeer.SimulateHostBeginRun"/> is true (also requires
+/// <see cref="CardEditorDebugFakeLobbyPeer.SimulateFakeJoinAsClient"/> true): after the local player
+/// marks itself ready (ready=true), a synthetic <see cref="LobbyBeginRunMessage"/> is delivered to
+/// <see cref="FakeClientNetGameService.DeliverFakeMessage{T}"/> exactly once (static guard), deferred
+/// one frame so the ready-UI settles first. The message carries the lobby's current Players list (with
+/// the user's chosen character), a fresh random seed, empty modifiers, and the lobby's Act1 value.</para>
+///
 /// <para>Format: <c>[CardEditor][FakePeer] SetReady({ready}) called for netId={n} ->
 /// localPlayer.isReady={bool}</c></para>
 ///
-/// <para>Prepare() returns false when all three consts are false — never applied when disabled.</para>
+/// <para>Prepare() returns false when all four consts are false — never applied when disabled.</para>
 /// </summary>
 [HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SetReady))]
 internal static class CardEditorFakePeer_SetReady_Patch
@@ -315,6 +368,9 @@ internal static class CardEditorFakePeer_SetReady_Patch
     {
         return CardEditorDebugFakeLobbyPeer.DiagnosticsActive;
     }
+
+    // Guard: ensure the fake LobbyBeginRunMessage is delivered at most once per join session.
+    private static bool _beginRunDelivered = false;
 
     private static void Postfix(StartRunLobby __instance, bool ready)
     {
@@ -325,10 +381,92 @@ internal static class CardEditorFakePeer_SetReady_Patch
 
             Log.Info($"[CardEditor][FakePeer] SetReady({ready}) called for netId={localNetId} " +
                      $"-> localPlayer.isReady={localPlayer.isReady}");
+
+            // SimulateHostBeginRun: deliver a fake LobbyBeginRunMessage once the local client is ready.
+            // Guard: SimulateFakeJoinAsClient must also be on (service must exist), ready must be true,
+            // and we must not have already fired (static bool prevents double-delivery if SetReady is
+            // somehow called twice).
+            if (!CardEditorDebugFakeLobbyPeer.SimulateHostBeginRun)
+            {
+                return;
+            }
+            if (!CardEditorDebugFakeLobbyPeer.SimulateFakeJoinAsClient)
+            {
+                return;
+            }
+            if (!ready)
+            {
+                return;
+            }
+            if (_beginRunDelivered)
+            {
+                Log.Info("[FakeJoin] SimulateHostBeginRun: begin-run already delivered this session; skipping.");
+                return;
+            }
+            _beginRunDelivered = true;
+
+            // Capture what we need from the lobby NOW (before the deferred frame).
+            // Players list: copy so the deferred closure sees the correct state even if Players mutates.
+            List<LobbyPlayer> playersSnapshot = new List<LobbyPlayer>(__instance.Players);
+            // Act1 is a public property on StartRunLobby (defaults to "random").
+            string act1Snapshot = __instance.Act1 ?? "random";
+            // Seed: mirror BeginRunForAllPlayersIfAllReady L725 — if Seed is null, use GetRandomSeed().
+            string seedSnapshot = (__instance.Seed == null)
+                ? SeedHelper.GetRandomSeed()
+                : SeedHelper.CanonicalizeSeed(__instance.Seed);
+
+            Log.Info($"[FakeJoin] SimulateHostBeginRun: scheduling deferred LobbyBeginRunMessage " +
+                     $"(seed={seedSnapshot}, act1={act1Snapshot}, players={playersSnapshot.Count}).");
+
+            // Defer by one frame so the ready-UI settles before the run-start fires.
+            Callable.From(delegate
+            {
+                try
+                {
+                    FakeClientNetGameService? svc = FakeClientServiceHolder.Instance;
+                    if (svc == null)
+                    {
+                        Log.Warn("[FakeJoin] SimulateHostBeginRun: FakeClientServiceHolder.Instance is null — " +
+                                 "PerformFakeClientJoin may not have run, or the instance was cleared. " +
+                                 "Cannot deliver LobbyBeginRunMessage.");
+                        return;
+                    }
+
+                    LobbyBeginRunMessage msg = new LobbyBeginRunMessage
+                    {
+                        playersInLobby = playersSnapshot,
+                        seed = seedSnapshot,
+                        modifiers = new List<SerializableModifier>(),
+                        act1 = act1Snapshot
+                    };
+
+                    Log.Info($"[FakeJoin] Delivering fake LobbyBeginRunMessage " +
+                             $"(seed={msg.seed}, players={msg.playersInLobby?.Count ?? 0}) — simulating host start.");
+
+                    int handled = svc.DeliverFakeMessage(msg, senderId: CardEditorDebugFakeLobbyPeer.FakeHostNetId);
+
+                    if (handled > 0)
+                    {
+                        Log.Info($"[FakeJoin] LobbyBeginRunMessage delivered to {handled} handler(s). " +
+                                 "The run should now begin loading. NOTE: may hang/desync — the fake host cannot respond.");
+                    }
+                    else
+                    {
+                        Log.Warn("[FakeJoin] *** LobbyBeginRunMessage delivery found NO handlers! *** " +
+                                 "Likely cause: StartRunLobby was not constructed with our FakeClientNetGameService. " +
+                                 "Check that InitializeMultiplayerAsClient uses the fakeService passed to it, and " +
+                                 "that the StartRunLobby constructor runs AFTER fakeService is created.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"[FakeJoin] SimulateHostBeginRun deferred delivery failed: {ex}");
+                }
+            }).CallDeferred();
         }
         catch (Exception ex)
         {
-            Log.Warn($"[CardEditor][FakePeer] SetReady diagnostic failed: {ex}");
+            Log.Warn($"[CardEditor][FakePeer] SetReady diagnostic/begin-run trigger failed: {ex}");
         }
     }
 }
@@ -348,6 +486,13 @@ internal static class CardEditorFakePeer_SetReady_Patch
 /// intentionally valuable: it surfaces whether <c>LobbyPlayerSetReadyMessage</c> is emitted when
 /// the joiner clicks Ready, which is the core of the reported bug.</para>
 ///
+/// <para><b>Handler storage:</b> <see cref="RegisterMessageHandler{T}"/> now stores delegates in
+/// <c>_handlers</c> (keyed by message type) so that <see cref="DeliverFakeMessage{T}"/> can
+/// invoke them directly — exactly as <see cref="StartRunLobby.HandleLobbyBeginRunMessage"/> is
+/// invoked on a real client when the host sends <see cref="LobbyBeginRunMessage"/>. Used by
+/// <see cref="CardEditorFakeSetReady_BeginRun_Trigger"/> when
+/// <see cref="CardEditorDebugFakeLobbyPeer.SimulateHostBeginRun"/> is true.</para>
+///
 /// <para>
 /// <b>NEVER SHIP ENABLED.</b> This class should only be instantiated when
 /// <see cref="CardEditorDebugFakeLobbyPeer.SimulateFakeJoinAsClient"/> is true.
@@ -356,6 +501,12 @@ internal static class CardEditorFakePeer_SetReady_Patch
 internal sealed class FakeClientNetGameService : INetGameService
 {
     private bool _isLoading;
+
+    // Stores registered handlers indexed by message type.
+    // Value is List<Delegate> because the same message type can have multiple handlers registered
+    // (e.g. StartRunLobby registers one, PeerInputSynchronizer may register another).
+    // Each stored delegate is a MessageHandlerDelegate<T> for the corresponding key type T.
+    private readonly Dictionary<Type, List<Delegate>> _handlers = new Dictionary<Type, List<Delegate>>();
 
     public ulong NetId { get; }
 
@@ -392,14 +543,79 @@ internal sealed class FakeClientNetGameService : INetGameService
         Log.Info($"[FakeJoin][FakeNetService] SendMessage<{typeof(T).Name}> (no-op: fake client, no real networking).");
     }
 
+    /// <summary>
+    /// Stores the handler delegate so it can later be invoked via
+    /// <see cref="DeliverFakeMessage{T}"/>. Previously a no-op; now required for
+    /// <see cref="CardEditorDebugFakeLobbyPeer.SimulateHostBeginRun"/> to work.
+    /// </summary>
     public void RegisterMessageHandler<T>(MessageHandlerDelegate<T> messageHandlerDelegate) where T : INetMessage
     {
-        // No-op: no real network means no messages will arrive. Safe to skip.
+        Type key = typeof(T);
+        if (!_handlers.TryGetValue(key, out List<Delegate>? list))
+        {
+            list = new List<Delegate>();
+            _handlers[key] = list;
+        }
+        list.Add(messageHandlerDelegate);
+        Log.Info($"[FakeJoin][FakeNetService] RegisterMessageHandler<{typeof(T).Name}> stored (total for type: {list.Count}).");
     }
 
+    /// <summary>
+    /// Removes a previously stored handler. Matches by delegate equality (same object reference).
+    /// </summary>
     public void UnregisterMessageHandler<T>(MessageHandlerDelegate<T> messageHandlerDelegate) where T : INetMessage
     {
-        // No-op.
+        Type key = typeof(T);
+        if (_handlers.TryGetValue(key, out List<Delegate>? list))
+        {
+            list.Remove(messageHandlerDelegate);
+            Log.Info($"[FakeJoin][FakeNetService] UnregisterMessageHandler<{typeof(T).Name}> (remaining for type: {list.Count}).");
+        }
+    }
+
+    /// <summary>
+    /// Delivers a fake inbound message directly to all handlers registered for type
+    /// <typeparamref name="T"/>. This is the mechanism that lets
+    /// <see cref="CardEditorFakeSetReady_BeginRun_Trigger"/> inject a
+    /// <see cref="LobbyBeginRunMessage"/> as if it arrived from the fake host.
+    /// </summary>
+    /// <typeparam name="T">The message type (must be a registered INetMessage).</typeparam>
+    /// <param name="message">The message to deliver.</param>
+    /// <param name="senderId">The sender id to pass to each handler (use FakeHostNetId = 1).</param>
+    /// <returns>The number of handler invocations that succeeded.</returns>
+    public int DeliverFakeMessage<T>(T message, ulong senderId) where T : INetMessage
+    {
+        Type key = typeof(T);
+        if (!_handlers.TryGetValue(key, out List<Delegate>? list) || list.Count == 0)
+        {
+            Log.Warn($"[FakeJoin][FakeNetService] DeliverFakeMessage<{typeof(T).Name}>: NO HANDLERS FOUND. " +
+                     $"Likely cause: StartRunLobby was not constructed with this FakeClientNetGameService, " +
+                     $"or RegisterMessageHandler was called before this instance was set on the lobby.");
+            return 0;
+        }
+
+        int successCount = 0;
+        foreach (Delegate d in list)
+        {
+            try
+            {
+                if (d is MessageHandlerDelegate<T> typed)
+                {
+                    typed(message, senderId);
+                    successCount++;
+                }
+                else
+                {
+                    Log.Warn($"[FakeJoin][FakeNetService] DeliverFakeMessage<{typeof(T).Name}>: stored delegate " +
+                             $"was not MessageHandlerDelegate<{typeof(T).Name}> (actual: {d.GetType().Name}); skipping.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[FakeJoin][FakeNetService] DeliverFakeMessage<{typeof(T).Name}>: handler threw: {ex}");
+            }
+        }
+        return successCount;
     }
 
     public void Update()
@@ -433,6 +649,17 @@ internal sealed class FakeClientNetGameService : INetGameService
     {
         return null;
     }
+}
+
+/// <summary>
+/// Holds the <see cref="FakeClientNetGameService"/> instance created by
+/// <see cref="CardEditorFakeJoin_ShowFriends_Patch.PerformFakeClientJoin"/> so the SetReady
+/// postfix can call <see cref="FakeClientNetGameService.DeliverFakeMessage{T}"/> on it.
+/// Null when no fake join has been performed (or after cleanup).
+/// </summary>
+internal static class FakeClientServiceHolder
+{
+    internal static FakeClientNetGameService? Instance { get; set; }
 }
 
 /// <summary>
@@ -566,8 +793,9 @@ internal static class CardEditorFakeJoin_ShowFriends_Patch
     {
         Log.Info("[FakeJoin] Building fake client service (Type=Client, NetId=2000).");
 
-        // Step a: build the fake INetGameService.
+        // Step a: build the fake INetGameService and cache it for the SimulateHostBeginRun trigger.
         FakeClientNetGameService fakeService = new FakeClientNetGameService(CardEditorDebugFakeLobbyPeer.FakeClientNetId);
+        FakeClientServiceHolder.Instance = fakeService;
 
         // Step b: build the fake ClientLobbyJoinResponseMessage.
         // HOST player (id=1, isReady=true, Ironclad, slot 0).
