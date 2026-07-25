@@ -1,4 +1,15 @@
-﻿## 2026-07-25 - MP ready fix VERIFIED on the joiner side (fake client lobby)
+﻿## 2026-07-25 - MP ready path CONFIRMED end to end (join -> ready -> host start -> run loads)
+
+Added SimulateHostBeginRun: the fake client service now STORES the message handlers StartRunLobby registers on it, so a synthetic LobbyBeginRunMessage can be delivered to the exact handler a real host message would hit (players/seed/act taken from the live lobby). This is simulation, not a shortcut - the game cannot tell the difference.
+RESULT (godot.log, no exceptions anywhere):
+  [FakeJoin] Delivering fake LobbyBeginRunMessage (seed=951VTXRCBT2V, players=2)
+  [StartRunLobby] Received LobbyBeginRunMessage      <- the GAME's own handler log
+  [FakeJoin] LobbyBeginRunMessage delivered to 1 handler(s)
+The run then began loading and stopped on a black screen. That is the PHANTOM PEER, not a bug: co-op run init waits on the other player (asset preload / input sync / checksum handshake) and nobody answers. Loading at all was the confirmation being sought.
+FULL CHAIN NOW VERIFIED SOLO on real game code: join as client -> pick character -> Ready registers (localPlayer.isReady=true) -> LobbyPlayerSetReadyMessage would be sent to the host -> IsAboutToBeginGame TRUE (all three conditions) -> host begin-run accepted -> run loads.
+STILL UNVERIFIED (needs a second real machine): actual cross-machine networking and card-definition sync between peers. Everything up to that point is proven.
+Clean build (all four debug toggles false) redeployed; distribution refreshed. 0 errors / 278 warnings.
+## 2026-07-25 - MP ready fix VERIFIED on the joiner side (fake client lobby)
 
 The ready-gate fix is now proven against real game code, solo, with no networking.
 Approach that finally worked (user's idea, simpler than everything before it): do not fake a network PEER - fake the JOIN. A debug entry in the game's own Choose-Friend list builds a client-typed INetGameService plus a ClientLobbyJoinResponseMessage containing an already-ready fake host, then calls the genuine NCharacterSelectScreen.InitializeMultiplayerAsClient and pushes the real character-select screen. From that point every line executed is real game code: same lobby, same SetReady, same gate. ENet is bypassed entirely (the in-process handshake is impossible - proven twice).
