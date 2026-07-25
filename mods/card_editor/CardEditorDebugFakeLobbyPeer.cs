@@ -47,7 +47,7 @@ namespace SlayTheSpire2Mod.CardEditor;
 ///   <see cref="TreatLocalAsClientForReadyGate"/> — forces AllowClientReady to behave as if the
 ///                                                    local session is a CLIENT; exercises the client
 ///                                                    ready-gate code path in a solo hosting session.
-///   <see cref="SimulateFakeJoinAsClient"/>        — injects a fake "Fake Lobby (client test) [debug]"
+///   <see cref="SimulateFakeJoinAsClient"/>        — injects a fake "Fake Lobby (client test) - debug"
 ///                                                    entry in the Join Friend list. Clicking it builds
 ///                                                    a synthetic CLIENT lobby (no real networking)
 ///                                                    and pushes CharacterSelect AS A CLIENT with a
@@ -90,7 +90,7 @@ internal static class CardEditorDebugFakeLobbyPeer
     internal const bool TreatLocalAsClientForReadyGate = false;
 
     /// <summary>
-    /// When true: injects a "Fake Lobby (client test) [debug]" entry into the Join Friend list.
+    /// When true: injects a "Fake Lobby (client test) - debug" entry into the Join Friend list.
     /// Clicking it builds a fully fake CLIENT-side lobby (no real ENet socket, no networking)
     /// and pushes NCharacterSelectScreen via InitializeMultiplayerAsClient with a pre-readied
     /// fake host player (netId=1, isReady=true) and the local player (netId=2000, isReady=false).
@@ -148,7 +148,7 @@ internal static class CardEditorDebugFakeLobbyPeer
 
         if (SimulateFakeJoinAsClient)
         {
-            Log.Info("[CardEditor][FakeJoin] SimulateFakeJoinAsClient=true: a 'Fake Lobby (client test) [debug]' " +
+            Log.Info("[CardEditor][FakeJoin] SimulateFakeJoinAsClient=true: a 'Fake Lobby (client test) - debug' " +
                      "entry will appear in Join Friend. Clicking it fakes a CLIENT lobby with a pre-readied host " +
                      "peer (id=1). No real networking. Use to test the joiner-side ready path.");
         }
@@ -334,7 +334,7 @@ internal static class CardEditorFakePeer_SetReady_Patch
 }
 
 // ---------------------------------------------------------------------------
-// PATCH 4: Inject a "Fake Lobby (client test) [debug]" entry into NJoinFriendScreen
+// PATCH 4: Inject a "Fake Lobby (client test) - debug" entry into NJoinFriendScreen
 //          (SimulateFakeJoinAsClient only)
 // ---------------------------------------------------------------------------
 
@@ -437,7 +437,7 @@ internal sealed class FakeClientNetGameService : INetGameService
 
 /// <summary>
 /// DEBUG-ONLY Harmony postfix on <see cref="NJoinFriendScreen"/>.ShowFriends that injects a fake
-/// "Fake Lobby (client test) [debug]" entry into the game's own "Choose Friend to Join" list.
+/// "Fake Lobby (client test) - debug" entry into the game's own "Choose Friend to Join" list.
 /// Clicking it builds a synthetic CLIENT-side lobby — no real ENet socket or networking — and pushes
 /// <see cref="NCharacterSelectScreen"/> via
 /// <see cref="NCharacterSelectScreen.InitializeMultiplayerAsClient"/> exactly as the real join path
@@ -519,7 +519,7 @@ internal static class CardEditorFakeJoin_ShowFriends_Patch
                     if (GodotObject.IsInstanceValid(btn))
                     {
                         MegaRichTextLabel label = btn.GetNode<MegaRichTextLabel>("%Text");
-                        label.Text = "[center]Fake Lobby (client test) [debug][/center]";
+                        label.Text = "[center]Fake Lobby (client test) - debug[/center]";
                     }
                 }
                 catch (Exception ex)

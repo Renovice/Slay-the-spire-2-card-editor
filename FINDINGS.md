@@ -1,4 +1,18 @@
-﻿## 2026-07-25 - Reverted perf items 3,5,6,7,8 (they caused card library/creator loading hitches)
+﻿## 2026-07-25 - MP ready fix VERIFIED on the joiner side (fake client lobby)
+
+The ready-gate fix is now proven against real game code, solo, with no networking.
+Approach that finally worked (user's idea, simpler than everything before it): do not fake a network PEER - fake the JOIN. A debug entry in the game's own Choose-Friend list builds a client-typed INetGameService plus a ClientLobbyJoinResponseMessage containing an already-ready fake host, then calls the genuine NCharacterSelectScreen.InitializeMultiplayerAsClient and pushes the real character-select screen. From that point every line executed is real game code: same lobby, same SetReady, same gate. ENet is bypassed entirely (the in-process handshake is impossible - proven twice).
+EVIDENCE (godot.log, joiner side):
+  [FakeJoin] Pushing character select as CLIENT (host id=1 ready=true, local id=2000 ready=false)
+  [FakeNetService] SendMessage<LobbyPlayerSetReadyMessage>            <- the message the mod used to swallow
+  [FakePeer] SetReady(True) called for netId=2000 -> localPlayer.isReady=True
+  [FakePeer] IsAboutToBeginGame -> True | connectingPlayers=0 players=2 allReady=True
+All three previously-failing behaviours now pass: the click reaches the game, isReady actually sets, and the set-ready message goes out to the host. IsAboutToBeginGame returns TRUE, i.e. the lobby is fully satisfied.
+"It sits there after Ready" is CORRECT, not a failure: a client never begins the run itself, it waits for the host's LobbyBeginRunMessage, and a fake host cannot send one. With a real host that is the moment both players load in.
+Also fixed: the debug entry's label used "[debug]", which the BBCode parser read as a tag ("Found end tag center, expected debug") and threw into the log - renamed to "- debug".
+STILL UNVERIFIED (needs the friend or the source build): real cross-machine networking and actual definition sync between peers. This test covers the local ready path only.
+Clean build (all three debug toggles false) rebuilt, deployed, distribution refreshed. Build 0 errors / 278 warnings.
+## 2026-07-25 - Reverted perf items 3,5,6,7,8 (they caused card library/creator loading hitches)
 
 User report: the editor caches and pool/character/boot-save changes made the CARD LIBRARY and CREATOR hitch while loading - i.e. the "optimisations" were a net regression on the screens they touched. Reverted per user instruction; correctness and smoothness beat micro-optimisation.
 REVERTED (restored to pre-perf-pass-2 behaviour):
