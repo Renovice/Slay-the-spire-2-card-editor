@@ -71,6 +71,11 @@ public static class CardEditorMod
 		RegisterCreatedCardsInPools();
 		CardEditorConsistencyAudit.RunStartupAudits();
 
+		// DEBUG-ONLY: no-op (zero cost) unless a const in CardEditorDebugFakeLobbyPeer is flipped.
+		// Must run before PatchAssemblySafely so ForceClientReadyGateForTesting is set before Harmony
+		// calls each patch class's Prepare() method.
+		CardEditorDebugFakeLobbyPeer.Prepare();
+
 		Harmony harmony = new Harmony(HarmonyId);
 		PatchPrivateGetDescriptionForPile(harmony);
 		PatchAssemblySafely(harmony, Assembly.GetExecutingAssembly());

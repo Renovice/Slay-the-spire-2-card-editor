@@ -199,6 +199,12 @@ internal static class CardEditorMultiplayerSync
 	private static bool _isRefreshingSettingsUi;
 	private static bool _settingsLocInjected;
 
+	// TEST-ONLY: set by CardEditorDebugFakeLobbyPeer when TreatLocalAsClientForReadyGate is true.
+	// When true, AllowClientReady treats the local session as a client even if it is actually the
+	// host, so the client-side ready-gate code path can be exercised in a solo hosting session.
+	// Must be false (the default) in any real multiplayer or shipping build.
+	internal static bool ForceClientReadyGateForTesting = false;
+
 	// L1/L4: client lobby-ready gate + snapshot request retry.
 	private static bool _pendingClientReady;
 	private static Action? _pendingReadyAction;
@@ -313,7 +319,7 @@ internal static class CardEditorMultiplayerSync
 		ClearPendingReady();
 
 		if (_netService != null
-			&& _netService.Type == NetGameType.Client
+			&& (_netService.Type == NetGameType.Client || ForceClientReadyGateForTesting)
 			&& CardEditorMultiplayerSettings.MultiplayerSyncEnabled
 			&& !IsClientSnapshotApplied())
 		{
