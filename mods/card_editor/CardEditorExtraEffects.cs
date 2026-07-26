@@ -10347,14 +10347,29 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return;
 		}
 
-		await CardCmd.Transform(
-			new List<CardTransformation> { new CardTransformation(current, entry.Original) },
-			rng: null,
-			CardPreviewStyle.None);
-		CardEditorTemporaryEnchantmentController.OnCardTransformed(combatState, current, entry.Original);
-		UnmarkStatefulTransformReplacement(current);
-		RefreshTransformVisuals(current, entry.Original);
-		UnregisterStatefulTransformEntry(state, entry);
+		try
+		{
+			await CardCmd.Transform(
+				new List<CardTransformation> { new CardTransformation(current, entry.Original) },
+				rng: null,
+				CardPreviewStyle.None);
+			CardEditorTemporaryEnchantmentController.OnCardTransformed(combatState, current, entry.Original);
+			RefreshTransformVisuals(current, entry.Original);
+		}
+		catch (Exception ex)
+		{
+			// CardCmd.Transform dereferences CombatManager.Instance on its first line, and during
+			// combat-end cleanup that singleton is already torn down - so the revert threw a
+			// NullReferenceException here and skipped the bookkeeping below, leaking the entry into
+			// the next combat. The visual swap is meaningless once combat is over; the bookkeeping
+			// is not, so it moved into the finally.
+			Log.Warn($"[CardEditor] Stateful transform revert could not swap the card back (state still cleaned up): {ex.Message}");
+		}
+		finally
+		{
+			UnmarkStatefulTransformReplacement(current);
+			UnregisterStatefulTransformEntry(state, entry);
+		}
 	}
 
 	private static async Task RunStatefulTransformPostCardPlayed(CombatState combatState, CardPlay cardPlay)
@@ -10531,23 +10546,34 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			foreach (StatefulTransformEntry entry in GetStatefulTransformEntriesSnapshot(state))
 			{
-				if (entry?.Current == null || entry.Original == null || entry.Effect == null || !IsStatefulTransformTrackedCardPresent(entry.Current))
+				// Per-entry guard: this used to be a single try around the whole loop, so the first
+				// entry that threw abandoned every remaining entry un-reverted and still registered.
+				try
 				{
+					if (entry?.Current == null || entry.Original == null || entry.Effect == null || !IsStatefulTransformTrackedCardPresent(entry.Current))
+					{
+						UnmarkStatefulTransformReplacement(entry?.Current);
+						UnregisterStatefulTransformEntry(state, entry);
+						continue;
+					}
+
+					bool shouldRevert = entry.Duration switch
+					{
+						_ when DoesStatefulTransformRevertConditionPass(combatState, entry.Current, BuildStatefulTransformConditionPlay(entry.Current), entry.Effect) => true,
+						CardExtraEffectStatefulTransformDuration.Run => false,
+						CardExtraEffectStatefulTransformDuration.Combats => --entry.RemainingCombats <= 0,
+						_ => true
+					};
+					if (shouldRevert)
+					{
+						await RevertStatefulTransform(combatState, state, entry);
+					}
+				}
+				catch (Exception entryEx)
+				{
+					Log.Warn($"[CardEditor] Stateful transform combat cleanup failed for one entry (others continue): {entryEx.Message}");
 					UnmarkStatefulTransformReplacement(entry?.Current);
 					UnregisterStatefulTransformEntry(state, entry);
-					continue;
-				}
-
-				bool shouldRevert = entry.Duration switch
-				{
-					_ when DoesStatefulTransformRevertConditionPass(combatState, entry.Current, BuildStatefulTransformConditionPlay(entry.Current), entry.Effect) => true,
-					CardExtraEffectStatefulTransformDuration.Run => false,
-					CardExtraEffectStatefulTransformDuration.Combats => --entry.RemainingCombats <= 0,
-					_ => true
-				};
-				if (shouldRevert)
-				{
-					await RevertStatefulTransform(combatState, state, entry);
 				}
 			}
 		}

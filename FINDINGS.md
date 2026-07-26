@@ -1,4 +1,37 @@
-﻿## 2026-07-25 - MP ready path CONFIRMED end to end (join -> ready -> host start -> run loads)
+﻿## 2026-07-27 - "Transform This Card" reverting: mostly BY DESIGN + a real NRE in the combat-end revert
+
+User report: a card with StatefulTransform (Turn End before discard, In Hand, Transform, duration THIS COMBAT, into a created card) plays the transform animation but "goes back into deck as Rainbow Evolution".
+ROOT ANSWER (not a bug): duration ThisCombat is combat-scoped by design. RunStatefulTransformsAfterCombatEnd (CardEditorExtraEffects.cs:10541-10547) reverts on the `_ => true` default arm; only Run returns false and Combats decrements. So at combat end the card becomes the original again and the run deck shows Rainbow Evolution. For a permanent transform the duration must be RUN.
+REFUTED along the way (two agents, ~300k tokens, worth recording so nobody re-checks): the end-of-turn discard does NOT iterate a pre-transform snapshot - FlushPlayerHand reads the live hand in Phase Two, after BeforeSideTurnEnd (CombatManager.cs:1253/1390/1401); the turn-boundary CardPlay DOES carry the live hand instance, not a clone (CardEditorExtraEffectTriggerPatches.cs:480); the trigger patch chains its task (`__result = RunAfter(__result, ...)`, :431) so the game awaits it - no race; ThisCombat does NOT revert at turn end (`_ => false`, :10492-10499); created-card ids resolve fine.
+REAL BUG FOUND (runtime evidence, godot.log): "[CardEditor] Stateful transform combat cleanup failed: System.NullReferenceException at CardCmd_Transform_CardEditorTransformInterop_Patch.UnmarkWhenFinished <- RevertStatefulTransform <- RunStatefulTransformsAfterCombatEnd". Cause: RevertStatefulTransform calls CardCmd.Transform, whose FIRST line dereferences CombatManager.Instance (game source CardCmd.cs:371) - and that singleton is already torn down during combat-end cleanup. The NRE surfaced at our `await originalTask` in the interop postfix. Two consequences: (1) the bookkeeping after the await (UnmarkStatefulTransformReplacement / UnregisterStatefulTransformEntry) never ran, leaking the entry - and _statefulTransformEntries is a STATIC list, so it leaks across combats; (2) the catch sat OUTSIDE the foreach, so the first throwing entry abandoned every remaining entry un-reverted and still registered.
+FIX: RevertStatefulTransform now wraps only the visual swap in try/catch and moves the bookkeeping into a finally (the visual swap is meaningless once combat is over; the bookkeeping is not). RunStatefulTransformsAfterCombatEnd got a per-entry try/catch that still unmarks+unregisters the failing entry so one bad entry cannot abort the sweep.
+Build 0 errors / 278 warnings. Deployed.
+Next Step: tell the user to set duration RUN if they want the transform to persist past combat; re-check the log for the cleanup warning after a combat to confirm the NRE is gone.
+## 2026-07-27 - Rainbow Evolution StatefulTransform "animate then revert" - root cause
+
+Hypothesis: Three hypotheses investigated for why a ThisCombat StatefulTransform (Turn End Before Discard, In Hand, Transform mode) animates but the card reverts.
+
+Finding: H-C partially confirmed at COMBAT END, not turn end. H-D and H-E refuted.
+
+Evidence:
+- RefreshStatefulTransformDuration (10143-10160): ThisCombat hits `_ => 0` → RemainingTurns=0, RemainingCombats=0.
+- RunStatefulTransformsAfterPlayerTurnEnd (10467): switch default `_ => false` → ThisCombat does NOT revert at turn end.
+- RunStatefulTransformsAfterCombatEnd (10516): switch default `_ => true` → ThisCombat DOES revert at combat end. This is the actual revert path.
+- DoesStatefulTransformConditionPass (10162): checks only ScaleMode count conditions, NOT card location. H-D refuted.
+- DoesStatefulTransformRevertConditionPass (10192): returns false unless HasUsableBranchCondition (branch condition set). No location check. H-D refuted.
+- CreateDynamicTransformReplacement (9748): TryParseSpecificCardId correctly resolves CARD.CARD_EDIT... ids via CardEditorCreatedCardsStore slot mapping. CardModel_ToMutable_Patch applies TARGET card's overrides. H-E refuted.
+- No pile-change handler, no AfterFlush sweep, no EvaluateStatefulTransformConditionStops call runs during the BeforeSideTurnEnd → FlushPlayerHand → AfterSideTurnEnd sequence that could trigger a within-turn revert.
+- Turn-end execution order confirmed: BeforeSideTurnEnd (Phase One, transform fires, card in Hand) → DoTurnEnd → FlushPlayerHand (Phase Two, discard) → AfterSideTurnEnd (RunStatefulTransformsAfterPlayerTurnEnd → _ => false).
+
+Reason: The transform fires correctly and persists through the turn. The revert happens at AfterCombatEnd via RunStatefulTransformsAfterCombatEnd's `_ => true` default arm which catches ThisCombat. The user observes "Rainbow Evolution" in the deck/discard AFTER combat ends, which is the correct behavior for ThisCombat. The "animates then reverts" description matches: forward transform animation plays during the turn, silent revert fires at combat end.
+
+Fix: To keep the transform permanently (through the run), use Duration = Run instead of ThisCombat. Run hits `CardExtraEffectStatefulTransformDuration.Run => false` in RunStatefulTransformsAfterCombatEnd and `_ => false` in RunStatefulTransformsAfterPlayerTurnEnd → never reverts.
+
+Side effects of changing to Run: the transform would persist across ALL combats (Run = entire run duration). If the intent is "transform for THIS combat only, revert at end" then ThisCombat is correct and the user must accept the revert. If the intent is "permanently transform", use Run.
+
+Next Step: Clarify with the user whether they want (a) transform that reverts at combat end (ThisCombat is correct, no code change needed) or (b) a permanent transform that persists to the next combat (use Run duration instead).
+
+## 2026-07-25 - MP ready path CONFIRMED end to end (join -> ready -> host start -> run loads)
 
 Added SimulateHostBeginRun: the fake client service now STORES the message handlers StartRunLobby registers on it, so a synthetic LobbyBeginRunMessage can be delivered to the exact handler a real host message would hit (players/seed/act taken from the live lobby). This is simulation, not a shortcut - the game cannot tell the difference.
 RESULT (godot.log, no exceptions anywhere):
