@@ -9897,7 +9897,15 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 		try
 		{
-			NCard? staleOriginalNode = original != null ? NCard.FindOnTable(original) : null;
+			// The pile override is REQUIRED here. By the time we run, CardCmd.Transform has already
+			// removed the original from state, so original.Pile is null - and FindOnTable's pile
+			// switch then falls to its `null => null` arm and finds nothing (NCard.cs:361). We would
+			// drop to RefreshCardVisuals(replacement) below, which looks the node up by the
+			// REPLACEMENT model that the node does not carry yet, so that missed too and the card
+			// silently kept rendering the original. The replacement took the original's slot, so its
+			// pile is where the stale node actually lives.
+			PileType? staleNodePile = replacement.Pile?.Type;
+			NCard? staleOriginalNode = original != null ? NCard.FindOnTable(original, staleNodePile) : null;
 			if (staleOriginalNode != null && GodotObject.IsInstanceValid(staleOriginalNode))
 			{
 				staleOriginalNode.Model = replacement;

@@ -1,4 +1,15 @@
-﻿## 2026-07-27 - "Transform This Card" reverting: mostly BY DESIGN + a real NRE in the combat-end revert
+﻿## 2026-07-27 (2) - Transform played its animation but the card never CHANGED: our visual repair could never find the node
+
+User pushed back on the "working as designed" answer and was right: the card visually stayed Rainbow Evolution during combat, which the ThisCombat/combat-end explanation does not cover. Root-caused properly this time.
+CHAIN:
+1. Vanilla only swaps what a card DISPLAYS inside NCardTransformShineVfx.PlayUntilCardUpdate: `if (!(await WaitAndInterruptIfNecessary(...))) QueueFreeSafely(); else UpdateCard(_cardNode, _endCard);`. UpdateCard is the ONLY thing that assigns cardNode.Model = replacement. WaitAndInterruptIfNecessary bails the moment `!cardNode.IsInsideTree() || _endCard.Pile == null` (NCardTransformShineVfx.cs:104-117, 133-151). At a Turn-End-before-discard transform the hand is being torn down while that ~0.75s animation runs, so the node leaves the tree, the wait aborts, and UpdateCard NEVER RUNS - the animation is seen, the card is not changed.
+2. We already had RefreshTransformVisuals (CardEditorExtraEffects.cs:9891) to repair exactly that, but it could never work: it called `NCard.FindOnTable(original)` with NO overridePile. By then CardCmd.Transform has removed the original from state, so original.Pile == null, and FindOnTable's switch falls to its `null => null` arm (game source NCard.cs:360-371) and returns null. We then fell through to RefreshCardVisuals(replacement), which looks the node up by the REPLACEMENT model - but the node still carries the ORIGINAL model precisely because UpdateCard never ran, so that missed too. Both paths missed; nothing ever repainted the card.
+FIX: pass the replacement's pile as the override - `NCard.FindOnTable(original, replacement.Pile?.Type)`. The replacement occupies the slot the original had, so its pile is where the stale node lives; the existing repair (set .Model, then NHandCardHolder.UpdateCard or UpdateVisuals) then runs as designed.
+NOTE this is a general fix, not specific to turn-end: ANY transform whose vanilla animation gets interrupted (card leaving the tree, pile change mid-animation) hit the same dead repair path.
+Separately confirmed earlier and still true: duration ThisCombat legitimately reverts at combat end (use RUN to persist), and the combat-end revert NRE fix from earlier today stands.
+Build 0 errors / 278 warnings. Deployed.
+Next Step: in game, end a turn with the card in hand - it must now visibly become the target card, and stay it for the rest of the combat.
+## 2026-07-27 - "Transform This Card" reverting: mostly BY DESIGN + a real NRE in the combat-end revert
 
 User report: a card with StatefulTransform (Turn End before discard, In Hand, Transform, duration THIS COMBAT, into a created card) plays the transform animation but "goes back into deck as Rainbow Evolution".
 ROOT ANSWER (not a bug): duration ThisCombat is combat-scoped by design. RunStatefulTransformsAfterCombatEnd (CardEditorExtraEffects.cs:10541-10547) reverts on the `_ => true` default arm; only Run returns false and Combats decrements. So at combat end the card becomes the original again and the run deck shows Rainbow Evolution. For a permanent transform the duration must be RUN.
