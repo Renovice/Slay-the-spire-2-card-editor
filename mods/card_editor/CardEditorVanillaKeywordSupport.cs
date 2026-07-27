@@ -17,7 +17,31 @@ namespace SlayTheSpire2Mod.CardEditor;
 
 internal static class CardEditorVanillaKeywordSupport
 {
-	private sealed record HoverTerm(string Term, Func<IHoverTip>? CreateHoverTip);
+	private sealed record HoverTerm(string Term, Func<IHoverTip>? CreateHoverTip)
+	{
+		private IHoverTip? _resolvedTip;
+		private bool _resolved;
+
+		// The factory used to be invoked once per matched term per HOVER, and several are expensive:
+		// the power/orb ones go through reflection, and the static-localisation ones run the game's
+		// SmartFormat over vanilla entries such as DISCARD_PILE.title, whose "{Hotkey:...}" selector
+		// cannot resolve from here - the formatter then logs a localisation error WITH A FULL STACK
+		// TRACE on every single hover (512 of them in one recorded session, triggered by any card
+		// whose text merely mentions a pile, which custom cards do constantly). A tip's content
+		// cannot change while the owning Cache is alive, so resolve once and reuse; rebuilding the
+		// Cache on a signature change drops these along with it.
+		internal IHoverTip? ResolveHoverTip()
+		{
+			if (_resolved)
+			{
+				return _resolvedTip;
+			}
+
+			_resolved = true;
+			_resolvedTip = CreateHoverTip?.Invoke();
+			return _resolvedTip;
+		}
+	}
 
 	private sealed class Cache
 	{
@@ -287,7 +311,12 @@ internal static class CardEditorVanillaKeywordSupport
 
 			try
 			{
-				tips.Add(term.CreateHoverTip());
+				// Resolved once per term (see HoverTerm.ResolveHoverTip) rather than per hover.
+				IHoverTip? tip = term.ResolveHoverTip();
+				if (tip != null)
+				{
+					tips.Add(tip);
+				}
 			}
 			catch
 			{

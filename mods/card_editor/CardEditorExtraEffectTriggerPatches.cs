@@ -485,7 +485,13 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 						continue;
 					}
 
-					CardEditorMod.VerboseLog($"[CardEditor][EndOfTurnInHandHook] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id}");
+					// VerboseLog checks the flag itself, but the interpolated string is built by the
+					// caller first - so this allocated a string per card per turn end even with
+					// verbose logging off. Guard before the interpolation, not inside it.
+					if (CardEditorMod.IsVerboseEditorLogging)
+					{
+						CardEditorMod.VerboseLog($"[CardEditor][EndOfTurnInHandHook] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id}");
+					}
 					CardEditorEndOfTurnInHandTracker.Mark(combatState, card);
 
 					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);

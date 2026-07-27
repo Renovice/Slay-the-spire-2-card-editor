@@ -1,4 +1,23 @@
-﻿## 2026-07-27 (2) - Transform played its animation but the card never CHANGED: our visual repair could never find the node
+﻿## 2026-07-27 (3) - Combat stutter deep dive: found an exception storm on the hover path (FIXED) + an O(N^2) turn-end scan (reported)
+
+User: "the game lags like crazy in combat with our custom cards, so many random stutters."
+SMOKING GUN, found in the user's godot.log rather than by reading code: a STACK TRACE repeated 512 times in one session -
+  [ERROR] Localization formatting error! No source extension could handle the selector named "Hotkey"
+  Discard Pile {Hotkey:choose(None):| ({})}   table=static_hover_tips key=DISCARD_PILE.title
+  at LocManager.SmartFormat <- HoverTip..ctor <- CardEditorVanillaKeywordSupport.CreateStaticLocalizationHoverTip <- AddStaticLocalizationTerm <- our HoverTips postfix <- NClickableControl.OnHoverHandler
+HoverTerm held a Func<IHoverTip> that was invoked PER MATCHED TERM PER HOVER (CardEditorVanillaKeywordSupport.cs:314). For the pile terms it built a HoverTip from vanilla localisation entries whose "{Hotkey:...}" selector cannot resolve in that context, so the game logged a formatting error WITH A FULL STACK TRACE every single hover. Exceptions + stack-trace capture + log writes on a hover handler is a textbook random-stutter source, and it is WORSE WITH CUSTOM CARDS exactly as reported: "Deck"/"Draw Pile"/"Discard Pile"/"Exhaust Pile" are hover terms, and custom cards mention piles constantly.
+FIX: memoise the resolved tip on HoverTerm (ResolveHoverTip). One resolve per term for the lifetime of the surrounding Cache instead of one per hover - kills 511 of the 512 error+stack-trace logs and also stops the power/orb tip factories re-running reflection per hover. Cache rebuilds on signature change still drop the memo, so content cannot go stale.
+ALSO FIXED: the end-of-turn hand loop built an interpolated log string per card per turn even with verbose logging off (VerboseLog checks the flag internally, but the caller builds the string first) - guarded at the call site (CardEditorExtraEffectTriggerPatches.cs:488).
+REPORTED BUT NOT SHIPPED (needs the user's call - deliberately not batching speculative perf changes after the perf-pass-2 regression):
+- O(N^2) TURN END, the biggest remaining win: EvaluateDynamicTransforms runs in the FINALLY of every RunForTrigger, and itself scans every card in every pile (GetDynamicTransformCandidates, with a pile.Cards.ToList() per pile per call) calling GetActiveDynamicTransformEffect per card. A 20-card deck at turn end = 20 RunForTrigger calls x 20 cards = ~400 effect-list builds. Proper fix needs a version-keyed "deck has any DynamicIdentity row" gate; the cheap bitmask prefilter cannot be used because MapKindToBit has NO DynamicIdentity bit, and adding one wrong silently disables the feature (the Pierce bug class), so it was not done blind at the end of a long session.
+- RunForTrigger (CardEditorExtraEffects.cs:14832) allocates its two scope disposables BEFORE the effects.Count==0 check, so every vanilla card in every pile pays them per combat event. Cannot simply gate on HasAnyModSurface: that returns true for EVERY card once ANY card has a combat grant, and moving the using-scopes inside the try would change disposal order relative to the finally.
+- CardMightHaveRuntimeEffectKind falls through for ALL cards once CombatHasAnyGrantedEffects is true, so the bitmask gate stops protecting the per-HIT damage hooks for the rest of the combat (List+HashSet allocations per hit per patch).
+- GetCache(card,...) builds a new Regex(RegexOptions.Compiled) per FormatDescription(card,...) call and never stores it; compiled-regex construction emits IL and is very expensive.
+- SyncVisibleMirrorPowers does LINQ over owner.Powers in the finally of every power trigger.
+- Quest completion calls FlushIfDirty on two stores mid-combat (synchronous File.WriteAllText), and this repo lives under OneDrive where writes can stall.
+Build 0 errors / 278 warnings. Deployed.
+Next Step: play a combat and re-check the log - the "Localization formatting error" count should drop from ~512 to ~4 (one per pile term). If stutters persist, the O(N^2) turn-end scan is the next target.
+## 2026-07-27 (2) - Transform played its animation but the card never CHANGED: our visual repair could never find the node
 
 User pushed back on the "working as designed" answer and was right: the card visually stayed Rainbow Evolution during combat, which the ThisCombat/combat-end explanation does not cover. Root-caused properly this time.
 CHAIN:
