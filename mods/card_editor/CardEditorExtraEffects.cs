@@ -3019,6 +3019,7 @@ internal static class CardEditorExtraEffects
 	private static readonly ConditionalWeakTable<CombatState, List<ResourceCountEntry>> _resourceCountHistory = new();
 	private static readonly ConditionalWeakTable<CombatState, DynamicTransformState> _dynamicTransformStates = new();
 	private static readonly ConditionalWeakTable<CardModel, DynamicTransformMarker> _dynamicTransformMarkers = new();
+	private static readonly ConditionalWeakTable<Player, DynamicIdentityPresenceEntry> _dynamicIdentityPresenceCache = new();
 	private static readonly ConditionalWeakTable<CombatState, StatefulTransformState> _statefulTransformStates = new();
 	private static readonly ConditionalWeakTable<CardModel, StatefulTransformMarker> _statefulTransformMarkers = new();
 	private static readonly List<StatefulTransformEntry> _statefulTransformEntries = new();
@@ -3040,6 +3041,18 @@ internal static class CardEditorExtraEffects
 	{
 		public CardModel Original { get; init; } = null!;
 		public CardExtraEffect Effect { get; init; } = null!;
+	}
+
+	// Per-player cache for "does any card in any combat pile currently carry a DynamicIdentity
+	// row?" Keyed on (CacheVersion, combat-piles stamp) so it invalidates whenever overrides
+	// change OR cards are added/removed/transformed. Conservative: returns true on any failure
+	// and whenever the combat has active temporary grants (which can add DynamicIdentity
+	// mid-combat without bumping the card-level version).
+	private sealed class DynamicIdentityPresenceEntry
+	{
+		internal long Version = long.MinValue;
+		internal int PilesStamp;
+		internal bool HasAny;
 	}
 
 	private sealed class StatefulTransformState
@@ -9599,6 +9612,120 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		return DoesBranchConditionPass(resolvedCombatState, ownerCreature, playForConditions, effect);
 	}
 
+	// Stamp that covers card identity AND upgrade level for every card in every combat pile
+	// the player owns. Used as the second key in DynamicIdentityPresenceEntry so that
+	// in-place upgrade (no version bump) or pile membership changes (card drawn/discarded/
+	// created) both invalidate the cache.
+	private static int ComputeCombatPilesStamp(Player player)
+	{
+		int stamp = 17;
+		unchecked
+		{
+			foreach (PileType pileType in GetCombatCardPileTypes())
+			{
+				CardPile? pile = pileType.GetPile(player);
+				IReadOnlyList<CardModel>? cards = pile?.Cards;
+				if (cards == null)
+				{
+					continue;
+				}
+
+				stamp = (stamp * 31) + (int)pileType;
+				stamp = (stamp * 31) + cards.Count;
+				for (int i = 0; i < cards.Count; i++)
+				{
+					CardModel? card = cards[i];
+					stamp = (stamp * 31) + (card == null ? 0 : RuntimeHelpers.GetHashCode(card));
+					stamp = (stamp * 31) + (card == null ? 0 : card.GetSafeCurrentUpgradeLevel());
+				}
+			}
+		}
+
+		return stamp;
+	}
+
+	// Returns true when any card in any combat pile could carry an active DynamicIdentity row.
+	// CONSERVATIVE: returns true on any failure, and always returns true when the combat has
+	// active temporary/aura grants (those can add DynamicIdentity without bumping the card-
+	// level version counter). False is only returned when the full description-level scan of
+	// all combat piles found no DynamicIdentity rows AND there are no active grants.
+	private static bool HasAnyDynamicIdentityRows(Player player, CombatState combatState)
+	{
+		try
+		{
+			// Temporary/aura grants can add DynamicIdentity mid-combat without bumping the
+			// card-level cache version. When any grants are active the cache is bypassed and
+			// we return true (conservative) so that ApplyDynamicTransforms runs.
+			if (CardEditorRuntimeCaches.CombatHasAnyGrantedEffects(combatState))
+			{
+				return true;
+			}
+
+			DynamicIdentityPresenceEntry entry = _dynamicIdentityPresenceCache.GetOrCreateValue(player);
+			long version = CardEditorRuntimeCacheVersion.Current;
+			int stamp = ComputeCombatPilesStamp(player);
+			if (entry.Version != version || entry.PilesStamp != stamp)
+			{
+				entry.HasAny = ComputeHasAnyDynamicIdentityRows(player);
+				entry.PilesStamp = stamp;
+				entry.Version = version;
+			}
+
+			return entry.HasAny;
+		}
+		catch
+		{
+			// Conservative: on failure fall through to the full scan.
+			return true;
+		}
+	}
+
+	private static bool ComputeHasAnyDynamicIdentityRows(Player player)
+	{
+		foreach (PileType pileType in GetCombatCardPileTypes())
+		{
+			CardPile? pile = pileType.GetPile(player);
+			IReadOnlyList<CardModel>? cards = pile?.Cards;
+			if (cards == null || cards.Count == 0)
+			{
+				continue;
+			}
+
+			// Snapshot to avoid mutation during the description scan (cards can move piles
+			// e.g. via triggers fired during description evaluation, though rare in practice).
+			foreach (CardModel? card in cards.ToList())
+			{
+				if (card == null)
+				{
+					continue;
+				}
+
+				// GetEffectsForDescription only surfaces the card's OWN rows. The path this gate
+				// protects (GetActiveDynamicTransformEffect) reads the full runtime list, which for
+				// a created card with legacy effect sources also injects the SOURCE card's rows - so
+				// a DynamicIdentity row borrowed that way is invisible here. Missing it would
+				// silently stop such a card from ever transforming, so treat any created card that
+				// borrows effects as a possible carrier. Conservative on purpose: a false positive
+				// only costs the scan we wanted to skip, a false negative removes a working feature.
+				if (card is CardEditorCreatedCardBase
+					&& CardEditorCreatedCardsStore.HasEffectSourceCard(card.Id))
+				{
+					return true;
+				}
+
+				foreach (CardExtraEffect effect in GetEffectsForDescription(card, isUpgradePreview: false))
+				{
+					if (effect?.Kind == CardExtraEffectKind.DynamicIdentity)
+					{
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
 	private static async Task EvaluateDynamicTransforms(CombatState combatState, PlayerChoiceContext choiceContext, Player? player)
 	{
 		if (combatState == null || choiceContext == null || player == null)
@@ -9616,7 +9743,25 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		try
 		{
 			await RevertExpiredDynamicTransforms(combatState, choiceContext, state);
-			await ApplyDynamicTransforms(combatState, choiceContext, player, state);
+
+			// Cheap presence gate: skip the O(N) candidate scan when no card in any combat
+			// pile carries a DynamicIdentity row AND no active transform entries need a new
+			// apply pass. The gate is conservative (returns true on any doubt) so it can
+			// never silence a transform that should fire. Active entries (state.Entries.Count
+			// > 0) are already handled by RevertExpiredDynamicTransforms above; they cannot
+			// start a new ApplyDynamicTransforms cycle anyway because their original/
+			// replacement cards are filtered out by the activeOriginals/activeReplacements
+			// sets inside ApplyDynamicTransforms. However, we still skip apply-scanning
+			// when entries exist but no other cards have DynamicIdentity rows, because those
+			// candidates would never match anyway. We only skip when the presence gate is
+			// false AND entries are empty (if entries exist, we still want apply to run so
+			// that freshly-un-replaced originals can be re-transformed if still eligible).
+			bool shouldApply = state.Entries.Count > 0
+				|| HasAnyDynamicIdentityRows(player, combatState);
+			if (shouldApply)
+			{
+				await ApplyDynamicTransforms(combatState, choiceContext, player, state);
+			}
 		}
 		catch (Exception ex)
 		{

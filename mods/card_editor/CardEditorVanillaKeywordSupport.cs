@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using HarmonyLib;
@@ -67,6 +68,20 @@ internal static class CardEditorVanillaKeywordSupport
 		"cyan",
 		"magenta"
 	};
+
+	// Per-card memoised cache for cards that have custom keywords.
+	// Keyed on a composite signature so that any change to the card's custom keyword names
+	// or descriptions (via CardEditorRuntimeCacheVersion), the base keyword set, or the
+	// upgrade/target context forces a rebuild.  ConditionalWeakTable lets card instances
+	// be collected without leaking.  Access is always on the Godot main thread (same as
+	// the base _cache), so no extra locking is needed here.
+	private sealed class PerCardKeywordCacheEntry
+	{
+		internal string Signature = string.Empty;
+		internal Cache? Cache;
+	}
+
+	private static readonly ConditionalWeakTable<CardModel, PerCardKeywordCacheEntry> _perCardCache = new();
 
 	private static readonly object _cacheLock = new object();
 	private static Cache? _cache;
@@ -324,6 +339,44 @@ internal static class CardEditorVanillaKeywordSupport
 		}
 	}
 
+	// Builds a string key that encodes everything that can change the merged keyword cache:
+	// - CardEditorRuntimeCacheVersion.Current  — covers all card/keyword mutations
+	// - baseSignature                          — covers vanilla keyword set changes
+	// - isUpgradePreview                       — affects which effects (and names) appear
+	// - each summary's Name+Description        — detects content changes per target/upgrade
+	//
+	// We do NOT include the target object reference: the same combination of version +
+	// base signature + upgrade flag + actual summary content uniquely determines the Cache.
+	// If target changes the summaries, the summary content changes and the signature changes.
+	private static string BuildPerCardSignature(
+		string baseSignature,
+		bool isUpgradePreview,
+		IReadOnlyList<CardExtraEffectKeywordSummary> summaries)
+	{
+		// Fast path: most cards have 0 or 1 custom keyword; avoid StringBuilder allocation.
+		long version = CardEditorRuntimeCacheVersion.Current;
+		if (summaries.Count == 0)
+		{
+			return $"{version}|{baseSignature}|{isUpgradePreview}|";
+		}
+
+		StringBuilder sb = new StringBuilder();
+		sb.Append(version);
+		sb.Append('|');
+		sb.Append(baseSignature);
+		sb.Append('|');
+		sb.Append(isUpgradePreview);
+		sb.Append('|');
+		foreach (CardExtraEffectKeywordSummary summary in summaries)
+		{
+			sb.Append(summary.Name ?? string.Empty);
+			sb.Append('\x01');
+			sb.Append(summary.Description ?? string.Empty);
+			sb.Append('\x02');
+		}
+		return sb.ToString();
+	}
+
 	private static Cache GetCache(CardModel? card, Creature? target, bool isUpgradePreview)
 	{
 		Cache baseCache = GetCache();
@@ -344,6 +397,17 @@ internal static class CardEditorVanillaKeywordSupport
 		if (customKeywordSummaries.Count == 0)
 		{
 			return baseCache;
+		}
+
+		// Check the per-card memo before building merged terms + compiling a Regex.
+		// The signature encodes version + base keywords + upgrade flag + summary content,
+		// so any change that would alter the result produces a different signature and
+		// triggers a rebuild.  ConditionalWeakTable handles card GC automatically.
+		string perCardSig = BuildPerCardSignature(baseCache.Signature, isUpgradePreview, customKeywordSummaries);
+		PerCardKeywordCacheEntry entry = _perCardCache.GetOrCreateValue(card);
+		if (entry.Cache != null && string.Equals(entry.Signature, perCardSig, StringComparison.Ordinal))
+		{
+			return entry.Cache;
 		}
 
 		Dictionary<string, HoverTerm>? mergedTerms = null;
@@ -371,15 +435,20 @@ internal static class CardEditorVanillaKeywordSupport
 
 		if (mergedTerms == null)
 		{
+			// All custom keyword names already exist in the base cache; no merge needed.
 			return baseCache;
 		}
 
-		return new Cache
+		Cache merged = new Cache
 		{
-			Signature = baseCache.Signature,
+			Signature = perCardSig,
 			TermsByText = mergedTerms,
 			TermRegex = BuildRegex(mergedTerms.Keys)
 		};
+
+		entry.Signature = perCardSig;
+		entry.Cache = merged;
+		return merged;
 	}
 
 	private static void UpdateColorDepth(string tag, ref int colorDepth)

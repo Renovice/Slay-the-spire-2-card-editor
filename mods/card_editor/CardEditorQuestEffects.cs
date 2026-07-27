@@ -434,10 +434,17 @@ internal static class CardEditorQuestEffects
 				_completing.Remove(completionKey);
 			}
 
-			// Quest completions rewrite persistent counters and may grant run powers; make sure
-			// the batched stores hit disk at this milestone even mid-combat.
-			CardEditorRunCardCounterState.FlushIfDirty();
-			CardEditorRunPowerState.FlushIfDirty();
+			// In-memory state is already updated by the time we reach here. Only the DISK WRITE is
+			// timing-sensitive: a synchronous File.WriteAllText mid-combat stalls visibly on this
+			// OneDrive path. So flush immediately when we are NOT in combat (durability unchanged
+			// from before), and in combat leave it to the existing turn-end / combat-end seams in
+			// CardEditorMod.cs. That keeps the worst-case durability window to a single player turn
+			// and only while a fight is actually running.
+			if (CombatManager.Instance?.IsInProgress != true)
+			{
+				CardEditorRunCardCounterState.FlushIfDirty();
+				CardEditorRunPowerState.FlushIfDirty();
+			}
 		}
 	}
 
