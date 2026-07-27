@@ -913,7 +913,7 @@ internal static class TemporaryStatDurationDescriptionFix
 			return;
 		}
 
-		if (overrideData.TemporaryStrengthDuration != null && IsCardPrimaryPowerType<TemporaryStrengthPower>(card))
+		if (overrideData!.TemporaryStrengthDuration != null && IsCardPrimaryPowerType<TemporaryStrengthPower>(card)) // overrideData non-null: TryGetOverrideData returned true
 		{
 			ReplaceMarker(ref description, StrengthMarker, overrideData.TemporaryStrengthDuration.Value, overrideData.TemporaryStrengthTurns);
 		}
@@ -1700,7 +1700,7 @@ internal static class HardcodedPowerAmountDescriptionFix
 			return;
 		}
 
-		if (!TryGetOverrideData(card, out CardOverride? overrideData) || overrideData.PowerAmounts == null || overrideData.PowerAmounts.Count == 0)
+		if (!TryGetOverrideData(card, out CardOverride? overrideData) || overrideData!.PowerAmounts == null || overrideData.PowerAmounts.Count == 0) // overrideData non-null when TryGetOverrideData returns true
 		{
 			return;
 		}
@@ -2738,6 +2738,7 @@ public static class PowerCmd_Apply_Patch
 		CardEditorTemporaryStatPowerDurationController.RegisterIfNeeded(power, overrideData);
 
 		if (cardSource != null
+			&& power != null
 			&& overrideData.PowerAmounts != null
 			&& overrideData.PowerAmounts.Count > 0
 			&& overrideData.PowerAmounts.TryGetValue(power.Id, out decimal overriddenAmount))
@@ -2786,6 +2787,7 @@ public static class PowerCmd_ModifyAmount_Patch
 		CardEditorTemporaryStatPowerDurationController.RegisterIfNeeded(power, overrideData);
 
 		if (cardSource != null
+			&& power != null
 			&& overrideData.PowerAmounts != null
 			&& overrideData.PowerAmounts.Count > 0
 			&& overrideData.PowerAmounts.TryGetValue(power.Id, out decimal overriddenAmount))
@@ -2863,7 +2865,7 @@ internal static class CardEditorCreatedCards_OnPlay_RunExtraEffects_Patch
 			return;
 		}
 
-		__result = RunOnPlayExtraEffectsDuringCardPlay(__instance, __result, combatState, choiceContext, cardPlay);
+		__result = RunOnPlayExtraEffectsDuringCardPlay(__instance, __result, combatState, choiceContext, cardPlay!); // cardPlay non-null: cardPlay?.Card != null checked above
 	}
 
 	private static async Task RunOnPlayExtraEffectsDuringCardPlay(CardEditorCreatedCardBase createdCard, Task original, CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay)
@@ -3176,7 +3178,7 @@ public static class Hook_AfterSideTurnStart_Patch
 					continue;
 				}
 
-				HookPlayerChoiceContext powerCtx = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+				HookPlayerChoiceContext powerCtx = new HookPlayerChoiceContext(player!, netId.Value, GameActionType.Combat); // player non-null: power != null implies creature != null implies player != null
 				Task powerTask = power.RunStartOfEnemyTurn(powerCtx);
 				bool powerCompleted = await powerCtx.AssignTaskAndWaitForPauseOrCompletion(powerTask);
 				if (!powerCompleted && powerCtx.GameAction != null)
@@ -3376,6 +3378,7 @@ public static class Hook_AfterCombatEnd_ClearScheduledEffects_Patch
 			// store is authoritative; this only flushes the pending disk write).
 			CardEditorRunCardCounterState.FlushIfDirty();
 			CardEditorRunPowerState.FlushIfDirty();
+			CardEditorDebugPerfTimer.Dump(); // emit perf summary (no-op when EnableCombatPerfTiming == false)
 		}
 	}
 }

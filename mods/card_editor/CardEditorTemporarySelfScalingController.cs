@@ -187,7 +187,7 @@ internal static class CardEditorTemporarySelfScalingController
 		{
 			if (card == null || state == null || state.Grants.Count == 0)
 			{
-				schedule.States.Remove(card);
+				schedule.States.Remove(card!);
 				continue;
 			}
 			if (!card.IsMutable || card.HasBeenRemovedFromState)
@@ -279,7 +279,7 @@ internal static class CardEditorTemporarySelfScalingController
 		{
 			if (card == null || state == null || state.Grants.Count == 0)
 			{
-				schedule.States.Remove(card);
+				schedule.States.Remove(card!);
 			}
 		}
 		if (schedule.States.Count == 0 && schedule.DeferredPermanentRuntimeMutations.Count == 0)

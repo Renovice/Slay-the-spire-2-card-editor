@@ -72,7 +72,7 @@ public partial class NCardEditorSubmenu : NSubmenu
 
 	private void OnCardPressed(NCardHolder holder)
 	{
-		CardModel card = holder.CardModel;
+		CardModel? card = holder.CardModel;
 		if (card == null || NModalContainer.Instance == null)
 		{
 			return;

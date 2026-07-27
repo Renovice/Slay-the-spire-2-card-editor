@@ -160,7 +160,7 @@ internal static class CardEditorTemporaryReplayController
 		{
 			if (card == null || state == null || state.Grants.Count == 0)
 			{
-				schedule.States.Remove(card);
+				schedule.States.Remove(card!);
 				continue;
 			}
 			if (!card.IsMutable || card.HasBeenRemovedFromState)

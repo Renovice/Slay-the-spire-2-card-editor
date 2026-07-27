@@ -1803,8 +1803,8 @@ internal static class CardEditorMultiplayerSync
 			return false;
 		}
 
-		NHoverTipSet nHoverTipSet = NHoverTipSet.CreateAndShow(owner, hoverTip);
-		nHoverTipSet.GlobalPosition = owner.GlobalPosition + NSettingsScreen.settingTipsOffset;
+		NHoverTipSet? nHoverTipSet = NHoverTipSet.CreateAndShow(owner, hoverTip);
+		nHoverTipSet!.GlobalPosition = owner.GlobalPosition + NSettingsScreen.settingTipsOffset; // CreateAndShow expected to return non-null
 		return true;
 	}
 

@@ -246,19 +246,24 @@ public static class CardEditorOverrides
 
 	public static bool TryGet(ModelId id, out CardOverride overrideData)
 	{
-		return _overrides.TryGetValue(id, out overrideData);
+		bool found = _overrides.TryGetValue(id, out CardOverride? temp);
+		overrideData = temp!;
+		return found;
 	}
 
 	internal static bool TryGet(CardModel? card, out CardOverride overrideData)
 	{
-		if (card != null && _instanceOverrides.TryGetValue(card, out overrideData))
+		if (card != null && _instanceOverrides.TryGetValue(card, out CardOverride? temp1))
 		{
+			overrideData = temp1!;
 			return true;
 		}
 
 		if (card != null)
 		{
-			return _overrides.TryGetValue(card.Id, out overrideData);
+			bool found = _overrides.TryGetValue(card.Id, out CardOverride? temp2);
+			overrideData = temp2!;
+			return found;
 		}
 
 		overrideData = null!;
@@ -274,7 +279,9 @@ public static class CardEditorOverrides
 
 		if (card != null)
 		{
-			return _overrides.TryGetValue(card.Id, out overrideData);
+			bool found = _overrides.TryGetValue(card.Id, out CardOverride? temp);
+			overrideData = temp!;
+			return found;
 		}
 
 		overrideData = null!;
@@ -318,7 +325,9 @@ public static class CardEditorOverrides
 		{
 			return true;
 		}
-		return _overrides.TryGetValue(id, out overrideData);
+		bool found = _overrides.TryGetValue(id, out CardOverride? temp);
+		overrideData = temp!;
+		return found;
 	}
 
 	internal static bool TryGetEffectiveOverride(CardModel? card, out CardOverride overrideData)
@@ -330,7 +339,9 @@ public static class CardEditorOverrides
 
 		if (card != null)
 		{
-			return _overrides.TryGetValue(card.Id, out overrideData);
+			bool found = _overrides.TryGetValue(card.Id, out CardOverride? temp);
+			overrideData = temp!;
+			return found;
 		}
 
 		overrideData = null!;
@@ -342,8 +353,9 @@ public static class CardEditorOverrides
 		CardModel? cursor = card;
 		for (int i = 0; i < 8 && cursor != null; i++)
 		{
-			if (_instanceOverrides.TryGetValue(cursor, out overrideData))
+			if (_instanceOverrides.TryGetValue(cursor, out CardOverride? temp))
 			{
+				overrideData = temp!;
 				return true;
 			}
 
@@ -367,7 +379,7 @@ public static class CardEditorOverrides
 
 	public static CardOverride? Get(ModelId id)
 	{
-		_overrides.TryGetValue(id, out CardOverride overrideData);
+		_overrides.TryGetValue(id, out CardOverride? overrideData);
 		return overrideData;
 	}
 
@@ -610,11 +622,11 @@ public static class CardEditorOverrides
 		{
 			return;
 		}
-		if (!_overrides.TryGetValue(card.Id, out CardOverride overrideData))
+		if (!_overrides.TryGetValue(card.Id, out CardOverride? overrideData))
 		{
 			return;
 		}
-		ApplyOverride(card, overrideData);
+		ApplyOverride(card, overrideData!);
 	}
 
 	public static void ApplyOverrideToCard(CardModel card, CardOverride overrideData)
@@ -635,8 +647,8 @@ public static class CardEditorOverrides
 		{
 			return;
 		}
-		if (!_overrides.TryGetValue(card.Id, out CardOverride overrideData)
-			|| overrideData.DynamicVarBaseValues == null
+		if (!_overrides.TryGetValue(card.Id, out CardOverride? overrideData)
+			|| overrideData!.DynamicVarBaseValues == null
 			|| overrideData.DynamicVarBaseValues.Count == 0)
 		{
 			return;
@@ -1513,9 +1525,11 @@ public static class CardEditorOverrides
 
 		try
 		{
-			if (card.GetConcreteCombatState() != null && (card.Pile?.Type ?? PileType.None) == PileType.Hand)
+			CombatState? concreteCombatState = card.GetConcreteCombatState();
+			if (concreteCombatState != null && (card.Pile?.Type ?? PileType.None) == PileType.Hand)
 			{
-				CardEditorExtraEffects.ApplyIntrinsicTimedCardCostsLessOnEnterHand(card.GetConcreteCombatState(), card);
+				// concreteCombatState non-null: checked above
+				CardEditorExtraEffects.ApplyIntrinsicTimedCardCostsLessOnEnterHand(concreteCombatState, card);
 			}
 		}
 		catch

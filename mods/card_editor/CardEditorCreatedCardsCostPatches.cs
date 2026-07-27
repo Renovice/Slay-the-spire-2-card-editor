@@ -50,13 +50,13 @@ internal static class CardEditorCardPlayContext
 		}
 	}
 
-	public static IDisposable PushScoped(CardPlay play)
+	public static IDisposable PushScoped(CardPlay? play)
 	{
 		Push(play);
 		return new Scope(play);
 	}
 
-	public static void Push(CardPlay play)
+	public static void Push(CardPlay? play)
 	{
 		if (play == null)
 		{
@@ -66,7 +66,7 @@ internal static class CardEditorCardPlayContext
 		stack.Push(play);
 	}
 
-	public static void Pop(CardPlay play)
+	public static void Pop(CardPlay? play)
 	{
 		Stack<CardPlay>? stack = _stack.Value;
 		if (stack == null || stack.Count == 0 || play == null)
@@ -654,7 +654,7 @@ internal static class CardEditorCreatedCardsCostController
 		{
 			if (card == null || discounts == null || discounts.Count == 0)
 			{
-				schedule.DiscountsByCard.Remove(card);
+				schedule.DiscountsByCard.Remove(card!);
 				continue;
 			}
 			if (card.HasBeenRemovedFromState || card.Owner == null)
@@ -720,7 +720,7 @@ internal static class CardEditorCreatedCardsCostController
 		{
 			if (card == null || discounts == null || discounts.Count == 0)
 			{
-				schedule.StarDiscountsByCard.Remove(card);
+				schedule.StarDiscountsByCard.Remove(card!);
 				continue;
 			}
 			if (card.HasBeenRemovedFromState || card.Owner == null)
@@ -782,7 +782,7 @@ internal static class CardEditorCreatedCardsCostController
 		}
 	}
 
-	public static void OnCardPlayStarted(CardModel card)
+	public static void OnCardPlayStarted(CardModel? card)
 	{
 		if (card == null)
 		{

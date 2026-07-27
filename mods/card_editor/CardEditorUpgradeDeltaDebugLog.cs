@@ -250,12 +250,14 @@ internal static class CardEditorUpgradeDeltaDebugLog
 			return false;
 		}
 
+		#pragma warning disable CS0162 // Unreachable code — Enabled is a const toggle
 		if (HasSuspectText(CardIdText(card)) || HasSuspectText(Safe(() => card?.Title)) || HasSuspectText(description))
 		{
 			return true;
 		}
 
 		return ShouldLog(null, overrideData, effects);
+		#pragma warning restore CS0162
 	}
 
 	private static bool ShouldLog(string? cardId, CardOverride? overrideData = null, IEnumerable<CardExtraEffect?>? effects = null)
@@ -265,6 +267,7 @@ internal static class CardEditorUpgradeDeltaDebugLog
 			return false;
 		}
 
+		#pragma warning disable CS0162 // Unreachable code — Enabled is a const toggle
 		if (HasSuspectText(cardId))
 		{
 			return true;
@@ -282,6 +285,7 @@ internal static class CardEditorUpgradeDeltaDebugLog
 
 		return EffectsContainSuspect(overrideData.ExtraEffects)
 			|| EffectsContainSuspect(overrideData.Upgrade?.ExtraEffects);
+		#pragma warning restore CS0162
 	}
 
 	private static bool ShouldLog(string? cardId, params CardExtraEffect?[] effects)
@@ -421,7 +425,9 @@ internal static class CardEditorUpgradeDeltaDebugLog
 			return;
 		}
 
+		#pragma warning disable CS0162 // Unreachable code — Enabled is a const toggle
 		int sequence = Interlocked.Increment(ref _sequence);
 		Log.Info($"{Tag} #{sequence} {message}");
+		#pragma warning restore CS0162
 	}
 }

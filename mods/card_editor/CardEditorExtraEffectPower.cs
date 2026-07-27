@@ -616,6 +616,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 	public async Task SyncVisibleMirrorPowers()
 	{
+		// NOTE: async method — PerfScope times the synchronous portion up to the first await suspension.
+		using CardEditorDebugPerfTimer.PerfScope _perf = CardEditorDebugPerfTimer.Measure("SyncVisibleMirrorPowers");
 		try
 		{
 			CoalesceMergeEntries();
@@ -625,7 +627,97 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				return;
 			}
 
-			List<CardEditorVisibleExtraEffectPower> existingMirrors = owner.Powers
+			// --- Allocation-free fast path ---
+			// When the set of mirrors is already in sync with Entries (same count, all EntryIds
+			// present, no duplicates, no zero-id anomalies) we skip the full allocating sync and
+			// just call SyncFromEntry in place. This avoids OfType<>.ToList() + HashSet<long> on
+			// every power trigger when the power list is stable (the common case).
+			//
+			// External-removal safety: CleanseRemainingPowersByType explicitly skips all powers
+			// from the mod's own assembly, so CardEditorVisibleExtraEffectPower cannot be removed
+			// by that path. The count-mismatch check below guards against any other external
+			// removal (e.g. vanilla PowerCmd.Remove<T> generic sweep): if a mirror disappears the
+			// actual count will be less than expected and we fall into the full sync.
+			int expectedCount = 0;
+			for (int i = 0; i < Entries.Count; i++)
+			{
+				PowerEffectEntry e = Entries[i];
+				if (e?.SourceCard != null && e.Effect != null && !IsCustomStatusBehaviorEntry(e))
+				{
+					expectedCount++;
+				}
+			}
+
+			int actualCount = 0;
+			bool mirrorAnomaly = false;
+			if (owner.Powers != null)
+			{
+				foreach (PowerModel power in owner.Powers)
+				{
+					if (power is CardEditorVisibleExtraEffectPower mirror && mirror != null)
+					{
+						if (mirror.EntryId <= 0)
+						{
+							mirrorAnomaly = true;
+							break;
+						}
+						actualCount++;
+						if (actualCount > expectedCount)
+						{
+							// More mirrors than expected entries (duplicate or stale mirror present).
+							mirrorAnomaly = true;
+							break;
+						}
+					}
+				}
+			}
+
+			bool needsFullSync = mirrorAnomaly || (actualCount != expectedCount);
+
+			if (!needsFullSync)
+			{
+				// Counts match and no anomalies; update existing mirrors in place without allocating.
+				foreach (PowerEffectEntry entry in Entries)
+				{
+					if (entry?.SourceCard == null || entry.Effect == null || IsCustomStatusBehaviorEntry(entry))
+					{
+						continue;
+					}
+
+					CardEditorVisibleExtraEffectPower? mirror = null;
+					if (owner.Powers != null)
+					{
+						foreach (PowerModel power in owner.Powers)
+						{
+							if (power is CardEditorVisibleExtraEffectPower candidate && candidate.EntryId == entry.EntryId)
+							{
+								mirror = candidate;
+								break;
+							}
+						}
+					}
+
+					if (mirror == null)
+					{
+						// EntryId not found despite matching counts — fall back to full sync.
+						needsFullSync = true;
+						break;
+					}
+
+					(int visibleAmount, bool showAmountLabel) = GetMirrorDisplayState(entry);
+					CardExtraEffect visibleEffect = BuildStackedRuntimeEffect(entry);
+					mirror.SyncFromEntry(entry.EntryId, entry.SourceCard, visibleEffect, visibleAmount, showAmountLabel);
+					CardEditorPowerSourceMap.Register(mirror, entry.SourceCard);
+				}
+
+				if (!needsFullSync)
+				{
+					return;
+				}
+			}
+
+			// --- Full (allocating) sync path ---
+			List<CardEditorVisibleExtraEffectPower> existingMirrors = (owner.Powers ?? Enumerable.Empty<PowerModel>())
 				.OfType<CardEditorVisibleExtraEffectPower>()
 				.Where(power => power != null)
 				.ToList();
@@ -891,8 +983,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 
 				CardPlay fatalPlay = new CardPlay
 				{
-					Card = fatalEntry.SourceCard,
-					Player = fatalEntry.SourceCard.Owner,
+					Card = fatalEntry.SourceCard!, // SourceCard non-null: checked at entry loop guard above
+					Player = fatalEntry.SourceCard!.Owner,
 					Target = killedTarget,
 					ResultPile = triggerPlay.ResultPile,
 					Resources = triggerPlay.Resources,
@@ -1058,7 +1150,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		CardPlay schedulingPlay = new CardPlay
 		{
 			Card = sourceCard,
-			Player = sourceCard.Owner,
+			Player = sourceCard.Owner!, // Owner expected non-null for a card in play
 			Target = lockedTarget,
 			ResultPile = triggerPlay.ResultPile,
 			Resources = triggerPlay.Resources,
@@ -1343,7 +1435,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
-					Player = sourceCard.Owner,
+					Player = sourceCard.Owner!, // sourceOwner != null above means sourceCard.Owner != null
 					Target = eventActor,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
@@ -1462,7 +1554,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					}
 				}
 
-				CardModel sourceCard = entry.SourceCard;
+				CardModel sourceCard = entry.SourceCard!; // SourceCard non-null: checked at entry loop guard above
 				Creature? sourceOwnerCreature = sourceCard.Owner?.Creature;
 				if (sourceOwnerCreature == null)
 				{
@@ -1476,7 +1568,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
-					Player = sourceCard.Owner,
+					Player = sourceCard.Owner!, // sourceOwnerCreature != null above means Owner != null
 					Target = target,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo

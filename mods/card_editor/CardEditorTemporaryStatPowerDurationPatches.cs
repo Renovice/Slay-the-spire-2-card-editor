@@ -22,7 +22,7 @@ internal static class CardEditorTemporaryStatPowerDurationController
 
 	private static readonly ConditionalWeakTable<PowerModel, DurationState> _states = new ConditionalWeakTable<PowerModel, DurationState>();
 
-	public static void RegisterIfNeeded(PowerModel power, CardOverride overrideData)
+	public static void RegisterIfNeeded(PowerModel? power, CardOverride overrideData)
 	{
 		if (power == null || overrideData == null)
 		{

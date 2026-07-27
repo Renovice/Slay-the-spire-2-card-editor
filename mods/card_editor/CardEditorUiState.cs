@@ -59,7 +59,9 @@ public static class CardEditorUiState
 
 	public static bool TryGetDraftOverride(ModelId cardId, out CardOverride overrideData)
 	{
-		return _draftOverrides.TryGetValue(cardId, out overrideData);
+		bool found = _draftOverrides.TryGetValue(cardId, out CardOverride? temp);
+		overrideData = temp!;
+		return found;
 	}
 
 	public static void ClearDraftOverride(ModelId cardId)

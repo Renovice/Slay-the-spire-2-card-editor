@@ -218,12 +218,13 @@ internal static class CardEditorCosmetics
 
 		if (animationPreset != CardEditorCosmeticAnimationPreset.None)
 		{
-			await TryPlayAnimationPreset(card, owner, ownerCreature, animationPreset, cardPlay);
+			// owner/cardPlay provably non-null: ownerCreature != null implies owner != null; card != null implies cardPlay != null
+			await TryPlayAnimationPreset(card, owner!, ownerCreature, animationPreset, cardPlay!);
 		}
 
 		if (preset != CardEditorCosmeticVfxPreset.None)
 		{
-			await TryPlayVfxPreset(combatState, cardPlay, owner, ownerCreature, preset, attach);
+			await TryPlayVfxPreset(combatState, cardPlay!, owner!, ownerCreature, preset, attach);
 		}
 	}
 

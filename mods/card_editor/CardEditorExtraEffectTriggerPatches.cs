@@ -182,6 +182,7 @@ internal static class Hook_BeforeCombatStart_CardEditorDeckPassive_Patch
 	private static async Task RunAfter(Task original, IRunState runState, CombatState combatState)
 	{
 		await original;
+		CardEditorDebugPerfTimer.Reset(); // reset perf counters at combat start (no-op when EnableCombatPerfTiming == false)
 		CardEditorRunSelfScalingState.RestoreForCombat(combatState);
 		await CardEditorRunPowerState.ApplyForCombat(combatState);
 
@@ -305,6 +306,8 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 
 	private static async Task RunAfter(Task original, CombatState combatState, AttackCommand command)
 	{
+		// NOTE: async method — PerfScope times the synchronous portion up to the first await suspension.
+		using CardEditorDebugPerfTimer.PerfScope _perf = CardEditorDebugPerfTimer.Measure("Hook.AfterAttack(mod)");
 		await original;
 
 		ulong? netId = LocalContext.NetId;
@@ -449,6 +452,8 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 
 	private static async Task RunAfter(Task original, CombatState combatState, IEnumerable<Creature> participants)
 	{
+		// NOTE: async method — PerfScope times the synchronous portion up to the first await suspension.
+		using CardEditorDebugPerfTimer.PerfScope _perf = CardEditorDebugPerfTimer.Measure("Hook.BeforeTurnEnd(mod)");
 		await original;
 
 		ulong? netId = LocalContext.NetId;
@@ -494,7 +499,7 @@ internal static class Hook_BeforeTurnEnd_CardEditorExtraEffects_Patch
 					}
 					CardEditorEndOfTurnInHandTracker.Mark(combatState, card);
 
-					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player, netId.Value, GameActionType.Combat);
+					HookPlayerChoiceContext choiceContext = new HookPlayerChoiceContext(player!, netId.Value, GameActionType.Combat); // player non-null: hand != null implies player != null
 					Task task = CardEditorExtraEffects.RunEndOfTurnInHand(combatState, choiceContext, card);
 					bool completed = await choiceContext.AssignTaskAndWaitForPauseOrCompletion(task);
 					if (!completed && choiceContext.GameAction != null)

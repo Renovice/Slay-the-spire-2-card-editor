@@ -782,6 +782,7 @@ internal static class CardModel_HoverTips_CardEditorKeywordSupport_Patch
 
 	public static void Postfix(CardModel __instance, ref IEnumerable<IHoverTip> __result)
 	{
+		using CardEditorDebugPerfTimer.PerfScope _perf = CardEditorDebugPerfTimer.Measure("HoverTips(mod)");
 		if (_isAugmentingHoverTips || __instance == null)
 		{
 			return;

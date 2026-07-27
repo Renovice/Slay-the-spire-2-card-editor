@@ -133,7 +133,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	}
 
 	private CardModel _previewCard = null!;
-	private ModelId _cardId;
+	private ModelId _cardId = null!; // Assigned before use via Init/Reinit
 	private Action? _onApplied;
 
 	// Fired on every effect change while this popup is an embedded effect host (e.g. the relic editor),
@@ -263,7 +263,9 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private readonly List<(ModelId? CardId, string? CustomFile, string Label)> _createdPortraitSourceCatalog = new();
 	private VBoxContainer? _createdEffectSourceListContainer;
 	private readonly List<ModelId> _createdEffectSourceIds = new();
+#pragma warning disable CS0414 // Deliberately kept — reserved UI control, may be wired in a future branch flip
 	private OptionButton? _createdEffectSourceOrderSelect;
+#pragma warning restore CS0414
 	private readonly List<CardEditorEffectSourcePlacement> _createdEffectSourceOrderOptions = new();
 	private VBoxContainer? _createdEffectValueContainer;
 	private Label? _createdEffectValueLoadingLabel;
@@ -6516,7 +6518,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		return row;
 	}
 
-	private void ApplyCostXUiState(LineEdit field, KeywordTickbox? xTickbox, string metaKeyPreviousText, string? placeholderWhenNonX)
+	private void ApplyCostXUiState(LineEdit? field, KeywordTickbox? xTickbox, string metaKeyPreviousText, string? placeholderWhenNonX)
 	{
 		if (field == null || xTickbox == null)
 		{
@@ -6984,7 +6986,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		return label;
 	}
 
-	private static void SetEffectFormRowLabelTooltip(HBoxContainer row, string tooltipText)
+	private static void SetEffectFormRowLabelTooltip(HBoxContainer? row, string tooltipText)
 	{
 		if (row == null || string.IsNullOrWhiteSpace(tooltipText))
 		{
@@ -7003,7 +7005,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 		}
 	}
 
-	private static void SetEffectFormRowLabelText(Control row, string labelText)
+	private static void SetEffectFormRowLabelText(Control? row, string labelText)
 	{
 		if (row == null || string.IsNullOrWhiteSpace(labelText) || row.GetChildCount() <= 0)
 		{
@@ -11636,7 +11638,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				value = (int)overridden;
 			}
 
-			string labelText = spec.LabelOverride;
+			string? labelText = spec.LabelOverride;
 			if (string.IsNullOrWhiteSpace(labelText))
 			{
 				string title = power.Title.GetFormattedText();
@@ -11831,7 +11833,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				? (int)currentAmount
 				: defaultValue;
 
-			string labelText = spec.LabelOverride;
+			string? labelText = spec.LabelOverride;
 			if (string.IsNullOrWhiteSpace(labelText))
 			{
 				string title = power.Title.GetFormattedText();
@@ -27286,7 +27288,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			row.MoveCardsRowBottom.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || isLinkedCardAction || usesPileCopyDestination || isResultPileOverride || delayedPileUsesDestination || consumeCardUsesDestination;
 
 			row.MoveFromPileSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isDrawCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isDelayedPileAction || isConsumeCardValue || isSelectCardsFromPile || isMovedPileTrigger;
-			row.MoveSelectionModeSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isDelayedPileAction || isConsumeCardValue || isSelectCardsFromPile || isDrawCards || (kind == CardExtraEffectKind.FetchSpecificCardToHand);
+			if (row.MoveSelectionModeSelect != null && GodotObject.IsInstanceValid(row.MoveSelectionModeSelect))
+			{
+				row.MoveSelectionModeSelect.Visible = isMoveCards || isUpgradeCardsInPile || isPlayFromPile || isAutoPlaySelfFromPile || isAutoDrawSelfFromPile || isConditionalAutoFromPile || isDiscardCards || isExhaustCards || isTransformCards || isGrantKeywordToPile || isUpgradeDeckCards || isCopyPileToDeck || isExactCopyPileToDeck || isRemoveCardsFromDeck || isDelayedPileAction || isConsumeCardValue || isSelectCardsFromPile || isDrawCards || (kind == CardExtraEffectKind.FetchSpecificCardToHand);
+			}
 			row.MoveToPileSelect.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || isLinkedCardAction || usesPileCopyDestination || isResultPileOverride || delayedPileUsesDestination || consumeCardUsesDestination;
 			row.MoveToPositionSelect.Visible = isMoveCards || isCopyThisCard || usesGeneratedDestination || isSpecificCardMove || isLinkedCardAction || usesPileCopyDestination || isResultPileOverride || delayedPileUsesDestination || consumeCardUsesDestination;
 			if (row.AdditionalMoveToRow != null && GodotObject.IsInstanceValid(row.AdditionalMoveToRow))
@@ -27360,7 +27365,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 		}
 
-		if (row.MoveCardsRow.Visible)
+		if (row.MoveCardsRow != null && GodotObject.IsInstanceValid(row.MoveCardsRow) && row.MoveCardsRow.Visible)
 		{
 			const string metaSpecificToHand = "card_editor_default_specific_to_hand";
 			if ((isSpecificCard || usesGeneratedDestination)
@@ -27658,7 +27663,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				Log.Info(
 					$"[CardEditor] MatchState supportsAsPower={supportsAsPower} asPower={asPower} "
 					+ $"showForPileOps={showForPileOps} showForFilters={showForFilters} "
-					+ $"powerVisible={row.PowerTickbox.Visible} powerTicked={row.PowerTickbox.IsTicked} "
+					+ $"powerVisible={row.PowerTickbox?.Visible} powerTicked={row.PowerTickbox?.IsTicked} "
 					+ $"powerFilterVisible={(row.PowerFilterRow != null && GodotObject.IsInstanceValid(row.PowerFilterRow) && row.PowerFilterRow.Visible)} "
 					+ $"countFilterVisible={(row.CountCardFilterRow != null && GodotObject.IsInstanceValid(row.CountCardFilterRow) && row.CountCardFilterRow.Visible)} "
 					+ $"drawTargetVisible={(row.DrawTargetFilterRow != null && GodotObject.IsInstanceValid(row.DrawTargetFilterRow) && row.DrawTargetFilterRow.Visible)} "
@@ -27865,7 +27870,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		row.MoveToPositionSelect.SelfModulate = enablePosition ? Colors.White : StsColors.gray;
 	}
 
-	private static void UpdateAdditionalMoveToTargets(OptionButton moveToPileSelect, params KeywordTickbox[] tickboxes)
+	private static void UpdateAdditionalMoveToTargets(OptionButton? moveToPileSelect, params KeywordTickbox[] tickboxes)
 	{
 		if (moveToPileSelect == null || !GodotObject.IsInstanceValid(moveToPileSelect) || tickboxes == null || tickboxes.Length < 4)
 		{
@@ -28548,9 +28553,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private static void UpdateUnifiedTimingControlsVisibility(
 		OptionButton timingModeSelect,
-		OptionButton timingEdgeSelect,
-		OptionButton timingSideSelect,
-		OptionButton timingOffsetSelect)
+		OptionButton? timingEdgeSelect,
+		OptionButton? timingSideSelect,
+		OptionButton? timingOffsetSelect)
 	{
 		bool isBoundary = timingModeSelect != null
 			&& GodotObject.IsInstanceValid(timingModeSelect)
@@ -31586,11 +31591,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 
 	private void SetSpinEnabled(LineEdit field, bool enabled)
 	{
-		if (!_spinButtons.TryGetValue(field, out SpinButtons spin))
+		if (!_spinButtons.TryGetValue(field, out SpinButtons? spin))
 		{
 			return;
 		}
-		spin.Up.Disabled = !enabled;
+		spin!.Up.Disabled = !enabled;
 		spin.Down.Disabled = !enabled;
 		spin.Container.SelfModulate = enabled ? Colors.White : StsColors.gray;
 	}
@@ -31608,9 +31613,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		field.SelfModulate = visible && enabled ? activeColor : StsColors.gray;
 		field.QueueRedraw();
 
-		if (_spinButtons.TryGetValue(field, out SpinButtons spin))
+		if (_spinButtons.TryGetValue(field, out SpinButtons? spin))
 		{
-			if (spin.Container != null && GodotObject.IsInstanceValid(spin.Container))
+			if (spin!.Container != null && GodotObject.IsInstanceValid(spin.Container))
 			{
 				spin.Container.Visible = visible;
 				spin.Container.SelfModulate = visible && enabled ? Colors.White : StsColors.gray;

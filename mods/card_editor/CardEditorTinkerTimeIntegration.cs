@@ -751,7 +751,7 @@ internal static class CardEditorTinkerTimeIntegration
 				CreateVanillaTypeHoverTip(tinker, choice.Type));
 		}
 
-		CardModel preview = CreateSourcePreview(tinker.Owner, choice.Template!);
+		CardModel preview = CreateSourcePreview(tinker.Owner!, choice.Template!); // Owner expected non-null for a running TinkerTime event
 		return new EventOption(
 			tinker,
 			() => ChooseCustomType(tinker, choice),
@@ -824,16 +824,16 @@ internal static class CardEditorTinkerTimeIntegration
 		if ((baseCardId == null || baseCardId == ModelId.none)
 			&& (riderCardId == null || riderCardId == ModelId.none))
 		{
-			MadScience madScience = tinker.Owner.RunState.CreateCard<MadScience>(tinker.Owner);
+			MadScience madScience = tinker.Owner!.RunState.CreateCard<MadScience>(tinker.Owner!); // Owner expected non-null for a running TinkerTime event
 			madScience.TinkerTimeType = GetChosenCardType(tinker);
 			madScience.TinkerTimeRider = vanillaRider;
 			card = madScience;
 		}
 		else
 		{
-			CardEditorBuiltTinkerCard built = (CardEditorBuiltTinkerCard)tinker.Owner.RunState.CreateCard(
+			CardEditorBuiltTinkerCard built = (CardEditorBuiltTinkerCard)tinker.Owner!.RunState.CreateCard(
 				ModelDb.Card<CardEditorBuiltTinkerCard>(),
-				tinker.Owner);
+				tinker.Owner!);
 			built.ConfigureForTinkerTime(GetChosenCardType(tinker), vanillaRider, baseCardId, riderCardId);
 			card = built;
 		}
@@ -845,7 +845,7 @@ internal static class CardEditorTinkerTimeIntegration
 
 	private static CardHoverTip CreateVanillaTypeHoverTip(TinkerTime tinker, CardType type)
 	{
-		MadScience madScience = tinker.Owner.RunState.CreateCard<MadScience>(tinker.Owner);
+		MadScience madScience = tinker.Owner!.RunState.CreateCard<MadScience>(tinker.Owner!); // Owner expected non-null for a running TinkerTime event
 		madScience.TinkerTimeType = type;
 		madScience.TinkerTimeRider = TinkerTime.RiderEffect.None;
 		return new CardHoverTip(madScience);
@@ -856,14 +856,14 @@ internal static class CardEditorTinkerTimeIntegration
 		TinkerBuildState? state = GetStateOrNull(tinker);
 		if (state?.HasCustomBase == true)
 		{
-			CardEditorBuiltTinkerCard built = (CardEditorBuiltTinkerCard)tinker.Owner.RunState.CreateCard(
+			CardEditorBuiltTinkerCard built = (CardEditorBuiltTinkerCard)tinker.Owner!.RunState.CreateCard(
 				ModelDb.Card<CardEditorBuiltTinkerCard>(),
-				tinker.Owner);
+				tinker.Owner!); // Owner expected non-null for a running TinkerTime event
 			built.ConfigureForTinkerTime(choice.Type, choice.Rider, state.BaseCardId, ModelId.none);
 			return new IHoverTip[] { new CardHoverTip(built) };
 		}
 
-		MadScience madScience = tinker.Owner.RunState.CreateCard<MadScience>(tinker.Owner);
+		MadScience madScience = tinker.Owner!.RunState.CreateCard<MadScience>(tinker.Owner!);
 		madScience.TinkerTimeType = choice.Type;
 		madScience.TinkerTimeRider = choice.Rider;
 		return new IHoverTip[] { new CardHoverTip(madScience) };
@@ -872,9 +872,9 @@ internal static class CardEditorTinkerTimeIntegration
 	private static CardModel CreateBuiltPreview(TinkerTime tinker, TinkerChoice riderChoice)
 	{
 		TinkerBuildState? state = GetStateOrNull(tinker);
-		CardEditorBuiltTinkerCard built = (CardEditorBuiltTinkerCard)tinker.Owner.RunState.CreateCard(
+		CardEditorBuiltTinkerCard built = (CardEditorBuiltTinkerCard)tinker.Owner!.RunState.CreateCard(
 			ModelDb.Card<CardEditorBuiltTinkerCard>(),
-			tinker.Owner);
+			tinker.Owner!); // Owner expected non-null for a running TinkerTime event
 		built.ConfigureForTinkerTime(
 			GetChosenCardType(tinker),
 			TinkerTime.RiderEffect.None,
@@ -944,14 +944,14 @@ internal static class CardEditorTinkerTimeIntegration
 		if (custom.Any(c => c.Mode == CardEditorRewardPoolInjectionMode.ForceInclude)
 			&& !selected.Any(c => !c.IsVanilla))
 		{
-			TinkerChoice forced = rng.NextItem(custom.Where(c => c.Mode == CardEditorRewardPoolInjectionMode.ForceInclude).ToList());
+			TinkerChoice? forced = rng.NextItem(custom.Where(c => c.Mode == CardEditorRewardPoolInjectionMode.ForceInclude).ToList());
 			if (selected.Count < count)
 			{
-				selected.Add(forced);
+				selected.Add(forced!); // forced non-null: ForceInclude list is non-empty (checked by .Any above)
 			}
 			else if (selected.Count > 0)
 			{
-				selected[Math.Clamp(rng.NextInt(selected.Count), 0, selected.Count - 1)] = forced;
+				selected[Math.Clamp(rng.NextInt(selected.Count), 0, selected.Count - 1)] = forced!;
 			}
 		}
 

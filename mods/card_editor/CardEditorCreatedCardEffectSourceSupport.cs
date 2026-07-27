@@ -367,7 +367,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 				{
 					using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
 					using IDisposable __ = CardEditorEffectSourceContext.PushScoped(effectSourceCard);
-					await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(combatState, choiceContext, cardPlay, borrowedEffects);
+					await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(combatState, choiceContext, cardPlay!, borrowedEffects); // cardPlay non-null: null check at line 339
 				}
 			}
 
@@ -398,7 +398,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 			Task? invokedTask;
 			using (CardEditorReflectiveOnPlayGuard.PushScoped())
 			{
-				invokedTask = onPlay.Invoke(effectSourceCard, new object[] { choiceContext, cardPlay }) as Task;
+				invokedTask = onPlay.Invoke(effectSourceCard, new object[] { choiceContext, cardPlay! }) as Task; // cardPlay non-null: null check at line 339
 			}
 			if (invokedTask != null)
 			{
@@ -767,7 +767,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		return true;
 	}
 
-	private static void BindVanillaEffectSourceCardToRuntimePlay(CardModel effectSourceCard, CardPlay cardPlay)
+	private static void BindVanillaEffectSourceCardToRuntimePlay(CardModel effectSourceCard, CardPlay? cardPlay)
 	{
 		if (effectSourceCard == null || cardPlay?.Card == null)
 		{
@@ -1021,7 +1021,7 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		{
 			foreach ((string key, decimal value) in overrideData.DynamicVarBaseValues)
 			{
-				if (effectSourceCard.DynamicVars.TryGetValue(key, out DynamicVar dynamicVar))
+				if (effectSourceCard.DynamicVars.TryGetValue(key, out DynamicVar? dynamicVar))
 				{
 					dynamicVar.BaseValue = value;
 				}

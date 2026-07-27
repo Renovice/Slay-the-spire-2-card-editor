@@ -80,6 +80,37 @@ internal static class CardEditorTemporaryExtraEffectController
 		return schedule.States.Count > 0 || CardEditorMatchingCardAuraController.HasAny(combatState);
 	}
 
+	// Returns true when THIS specific card has at least one temporary (non-aura) grant stored
+	// against it. O(1) dictionary lookup - safe to call on every per-card hot-path gate.
+	// Does NOT cover aura grants (which are rule-matched per Player, not keyed per card).
+	public static bool HasTemporaryGrantsForCard(CombatState combatState, CardModel card)
+	{
+		if (combatState == null || card == null)
+		{
+			return false;
+		}
+		if (!_schedules.TryGetValue(combatState, out CombatSchedule? schedule) || schedule.States.Count == 0)
+		{
+			return false;
+		}
+
+		if (schedule.States.TryGetValue(card, out CardState? state) && state.Effects.Count > 0)
+		{
+			return true;
+		}
+
+		// Also check the resolved schedule key (clone-chain walking done once on grant).
+		CardModel key = ResolveScheduleKey(card);
+		if (!ReferenceEquals(key, card)
+			&& schedule.States.TryGetValue(key, out CardState? keyState)
+			&& keyState.Effects.Count > 0)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
 	public static IReadOnlyList<CardExtraEffect> GetEffects(CombatState combatState, CardModel card)
 	{
 		if (combatState == null || card == null)
@@ -344,13 +375,13 @@ internal static class CardEditorTemporaryExtraEffectController
 		{
 			if (card == null || state == null || state.Grants.Count == 0)
 			{
-				schedule.States.Remove(card);
+				schedule.States.Remove(card!);
 				continue;
 			}
 			if (!card.IsMutable || card.HasBeenRemovedFromState)
 			{
 				CardEditorMod.VerboseLog($"[CardEditor][TempCostGrantCleanup] dropping key={card?.Id} mutable={card?.IsMutable} removed={card?.HasBeenRemovedFromState} grants={state.Grants.Count}");
-				schedule.States.Remove(card);
+				schedule.States.Remove(card!);
 				continue;
 			}
 

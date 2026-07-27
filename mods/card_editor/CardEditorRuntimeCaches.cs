@@ -81,6 +81,7 @@ internal static class CardEditorRuntimeCaches
 
 	// True when this combat has any temporary/aura grant state. Grants are pile/state
 	// dependent, so gates must treat every card as "might be modified" while any exist.
+	// Kept for callers that do not have a card context (e.g. non-card-specific prefilters).
 	internal static bool CombatHasAnyGrantedEffects(CombatState? combatState)
 	{
 		if (combatState == null)
@@ -98,6 +99,42 @@ internal static class CardEditorRuntimeCaches
 		}
 	}
 
+	// Narrowed version: returns true only when THIS specific card has or might have any
+	// granted/aura effects applied to it.
+	//
+	// Temporary (per-card) side: O(1) dictionary lookup - bypasses the cache only when
+	// this card actually has grants stored against it.
+	//
+	// Aura side: still combat-wide (conservative). Aura grants are keyed by Player and
+	// matched against cards via rule predicates (pile filter, card selection filters, etc.).
+	// There is no cheap per-card index, so if any aura exists in this combat we must treat
+	// every card as "might match". A false-positive here (bypassing the kind-bit cache for a
+	// card that does not actually match the aura) is acceptable; a false-negative would skip
+	// an aura that should apply - forbidden.
+	internal static bool CardOrCombatHasGrantedEffects(CombatState? combatState, CardModel? card)
+	{
+		if (combatState == null)
+		{
+			return false;
+		}
+
+		try
+		{
+			// Per-card check for temporary grants (cheap).
+			if (card != null && CardEditorTemporaryExtraEffectController.HasTemporaryGrantsForCard(combatState, card))
+			{
+				return true;
+			}
+
+			// Combat-wide check for aura grants (conservative - cannot be narrowed cheaply).
+			return CardEditorMatchingCardAuraController.HasAny(combatState);
+		}
+		catch
+		{
+			return true;
+		}
+	}
+
 	// Cheap "is this card touched by the mod in any way" prefilter. Must never return
 	// false for a card whose runtime/description effect list could be non-empty.
 	internal static bool HasAnyModSurface(CardModel? card, CombatState? combatState)
@@ -107,7 +144,7 @@ internal static class CardEditorRuntimeCaches
 			return false;
 		}
 
-		if (CombatHasAnyGrantedEffects(combatState))
+		if (CardOrCombatHasGrantedEffects(combatState, card))
 		{
 			return true;
 		}
@@ -186,7 +223,7 @@ internal static class CardEditorRuntimeCaches
 			return false;
 		}
 
-		if (CombatHasAnyGrantedEffects(combatState))
+		if (CardOrCombatHasGrantedEffects(combatState, card))
 		{
 			return true;
 		}

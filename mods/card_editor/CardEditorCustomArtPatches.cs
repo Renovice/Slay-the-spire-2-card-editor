@@ -1477,7 +1477,7 @@ internal static class NCard_Reload_CustomPortrait_Patch
 
 		try
 		{
-			TextureRect portrait = PortraitRef(__instance);
+			TextureRect portrait = PortraitRef(__instance!); // __instance non-null: model?.Id == null returns early above
 			if (portrait != null)
 			{
 				if (hasCustomPortrait)
@@ -1488,7 +1488,7 @@ internal static class NCard_Reload_CustomPortrait_Patch
 				SyncPortraitTransform(portrait, hasTransform && portrait.Visible, transform);
 			}
 
-			TextureRect ancientPortrait = AncientPortraitRef(__instance);
+			TextureRect ancientPortrait = AncientPortraitRef(__instance!); // __instance non-null: model?.Id == null returns early above
 			if (ancientPortrait != null)
 			{
 				if (hasCustomPortrait)

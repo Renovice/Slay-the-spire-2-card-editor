@@ -90,7 +90,7 @@ internal static class CardEditorExtraEffectScheduler
 		CombatSchedule schedule = _schedules.GetOrCreateValue(combatState);
 		schedule.Effects.Add(new ScheduledEffect
 		{
-			Card = CreateScheduledCardSnapshot(owner, sourcePlay.Card),
+			Card = CreateScheduledCardSnapshot(owner, sourcePlay.Card)!, // sourcePlay.Card is non-null; snapshot falls back to sourceCard
 			Owner = owner,
 			Effect = scheduledEffect,
 			LockedTarget = scheduledEffect.Target == CardExtraEffectTarget.Target ? lockedTarget : null,
@@ -338,7 +338,7 @@ internal static class CardEditorExtraEffectScheduler
 		}
 	}
 
-	private static CardModel CreateScheduledCardSnapshot(Player owner, CardModel sourceCard)
+	private static CardModel? CreateScheduledCardSnapshot(Player owner, CardModel sourceCard)
 	{
 		if (owner == null || sourceCard == null)
 		{

@@ -276,7 +276,7 @@ internal sealed class CardEditorPowerDurationTrackerPower : PowerModel
 			{
 				Log.Warn($"[CardEditor] Temporary power duration cleanup failed for {entry?.PowerId}: {ex}");
 			}
-			Entries.Remove(entry);
+			Entries.Remove(entry!);
 		}
 
 		if (Entries.Count == 0)

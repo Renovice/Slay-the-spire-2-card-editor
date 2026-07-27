@@ -371,12 +371,13 @@ internal static class Creature_LoseBlockInternal_CardEditorResourceCount_Patch
 		try
 		{
 			int delta = Math.Max(0, __state - __instance.Block);
-			if (delta > 0 && __instance.GetConcreteCombatState() != null)
+			CombatState? cs1 = __instance.GetConcreteCombatState();
+			if (delta > 0 && cs1 != null)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentBlockRemoved(delta);
-				CardEditorExtraEffects.RecordResourceCount(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, delta);
-				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
-				TaskHelper.RunSafely(CardEditorQuestEffects.RecordRunProgress(__instance, CardExtraEffectCountEvent.BlockLost, delta, __instance.GetConcreteCombatState()));
+				CardEditorExtraEffects.RecordResourceCount(cs1, __instance, CardExtraEffectCountEvent.BlockLost, delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(cs1, __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
+				TaskHelper.RunSafely(CardEditorQuestEffects.RecordRunProgress(__instance, CardExtraEffectCountEvent.BlockLost, delta, cs1));
 			}
 		}
 		catch (Exception ex)
@@ -396,7 +397,8 @@ internal static class Creature_DamageBlockInternal_CardEditorResourceCount_Patch
 
 	public static void Postfix(Creature __instance, int __state)
 	{
-		if (__instance.GetConcreteCombatState() == null)
+		CombatState? cs2 = __instance.GetConcreteCombatState();
+		if (cs2 == null)
 		{
 			return;
 		}
@@ -407,9 +409,9 @@ internal static class Creature_DamageBlockInternal_CardEditorResourceCount_Patch
 			if (delta > 0)
 			{
 				CardEditorEffectExecutionAmountContext.ReportCurrentBlockRemoved(delta);
-				CardEditorExtraEffects.RecordResourceCount(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, delta);
-				CardEditorExtraEffects.TriggerPowerCountEvent(__instance.GetConcreteCombatState(), __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
-				TaskHelper.RunSafely(CardEditorQuestEffects.RecordRunProgress(__instance, CardExtraEffectCountEvent.BlockLost, delta, __instance.GetConcreteCombatState()));
+				CardEditorExtraEffects.RecordResourceCount(cs2, __instance, CardExtraEffectCountEvent.BlockLost, delta);
+				CardEditorExtraEffects.TriggerPowerCountEvent(cs2, __instance, CardExtraEffectCountEvent.BlockLost, amount: delta);
+				TaskHelper.RunSafely(CardEditorQuestEffects.RecordRunProgress(__instance, CardExtraEffectCountEvent.BlockLost, delta, cs2));
 			}
 		}
 		catch (Exception ex)

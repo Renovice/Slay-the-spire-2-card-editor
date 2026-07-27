@@ -97,7 +97,7 @@ internal static class CardEditorRewardPoolRegistry
 
 	internal static IReadOnlyList<CardEditorRewardPoolTemplateCandidate> GetEnabledTemplateCandidates(
 		IEnumerable<string> poolIds,
-		Player owner,
+		Player? owner,
 		CardRarity? selectedRarity = null)
 	{
 		if (owner == null)
@@ -749,7 +749,7 @@ internal static class CardEditorCardRewardSpecs
 		List<CardCreationResult> result = new();
 		for (int i = 0; i < count && remaining.Count > 0; i++)
 		{
-			CardModel canonical = rng.NextItem(remaining);
+			CardModel? canonical = rng.NextItem(remaining);
 			if (canonical == null)
 			{
 				break;

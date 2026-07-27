@@ -49,6 +49,7 @@ internal static class Hook_ModifyDamage_IgnoreProps_Patch
 {
 	public static void Prefix(CombatState? combatState, Creature? target, Creature? dealer, ref ValueProp props, CardModel? cardSource)
 	{
+		using CardEditorDebugPerfTimer.PerfScope _perf = CardEditorDebugPerfTimer.Measure("ModifyDamage(mod)");
 		(bool ignoreBlock, bool ignoreDamageModifiers) = CardEditorIgnoreEffectHelpers.HasActiveIgnoreEffectPair(
 			CardExtraEffectKind.IgnoreBlock,
 			CardExtraEffectKind.IgnoreDamageModifiers,

@@ -133,6 +133,7 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 			return;
 		}
 
+		#pragma warning disable CS0162 // Unreachable code — TunerEnabled is a const toggle
 		if (!shouldShow)
 		{
 			if (toggleButton != null)
@@ -145,6 +146,7 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 			}
 			return;
 		}
+		#pragma warning restore CS0162
 
 		if (toggleButton == null)
 		{
@@ -388,8 +390,10 @@ internal static class CardEditorBaseDeckBookmarkTunerHooks
 			return;
 		}
 
+		#pragma warning disable CS0162 // Unreachable code — TunerEnabled is a const toggle
 		library.SetMeta(OpenMetaKey, open);
 		Sync(library);
+		#pragma warning restore CS0162
 	}
 
 }

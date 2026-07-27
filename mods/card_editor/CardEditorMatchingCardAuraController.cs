@@ -99,7 +99,7 @@ internal static class CardEditorMatchingCardAuraController
 		{
 			if (player == null || state == null || state.Grants.Count == 0)
 			{
-				schedule.States.Remove(player);
+				schedule.States.Remove(player!);
 				continue;
 			}
 

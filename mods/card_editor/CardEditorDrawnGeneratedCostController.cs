@@ -58,7 +58,7 @@ internal static class CardEditorDrawnGeneratedCostController
 		{
 			if (player == null || state == null || state.Grants.Count == 0)
 			{
-				schedule.States.Remove(player);
+				schedule.States.Remove(player!);
 				continue;
 			}
 
