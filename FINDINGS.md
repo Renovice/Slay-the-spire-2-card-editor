@@ -1,4 +1,36 @@
-﻿## 2026-07-27 (4) - Tier 1 combat perf, with a hostile feature-loss review that caught a real break
+﻿## 2026-07-27 (5) - Scaled Block/Damage never went green in combat; live refresh was NEVER broken
+
+User: a custom "Shiny Armor" ("Gain 8 Block. Gain 8 more Block for each card from other characters you've created this combat") shows its scaled number in WHITE, not green like vanilla Supermassive, and "doesnt seem to update mid combat" - asked us to use the vanilla pipeline.
+FINDING (one of the two reported symptoms was real):
+- GREEN: REAL BUG, and small. In TryFormatLine's usesHistoryScalingWording branch (CardEditorExtraEffects.cs ~16940) the highlight was applied only `if (upgradeHighlightComparison != 0)`. That value is non-zero ONLY during an upgrade-preview diff, so during normal combat the running total was never highlighted regardless of how far it had scaled. The sibling usesTwoLineHistoryScalingPreview branch already did it correctly (`upgradeHighlightComparison != 0 ? ... : totalAmount.CompareTo(baseAmount)`); GainBlock/DealDamage/CardDealsExtraDamage were routed into the other branch without that pattern being copied. FIXED by matching the sibling branch - green whenever the current total exceeds the un-scaled base, which is vanilla's own rule (DynamicVar.ToHighlightedString compares PreviewValue to EnchantedValue).
+- LIVE UPDATE: NOT BROKEN. Traced the full chain and it already works: CombatHistory.Add -> History.Changed -> CombatStateTracker.NotifyCombatStateChanged -> RecalculateCardValues + CombatStateChanged -> NPlayerHand.OnCombatStateChanged -> holder.UpdateCard -> NCard.UpdateVisuals -> GetDescriptionForPile -> our builder, which recomputes historyMultiplier from live CombatHistory on every call. The text WAS updating; with no colour change it just looked static.
+"USE THE VANILLA PIPELINE" - investigated and DELIBERATELY DECLINED, with reasons: routing the scaled value through vanilla's CalculatedBlockVar would need (a) CalculationBaseVar + CalculationExtraVar added to every created card's DynamicVarSet, (b) a multiplier lambda built at CanonicalVars time bound to the right effect row, (c) the description switched from our built string to a LocString using {CalculatedBlock:diff()}, and (d) that LocString taught to emit our two-line "Gain N Block / Gain M more for each ..." shape. Vanilla only greens through HighlightDifferencesFormatter, which our string path bypasses entirely - so even a correct DynamicVar would not have coloured anything until the description builder was rewritten too. At that point both routes converge on the same comparison, and the one-line version carries none of the regression risk. Worth revisiting only if we ever move description building onto LocStrings wholesale.
+SEPARATE PARITY GAP LOGGED (not fixed): BuildVanillaParityVars (CardEditorExtraEffects.cs ~7107) publishes BlockVar(effect.Amount) using the STATIC amount and ignores ScaleMode, so vanilla readers (Thrash, Reap, SeekerStrike) see 8 rather than the scaled 8+8N. Real, but a different bug from the colour one.
+ALSO CLARIFIED: the user's "250 build errors" are 0 errors / 278 WARNINGS - 402 CS8604 + 74 CS8602 + 28 CS8601 + 28 CS8600 nullable hints, 10 CS0162 unreachable, 2 CS0414 unused field. Nothing affects runtime; an IDE lists them beside errors.
+Build 0 errors / 278 warnings. Deployed.
+Next Step: in combat, create an other-character card and confirm Shiny Armor's Block total turns green. Remaining open: general combat lag (Tier 2 items in the earlier entry), and the BuildVanillaParityVars scaling gap.
+## 2026-07-27 (5) - Shiny Armor: white number (not green) + live-refresh diagnosis
+
+Hypothesis: The mod builds card description text as a static string per render. For history-scaled GainBlock cards ("Shiny Armor"), the scaled total is baked into the string without green coloring, unlike vanilla's DynamicVar path.
+
+Finding: Partially true — **two separate bugs, not one**.
+
+Evidence:
+1. Bug A (WHITE NUMBER): In `CardEditorExtraEffects.TryFormatLine` (line 16930–16967), the `usesHistoryScalingWording` branch (GainBlock + PerHistoryCount scale) builds `totalAmountText` as a plain integer string (line 16940) and only calls `StsTextUtilities.HighlightChangeText` if `upgradeHighlightComparison != 0`. That comparison is always `0` outside upgrade-preview (line 16525: it comes from `DescriptionUpgradeComparison.None` at line 11639). No comparison of `totalBaseAmount` vs `startingBaseAmount` (vs `baseAmount`) is ever performed, so the number is never green during combat.
+   - Contrast with the `usesTwoLineHistoryScalingPreview` branch (line 16990): `int comparison = upgradeHighlightComparison != 0 ? upgradeHighlightComparison : totalAmount.CompareTo(baseAmount);` — THIS branch DOES green the number when `totalAmount > baseAmount`. It was the wrong branch for GainBlock/DealDamage.
+   - Vanilla path for comparison: `DynamicVar.ToHighlightedString()` (DynamicVar.cs:171-176) greens by comparing `PreviewValue` vs `EnchantedValue`. `BlockVar.UpdateCardPreview()` (BlockVar.cs:29-46) calls `Hook.ModifyBlock()` which raises `PreviewValue`, making the comparison non-zero → green.
+
+2. Bug B (LIVE UPDATE): NOT a real bug. The description string IS recomputed live. `historyMultiplier` is recalculated on every `GetHistoryCountMultiplier()` call at description-build time. The refresh chain: `CombatHistory.Add()` → `Changed` event → `CombatStateTracker.OnCombatHistoryChanged()` → `NotifyCombatStateChanged()` → deferred `RecalculateCardValues()` + `CombatStateChanged.Invoke()` → `NPlayerHand.OnCombatStateChanged()` (NPlayerHand.cs:554) → `holder.UpdateCard()` → `NCard.UpdateVisuals()` → `GetDescriptionForPile()` → mod's `TryFormatLine()` with fresh `historyMultiplier`. Every time a card is generated in combat, `CombatHistory.CardGenerated()` fires, which triggers this chain. Live refresh already works.
+
+3. Existing parity machinery: `BuildVanillaParityVars()` (CardEditorExtraEffects.cs:7107-7154) exposes only the BASE (non-scaled) block amount as a `BlockVar(effect.Amount, ...)`. It ignores `historyMultiplier` entirely. This means the vanilla DynamicVar the parity system exposes is WRONG for the scaled value — Thrash/Reap would see base 8 instead of 8 + 8*N.
+
+Reason: The `usesHistoryScalingWording` branch (line 16682-16686) is for GainBlock/DealDamage specifically but forgot to do the `totalBaseAmount.CompareTo(startingBaseAmount)` comparison that the `usesTwoLineHistoryScalingPreview` branch does. Single-line fix.
+
+Next Step: In `usesHistoryScalingWording` path, replace the `upgradeHighlightComparison != 0` guard on `totalAmountText` with:
+  `int combatComparison = upgradeHighlightComparison != 0 ? upgradeHighlightComparison : totalBaseAmount.CompareTo(startingBaseAmount);`
+  and use `combatComparison` instead of `upgradeHighlightComparison`. This makes the number green whenever the history has increased the total above its base, exactly mirroring vanilla `ToHighlightedString(PreviewValue.CompareTo(EnchantedValue))`.
+
+## 2026-07-27 (4) - Tier 1 combat perf, with a hostile feature-loss review that caught a real break
 
 User: "plz make sure it doesnt remove any actual useful features anyways fix it". Implemented three fixes, then had a reviewer attack them SPECIFICALLY for feature loss before shipping. It found one genuine break - shipping without that pass would have silently disabled a feature.
 

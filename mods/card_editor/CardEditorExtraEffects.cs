@@ -16937,10 +16937,18 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				: 0;
 			int totalBaseAmount = (int)Math.Clamp((long)startingBaseAmount + ((long)baseAmount * historyMultiplier), 0L, int.MaxValue);
 
+			// Highlight the running total the way vanilla scaling cards do. upgradeHighlightComparison
+			// is only non-zero during an UPGRADE PREVIEW diff, so gating solely on it meant the number
+			// never went green in normal combat no matter how far it had scaled - it just sat white.
+			// Vanilla greens a value whenever it currently exceeds its un-scaled base, and the sibling
+			// two-line preview branch below already does exactly this; match it.
+			int totalHighlightComparison = upgradeHighlightComparison != 0
+				? upgradeHighlightComparison
+				: totalBaseAmount.CompareTo(startingBaseAmount);
 			string totalAmountText = totalBaseAmount.ToString(CultureInfo.InvariantCulture);
-			if (upgradeHighlightComparison != 0)
+			if (totalHighlightComparison != 0)
 			{
-				totalAmountText = StsTextUtilities.HighlightChangeText(totalAmountText, upgradeHighlightComparison);
+				totalAmountText = StsTextUtilities.HighlightChangeText(totalAmountText, totalHighlightComparison);
 			}
 
 			string coefficientText = baseAmount.ToString(CultureInfo.InvariantCulture);
