@@ -310,7 +310,7 @@ public sealed class CardEditorBuiltTinkerCard : CardModel
 				: 1;
 			for (int i = 0; i < hits; i++)
 			{
-				await DamageCmd.Attack(DynamicVars.Damage.BaseValue).FromCard(this, cardPlay).Targeting(target)
+				await DamageCmd.Attack(DynamicVars.Damage.BaseValue).FromCard(this).Targeting(target)
 					.WithHitFx("vfx/vfx_attack_slash")
 					.Execute(choiceContext);
 			}

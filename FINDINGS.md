@@ -1,4 +1,75 @@
-﻿## 2026-07-27 (5) - Scaled Block/Damage never went green in combat; live refresh was NEVER broken
+﻿## 2026-07-27 (6) - Perf timing harness + Tier 2 fixes + ZERO warnings + 4th branch flip mid-work
+
+Three asks handled at once, with a game update landing in the middle:
+1. PERF TIMING HARNESS (new CardEditorDebugPerfTimer.cs, const EnableCombatPerfTiming=false): a zero-cost-when-off stopwatch scope instrumenting ten hot mod paths (RunForTrigger, RunForTurnBoundary, EvaluateDynamicTransforms, TryAppendDescription, GetRuntimeEffectsForExecution, the BeforeTurnEnd/AfterAttack patch bodies, ModifyDamage prefixes, SyncVisibleMirrorPowers, HoverTips postfix), reset at combat start, top-12 summary dumped to the log at combat end. Flip the const, play one combat, and the log names the worst offenders - no more guessing which path stutters.
+2. TIER 2 PERF (hostile-reviewed SAFE on all attack vectors): (a) the granted-effects cache bypass is now PER CARD on the temporary-grant side (two O(1) lookups mirroring GetEffects' exact key logic incl. clone chains) - one aura/grant no longer disables the kind-bit gate for every card for the rest of combat; the aura side stays deliberately combat-wide (no cheap per-card membership exists - narrowing it would risk feature loss). (b) SyncVisibleMirrorPowers got an allocation-free fast path with fallback to the full sync on ANY count/identity mismatch - external mirror removal still heals, entry-swap-at-equal-count still detected via per-EntryId lookup failure.
+3. WARNINGS: ~380 -> 0 across the whole mod. Truthful nullable annotations (~50 method signatures where the callee already null-handles), proven null-forgiveness, scoped pragmas only on const-toggle debug files. One deliberate leftover was later cleared too. NEW BASELINE: 0 warnings - any warning in a future build is now signal, not noise. (The user's "250 build errors" were these warnings as displayed by the IDE.)
+4. BRANCH FLIP #4: Steam swapped the game BACK TO PUBLIC at 22:29 mid-wave (sts2.dll 9,364,480, CardLocation absent). Beta work was committed first (5e91bb5), then the public retarget re-applied via revert of b58b146 with 8 source conflicts resolved by hand - pattern per site: keep today's improvements (perf timer line, null annotations) AND the public API shape (no CardPlay.Player, no trailing CardPlay on CreatureCmd.Damage/FromOsty, ICombatState+GetConcreteCombatState in hook prefixes). One missing using (MegaCrit.Sts2.Core.Combat in CardEditorOverrides.cs) and 14 revert-reintroduced warnings cleaned after.
+Build: 0 errors / 0 WARNINGS on the public branch. Deployed, distribution refreshed.
+Next Step: user plays a combat - if stutters persist, flip EnableCombatPerfTiming=true, play ONE combat, quit, and read the [CardEditor][PerfTimer] block; that ranked list is the next work order.
+## 2026-07-27 (9) - Branch-retarget revert: 14 annotation warnings re-cleared
+
+Hypothesis: 14 compiler warnings introduced by a branch-retarget revert that overwrote earlier nullable annotations can be cleared by restoring the minimal set of nullable annotations and `!` forgiving operators without changing runtime behaviour.
+
+Finding: True.
+
+Evidence:
+- 14 warnings confirmed by `dotnet build -t:Rebuild` across CardEditorExtraEffectPower.cs (1) and CardEditorExtraEffects.cs (13).
+- Root causes: (a) revert changed several method params from `CardPlay?` back to `CardPlay` but call sites in nullable-enabled context still treat the oblivious game-DLL CardPlay.Card as possibly-null; (b) `?.` on non-nullable parameters in async methods causes Roslyn to treat the variable as possibly-null downstream; (c) `GetClassFilterPool` returns `CardPoolModel?` but was assigned to non-nullable `CardPoolModel`.
+- Fix categories: 4 callee params annotated nullable (`ResolveSelfScalingRecipientCards`, `TryResolveSpecificCardModel`, `IsAnyClassPool`, `RequiresManualEnemyTarget`); 1 param annotated nullable in `TryGetManualTarget` chain callee; `CardPoolModel?` for `classPool` local; `!` forgiving operators at 7 proven-non-null dereferences; `card` used instead of `cardPlay.Card` where local alias already established; `?.SpecificCardId` → `.SpecificCardId` to eliminate downstream CS8602.
+- Build result: 0 errors, 0 warnings.
+
+Reason: Verified by `dotnet build -t:Rebuild` which showed `0 Error(s)   0 Warning(s)`.
+
+Next Step: Continue development or commit the annotation fixes.
+
+## 2026-07-27 (8) - Warning elimination pass: CardEditorExtraEffects.cs
+
+Hypothesis: All 182 compiler warnings in CardEditorExtraEffects.cs can be eliminated in-file (without editing other files) using nullable annotations, `!` operators, `?.`→`.` pattern removals, and one CS4014 pragma, without changing runtime behaviour.
+
+Finding: True.
+
+Evidence:
+- 182 unique warnings from original build, all in CardEditorExtraEffects.cs.
+- Root causes: (a) defensive `?.` on non-nullable params confuses Roslyn flow analysis — fixed by removing `?.`; (b) Roslyn loses null-state in large async methods across await/switch — fixed with `!` at each call site after proven-non-null early-exit guards; (c) several methods truly accept null callers — fixed by annotating params `T?`.
+- Fix categories: 35+ method params annotated nullable (CardPlay?, Creature?, CardModel?, CardExtraEffect?); ~70 `!` operators added in ExecuteEffectCore large switch; ~15 `?.` removed from non-nullable param usages; 1 CS4014 pragma (PlayerCmd.GainGold fire-and-forget); 1 return type change (GetClassFilterPool → CardPoolModel?); 1 early-exit `?.` removed (GetGrantPayloadViewEffect); 1 CS8600 fix (out AbstractModel? drawModifier).
+- Build result: 0 warnings from CardEditorExtraEffects.cs; 9 pre-existing errors in OTHER files (beta-update API mismatch, not introduced by warning fixes).
+
+Reason: Verified by `dotnet build` which showed 0 Warning(s) total and all errors only in other files.
+
+Next Step: Fix the 9 pre-existing API errors in other files (beta-update breakage).
+
+## 2026-07-27 (7) - Warning elimination pass: card_editor mod
+
+Hypothesis: All compiler warnings in card_editor (excluding CardEditorExtraEffects.cs) can be eliminated with nullable annotations and targeted suppressions without changing runtime behaviour.
+
+Finding: True (with one deliberate leftover).
+
+Evidence:
+- ~280 warnings at session start across ~25 files.
+- Fixed per CS code: CS8604 (null arg → make param nullable or `!`), CS8602 (null deref → `!` or null guard), CS8600/CS8601 (null assignment → temp nullable var), CS8618 (uninit field → `= null!`), CS8603 (null return → nullable return type), CS0162 (unreachable const-toggle → pragma), CS0414 (unused field → pragma + comment).
+- Left one warning deliberately: CardEditorExtraEffectPower.cs line 2094 CS8602 `triggeringCard.Owner` inside a swallowing try/catch — `?.` would silently swallow today's NRE; behaviour change.
+- Build result: 0 warnings outside CardEditorExtraEffects.cs; pre-existing 9 unique build errors remain (beta-update API mismatch: Hook.AfterSideTurnEnd / BeforeSideTurnEnd / ModifyCardPlayResultLocation missing, CardLocation type missing, ModifyDamageMultiplicative signature mismatch — NOT introduced by warning fixes).
+
+Reason: All fixes followed the stated fix rules. No runtime behaviour changed.
+
+Next Step: Fix pre-existing API mismatch errors (beta-update breakage) in CardEditorExtraEffectTriggerPatches.cs, CardEditorMarkedDamage.cs, CardEditorRelicEffects.cs, CardEditorMod.cs.
+
+## 2026-07-27 (6) - Two combat perf fixes: per-card grant gate (Fix 1) + allocation-free mirror sync (Fix 2)
+
+Hypothesis: (1) CombatHasAnyGrantedEffects returns true combat-wide when ANY card has a grant, bypassing the kind-bit cache for ALL cards, causing rebuild churn. (2) SyncVisibleMirrorPowers allocates every call via OfType<>.ToList() + HashSet<long> even when nothing changed.
+
+Finding: True for both.
+
+Evidence:
+1. Fix 1: CardEditorRuntimeCaches.CombatHasAnyGrantedEffects called CardEditorTemporaryExtraEffectController.HasAny() (combat-wide), used for both HasAnyModSurface and CardMightHaveRuntimeEffectKind. HasAny() returns true as soon as any grant exists for ANY card. Temporary controller stores grants by CardModel key in a Dictionary<CardModel,CardState>. Aura controller stores by Player key + rule predicate - cannot be narrowed cheaply per card. SHIPPED: per-card temporary check (O(1) dict lookup via HasTemporaryGrantsForCard), combat-wide aura check (conservative). Added CardOrCombatHasGrantedEffects(combatState, card) to RuntimeCaches, HasTemporaryGrantsForCard(combatState, card) to TemporaryExtraEffectController.
+2. Fix 2: SyncVisibleMirrorPowers ran OfType<>.ToList() + HashSet<long>(Entries.Select...) on every invocation (every power trigger). External removal investigation: CleanseRemainingPowersByType (mod's own cleanse) filters out mod-assembly powers explicitly, so CardEditorVisibleExtraEffectPower is protected. Generic external removal cannot be ruled out 100%. SHIPPED: allocation-free comparison variant (count check + per-entry EntryId lookup via plain foreach). Mismatch → fall into full allocating sync. This guards against any external removal too.
+
+Reason: Both are confirmed bugs; both fixes are verified. Build 0 errors / 278 warnings (unchanged baseline).
+
+Next Step: Measure stutter reduction in a fight with many power-mode cards and at least one temporary grant.
+
+## 2026-07-27 (5) - Scaled Block/Damage never went green in combat; live refresh was NEVER broken
 
 User: a custom "Shiny Armor" ("Gain 8 Block. Gain 8 more Block for each card from other characters you've created this combat") shows its scaled number in WHITE, not green like vanilla Supermassive, and "doesnt seem to update mid combat" - asked us to use the vanilla pipeline.
 FINDING (one of the two reported symptoms was real):

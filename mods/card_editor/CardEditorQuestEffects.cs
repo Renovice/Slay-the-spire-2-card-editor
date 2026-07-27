@@ -580,7 +580,6 @@ internal static class CardEditorQuestEffects
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = questCard,
-				Player = questCard.Owner,
 				Target = null,
 				ResultPile = questCard.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -701,7 +700,6 @@ internal static class CardEditorQuestEffects
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = questCard,
-					Player = questCard.Owner ?? owner,
 					Target = null,
 					ResultPile = questCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo

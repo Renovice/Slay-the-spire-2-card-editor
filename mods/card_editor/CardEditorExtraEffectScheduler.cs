@@ -313,7 +313,6 @@ internal static class CardEditorExtraEffectScheduler
 		CardPlay play = new CardPlay
 		{
 			Card = scheduled.Card,
-			Player = scheduled.Card.Owner,
 			Target = scheduled.LockedTarget,
 			ResultPile = scheduled.ResultPile,
 			Resources = scheduled.Resources,
