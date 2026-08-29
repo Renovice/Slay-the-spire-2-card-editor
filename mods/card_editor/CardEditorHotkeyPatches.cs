@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Localization;
@@ -31,8 +30,6 @@ internal static class CardEditorQuickOpenHotkey
 
 	private static bool _baseInstalled;
 	private static bool _openedCapstoneViaHotkey;
-
-	private static FieldInfo? _inputSettingsEntryLocMapField;
 
 	public static void EnsureInstalled()
 	{
@@ -72,7 +69,13 @@ internal static class CardEditorQuickOpenHotkey
 
 	private static void EnsureRemappableKeyboardInput()
 	{
-		if (NInputManager.remappableKeyboardInputs is List<StringName> list && !list.Contains(InputName))
+		AddRemappableInput(NInputManager.remappableMKbInputs);
+		AddRemappableInput(NInputManager.remappableKbOnlyInputs);
+	}
+
+	private static void AddRemappableInput(IReadOnlyList<StringName> inputs)
+	{
+		if (inputs is ICollection<StringName> list && !list.Contains(InputName))
 		{
 			list.Add(InputName);
 		}
@@ -80,13 +83,7 @@ internal static class CardEditorQuickOpenHotkey
 
 	private static void EnsureInputSettingsTitleMapping()
 	{
-		_inputSettingsEntryLocMapField ??= typeof(NInputSettingsEntry).GetField("_commandToLocTitle", BindingFlags.Static | BindingFlags.NonPublic);
-		Dictionary<StringName, string>? map = _inputSettingsEntryLocMapField?.GetValue(null) as Dictionary<StringName, string>;
-		if (map == null)
-		{
-			return;
-		}
-		map[InputName] = SettingsLocTitleSuffix;
+		NInputSettingsEntry.commandToLocTitle[InputName] = SettingsLocTitleSuffix;
 	}
 
 	public static void EnsureLocalizationKey()
@@ -290,8 +287,8 @@ internal static class NInputManager_Ready_CardEditorHotkey_Patch
 	}
 }
 
-[HarmonyPatch(typeof(NInputManager), "get_DefaultKeyboardInputMap")]
-internal static class NInputManager_get_DefaultKeyboardInputMap_CardEditorHotkey_Patch
+[HarmonyPatch(typeof(NInputManager), "get_DefaultHotkeyInputMap")]
+internal static class NInputManager_get_DefaultHotkeyInputMap_CardEditorHotkey_Patch
 {
 	public static void Postfix(ref Dictionary<StringName, Key> __result)
 	{

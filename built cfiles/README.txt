@@ -14,7 +14,7 @@ FEATURES
 - Hotkey: quick-open Editor (default F11, remappable)
 - Creator: custom cards (slots) + optional custom art from disk
 
-INSTALL (works on old + beta/new loader)
+INSTALL (Slay the Spire 2 public beta v0.111.0 or newer)
 1) Create a folder:
    ...\Slay the Spire 2\mods\card_editor\
 2) Copy EVERYTHING from this zip into it (including the `localization` folder):
@@ -49,6 +49,7 @@ NOTES
 - Logs: user://logs/godot.log (search for [CardEditor])
 
 CHANGELOG (high level)
+- v10.1.0: Public beta v0.111.0 compatibility, relic/reward/runtime fixes, and headless regression coverage.
 - v1.4: Presets + extra effects/scaling, hotkey, beta/new mod-loader manifest support, Creator slots + custom art folder support.
 - v2.0: External localization support, more extra effects, true X-cost (energy/stars), misc fixes.
 - v2.7: Conditional auto-play/draw from pile (multi-variable editor: event verb, threshold, card-type filter, time window, pile source). Draw-cards-cost-less Permanent wording fix.

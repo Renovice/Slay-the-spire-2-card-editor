@@ -1,9 +1,10 @@
-{
+﻿{
   "PreloadEditorPopupsOnLaunch": false,
   "LegacyPreloadEveryEditorPopupOnLaunch": false,
   "IncrementalPopupHydrationOnOpen": true,
   "BackgroundPopupWarmupAfterDirtyClose": true,
   "BackgroundPopupWarmupDelaySeconds": 0.08,
+
   "VerboseLogging": false,
   "VerboseDamageDebugLogging": false
 }

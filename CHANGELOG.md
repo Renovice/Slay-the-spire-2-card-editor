@@ -1,5 +1,13 @@
 # Card Editor changelog
 
+## 10.1.0 - Public Beta compatibility and runtime fixes (2026-08-29)
+
+- Retargeted the mod to Slay the Spire 2 public beta `v0.111.0`, including the current networking, hotkey, card-command, and combat APIs.
+- Fixed reward-pool state loading, edited Calling Bell/Tea/Hefty Tablet relic values, Nightmare mutation copies, decimal source rounding, live damage/block sources, and delayed power-value snapshots.
+- Restored move, manual Exhaust, filtered Transform, triggered This Card cost reductions, After Death power dispatch, and Copy Debuffs against the current beta runtime.
+- Added a headless regression harness covering ten runtime and source-contract scenarios without launching the game.
+- Kept the unsafe `Grant -> Hits All Enemies` combination blocked so affected cards cannot become stranded during resolution.
+
 ## 10.0 — The Card Engine & Chainboard update (2026-07-19)
 
 The biggest rework since release: effects are now a composable engine, and you can build them visually.

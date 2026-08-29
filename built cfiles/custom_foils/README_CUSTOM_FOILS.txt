@@ -3,8 +3,8 @@ Card Editor Custom Shader Foils
 
 Status
 ------
-This folder is the intended drop-in location for user shader foils.
-The custom shader loader should treat these as a separate "Custom" finish lane.
+This folder is the drop-in location for user shader foils.
+The custom shader loader treats these as a separate "Custom Foil" lane.
 They should not replace or modify built-in Card Editor finishes, and they should
 not use the base-game/vanilla finish pipeline.
 
@@ -27,6 +27,10 @@ Example:
 The finish dropdown should display that as:
 
   Custom: Starfield
+
+In the editor, use:
+
+  Cosmetics -> Custom Foil
 
 Shader requirements
 -------------------
@@ -93,11 +97,14 @@ Recommended names for common knobs:
 
 Avoid for first-pass compatibility:
 
-  sampler2D texture uniforms
   viewport-only SCREEN_TEXTURE assumptions
   spatial shaders
   particle shaders
   scripts inside .tscn files
+
+Texture uniforms are supported when the manifest marks the knob as "texture".
+Texture paths must stay inside custom_foils/ or a subfolder such as
+custom_foils/assets/.
 
 Foil manifest
 -------------
@@ -182,12 +189,23 @@ defaults:
   Optional object of shader parameter defaults.
 
 knobs:
-  Optional list of UI controls. Supported planned types:
+  Optional list of UI controls. Supported types:
     float
     int
     bool
     color
     vec2
+    vec3
+    vec4
+    texture
+    string
+
+The loader also injects these uniforms when present, so they normally should be
+hidden/internal:
+
+  rect_size
+  foil_size
+  full_art
 
 Safe failure behavior
 ---------------------

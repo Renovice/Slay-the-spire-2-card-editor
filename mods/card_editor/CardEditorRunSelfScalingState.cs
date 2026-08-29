@@ -131,6 +131,35 @@ internal static class CardEditorRunSelfScalingState
 		TryRestoreCard(card, cardAlreadyRebased: true);
 	}
 
+	internal static void CopyMutationMetadata(CardModel? source, CardModel? clone)
+	{
+		if (source == null || clone == null || ReferenceEquals(source, clone))
+		{
+			return;
+		}
+
+		string payload = source is CardEditorCreatedCardBase createdSource
+			? createdSource.CardEditorSelfScalingDiff ?? string.Empty
+			: GetSerializedMutationPayload(source);
+		if (string.IsNullOrWhiteSpace(payload))
+		{
+			return;
+		}
+
+		if (clone is CardEditorCreatedCardBase createdClone)
+		{
+			createdClone.CardEditorSelfScalingDiff = payload;
+		}
+		else
+		{
+			SetSerializedMutationPayload(clone, payload);
+		}
+
+		// ClonePreservingMutability already copied the mutated card values. Mark the
+		// payload as applied so a later restore does not apply the same diff twice.
+		SetAppliedMarker(clone, BuildSavedCardMarker(payload));
+	}
+
 	private static void RecordSerializedCardMutation(CardModel card, CardEditorExtraEffects.SelfScalingMutationDiff diff)
 	{
 		if (card == null || diff == null || diff.IsEmpty)
@@ -968,5 +997,23 @@ internal static class CardModel_FromSerializable_CardEditorRunSelfScalingState_P
 	private static void Postfix(SerializableCard save, CardModel __result)
 	{
 		CardEditorRunSelfScalingState.ReadSavedMutationFromSerializable(save, __result);
+	}
+}
+
+[HarmonyPatch(typeof(RunState), nameof(RunState.CloneCard))]
+internal static class RunState_CloneCard_CardEditorRunSelfScalingState_Patch
+{
+	private static void Postfix(CardModel mutableCard, CardModel __result)
+	{
+		CardEditorRunSelfScalingState.CopyMutationMetadata(mutableCard, __result);
+	}
+}
+
+[HarmonyPatch(typeof(CombatState), nameof(CombatState.CloneCard))]
+internal static class CombatState_CloneCard_CardEditorRunSelfScalingState_Patch
+{
+	private static void Postfix(CardModel mutableCard, CardModel __result)
+	{
+		CardEditorRunSelfScalingState.CopyMutationMetadata(mutableCard, __result);
 	}
 }

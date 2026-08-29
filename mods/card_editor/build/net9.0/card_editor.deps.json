@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v9.0": {
-      "card_editor/10.0.0": {
+      "card_editor/10.1.0": {
         "dependencies": {
           "0Harmony": "2.4.2.0",
           "GodotSharp": "4.5.1.0",
@@ -40,11 +40,19 @@
           }
         }
       },
-      "Sentry/5.0.0.0": {
+      "Sentry.Godot/1.0.0.0": {
+        "runtime": {
+          "Sentry.Godot.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "Sentry/6.7.0.0": {
         "runtime": {
           "Sentry.dll": {
-            "assemblyVersion": "5.0.0.0",
-            "fileVersion": "5.0.0.0"
+            "assemblyVersion": "6.7.0.0",
+            "fileVersion": "6.7.0.0"
           }
         }
       },
@@ -123,7 +131,7 @@
     }
   },
   "libraries": {
-    "card_editor/10.0.0": {
+    "card_editor/10.1.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
@@ -143,7 +151,12 @@
       "serviceable": false,
       "sha512": ""
     },
-    "Sentry/5.0.0.0": {
+    "Sentry.Godot/1.0.0.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Sentry/6.7.0.0": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""

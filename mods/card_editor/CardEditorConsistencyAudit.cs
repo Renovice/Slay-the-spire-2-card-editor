@@ -17,6 +17,12 @@ internal static class CardEditorConsistencyAudit
 	{
 		CardExtraEffectKind.EffectLimit,
 		CardExtraEffectKind.HoverPreview,
+		CardExtraEffectKind.ScalingStage,
+		CardExtraEffectKind.EnchantCard,
+		CardExtraEffectKind.RunEffectSourceCard,
+		CardExtraEffectKind.ChooseOneEffectSource,
+		CardExtraEffectKind.DynamicIdentity,
+		CardExtraEffectKind.StatefulTransform,
 	};
 
 	public static void RunStartupAudits()

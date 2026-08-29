@@ -228,6 +228,8 @@ internal static class CardEditorRelicOverrides
 				}
 			}
 		}
+
+		CardEditorRelicCompatibility.SyncRuntimeCounters(relic, overrideData);
 	}
 
 	internal static bool TryBuildCustomDynamicDescription(RelicModel relic, out LocString locString)

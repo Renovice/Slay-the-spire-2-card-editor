@@ -545,26 +545,26 @@ internal static class CardEditorRewardPoolRegistry
 	}
 
 	private static HashSet<ModelId> Ids<T>() where T : CardModel
-		=> new() { ModelDb.Card<T>().Id };
+		=> new() { ModelDb.GetId<T>() };
 
 	private static HashSet<ModelId> Ids<T1, T2>() where T1 : CardModel where T2 : CardModel
-		=> new() { ModelDb.Card<T1>().Id, ModelDb.Card<T2>().Id };
+		=> new() { ModelDb.GetId<T1>(), ModelDb.GetId<T2>() };
 
 	private static HashSet<ModelId> Ids<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>()
 		where T1 : CardModel where T2 : CardModel where T3 : CardModel where T4 : CardModel where T5 : CardModel
 		where T6 : CardModel where T7 : CardModel where T8 : CardModel where T9 : CardModel where T10 : CardModel
 		=> new()
 		{
-			ModelDb.Card<T1>().Id,
-			ModelDb.Card<T2>().Id,
-			ModelDb.Card<T3>().Id,
-			ModelDb.Card<T4>().Id,
-			ModelDb.Card<T5>().Id,
-			ModelDb.Card<T6>().Id,
-			ModelDb.Card<T7>().Id,
-			ModelDb.Card<T8>().Id,
-			ModelDb.Card<T9>().Id,
-			ModelDb.Card<T10>().Id
+			ModelDb.GetId<T1>(),
+			ModelDb.GetId<T2>(),
+			ModelDb.GetId<T3>(),
+			ModelDb.GetId<T4>(),
+			ModelDb.GetId<T5>(),
+			ModelDb.GetId<T6>(),
+			ModelDb.GetId<T7>(),
+			ModelDb.GetId<T8>(),
+			ModelDb.GetId<T9>(),
+			ModelDb.GetId<T10>()
 		};
 
 	private sealed record RewardPoolCandidate(CardModel Template, CardEditorRewardPoolBucket Bucket, CardEditorRewardPoolInjectionMode Mode);

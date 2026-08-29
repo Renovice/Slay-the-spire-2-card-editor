@@ -158,7 +158,7 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.LoseStars, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.GainGold, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.LoseGold, G | P | R | D | H, Players);
-		Add(CardExtraEffectKind.GrantKeywordToPile, G | D | H | S | C, Players);
+		Add(CardExtraEffectKind.GrantKeywordToPile, G | P | D | H | S | C, Players);
 		Add(CardExtraEffectKind.GeneratedCardsUpgraded, H, Players);
 		Add(CardExtraEffectKind.CardsInPileUpgradedAura, H, Players);
 

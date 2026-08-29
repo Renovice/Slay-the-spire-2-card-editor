@@ -30,6 +30,7 @@ using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 using MegaCrit.Sts2.Core.Unlocks;
 using MegaCrit.Sts2.addons.mega_text;
+using LobbyPlayer = MegaCrit.Sts2.Core.Entities.Multiplayer.StartRunLobbyPlayer;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -518,6 +519,8 @@ internal sealed class FakeClientNetGameService : INetGameService
     public NetGameType Type => NetGameType.Client;
 
     public PlatformType Platform => PlatformType.None;
+
+    public PeerVersionInfo LocalVersion { get; } = PeerVersionInfo.LocalDefault();
 
     public event Action<NetErrorInfo>? Disconnected;
 

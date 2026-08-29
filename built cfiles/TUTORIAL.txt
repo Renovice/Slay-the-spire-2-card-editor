@@ -373,6 +373,3 @@ Scaling Stage = staged conditional effect-source execution
 Effect Source = card used as a reusable effect payload or number source
 
 End of file.
-
-
-

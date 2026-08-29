@@ -21,6 +21,7 @@ using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Unlocks;
+using LobbyPlayer = MegaCrit.Sts2.Core.Entities.Multiplayer.StartRunLobbyPlayer;
 
 namespace SlayTheSpire2Mod.CardEditor;
 
@@ -133,7 +134,7 @@ internal static class CardEditorDebugDummyLobby
 				return;
 			}
 
-			NetHostGameService host = new NetHostGameService();
+			NetHostGameService host = new NetHostGameService(PeerVersionInfo.LocalDefault());
 
 			// Mirror NMultiplayerTest.StartHost: null return means success.
 			NetErrorInfo? error = host.StartENetHost(DummyHostPort, DummyHostMaxClients);
@@ -349,13 +350,18 @@ internal static class CardEditorDebugDummyLobby
 	/// </summary>
 	/// <param name="wrongVersion">A version string that intentionally does not match the host's.</param>
 	/// <returns>A single-use <see cref="JoinFlow"/> preloaded with the mismatched identity.</returns>
-	// NOTE: the JoinFlow.MockInfo seam this used exists only on the v0.109 BETA branch. The mod
-	// currently targets the PUBLIC branch, where JoinFlow has no mock constructor, so the helper is
-	// compiled out rather than deleted - restore it if the mod is ever retargeted to that beta.
-	internal static JoinFlow? BuildMismatchedJoinFlow(string wrongVersion = "v0.000-DEBUG-MISMATCH")
+	internal static JoinFlow BuildMismatchedJoinFlow(string wrongVersion = "v0.000-DEBUG-MISMATCH")
 	{
-		Log.Warn("[CardEditor][DummyLobby] BuildMismatchedJoinFlow needs JoinFlow.MockInfo, which this game build does not expose; skipping.");
-		return null;
+		PeerVersionInfo mockInfo = new PeerVersionInfo
+		{
+			version = wrongVersion,
+			idDatabaseHash = 0u,
+			branch = default(PlatformBranch),
+			gameplayAffectingMods = new List<string>(),
+			otherMods = new List<string>()
+		};
+
+		return new JoinFlow(new NetClientGameService(mockInfo));
 	}
 
 	/// <summary>

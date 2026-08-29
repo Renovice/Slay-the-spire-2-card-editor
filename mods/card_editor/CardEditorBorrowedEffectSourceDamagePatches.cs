@@ -84,7 +84,8 @@ internal static class AttackCommand_FromOsty_BorrowedEffectSourceSourcePatch
 	typeof(decimal),
 	typeof(ValueProp),
 	typeof(Creature),
-	typeof(CardModel)
+	typeof(CardModel),
+	typeof(CardPlay)
 })]
 internal static class CreatureCmd_Damage_BorrowedEffectSourceSourcePatch
 {

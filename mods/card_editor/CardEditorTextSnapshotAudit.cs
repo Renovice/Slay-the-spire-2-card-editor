@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using Godot;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
@@ -22,6 +23,9 @@ internal static class CardEditorTextSnapshotAudit
 	private const string CurrentPath = "user://card_editor/text_snapshot.current.txt";
 	private const string BaselinePath = "user://card_editor/text_snapshot.baseline.txt";
 	private const int MaxReportedDiffs = 12;
+	private static readonly Regex EnergyIconPath = new(
+		@"(?<=res://images/packed/sprite_fonts/)[^/\]]+_energy_icon\.png",
+		RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
 	private static bool _ran;
 
@@ -98,7 +102,7 @@ internal static class CardEditorTextSnapshotAudit
 			int secondPipe = IndexOfSecondPipe(line);
 			if (secondPipe > 0)
 			{
-				baselineByKey[line.Substring(0, secondPipe)] = line.Substring(secondPipe + 1);
+				baselineByKey[line.Substring(0, secondPipe)] = NormalizeContextDependentText(line.Substring(secondPipe + 1));
 			}
 		}
 
@@ -115,7 +119,7 @@ internal static class CardEditorTextSnapshotAudit
 			}
 
 			string key = line.Substring(0, secondPipe);
-			string text = line.Substring(secondPipe + 1);
+			string text = NormalizeContextDependentText(line.Substring(secondPipe + 1));
 			seenKeys.Add(key);
 			if (!baselineByKey.TryGetValue(key, out string? baselineText))
 			{
@@ -166,5 +170,10 @@ internal static class CardEditorTextSnapshotAudit
 	{
 		int first = line.IndexOf('|');
 		return first < 0 ? -1 : line.IndexOf('|', first + 1);
+	}
+
+	private static string NormalizeContextDependentText(string text)
+	{
+		return EnergyIconPath.Replace(text ?? string.Empty, "character_energy_icon.png");
 	}
 }

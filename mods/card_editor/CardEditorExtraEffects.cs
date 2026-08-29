@@ -1339,6 +1339,7 @@ public sealed class CardExtraEffect
 	public CardExtraEffectValueSourceAggregation ValueSourceAggregation { get; set; } = CardExtraEffectValueSourceAggregation.Value;
 	public CardExtraEffectValueSourceKind ValueSourceKind { get; set; } = CardExtraEffectValueSourceKind.MaxHp;
 	public string? ValueSourcePowerId { get; set; }
+	internal bool DeferredPowerAmountIsUnpowered { get; set; }
 
 	// Optional: apply a flat bonus to this effect's resolved amount when the condition passes.
 	public int ConditionalBonusAmount { get; set; }
@@ -1650,7 +1651,7 @@ public sealed class CardExtraEffect
 	public string? EffectLimitTargetEffectIds { get; set; }
 
 	// Runtime-only identity for named keyword/effect-source packages granted to cards.
-	public string? GrantPackageKey { get; set; }
+	internal string? GrantPackageKey { get; set; }
 
 	// Self-scaling: mutate this card's own base vars or a chosen effect row after it is played.
 	public CardExtraEffectSelfScalingOperation SelfScalingOperation { get; set; } = CardExtraEffectSelfScalingOperation.Increase;
@@ -3282,7 +3283,7 @@ internal static class CardEditorExtraEffects
 			&& (e.Target == CardExtraEffectTarget.Target || e.Kind == CardExtraEffectKind.CopyDebuffs);
 	}
 
-	public static bool RequiresManualEnemyTarget(CardModel? card)
+	public static bool RequiresManualEnemyTarget(CardModel card)
 	{
 		if (card == null)
 		{
@@ -7493,6 +7494,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		return new CardPlay
 		{
 			Card = card,
+			Player = card.Owner,
 			Target = target,
 			ResultPile = card.TryGetPile()?.Type ?? PileType.None,
 			Resources = new ResourceInfo
@@ -8995,7 +8997,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		=> mode is CardExtraEffectSelfScalingRecipientMode.MatchingCards
 			or CardExtraEffectSelfScalingRecipientMode.ThisAndMatchingCards;
 
-	private static async Task<List<CardModel>> ResolveSelfScalingRecipientCards(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay? cardPlay, CardExtraEffect effect)
+	private static async Task<List<CardModel>> ResolveSelfScalingRecipientCards(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay, CardExtraEffect effect)
 	{
 		List<CardModel> selected = new List<CardModel>();
 		if (combatState == null || choiceContext == null || cardPlay?.Card?.Owner == null || effect == null)
@@ -9087,7 +9089,12 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 	private static async Task<bool> ApplySelfScalingMutation(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay, CardExtraEffect effect, int triggerEventAmount)
 	{
-		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? cardPlay?.Card?.Owner?.Creature;
+		if (cardPlay == null || cardPlay.Card == null)
+		{
+			return false;
+		}
+
+		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? cardPlay.Card.Owner?.Creature;
 		if (ownerCreature == null || !TryResolveSelfScalingDelta(combatState, ownerCreature, cardPlay, effect, triggerEventAmount, out int delta))
 		{
 			return false;
@@ -9100,7 +9107,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			foreach (CardModel recipient in recipients)
 			{
-				mutated |= ApplyPersistentSelfScalingMutationToCard(combatState, recipient, effect, delta, cardPlay?.Card);
+				mutated |= ApplyPersistentSelfScalingMutationToCard(combatState, recipient, effect, delta, cardPlay.Card);
 			}
 			return mutated;
 		}
@@ -9116,7 +9123,12 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 	private static async Task<bool> ApplyPersistentSelfScalingMutation(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay, CardExtraEffect effect, int triggerEventAmount)
 	{
-		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? cardPlay?.Card?.Owner?.Creature;
+		if (cardPlay == null || cardPlay.Card == null)
+		{
+			return false;
+		}
+
+		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? cardPlay.Card.Owner?.Creature;
 		if (ownerCreature == null || !TryResolveSelfScalingDelta(combatState, ownerCreature, cardPlay, effect, triggerEventAmount, out int delta))
 		{
 			return false;
@@ -9134,7 +9146,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			{
 				continue;
 			}
-			mutated |= ApplyPersistentSelfScalingMutationToCard(combatState, recipient, effect, delta, cardPlay?.Card);
+			mutated |= ApplyPersistentSelfScalingMutationToCard(combatState, recipient, effect, delta, cardPlay.Card);
 		}
 		return mutated;
 	}
@@ -10817,7 +10829,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 
 	internal static IReadOnlyList<IHoverTip> GetAdditionalHoverPreviewTips(CardModel? card)
 	{
-		if (!HasCardEditorDescriptionSurface(card))
+		if (card == null || !HasCardEditorDescriptionSurface(card))
 		{
 			return Array.Empty<IHoverTip>();
 		}
@@ -10831,7 +10843,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 				continue;
 			}
 
-			if (!DoesBehaviorConditionPass(combatState, card!, card!, effect))
+			if (!DoesBehaviorConditionPass(combatState, card, card, effect))
 			{
 				continue;
 			}
@@ -10854,7 +10866,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		return tips;
 	}
 
-	private static bool TryResolveSpecificCardModel(string? specificCardId, CardModel? contextCard, out CardModel card)
+	private static bool TryResolveSpecificCardModel(string? specificCardId, CardModel contextCard, out CardModel card)
 	{
 		card = null!;
 		if (!TryParseSpecificCardId(specificCardId ?? string.Empty, out ModelId sourceId)
@@ -13338,11 +13350,11 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 	internal static async Task RunResolvedOnPlayEffectsDuringCardPlay(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay? cardPlay, IReadOnlyList<CardExtraEffect> effects)
 	{
-		CardModel? card = cardPlay?.Card;
-		if (combatState == null || choiceContext == null || card == null || effects == null || effects.Count == 0)
+		if (combatState == null || choiceContext == null || cardPlay == null || cardPlay.Card == null || effects == null || effects.Count == 0)
 		{
 			return;
 		}
+		CardModel card = cardPlay.Card;
 
 		Creature? ownerCreature = card.TryGetOwnerCreature();
 		VigorPreserver? vigor = null;
@@ -13356,7 +13368,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		// AsyncLocal ambient value flows into the awaited row execution below; the context
 		// itself is created lazily by the first landing row.
 		SharedAttackContextScope? sharedAttack = ShouldOpenSharedAttackScope(combatState, choiceContext, cardPlay, effects, autoActionPayloadIds)
-			? new SharedAttackContextScope(cardPlay!, new SharedAttackContextHolder())
+			? new SharedAttackContextScope(cardPlay, new SharedAttackContextHolder())
 			: null;
 		if (ownerCreature != null && sharedAttack == null)
 		{
@@ -13372,7 +13384,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 			if (remainingImmediateDamageEffects > 1)
 			{
-				vigor = VigorPreserver.TryCreate(ownerCreature, card);
+				vigor = VigorPreserver.TryCreate(ownerCreature, cardPlay.Card);
 			}
 		}
 
@@ -13419,12 +13431,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				else
 				{
 					Creature? lockedTarget = null;
-					Player? owner = card.Owner;
+					Player? owner = cardPlay.Card.Owner;
 					if (effect.Target == CardExtraEffectTarget.Target && owner?.Creature != null)
 					{
-						lockedTarget = ResolveSingleTarget(combatState, owner.Creature, cardPlay!);
+						lockedTarget = ResolveSingleTarget(combatState, owner.Creature, cardPlay);
 					}
-					CardEditorExtraEffectScheduler.Schedule(combatState, cardPlay!, effect, lockedTarget);
+					CardEditorExtraEffectScheduler.Schedule(combatState, cardPlay, effect, lockedTarget);
 				}
 			}
 		}
@@ -13456,7 +13468,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			await vigor.FinalizeRestores();
 		}
 
-		await RunFatalForCreatedCardOnPlayIfNeeded(combatState, choiceContext, cardPlay!, effects);
+		await RunFatalForCreatedCardOnPlayIfNeeded(combatState, choiceContext, cardPlay, effects);
 	}
 
 	private static async Task RunFatalForCreatedCardOnPlayIfNeeded(
@@ -13558,6 +13570,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			&& !e.GrantToCard
 			&& GetEffectiveResolvedTarget(cardPlay, e.Target) != CardExtraEffectTarget.Self
 			&& !UsesDamageResultAmountSource(e)
+			&& !UsesRuntimeModifiedVanillaAmountSource(e)
 			&& IsValidEffectAmount(e.Kind, e.Amount));
 		return poweredImmediateDamageRows >= 2;
 	}
@@ -13613,9 +13626,9 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		{
 			if (_sharedHolder != null)
 			{
-				return _sharedHolder.Context ??= await AttackCommand.CreateContextAsync(_combatState, _choiceContext, _cardPlay.Card);
+				return _sharedHolder.Context ??= await AttackCommand.CreateContextAsync(_combatState, _choiceContext, _cardPlay);
 			}
-			return _owned ??= await AttackCommand.CreateContextAsync(_combatState, _choiceContext, _cardPlay.Card);
+			return _owned ??= await AttackCommand.CreateContextAsync(_combatState, _choiceContext, _cardPlay);
 		}
 
 		public async ValueTask DisposeAsync()
@@ -13643,7 +13656,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		SharedAttackContextHolder holder)
 	{
 		ValueProp damageProps = ValueProp.Move;
-		if (UsesDamageResultAmountSource(effect) || resolvedTarget == CardExtraEffectTarget.Self)
+		if (UsesDamageResultAmountSource(effect)
+			|| UsesRuntimeModifiedVanillaAmountSource(effect)
+			|| effect.DeferredPowerAmountIsUnpowered
+			|| resolvedTarget == CardExtraEffectTarget.Self)
 		{
 			damageProps |= ValueProp.Unpowered;
 		}
@@ -13719,8 +13735,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			// to land — vanilla fires it before the first damage computation (AttackContext
 			// CreateAsync / AttackCommand.Execute), so this preserves Vigor/Gigantification
 			// ModifyDamage on this very hit while all-fizzle plays never latch at all.
-			AttackContext attackContext = holder.Context ??= await AttackCommand.CreateContextAsync(combatState, choiceContext, cardPlay.Card);
-			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card);
+			AttackContext attackContext = holder.Context ??= await AttackCommand.CreateContextAsync(combatState, choiceContext, cardPlay);
+			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 			if (results.Count == 0)
 			{
@@ -14043,6 +14059,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -14756,6 +14773,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -14982,6 +15000,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		using IDisposable _ = CardEditorCardPlayContext.PushScoped(new CardPlay
 		{
 			Card = card,
+			Player = card.Owner,
 			Target = eventTarget,
 			ResultPile = card.Pile?.Type ?? PileType.None,
 			Resources = new ResourceInfo
@@ -15009,6 +15028,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = eventTarget,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -15201,6 +15221,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		{
 			return;
 		}
+		CardModel targetCard = card;
 		if (!IsValidEffectAmount(effect.Kind, effect.Amount))
 		{
 			return;
@@ -15208,9 +15229,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 		CardPlay effectivePlay = triggerPlay ?? new CardPlay
 		{
-			Card = card,
+			Card = targetCard,
+			Player = targetCard.Owner,
 			Target = null,
-			ResultPile = card.Pile?.Type ?? PileType.None,
+			ResultPile = targetCard.Pile?.Type ?? PileType.None,
 			Resources = new ResourceInfo
 			{
 				EnergySpent = 0,
@@ -15222,7 +15244,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			PlayIndex = 0,
 			PlayCount = 1
 		};
-		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? card.TryGetOwnerCreature();
+		Creature? ownerCreature = CardEditorPowerExecutionHostContext.Current ?? targetCard.TryGetOwnerCreature();
 		if (ownerCreature == null || !TryResolveSignedAmountForCostEffect(combatState, ownerCreature, effectivePlay, effect, out int signedAmount))
 		{
 			return;
@@ -15240,13 +15262,13 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 		if (active.CardCostsLessDuration == CardExtraEffectCardCostsLessDuration.Permanent)
 		{
-			if (ApplyPersistentTriggeredCardCostsLessMutation(card, active))
+			if (ApplyPersistentTriggeredCardCostsLessMutation(targetCard, active))
 			{
-				CardEditorMod.VerboseLog($"[CardEditor][ApplyTriggeredCostLess] card={card.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration=Permanent amount={active.Amount} modifier={GetEffectiveCardCostsLessModifier(active)} persistent=True");
+				CardEditorMod.VerboseLog($"[CardEditor][ApplyTriggeredCostLess] card={targetCard.Id} pile={targetCard.Pile?.Type} mutable={targetCard.IsMutable} clone={targetCard.IsClone} cloneOf={targetCard.CloneOf?.Id} duration=Permanent amount={active.Amount} modifier={GetEffectiveCardCostsLessModifier(active)} persistent=True");
 				return;
 			}
 
-			Log.Warn($"[CardEditor][ApplyTriggeredCostLess] Permanent trigger could not persist on {card?.Id}; falling back to combat-only grant.");
+			Log.Warn($"[CardEditor][ApplyTriggeredCostLess] Permanent trigger could not persist on {targetCard.Id}; falling back to combat-only grant.");
 		}
 
 		CardExtraEffectCardGrantDuration duration = effect.CardCostsLessDuration switch
@@ -15261,12 +15283,12 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			? Math.Clamp(effect.CardCostsLessTurns, 1, 99)
 			: 1;
 		// Stack repeated triggers (e.g. "Costs 1 less each time it's played") by merging into an equivalent existing grant when possible.
-		if (!CardEditorTemporaryExtraEffectController.TryStackTimedCardCostsLess(combatState, card!, active, duration, turns))
+		if (!CardEditorTemporaryExtraEffectController.TryStackTimedCardCostsLess(combatState, targetCard, active, duration, turns))
 		{
-			CardEditorTemporaryExtraEffectController.Grant(combatState, card!, active, duration, turns);
+			CardEditorTemporaryExtraEffectController.Grant(combatState, targetCard, active, duration, turns);
 		}
-		CardEditorMod.VerboseLog($"[CardEditor][ApplyTriggeredCostLess] card={card!.Id} pile={card.Pile?.Type} mutable={card.IsMutable} clone={card.IsClone} cloneOf={card.CloneOf?.Id} duration={duration} turns={turns} amount={active.Amount} modifier={GetEffectiveCardCostsLessModifier(active)}");
-		NotifyTriggeredPermanentCardCostsLessChanged(card, active.Kind);
+		CardEditorMod.VerboseLog($"[CardEditor][ApplyTriggeredCostLess] card={targetCard.Id} pile={targetCard.Pile?.Type} mutable={targetCard.IsMutable} clone={targetCard.IsClone} cloneOf={targetCard.CloneOf?.Id} duration={duration} turns={turns} amount={active.Amount} modifier={GetEffectiveCardCostsLessModifier(active)}");
+		NotifyTriggeredPermanentCardCostsLessChanged(targetCard, active.Kind);
 	}
 
 	private static string GetSelfScalingTargetLabel(CardModel card, CardExtraEffect effect, bool isUpgradePreview)
@@ -24373,7 +24395,7 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			{
 				IReadOnlyList<Creature?> previewTargets = ResolvePreviewTargetsForEffect(combatState, ownerCreature, modifierCard, target, requestedTarget, selfTarget);
 				if (TryGetUniformHookedPreview(previewTargets, previewTarget =>
-					Hook.ModifyDamage(owner.RunState, combatState, previewTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, ModifyDamageHookType.All, CardPreviewMode.Normal, out IEnumerable<AbstractModel> _), out preview))
+					Hook.ModifyDamage(owner.RunState, combatState, previewTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, cardPlay: null, ModifyDamageHookType.All, CardPreviewMode.Normal, out IEnumerable<AbstractModel> _), out preview))
 				{
 					return true;
 				}
@@ -24388,7 +24410,7 @@ private static string BuildChooseOneOptionSummary(CardModel card, Creature? targ
 			CardPreviewMode previewMode = ShouldUseMultiCreatureMovePreview(modifierCard, requestedTarget, visualPreviewMode)
 				? CardPreviewMode.MultiCreatureTargeting
 				: CardPreviewMode.Normal;
-			preview = Hook.ModifyDamage(owner.RunState, combatState, fallbackTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, ModifyDamageHookType.All, previewMode, out IEnumerable<AbstractModel> _);
+			preview = Hook.ModifyDamage(owner.RunState, combatState, fallbackTarget, effectiveDealer, baseAmount, ValueProp.Move, modifierCard, cardPlay: null, ModifyDamageHookType.All, previewMode, out IEnumerable<AbstractModel> _);
 			return true;
 		}
 
@@ -27385,6 +27407,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 				CardPlay play = new CardPlay
 				{
 					Card = payload.Card,
+					Player = payload.Card.Owner,
 					Target = entry.LockedTarget,
 					ResultPile = payload.ResultPile,
 					Resources = payload.Resources,
@@ -28011,7 +28034,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		if (UsesAppliedEffectRowAmountSource(effect))
 		{
 			if (effect.AmountSourceMode == CardExtraEffectAmountSourceMode.AppliedEffectRow
-				&& TryResolveVanillaDynamicAmountSource(cardPlay?.Card, effect.AmountSourceEffectId, out int vanillaAmount))
+				&& TryResolveVanillaDynamicAmountSource(combatState, ownerCreature, cardPlay, effect.AmountSourceEffectId, out int vanillaAmount))
 			{
 				return ScaleAmountSourceAmount(vanillaAmount, effect);
 			}
@@ -28085,7 +28108,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return int.MaxValue;
 		}
 
-		return Math.Max(0, (int)decimal.Round(total, 0, MidpointRounding.AwayFromZero));
+		return Math.Max(0, (int)decimal.Floor(total));
 	}
 
 	internal static bool TryDecodeVanillaDynamicAmountSource(string? encodedSource, out string key)
@@ -28104,9 +28127,15 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 	internal static string EncodeVanillaDynamicAmountSource(string key)
 		=> VanillaDynamicAmountSourcePrefix + (key ?? string.Empty).Trim();
 
-	private static bool TryResolveVanillaDynamicAmountSource(CardModel? card, string? encodedSource, out int amount)
+	private static bool TryResolveVanillaDynamicAmountSource(
+		CombatState combatState,
+		Creature ownerCreature,
+		CardPlay? cardPlay,
+		string? encodedSource,
+		out int amount)
 	{
 		amount = 0;
+		CardModel? card = cardPlay?.Card;
 		if (card?.DynamicVars == null || !TryDecodeVanillaDynamicAmountSource(encodedSource, out string key))
 		{
 			return false;
@@ -28119,7 +28148,43 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				continue;
 			}
 
-			amount = Math.Max(0, (int)decimal.Round(dynamicVar.BaseValue, 0, MidpointRounding.AwayFromZero));
+			decimal resolved = dynamicVar.BaseValue;
+			try
+			{
+				if (dynamicVar is DamageVar damageVar && card.Owner?.RunState != null)
+				{
+					resolved = Hook.ModifyDamage(
+						card.Owner.RunState,
+						combatState,
+						cardPlay?.Target,
+						ownerCreature,
+						damageVar.BaseValue,
+						damageVar.Props,
+						card,
+						cardPlay,
+						ModifyDamageHookType.All,
+						CardPreviewMode.Normal,
+						out IEnumerable<AbstractModel> _);
+				}
+				else if (dynamicVar is BlockVar blockVar && combatState != null && ownerCreature != null)
+				{
+					resolved = Hook.ModifyBlock(
+						combatState,
+						ownerCreature,
+						blockVar.BaseValue,
+						blockVar.Props,
+						card,
+						cardPlay,
+						out IEnumerable<AbstractModel> _);
+				}
+			}
+			catch (Exception ex)
+			{
+				Log.Warn($"[CardEditor][AmountSource] Failed to resolve live value for {card.Id.Entry}.{key}; using its base value: {ex}");
+				resolved = dynamicVar.BaseValue;
+			}
+
+			amount = Math.Max(0, (int)decimal.Floor(resolved));
 			return true;
 		}
 
@@ -28393,7 +28458,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		// Result-derived amounts already include Strength/Vigor from the source hit — running
 		// them powered double-dips. Self-damage never benefits from the owner's powers either.
 		ValueProp damageProps = ValueProp.Move;
-		if (UsesDamageResultAmountSource(effect) || GetEffectiveResolvedTarget(cardPlay, effect.Target) == CardExtraEffectTarget.Self)
+		if (UsesDamageResultAmountSource(effect)
+			|| UsesRuntimeModifiedVanillaAmountSource(effect)
+			|| effect.DeferredPowerAmountIsUnpowered
+			|| GetEffectiveResolvedTarget(cardPlay, effect.Target) == CardExtraEffectTarget.Self)
 		{
 			damageProps |= ValueProp.Unpowered;
 		}
@@ -28424,7 +28492,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 
 			AttackContext attackContext = await attackContextLease.Ensure();
-			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card);
+			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 			if (results.Count <= 0)
 			{
@@ -28472,6 +28540,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 		int safeRepeats = Math.Clamp(repeats <= 0 ? 1 : repeats, 1, 99);
 		ValueProp damageProps = UsesDamageResultAmountSource(effect)
+			|| UsesRuntimeModifiedVanillaAmountSource(effect)
+			|| effect.DeferredPowerAmountIsUnpowered
 			? ValueProp.Unpowered | ValueProp.Move
 			: ValueProp.Move;
 
@@ -28498,7 +28568,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 
 			AttackContext attackContext = await attackContextLease.Ensure();
-			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card);
+			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 			if (results.Count <= 0)
 			{
@@ -28531,6 +28601,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			or CardExtraEffectAmountSourceMode.AppliedEffectTotalAndOverkillDamage;
 	}
 
+	private static bool UsesRuntimeModifiedVanillaAmountSource(CardExtraEffect effect)
+	{
+		return effect?.AmountSourceMode == CardExtraEffectAmountSourceMode.AppliedEffectRow
+			&& TryDecodeVanillaDynamicAmountSource(effect.AmountSourceEffectId, out _);
+	}
+
 	private static async Task ExecutePerTargetConditionalDamage(
 		CombatState combatState,
 		PlayerChoiceContext choiceContext,
@@ -28549,6 +28625,8 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 		int safeRepeats = Math.Clamp(repeats <= 0 ? 1 : repeats, 1, 99);
 		ValueProp damageProps = UsesDamageResultAmountSource(effect)
+			|| UsesRuntimeModifiedVanillaAmountSource(effect)
+			|| effect.DeferredPowerAmountIsUnpowered
 			? ValueProp.Unpowered | ValueProp.Move
 			: ValueProp.Move;
 
@@ -28586,7 +28664,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				}
 
 				AttackContext attackContext = await attackContextLease.Ensure();
-				IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, target, targetAmount, damageProps, ownerCreature, cardPlay.Card);
+				IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, target, targetAmount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 				List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 				if (results.Count <= 0)
 				{
@@ -28910,8 +28988,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				return;
 			}
 
-			var attack = DamageCmd.Attack(amount).FromCard(cardPlay.Card).WithHitCount(repeats);
-			if (UsesDamageResultAmountSource(effect))
+			var attack = DamageCmd.Attack(amount).FromCard(cardPlay.Card, cardPlay).WithHitCount(repeats);
+			if (UsesDamageResultAmountSource(effect)
+				|| UsesRuntimeModifiedVanillaAmountSource(effect)
+				|| effect.DeferredPowerAmountIsUnpowered)
 			{
 				// "Damage equal to damage dealt" already includes Strength/Vigor from the source hit;
 				// vanilla echo damage (Omnislice) is Unpowered so the bonuses are never added twice.
@@ -28996,12 +29076,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 					Creature? ostyAttackTarget = ResolveSingleTarget(combatState, ownerCreature, cardPlay);
 					if (ostyAttackTarget != null)
 					{
-						await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay.Card).WithHitCount(repeats).Targeting(ostyAttackTarget).Execute(choiceContext);
+						await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay.Card, cardPlay).WithHitCount(repeats).Targeting(ostyAttackTarget).Execute(choiceContext);
 					}
 				}
 				else
 				{
-					await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay.Card).WithHitCount(repeats).TargetingAllOpponentsCompat(combatState).Execute(choiceContext);
+					await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay.Card, cardPlay).WithHitCount(repeats).TargetingAllOpponentsCompat(combatState).Execute(choiceContext);
 				}
 			}
 			return;
@@ -29015,7 +29095,10 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			{
 				foreach (Creature target in ResolveTargets(combatState, ownerCreature!, cardPlay!, effect.Target))
 				{
-					await CreatureCmd.GainBlock(target, amount, ValueProp.Move, cardPlay!);
+					ValueProp blockProps = effect.DeferredPowerAmountIsUnpowered || UsesRuntimeModifiedVanillaAmountSource(effect)
+						? ValueProp.Move | ValueProp.Unpowered
+						: ValueProp.Move;
+					await CreatureCmd.GainBlock(target, amount, blockProps, cardPlay!);
 				}
 				break;
 			}
@@ -29038,8 +29121,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				{
 					// P5 value bus: LoseHp results feed the chain metrics like DealDamage's do -
 					// "draw cards equal to Kills from row 1" now works off an HP-loss row.
-					// Public-branch CreatureCmd.Damage has no trailing CardPlay parameter.
-					IEnumerable<DamageResult> loseHpRawResults = await CreatureCmd.Damage(choiceContext, targets, amount, DamageProps.cardHpLoss, ownerCreature!, cardPlay!.Card);
+					IEnumerable<DamageResult> loseHpRawResults = await CreatureCmd.Damage(choiceContext, targets, amount, DamageProps.cardHpLoss, ownerCreature!, cardPlay!.Card, cardPlay!);
 					List<DamageResult> loseHpResults = loseHpRawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 					if (loseHpResults.Count > 0)
 					{
@@ -29540,13 +29622,12 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 							Creature? attackTarget = ResolveSingleTarget(combatState, ownerCreature!, cardPlay!);
 							if (attackTarget != null)
 							{
-								// Public-branch FromOsty has no trailing CardPlay parameter.
-								await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay!.Card).Targeting(attackTarget).Execute(choiceContext);
+								await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay!.Card, cardPlay!).Targeting(attackTarget).Execute(choiceContext);
 							}
 							break;
 						}
 						case CardExtraEffectOstyAction.AttackAll:
-							await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay!.Card).TargetingAllOpponentsCompat(combatState).Execute(choiceContext);
+							await DamageCmd.Attack(amount).FromOsty(owner.Osty!, cardPlay!.Card, cardPlay!).TargetingAllOpponentsCompat(combatState).Execute(choiceContext);
 							break;
 						case CardExtraEffectOstyAction.Heal:
 							await CreatureCmd.Heal(owner.Osty!, amount);
@@ -29641,7 +29722,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 						continue;
 					}
 
-					await CreatureCmd.LoseBlock(target, Math.Min((decimal)amount, target.Block));
+					await CreatureCmd.LoseBlock(choiceContext, target, Math.Min((decimal)amount, target.Block), ownerCreature);
 				}
 				break;
 			}
@@ -33861,6 +33942,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 		return new CardPlay
 		{
 			Card = source.Card,
+			Player = source.Card.Owner,
 			Target = target,
 			ResultPile = source.ResultPile,
 			Resources = source.Resources,
@@ -34024,6 +34106,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 		return new CardPlay
 		{
 			Card = card,
+			Player = card.Owner,
 			Target = target,
 			ResultPile = card.Pile?.Type ?? PileType.None,
 			Resources = new ResourceInfo
@@ -34171,7 +34254,11 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 	{
 		if (includeTimedIntrinsic)
 		{
-			return true;
+			// A granted Triggered row is the event definition, not an active discount.
+			// ApplyTriggeredCardCostsLess materializes a separate Passive grant when the
+			// event fires; including the definition here applies it early and then counts
+			// it a second time after the trigger.
+			return IsPassiveCardCostsLessDefinition(effect);
 		}
 		if (!IsPassiveCardCostsLessDefinition(effect))
 		{
@@ -34570,6 +34657,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			: new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -34745,6 +34833,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 			: new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -37527,7 +37616,7 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 			case CardGeneratedCardPool.Necrobinder:
 				return ReferenceEquals(classPool, ModelDb.CardPool<NecrobinderCardPool>());
 			case CardGeneratedCardPool.OtherColors:
-				return IsAnyClassPool(classPool) && !ReferenceEquals(classPool, owner.Character.CardPool);
+				return classPool != null && IsAnyClassPool(classPool) && !ReferenceEquals(classPool, owner.Character.CardPool);
 			default:
 				return ReferenceEquals(classPool, owner.Character.CardPool);
 		}
@@ -37562,7 +37651,7 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 		return card.Pool;
 	}
 
-	private static bool IsAnyClassPool(CardPoolModel? pool)
+	private static bool IsAnyClassPool(CardPoolModel pool)
 	{
 		return pool != null
 			&& (ReferenceEquals(pool, ModelDb.CardPool<IroncladCardPool>())
@@ -38153,7 +38242,7 @@ private static bool MatchesGrantCardFilters(Player owner, CardModel card, CardEx
 			CardExtraEffectPotionPoolFilter.Event => ModelDb.PotionPool<EventPotionPool>().GetUnlockedPotions(owner.UnlockState),
 			CardExtraEffectPotionPoolFilter.Token => ModelDb.PotionPool<TokenPotionPool>().GetUnlockedPotions(owner.UnlockState),
 			CardExtraEffectPotionPoolFilter.All => ModelDb.AllPotions,
-			_ => PotionFactory.GetPotionOptions(owner, Enumerable.Empty<PotionModel>())
+			_ => PotionFactory.GetPotionOptions(owner)
 		};
 
 		bool inCombatOnly = effect?.PotionInCombatOnly != false;
@@ -39310,7 +39399,9 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 			Creature? osty = ownerCreature.Player?.Osty;
 			return osty != null && osty.IsAlive ? osty : null;
 		}
-		if (TryGetManualTarget(cardPlay.Card!, out Creature? manualTarget) && manualTarget != null && manualTarget.IsAlive)
+		CardModel? playedCard = cardPlay.Card;
+		Creature? manualTarget = null;
+		if (playedCard != null && TryGetManualTarget(playedCard, out manualTarget) && manualTarget != null && manualTarget.IsAlive)
 		{
 			return manualTarget;
 		}
@@ -39318,9 +39409,9 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 		{
 			return null;
 		}
-		if (cardPlay.IsFirstInSeries && RequiresManualEnemyTarget(cardPlay.Card))
+		if (playedCard != null && cardPlay.IsFirstInSeries && RequiresManualEnemyTarget(playedCard))
 		{
-			Log.Warn($"[CardEditor] Missing manual target for {cardPlay.Card!.Id.Entry}; falling back to random enemy.");
+			Log.Warn($"[CardEditor] Missing manual target for {playedCard.Id.Entry}; falling back to random enemy.");
 		}
 		return combatState.RunState.Rng.CombatTargets.NextItem(combatState.GetOpponentsOf(ownerCreature).Where(c => c.IsAlive));
 	}
@@ -40254,6 +40345,13 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 	{
 		CardExtraEffect clone = CloneEffect(source);
 		CaptureDeferredXValues(sourcePlay, clone);
+		return clone;
+	}
+
+	internal static CardExtraEffect CloneForPowerExecution(CardPlay? sourcePlay, CardExtraEffect source)
+	{
+		CardExtraEffect clone = CloneForDeferredExecution(sourcePlay, source);
+		clone.DeferredPowerAmountIsUnpowered = clone.Kind is CardExtraEffectKind.DealDamage or CardExtraEffectKind.GainBlock;
 		return clone;
 	}
 

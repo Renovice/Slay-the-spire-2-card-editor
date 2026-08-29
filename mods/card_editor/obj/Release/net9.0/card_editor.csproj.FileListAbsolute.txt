@@ -52,3 +52,6 @@ C:\Users\Bartek\OneDrive\Dokumenter\REPOS\slay-the-spire-2\slay-the-spire-2\mods
 C:\Users\Bartek\OneDrive\Dokumenter\REPOS\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net9.0\refint\card_editor.dll
 C:\Users\Bartek\OneDrive\Dokumenter\REPOS\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net9.0\card_editor.pdb
 C:\Users\Bartek\OneDrive\Dokumenter\REPOS\slay-the-spire-2\slay-the-spire-2\mods\card_editor\obj\Release\net9.0\ref\card_editor.dll
+C:\Users\Bartek\OneDrive\Dokumenter\REPOS\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\Sentry.Godot.dll
+C:\Users\Bartek\OneDrive\Dokumenter\REPOS\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\sts2.xml
+C:\Users\Bartek\OneDrive\Dokumenter\REPOS\slay-the-spire-2\slay-the-spire-2\mods\card_editor\build\net9.0\Sentry.Godot.xml

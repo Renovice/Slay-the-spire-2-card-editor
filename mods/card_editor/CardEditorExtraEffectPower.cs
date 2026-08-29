@@ -153,7 +153,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			}
 
 			CardExtraEffect stored = sourcePlay != null
-				? CardEditorExtraEffects.CloneForDeferredExecution(sourcePlay, normalizedEffect)
+				? CardEditorExtraEffects.CloneForPowerExecution(sourcePlay, normalizedEffect)
 				: CardEditorExtraEffects.CloneEffect(normalizedEffect);
 			if (!CardEditorExtraEffects.IsValidEffectAmount(stored.Kind, stored.Amount))
 			{
@@ -984,6 +984,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay fatalPlay = new CardPlay
 				{
 					Card = fatalEntry.SourceCard!, // SourceCard non-null: checked at entry loop guard above
+					Player = fatalEntry.SourceCard!.Owner,
 					Target = killedTarget,
 					ResultPile = triggerPlay.ResultPile,
 					Resources = triggerPlay.Resources,
@@ -1115,6 +1116,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					executionPlay = new CardPlay
 					{
 						Card = executionCard,
+						Player = executionCard.Owner,
 						Target = executionTarget,
 						ResultPile = triggerPlay.ResultPile,
 						Resources = triggerPlay.Resources,
@@ -1148,6 +1150,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		CardPlay schedulingPlay = new CardPlay
 		{
 			Card = sourceCard,
+			Player = sourceCard.Owner!, // Owner expected non-null for a card in play
 			Target = lockedTarget,
 			ResultPile = triggerPlay.ResultPile,
 			Resources = triggerPlay.Resources,
@@ -1341,6 +1344,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					basePlay = new CardPlay
 					{
 						Card = playCard,
+						Player = playCard.Owner,
 						Target = eventActor,
 						ResultPile = playCard.Pile?.Type ?? PileType.None,
 						Resources = new ResourceInfo
@@ -1431,6 +1435,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
+					Player = sourceCard.Owner!, // sourceOwner != null above means sourceCard.Owner != null
 					Target = eventActor,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
@@ -1563,6 +1568,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
+					Player = sourceCard.Owner!, // sourceOwnerCreature != null above means Owner != null
 					Target = target,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
@@ -1722,6 +1728,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 				CardPlay syntheticPlay = new CardPlay
 				{
 					Card = sourceCard,
+					Player = sourceCard.Owner,
 					Target = null,
 					ResultPile = sourceCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
@@ -1873,6 +1880,7 @@ public async Task RunTurnBoundary(PlayerChoiceContext choiceContext, CardExtraEf
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -1991,6 +1999,7 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 			CardPlay syntheticPlay = new CardPlay
 			{
 				Card = card,
+				Player = card.Owner,
 				Target = null,
 				ResultPile = card.Pile?.Type ?? PileType.None,
 				Resources = new ResourceInfo
@@ -2038,15 +2047,17 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 			{
 				return;
 			}
+			CardModel activeTriggeringCard = triggeringCard;
 
 			CardPlay? basePlay = play;
-			if (basePlay == null && triggeringCard != null)
+			if (basePlay == null)
 			{
 				basePlay = new CardPlay
 				{
-					Card = triggeringCard,
+					Card = activeTriggeringCard,
+					Player = activeTriggeringCard.Owner,
 					Target = eventActor,
-					ResultPile = triggeringCard.Pile?.Type ?? PileType.None,
+					ResultPile = activeTriggeringCard.Pile?.Type ?? PileType.None,
 					Resources = new ResourceInfo
 					{
 						EnergySpent = 0,
@@ -2081,8 +2092,8 @@ private async Task RunStartOrEndTimed(PlayerChoiceContext choiceContext, CardExt
 					continue;
 				}
 
-				Player? filterOwner = entry.SourceCard?.Owner ?? triggeringCard!.Owner;
-				if (!CardEditorExtraEffects.MatchesPowerTriggerCardFilters(filterOwner, triggeringCard, entry.Effect))
+				Player? filterOwner = entry.SourceCard?.Owner ?? activeTriggeringCard.Owner;
+				if (!CardEditorExtraEffects.MatchesPowerTriggerCardFilters(filterOwner, activeTriggeringCard, entry.Effect))
 				{
 					continue;
 				}
