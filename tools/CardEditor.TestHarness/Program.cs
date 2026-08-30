@@ -70,6 +70,7 @@ internal static class Program
 			new("Reduce Cost -> This Card -> all public Whenever dispatches", TestTriggeredThisCardCostReduction),
 			new("Reduce Cost -> This Card -> installed Whenever event power", TestTriggeredThisCardCostReductionWheneverPower),
 			new("Resources -> After Death -> player/enemy power hosts", TestAfterDeathPowerTrigger),
+			new("Run Effect Source -> Regent block and Osty cards", TestRunEffectSourceRegentCards),
 			new("Copy Debuffs: selected source to another enemy", TestCopyDebuffs),
 			new("Grant -> Hits All Enemies safety block", TestHitsAllGrantIsBlocked),
 			new("Multiplayer client Ready reaches vanilla network dispatch", TestMultiplayerClientReady),
@@ -559,6 +560,98 @@ internal static class Program
 		AssertSame(enemyHostBefore, enemyHostFixture.Player.PlayerCombatState.Energy, "prevented host death incorrectly fired the enemy-hosted power");
 		await enemyPower.AfterDeath(enemyHostFixture.Choices, enemyHost, wasRemovalPrevented: false, deathAnimLength: 0f);
 		AssertSame(enemyHostBefore + 1, enemyHostFixture.Player.PlayerCombatState.Energy, "enemy-hosted Self death did not pay its source-card owner");
+	}
+
+	private static async Task TestRunEffectSourceRegentCards()
+	{
+		Fixture fixture = CreateFixture();
+		CardModel host = CreateSourceCard(fixture);
+		Creature enemy = fixture.Combat.Enemies.First();
+
+		foreach (Type sourceType in new[]
+		{
+			typeof(MegaCrit.Sts2.Core.Models.Cards.ParticleWall),
+			typeof(MegaCrit.Sts2.Core.Models.Cards.IAmInvincible)
+		})
+		{
+			CardModel canonical = ModelDb.AllCards.Single(card => card.GetType() == sourceType);
+			int expectedBlock = canonical.DynamicVars.Block.IntValue;
+			int beforeBlock = fixture.Player.Creature.Block;
+			CardExtraEffect effect = ImmediateOnPlay(CardExtraEffectKind.RunEffectSourceCard);
+			effect.Amount = 0;
+			effect.SpecificCardId = canonical.Id.ToString();
+
+			await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(
+				fixture.Combat,
+				fixture.Choices,
+				CreateCardPlay(fixture, host),
+				[effect]);
+
+			AssertSame(beforeBlock + expectedBlock, fixture.Player.Creature.Block,
+				$"{sourceType.Name}: Run Effect Source did not apply the source card's block");
+		}
+
+		await PlayerCmd.AddPet<MegaCrit.Sts2.Core.Models.Monsters.Osty>(fixture.Player);
+		CardModel rightHandHand = ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.RightHandHand>();
+		int beforeHp = enemy.CurrentHp;
+		CardExtraEffect attack = ImmediateOnPlay(CardExtraEffectKind.RunEffectSourceCard);
+		attack.Amount = 0;
+		attack.SpecificCardId = rightHandHand.Id.ToString();
+		await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(
+			fixture.Combat,
+			fixture.Choices,
+			CreateCardPlay(fixture, host, enemy),
+			[attack]);
+
+		Assert(enemy.CurrentHp < beforeHp, "RightHandHand: Run Effect Source did not damage the selected enemy");
+
+		CardModel particleHost = CreateSourceCard(fixture);
+		CardExtraEffect particleSource = ImmediateOnPlay(CardExtraEffectKind.RunEffectSourceCard);
+		particleSource.Amount = 0;
+		particleSource.SpecificCardId = ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.ParticleWall>().Id.ToString();
+		CardEditorTemporaryExtraEffectController.Grant(
+			fixture.Combat, particleHost, particleSource, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+		Assert(CardEditorExtraEffects.TryGetBorrowedEffectSourceResultPileOverride(
+			particleHost, out PileType particleResultPile, out CardPilePosition particleResultPosition),
+			"ParticleWall: borrowed result-pile behavior was not detected");
+		AssertSame(PileType.Hand, particleResultPile, "ParticleWall: borrowed result pile was not Hand");
+		AssertSame(CardPilePosition.Bottom, particleResultPosition, "ParticleWall: borrowed Hand position was not Bottom");
+
+		CardModel rightHandHost = CreateSourceCard(fixture);
+		CardExtraEffect rightHandSource = ImmediateOnPlay(CardExtraEffectKind.RunEffectSourceCard);
+		rightHandSource.Amount = 0;
+		rightHandSource.SpecificCardId = rightHandHand.Id.ToString();
+		CardEditorTemporaryExtraEffectController.Grant(
+			fixture.Combat, rightHandHost, rightHandSource, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+		await PutInPile(rightHandHost, PileType.Discard);
+		CardModel energyCard = CreateSourceCard(fixture);
+		CardPlay energyPlay = new()
+		{
+			Card = energyCard,
+			Player = fixture.Player,
+			Target = null,
+			ResultPile = PileType.Discard,
+			Resources = new ResourceInfo { EnergySpent = 2, EnergyValue = 2, StarsSpent = 0, StarValue = 0 },
+			IsAutoPlay = false,
+			PlayIndex = 0,
+			PlayCount = 1
+		};
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardPlayedLate(fixture.Combat, fixture.Choices, energyPlay);
+		AssertSame(PileType.Hand, rightHandHost.Pile?.Type ?? PileType.None,
+			"RightHandHand: borrowed late hook did not return the host card from Discard to Hand");
+
+		CardModel invincibleHost = fixture.Combat.CreateCard(
+			ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.DefendIronclad>(), fixture.Player);
+		CardExtraEffect invincibleSource = ImmediateOnPlay(CardExtraEffectKind.RunEffectSourceCard);
+		invincibleSource.Amount = 0;
+		invincibleSource.SpecificCardId = ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.IAmInvincible>().Id.ToString();
+		CardEditorTemporaryExtraEffectController.Grant(
+			fixture.Combat, invincibleHost, invincibleSource, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+		await PutInPile(invincibleHost, PileType.Draw, CardPilePosition.Top);
+		Assert(CardEditorExtraEffects.ShouldAutoPlayBorrowedIAmInvincible(fixture.Player, out CardModel? detectedTopCard),
+			"IAmInvincible: borrowed auto-post-play hook did not recognize the top Draw Pile card");
+		Assert(ReferenceEquals(invincibleHost, detectedTopCard),
+			"IAmInvincible: borrowed auto-post-play hook selected the wrong Draw Pile card");
 	}
 
 	private static async Task TestCopyDebuffs()

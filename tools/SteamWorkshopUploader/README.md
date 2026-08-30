@@ -8,7 +8,7 @@ folder.
 ```powershell
 dotnet run --project .\tools\SteamWorkshopUploader\SteamWorkshopUploader.csproj -- `
   ".\built cfiles" `
-  "Version 10.1.2: fixed This Card Whenever cost reductions, After Death resources, and duplicate Match Energy text."
+  "Version 10.1.3: fixed Particle Wall, Right Hand Hand, and I Am Invincible through Run Effect Source."
 ```
 
 The tool reports success only after the `SubmitItemUpdateResult_t` callback returns

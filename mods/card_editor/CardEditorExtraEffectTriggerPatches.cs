@@ -36,7 +36,36 @@ internal static class Hook_ModifyCardPlayResultLocation_CardEditorExtraEffects_P
 		if (CardEditorExtraEffects.TryGetCardPlayResultPileOverride(card, out PileType overridePile, out CardPilePosition overridePosition))
 		{
 			__result = new CardLocation(__result.player, overridePile, overridePosition);
+			return;
 		}
+
+		// Particle Wall changes only the normal Discard result. Preserve Exhaust, Power/dupe
+		// removal, and any earlier vanilla hook result exactly as the source card does.
+		if (__result.pileType == PileType.Discard
+			&& CardEditorExtraEffects.TryGetBorrowedEffectSourceResultPileOverride(card, out overridePile, out overridePosition))
+		{
+			__result = new CardLocation(__result.player, overridePile, overridePosition);
+		}
+	}
+}
+
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterAutoPostPlayPhaseEntered))]
+internal static class Hook_AfterAutoPostPlayPhaseEntered_BorrowedEffectSources_Patch
+{
+	public static void Postfix(HookPlayerChoiceContext playerChoiceContext, ICombatState combatState, Player player, ref Task __result)
+	{
+		if (__result == null || combatState is not CombatState concreteCombatState || player == null)
+		{
+			return;
+		}
+
+		__result = RunAfter(__result, concreteCombatState, playerChoiceContext, player);
+	}
+
+	private static async Task RunAfter(Task original, CombatState combatState, PlayerChoiceContext choiceContext, Player player)
+	{
+		await original;
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterAutoPostPlayPhaseEntered(combatState, choiceContext, player);
 	}
 }
 
@@ -1378,12 +1407,13 @@ internal static class Hook_AfterCardPlayed_AutoPlayDrawSelfFromPile_Patch
 		{
 			return;
 		}
-		__result = RunAfter(__result, combatState, cardPlay);
+		__result = RunAfter(__result, combatState, choiceContext, cardPlay);
 	}
 
-	private static async Task RunAfter(Task original, CombatState combatState, CardPlay cardPlay)
+	private static async Task RunAfter(Task original, CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay)
 	{
 		await original;
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardPlayedLate(combatState, choiceContext, cardPlay);
 		await CardEditorQuestEffects.RecordCardPlayed(combatState, cardPlay);
 
 		ulong? netId = LocalContext.NetId;

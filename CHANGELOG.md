@@ -1,5 +1,12 @@
 # Card Editor changelog
 
+## 10.1.3 - Run Effect Source lifecycle fixes (2026-08-30)
+
+- Fixed `Run Effect Source -> Particle Wall` not returning the host card to Hand after a normal play.
+- Fixed `Run Effect Source -> Right Hand Hand` not returning the host card from Discard after a card costing at least 2 Energy is played.
+- Fixed `Run Effect Source -> I Am Invincible` not auto-playing the host card from the top of the Draw Pile at end of turn.
+- Added beta regression coverage for the three cards' immediate effects and borrowed lifecycle behavior.
+
 ## 10.1.2 - Whenever, After Death, and Match Energy fixes (2026-08-30)
 
 - Fixed `Reduce Cost -> This Card -> Whenever (Event)` power triggers creating an ignored power-tagged grant instead of an active passive cost reduction.

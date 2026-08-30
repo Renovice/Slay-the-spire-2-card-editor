@@ -49,6 +49,7 @@ NOTES
 - Logs: user://logs/godot.log (search for [CardEditor])
 
 CHANGELOG (high level)
+- v10.1.3: Fixed Particle Wall, Right Hand Hand, and I Am Invincible lifecycle behavior through Run Effect Source.
 - v10.1.2: Fixed This Card Whenever cost reductions, After Death resources, and duplicate Match Energy text.
 - v10.1.0: Public beta v0.111.0 compatibility, relic/reward/runtime fixes, and headless regression coverage.
 - v1.4: Presets + extra effects/scaling, hotkey, beta/new mod-loader manifest support, Creator slots + custom art folder support.
