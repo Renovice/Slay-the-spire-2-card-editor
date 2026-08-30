@@ -36,6 +36,9 @@ never updated the values written to `CardExtraEffect.MoveToPile` and
 - Release PDB SHA-256: `CA7B089511EC6F9D7FC8E3B634A86CC108D1D2468A2262EFF3CA236D364AC249`.
 - DLL/PDB hashes match in build output, `built cfiles`, the pack mirror, and the live
   Steam mod folder.
+- Steam Workshop submission returned `k_EResultOK` for item `3748283746`.
+- The public Steam metadata endpoint reported `11,917,795` bytes, exactly matching
+  the curated `built cfiles` package, updated at `2026-08-30 12:08:13 UTC`.
 
 ## Boundary
 
