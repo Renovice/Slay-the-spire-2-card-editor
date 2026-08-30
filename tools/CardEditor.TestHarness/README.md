@@ -12,14 +12,17 @@ The suite exits `0` only when every test passes. It treats C# warnings as errors
 
 ## What It Exercises
 
-- Move cards between draw and discard piles, including top and bottom placement.
+- Move cards across the complete Hand/Draw/Discard/Exhaust source-destination matrix, including top and bottom placement.
+- Ensure a Discard/Exhaust reorder fires only its final positional trigger, not the vanilla pipeline's intermediate Bottom position.
 - Manually choose and Exhaust a card through the beta `TestCardSelector` path.
 - Transform cards filtered by card type.
 - Transform cards filtered by vanilla card tag.
-- Trigger This Card cost reduction on draw, discard, and exhaust events.
-- Store an After Death effect as `CardEditorExtraEffectPower` and dispatch it for an enemy death.
+- Trigger This Card cost reduction through every public lifecycle/event dispatcher (24 paths).
+- Store After Death effects on player and enemy power hosts, ignore prevented/unrelated deaths, and dispatch a real death.
 - Copy Weak stacks from one selected enemy to another enemy.
 - Keep Grant -> Hits All Enemies blocked.
+- Construct the beta `StartRunLobby` with a recording client service and prove Ready updates local state, notifies the UI, and sends `LobbyPlayerSetReadyMessage`.
+- Assert that both base and upgraded card editors save the selected Result Pile destination.
 - Assert that Match Energy is registered once in the editor popup source.
 - Assert that the current beta card description path still calls `SetTextAutoSize`.
 
@@ -31,4 +34,6 @@ The initial `SentryGodotInitializer` message is expected: `Sentry.Godot` cannot 
 
 ## Boundary
 
-The final two checks are source contracts, not visual assertions. They catch duplicate editor registration and removal of the beta auto-size call, but only an automated Godot scene or an in-game screenshot can prove final pixel layout and long-text fitting.
+The editor serialization, Match Energy, and auto-size checks are source contracts, not visual assertions. They catch save-path or registration regressions, but only an automated Godot scene or an in-game screenshot can prove final pixel layout and long-text fitting.
+
+For those engine-backed checks, use `tools/CardEditor.EngineTests/run-engine-tests.ps1`. It launches the installed game through Steam with an explicit self-test argument, measures the real popup and card controls, writes `user://card_editor/engine_ui_selftest_report.txt`, and exits. Steam must be signed in because the game blocks before mod loading otherwise.

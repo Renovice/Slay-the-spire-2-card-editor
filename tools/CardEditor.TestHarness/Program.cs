@@ -3,18 +3,28 @@ using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Acts;
+using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Models.Monsters.Mocks;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Modding;
+using MegaCrit.Sts2.Core.Multiplayer;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
+using MegaCrit.Sts2.Core.Multiplayer.Messages.Lobby;
+using MegaCrit.Sts2.Core.Multiplayer.Quality;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
+using MegaCrit.Sts2.Core.Platform;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Managers;
 using MegaCrit.Sts2.Core.TestSupport;
+using MegaCrit.Sts2.Core.Unlocks;
 using SlayTheSpire2Mod.CardEditor;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -52,14 +62,17 @@ internal static class Program
 
 		TestCase[] tests =
 		[
-			new("Move cards between piles: top/bottom and vanilla discard", TestMoveCardsBetweenPiles),
+			new("Move cards between piles: complete pile/position matrix", TestMoveCardsBetweenPiles),
+			new("Move cards between piles: final positional trigger only", TestMoveCardsFinalPositionTrigger),
 			new("Manual Exhaust: headless Choose selection", TestManualExhaust),
 			new("Transform cards: type filter", TestTransformByType),
 			new("Transform cards: vanilla tag filter", TestTransformByTag),
-			new("Reduce Cost -> This Card -> Whenever events", TestTriggeredThisCardCostReduction),
-			new("Resources -> After Death -> Check on Power", TestAfterDeathPowerTrigger),
+			new("Reduce Cost -> This Card -> all public Whenever dispatches", TestTriggeredThisCardCostReduction),
+			new("Resources -> After Death -> player/enemy power hosts", TestAfterDeathPowerTrigger),
 			new("Copy Debuffs: selected source to another enemy", TestCopyDebuffs),
 			new("Grant -> Hits All Enemies safety block", TestHitsAllGrantIsBlocked),
+			new("Multiplayer client Ready reaches vanilla network dispatch", TestMultiplayerClientReady),
+			new("UI source contract: Result Pile saves selected destination", TestResultPileDestinationIsSerialized),
 			new("UI source contract: Match Energy is defined once", TestMatchEnergyDefinitionIsUnique),
 			new("UI source contract: card description uses auto-size", TestCardDescriptionUsesAutoSize)
 		];
@@ -215,31 +228,55 @@ internal static class Program
 
 	private static async Task TestMoveCardsBetweenPiles()
 	{
-		Fixture fixture = CreateFixture();
-		CardModel source = CreateSourceCard(fixture);
-		CardModel candidate = fixture.Combat.CreateCard(
-			ModelDb.AllCards.First(card => card.IsTransformable && card.Type == CardType.Skill), fixture.Player);
-		await PutInPile(candidate, PileType.Draw, CardPilePosition.Top);
+		(CardExtraEffectCardPile Editor, PileType Runtime)[] piles =
+		[
+			(CardExtraEffectCardPile.Hand, PileType.Hand),
+			(CardExtraEffectCardPile.DrawPile, PileType.Draw),
+			(CardExtraEffectCardPile.DiscardPile, PileType.Discard),
+			(CardExtraEffectCardPile.ExhaustPile, PileType.Exhaust)
+		];
 
-		CardExtraEffect moveToDiscard = ImmediateOnPlay(CardExtraEffectKind.MoveCardsBetweenPiles);
-		moveToDiscard.CardSelectionPile = CardExtraEffectCardPile.DrawPile;
-		moveToDiscard.CardSelectionMode = CardExtraEffectCardSelectionMode.Top;
-		moveToDiscard.MoveToPile = CardExtraEffectCardPile.DiscardPile;
-		moveToDiscard.MoveToPosition = CardExtraEffectCardPilePosition.Bottom;
-		await RunOnPlay(fixture, source, moveToDiscard);
+		foreach ((CardExtraEffectCardPile fromEditor, PileType fromRuntime) in piles)
+		{
+			foreach ((CardExtraEffectCardPile toEditor, PileType toRuntime) in piles)
+			{
+				if (fromRuntime == toRuntime)
+				{
+					continue;
+				}
 
-		AssertSame(PileType.Discard, candidate.Pile?.Type, "top draw card was not moved through the vanilla discard pipeline");
-		AssertSame(candidate, PileType.Discard.GetPile(fixture.Player).Cards[^1], "card was not placed at discard bottom");
+				foreach (CardExtraEffectCardPilePosition requestedPosition in new[]
+					{
+						CardExtraEffectCardPilePosition.Top,
+						CardExtraEffectCardPilePosition.Bottom
+					})
+				{
+					Fixture fixture = CreateFixture();
+					CardModel source = CreateSourceCard(fixture);
+					CardModel candidate = fixture.Combat.CreateCard(
+						ModelDb.AllCards.First(card => card.IsTransformable && card.Type == CardType.Skill), fixture.Player);
+					CardModel sentinel = fixture.Combat.CreateCard(
+						ModelDb.AllCards.First(card => card.IsTransformable && card.Type == CardType.Attack), fixture.Player);
+					await PutInPile(sentinel, toRuntime, CardPilePosition.Bottom);
+					await PutInPile(candidate, fromRuntime, CardPilePosition.Top);
 
-		CardExtraEffect moveToDraw = ImmediateOnPlay(CardExtraEffectKind.MoveCardsBetweenPiles);
-		moveToDraw.CardSelectionPile = CardExtraEffectCardPile.DiscardPile;
-		moveToDraw.CardSelectionMode = CardExtraEffectCardSelectionMode.Bottom;
-		moveToDraw.MoveToPile = CardExtraEffectCardPile.DrawPile;
-		moveToDraw.MoveToPosition = CardExtraEffectCardPilePosition.Top;
-		await RunOnPlay(fixture, source, moveToDraw);
+					CardExtraEffect move = ImmediateOnPlay(CardExtraEffectKind.MoveCardsBetweenPiles);
+					move.CardSelectionPile = fromEditor;
+					move.CardSelectionMode = CardExtraEffectCardSelectionMode.Top;
+					move.MoveToPile = toEditor;
+					move.MoveToPosition = requestedPosition;
+					await RunOnPlay(fixture, source, move);
 
-		AssertSame(PileType.Draw, candidate.Pile?.Type, "bottom discard card was not moved to draw");
-		AssertSame(candidate, PileType.Draw.GetPile(fixture.Player).Cards[0], "card was not placed at draw top");
+					string scenario = $"{fromRuntime} -> {toRuntime} {requestedPosition}";
+					AssertSame(toRuntime, candidate.Pile?.Type, $"{scenario}: selected card entered the wrong pile");
+					IReadOnlyList<CardModel> destination = toRuntime.GetPile(fixture.Player).Cards;
+					CardModel actual = requestedPosition == CardExtraEffectCardPilePosition.Top
+						? destination[0]
+						: destination[^1];
+					AssertSame(candidate, actual, $"{scenario}: selected card ignored the requested position");
+				}
+			}
+		}
 	}
 
 	private static async Task TestManualExhaust()
@@ -260,6 +297,40 @@ internal static class Program
 		await RunOnPlay(fixture, source, effect);
 
 		AssertSame(PileType.Exhaust, selected.Pile?.Type, "chosen hand card did not enter the exhaust pile");
+	}
+
+	private static async Task TestMoveCardsFinalPositionTrigger()
+	{
+		Fixture fixture = CreateFixture();
+		CardModel source = CreateSourceCard(fixture);
+		CardModel candidate = fixture.Combat.CreateCard(
+			ModelDb.AllCards.First(card => card.IsTransformable && card.Type == CardType.Skill), fixture.Player);
+		CardModel sentinel = fixture.Combat.CreateCard(
+			ModelDb.AllCards.First(card => card.IsTransformable && card.Type == CardType.Attack), fixture.Player);
+		await PutInPile(candidate, PileType.Hand, CardPilePosition.Top);
+		await PutInPile(sentinel, PileType.Discard, CardPilePosition.Bottom);
+
+		CardExtraEffect topReaction = ImmediateOnPlay(CardExtraEffectKind.GainEnergy, amount: 1);
+		topReaction.Trigger = CardExtraEffectTrigger.OnMovedToTopOfPile;
+		topReaction.CardSelectionPile = CardExtraEffectCardPile.DiscardPile;
+		CardExtraEffect bottomReaction = ImmediateOnPlay(CardExtraEffectKind.GainEnergy, amount: 10);
+		bottomReaction.Trigger = CardExtraEffectTrigger.OnMovedToBottomOfPile;
+		bottomReaction.CardSelectionPile = CardExtraEffectCardPile.DiscardPile;
+		CardEditorTemporaryExtraEffectController.Grant(
+			fixture.Combat, candidate, topReaction, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+		CardEditorTemporaryExtraEffectController.Grant(
+			fixture.Combat, candidate, bottomReaction, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+
+		CardExtraEffect move = ImmediateOnPlay(CardExtraEffectKind.MoveCardsBetweenPiles);
+		move.CardSelectionPile = CardExtraEffectCardPile.Hand;
+		move.CardSelectionMode = CardExtraEffectCardSelectionMode.Top;
+		move.MoveToPile = CardExtraEffectCardPile.DiscardPile;
+		move.MoveToPosition = CardExtraEffectCardPilePosition.Top;
+		int before = fixture.Player.PlayerCombatState!.Energy;
+		await RunOnPlay(fixture, source, move);
+
+		AssertSame(before + 1, fixture.Player.PlayerCombatState.Energy,
+			"Discard Top fired the intermediate Bottom trigger or failed to fire the final Top trigger");
 	}
 
 	private static async Task TestTransformByType()
@@ -322,41 +393,74 @@ internal static class Program
 
 	private static async Task TestTriggeredThisCardCostReduction()
 	{
-		CardExtraEffectTrigger[] triggers =
+		(CardExtraEffectTrigger Trigger, Func<Fixture, CardModel, Task> Dispatch)[] cases =
 		[
-			CardExtraEffectTrigger.OnDraw,
-			CardExtraEffectTrigger.OnDiscard,
-			CardExtraEffectTrigger.OnExhaust
+			(CardExtraEffectTrigger.OnPlay, (fixture, card) => CardEditorExtraEffects.RunAfterCardPlayed(fixture.Combat, fixture.Choices, CreateCardPlay(fixture, card))),
+			(CardExtraEffectTrigger.OnDraw, (fixture, card) => CardEditorExtraEffects.RunAfterCardDrawn(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OnDiscard, (fixture, card) => CardEditorExtraEffects.RunAfterCardDiscarded(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OnExhaust, (fixture, card) => CardEditorExtraEffects.RunAfterCardExhausted(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.EndOfTurnInHand, (fixture, card) => CardEditorExtraEffects.RunEndOfTurnInHand(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.StartOfTurn, (fixture, card) => CardEditorExtraEffects.RunStartOfTurn(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.EndOfTurn, (fixture, card) => CardEditorExtraEffects.RunEndOfTurn(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.StartOfEnemyTurn, (fixture, card) => CardEditorExtraEffects.RunStartOfEnemyTurn(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.EndOfEnemyTurn, (fixture, card) => CardEditorExtraEffects.RunEndOfEnemyTurn(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OstyDealDamage, (fixture, card) => CardEditorExtraEffects.RunAfterOstyDealDamage(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.AfterCombat, (fixture, card) => CardEditorExtraEffects.RunAfterCombat(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OnChannel, (fixture, card) => CardEditorExtraEffects.RunAfterOrbChanneled(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OnEvoke, (fixture, card) => CardEditorExtraEffects.RunAfterOrbEvoked(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.TurnBoundary, DispatchTurnBoundary),
+			(CardExtraEffectTrigger.DeckPassiveCombatStart, (fixture, card) => CardEditorExtraEffects.RunDeckPassiveCombatStart(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.DeckPassiveCombatEnd, (fixture, card) => CardEditorExtraEffects.RunDeckPassiveCombatEnd(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OnMovedToTopOfPile, (fixture, card) => CardEditorExtraEffects.RunAfterCardMovedToTopOfPile(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OnMovedToBottomOfPile, (fixture, card) => CardEditorExtraEffects.RunAfterCardMovedToBottomOfPile(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.AfterCardEnteredCombat, (fixture, card) => CardEditorExtraEffects.RunAfterCardEnteredCombat(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.BeforeHandDraw, (fixture, card) => CardEditorExtraEffects.RunBeforeHandDraw(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.AfterAttack, (fixture, card) => CardEditorExtraEffects.RunAfterAttack(fixture.Combat, fixture.Choices, card, fixture.Combat.Enemies.First())),
+			(CardExtraEffectTrigger.AfterDeath, (fixture, card) => CardEditorExtraEffects.RunAfterDeath(fixture.Combat, fixture.Choices, card, fixture.Combat.Enemies.First())),
+			(CardExtraEffectTrigger.AfterCombatEnd, (fixture, card) => CardEditorExtraEffects.RunAfterCombatEnd(fixture.Combat, fixture.Choices, card)),
+			(CardExtraEffectTrigger.OnChosen, (fixture, card) => CardEditorExtraEffects.RunOnChosen(fixture.Combat, fixture.Choices, card))
 		];
 
-		foreach (CardExtraEffectTrigger trigger in triggers)
+		foreach ((CardExtraEffectTrigger trigger, Func<Fixture, CardModel, Task> dispatch) in cases)
 		{
 			Fixture fixture = CreateFixture();
 			CardModel card = CreateSourceCard(fixture);
+			if (trigger == CardExtraEffectTrigger.OnMovedToTopOfPile)
+			{
+				await PutInPile(card, PileType.Hand, CardPilePosition.Top);
+			}
+			else if (trigger == CardExtraEffectTrigger.OnMovedToBottomOfPile)
+			{
+				await PutInPile(card, PileType.Hand, CardPilePosition.Bottom);
+			}
 			CardExtraEffect effect = ImmediateOnPlay(CardExtraEffectKind.CardCostsLess);
 			effect.Trigger = trigger;
 			effect.CardCostsLessMode = CardExtraEffectCardCostsLessMode.Triggered;
 			effect.CardCostsLessDuration = CardExtraEffectCardCostsLessDuration.ThisCombat;
 			effect.CardCostsLessModifier = CardExtraEffectCostModifier.Reduce;
+			if (trigger == CardExtraEffectTrigger.TurnBoundary)
+			{
+				effect.TurnBoundary = CardExtraEffectTurnBoundary.Start;
+				effect.TurnBoundarySide = CardExtraEffectTurnBoundarySide.YourTurn;
+			}
 			CardEditorTemporaryExtraEffectController.Grant(
 				fixture.Combat, card, effect, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
 
 			AssertSame(0, CardEditorExtraEffects.GetCardCostsLessReduction(fixture.Combat, card), $"{trigger} reduction became passive before its event");
-			await DispatchCardTrigger(fixture, card, trigger);
+			await dispatch(fixture, card);
 			AssertSame(1, CardEditorExtraEffects.GetCardCostsLessReduction(fixture.Combat, card), $"{trigger} did not apply the This Card cost reduction");
 			Assert(CardEditorExtraEffects.DoesTriggerMatch(effect, trigger, card), $"{trigger} did not match its own event contract");
 		}
 	}
 
-	private static Task DispatchCardTrigger(Fixture fixture, CardModel card, CardExtraEffectTrigger trigger)
+	private static Task DispatchTurnBoundary(Fixture fixture, CardModel card)
 	{
-		return trigger switch
-		{
-			CardExtraEffectTrigger.OnDraw => CardEditorExtraEffects.RunAfterCardDrawn(fixture.Combat, fixture.Choices, card),
-			CardExtraEffectTrigger.OnDiscard => CardEditorExtraEffects.RunAfterCardDiscarded(fixture.Combat, fixture.Choices, card),
-			CardExtraEffectTrigger.OnExhaust => CardEditorExtraEffects.RunAfterCardExhausted(fixture.Combat, fixture.Choices, card),
-			_ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, null)
-		};
+		return CardEditorExtraEffects.RunTurnBoundary(
+			fixture.Combat,
+			fixture.Choices,
+			card,
+			CardExtraEffectTurnBoundary.Start,
+			CardExtraEffectTurnBoundarySide.YourTurn);
 	}
 
 	private static async Task TestAfterDeathPowerTrigger()
@@ -378,8 +482,38 @@ internal static class Program
 		Assert(power != null, "playing the card did not install CardEditorExtraEffectPower");
 
 		int before = fixture.Player.PlayerCombatState!.Energy;
+		await power!.AfterDeath(fixture.Choices, enemy, wasRemovalPrevented: true, deathAnimLength: 0f);
+		AssertSame(before, fixture.Player.PlayerCombatState.Energy, "prevented enemy death incorrectly dispatched Gain Energy");
 		await power!.AfterDeath(fixture.Choices, enemy, wasRemovalPrevented: false, deathAnimLength: 0f);
 		AssertSame(before + 1, fixture.Player.PlayerCombatState.Energy, "enemy death did not dispatch Gain Energy from the stored power");
+
+		Fixture enemyHostFixture = CreateFixture();
+		CardModel enemyHostSource = CreateSourceCard(enemyHostFixture);
+		Creature enemyHost = AddMockEnemy(enemyHostFixture, "after-death-enemy-host");
+		Creature unrelatedEnemy = AddMockEnemy(enemyHostFixture, "after-death-unrelated");
+		CardExtraEffect enemyHostedEffect = ImmediateOnPlay(CardExtraEffectKind.GainEnergy);
+		enemyHostedEffect.Trigger = CardExtraEffectTrigger.AfterDeath;
+		enemyHostedEffect.AsPower = true;
+		enemyHostedEffect.Target = CardExtraEffectTarget.AllEnemies;
+		enemyHostedEffect.PowerHost = CardExtraEffectPowerHost.EffectTargets;
+		enemyHostedEffect.PowerTriggerFrom = CardExtraEffectPowerTriggerFrom.Self;
+		enemyHostedEffect.PowerTargeting = CardExtraEffectPowerTargeting.TriggerTarget;
+		CardEditorTemporaryExtraEffectController.Grant(
+			enemyHostFixture.Combat, enemyHostSource, enemyHostedEffect, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+		await CardEditorExtraEffects.RunAfterCardPlayed(
+			enemyHostFixture.Combat,
+			enemyHostFixture.Choices,
+			CreateCardPlay(enemyHostFixture, enemyHostSource, enemyHost));
+		CardEditorExtraEffectPower? enemyPower = enemyHost.GetPower<CardEditorExtraEffectPower>();
+		Assert(enemyPower != null, "Trigger Target did not install the After Death power on the enemy");
+
+		int enemyHostBefore = enemyHostFixture.Player.PlayerCombatState!.Energy;
+		await enemyPower!.AfterDeath(enemyHostFixture.Choices, unrelatedEnemy, wasRemovalPrevented: false, deathAnimLength: 0f);
+		AssertSame(enemyHostBefore, enemyHostFixture.Player.PlayerCombatState.Energy, "Self-hosted death power reacted to an unrelated enemy");
+		await enemyPower.AfterDeath(enemyHostFixture.Choices, enemyHost, wasRemovalPrevented: true, deathAnimLength: 0f);
+		AssertSame(enemyHostBefore, enemyHostFixture.Player.PlayerCombatState.Energy, "prevented host death incorrectly fired the enemy-hosted power");
+		await enemyPower.AfterDeath(enemyHostFixture.Choices, enemyHost, wasRemovalPrevented: false, deathAnimLength: 0f);
+		AssertSame(enemyHostBefore + 1, enemyHostFixture.Player.PlayerCombatState.Energy, "enemy-hosted Self death did not pay its source-card owner");
 	}
 
 	private static async Task TestCopyDebuffs()
@@ -412,11 +546,140 @@ internal static class Program
 		return Task.CompletedTask;
 	}
 
+	private static Task TestMultiplayerClientReady()
+	{
+		const ulong localId = 2000;
+		RecordingClientNetGameService service = new(localId);
+		RecordingStartRunLobbyListener listener = new();
+		StartRunLobby lobby = new(GameMode.Standard, service, listener, maxPlayers: 2);
+		SerializableUnlockState unlocks = new UnlockState(SaveManager.Instance.Progress).ToSerializable();
+		CharacterModel character = ModelDb.Character<Ironclad>();
+		lobby.Players.Add(new StartRunLobbyPlayer
+		{
+			id = 1,
+			slotId = 0,
+			character = character,
+			unlockState = unlocks,
+			maxMultiplayerAscensionUnlocked = 0,
+			isReady = false
+		});
+		lobby.Players.Add(new StartRunLobbyPlayer
+		{
+			id = localId,
+			slotId = 1,
+			character = character,
+			unlockState = unlocks,
+			maxMultiplayerAscensionUnlocked = 0,
+			isReady = false
+		});
+
+		SetPrivateStaticField(typeof(CardEditorMultiplayerSettings), "_loaded", true);
+		SetPrivateStaticField(typeof(CardEditorMultiplayerSettings), "_data", new CardEditorMultiplayerSettingsData());
+		SetPrivateStaticField(typeof(CardEditorMultiplayerSync), "_netService", service);
+		SetPrivateStaticField(typeof(CardEditorMultiplayerSync), "_lastAppliedSequence", 0);
+		SetPrivateStaticField(typeof(CardEditorMultiplayerSync), "_requestedInitialSync", true);
+		try
+		{
+			bool originalAllowed = CardEditorMultiplayerSync.AllowClientReady(() => lobby.SetReady(true), ready: true);
+			Assert(originalAllowed, "Card Editor swallowed the client's Ready click before StartRunLobby.SetReady");
+			if (originalAllowed)
+			{
+				lobby.SetReady(true);
+			}
+
+			Assert(lobby.LocalPlayer.isReady, "the vanilla lobby did not mark the local client ready");
+			Assert(service.SentMessageTypes.Contains(typeof(LobbyPlayerSetReadyMessage)),
+				"the vanilla lobby did not send LobbyPlayerSetReadyMessage to the host");
+			AssertSame(1, listener.PlayerChangedCount, "the lobby UI listener did not receive the Ready state change");
+			Assert(!GetPrivateStaticField<bool>(typeof(CardEditorMultiplayerSync), "_requestedInitialSync"),
+				"readying before the snapshot did not re-arm the initial sync request");
+		}
+		finally
+		{
+			lobby.CleanUp(disconnectSession: false);
+			SetPrivateStaticField(typeof(CardEditorMultiplayerSync), "_netService", null);
+			CardEditorMultiplayerSync.ForceClientReadyGateForTesting = false;
+		}
+
+		return Task.CompletedTask;
+	}
+
+	private static void SetPrivateStaticField(Type type, string name, object? value)
+	{
+		type.GetField(name, BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, value);
+	}
+
+	private static T GetPrivateStaticField<T>(Type type, string name)
+	{
+		return (T)type.GetField(name, BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+	}
+
+	private sealed class RecordingClientNetGameService(ulong netId) : INetGameService
+	{
+		public List<Type> SentMessageTypes { get; } = [];
+		public ulong NetId { get; } = netId;
+		public bool IsConnected => true;
+		public bool IsGameLoading { get; private set; }
+		public NetGameType Type => NetGameType.Client;
+		public PlatformType Platform => PlatformType.None;
+		public PeerVersionInfo LocalVersion { get; } = new()
+		{
+			version = "0.111.0-headless-test",
+			branch = default,
+			idDatabaseHash = 0,
+			gameplayAffectingMods = [],
+			otherMods = []
+		};
+		public event Action<NetErrorInfo>? Disconnected;
+		public void SendMessage<T>(T message, ulong playerId) where T : INetMessage => SentMessageTypes.Add(typeof(T));
+		public void SendMessage<T>(T message) where T : INetMessage => SentMessageTypes.Add(typeof(T));
+		public void RegisterMessageHandler<T>(MessageHandlerDelegate<T> handler) where T : INetMessage { }
+		public void UnregisterMessageHandler<T>(MessageHandlerDelegate<T> handler) where T : INetMessage { }
+		public void Update() { }
+		public void Disconnect(NetError reason, bool now = false) => Disconnected?.Invoke(new NetErrorInfo(reason, selfInitiated: true));
+		public ConnectionStats? GetStatsForPeer(ulong peerId) => null;
+		public void SetGameLoading(bool isLoading) => IsGameLoading = isLoading;
+		public void SetBufferMessages(bool bufferMessages) { }
+		public string? GetRawLobbyIdentifier() => null;
+	}
+
+	private sealed class RecordingStartRunLobbyListener : IStartRunLobbyListener
+	{
+		public int PlayerChangedCount { get; private set; }
+		public void PlayerConnected(StartRunLobbyPlayer player) { }
+		public void PlayerChanged(StartRunLobbyPlayer player, bool isRandomCharacterResolution) => PlayerChangedCount++;
+		public void AscensionChanged() { }
+		public void SeedChanged() { }
+		public void ModifiersChanged() { }
+		public void MaxAscensionChanged() { }
+		public void RemotePlayerDisconnected(StartRunLobbyPlayer player) { }
+		public void BeginRun(string seed, List<ActModel> acts, IReadOnlyList<ModifierModel> modifiers) { }
+		public void LocalPlayerDisconnected(NetErrorInfo info) { }
+	}
+
 	private static Task TestMatchEnergyDefinitionIsUnique()
 	{
 		string root = FindRepoRoot();
 		string popupSource = File.ReadAllText(Path.Combine(root, "mods", "card_editor", "NCardEditorPopup.cs"));
 		AssertSame(1, CountOccurrences(popupSource, "cardCostsLess.kind.matchingCardsEnergy"), "editor popup registers Match Energy more than once");
+		return Task.CompletedTask;
+	}
+
+	private static Task TestResultPileDestinationIsSerialized()
+	{
+		string root = FindRepoRoot();
+		string popupSource = File.ReadAllText(Path.Combine(root, "mods", "card_editor", "NCardEditorPopup.cs"));
+		string baseOverrideBuilder = SliceSource(
+			popupSource,
+			"private CardOverride BuildOverrideFromUi()",
+			"private void ApplyPowerDurationToOverride(");
+		string upgradeOverrideBuilder = SliceSource(
+			popupSource,
+			"private CardUpgradeOverride BuildUpgradeOverrideFromUiDeltas(UpgradeBaseline baseline)",
+			"private static void ApplyUpgradeOverridePreview(");
+
+		AssertSame(2, CountOccurrences(baseOverrideBuilder, "or CardExtraEffectKind.ResultPileOverride"), "base-card editor does not route Result Pile through both pile configuration gates");
+		AssertSame(2, CountOccurrences(upgradeOverrideBuilder, "or CardExtraEffectKind.ResultPileOverride"), "upgraded-card editor does not route Result Pile through both pile configuration gates");
 		return Task.CompletedTask;
 	}
 
@@ -444,6 +707,23 @@ internal static class Program
 		}
 
 		throw new DirectoryNotFoundException("Could not locate the repository root from the test output directory.");
+	}
+
+	private static string SliceSource(string source, string startMarker, string endMarker)
+	{
+		int start = source.IndexOf(startMarker, StringComparison.Ordinal);
+		if (start < 0)
+		{
+			throw new InvalidOperationException($"Source start marker not found: {startMarker}");
+		}
+
+		int end = source.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
+		if (end < 0)
+		{
+			throw new InvalidOperationException($"Source end marker not found: {endMarker}");
+		}
+
+		return source[start..end];
 	}
 
 	private static int CountOccurrences(string value, string needle)

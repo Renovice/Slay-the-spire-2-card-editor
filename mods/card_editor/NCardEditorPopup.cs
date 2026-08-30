@@ -33740,7 +33740,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					or CardExtraEffectKind.ConditionalAutoRunEffects
 					or CardExtraEffectKind.LinkedCardAction
 					or CardExtraEffectKind.DrawCards
-					or CardExtraEffectKind.DrawCardsThatCostLess)
+					or CardExtraEffectKind.DrawCardsThatCostLess
+					or CardExtraEffectKind.ResultPileOverride)
 				{
 					if (resolvedKind is CardExtraEffectKind.MoveCardsBetweenPiles
 						or CardExtraEffectKind.DelayedPileAction
@@ -33752,6 +33753,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						or CardExtraEffectKind.CopyCardsFromPileToDeck
 						or CardExtraEffectKind.CopyExactCardsFromPileToDeck
 						or CardExtraEffectKind.LinkedCardAction
+						or CardExtraEffectKind.ResultPileOverride
 						|| consumeCardUsesDestination)
 					{
 						CardExtraEffectCardPile moveToDefaultPile = resolvedKind switch
@@ -35239,7 +35241,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					or CardExtraEffectKind.ConditionalAutoRunEffects
 					or CardExtraEffectKind.LinkedCardAction
 					or CardExtraEffectKind.DrawCards
-					or CardExtraEffectKind.DrawCardsThatCostLess)
+					or CardExtraEffectKind.DrawCardsThatCostLess
+					or CardExtraEffectKind.ResultPileOverride)
 				{
 					if (resolvedKind is CardExtraEffectKind.MoveCardsBetweenPiles
 						or CardExtraEffectKind.DelayedPileAction
@@ -35251,6 +35254,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 						or CardExtraEffectKind.CopyCardsFromPileToDeck
 						or CardExtraEffectKind.CopyExactCardsFromPileToDeck
 						or CardExtraEffectKind.LinkedCardAction
+						or CardExtraEffectKind.ResultPileOverride
 						|| consumeCardUsesDestination)
 					{
 						CardExtraEffectCardPile moveToDefaultPile = resolvedKind switch

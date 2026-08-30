@@ -293,9 +293,8 @@ internal static class CardEditorMultiplayerSync
 		return _lastAppliedSequence > 0;
 	}
 
-	// L1: hold a client's lobby "ready" until the host snapshot has been applied. Returns false to
-	// block the original SetReady; FirePendingReadyIfNeeded re-fires `fireReadyTrue` once synced (or
-	// on timeout). Works for any lobby type (the caller supplies how to re-ready).
+	// Never suppress the vanilla Ready call. If the initial snapshot is missing, re-arm its request
+	// while allowing StartRunLobby/LoadRunLobby to update local state and send the Ready message.
 	internal static bool AllowClientReady(Action fireReadyTrue, bool ready)
 	{
 		// An explicit un-ready always passes through, and cancels any deferred ready so the player is
@@ -2019,9 +2018,7 @@ internal static class CardEditorChecksumTrackerCompareChecksumsPatch
 	}
 }
 
-// L1: hold a client's lobby "ready" until the card-editor snapshot has been applied (or a timeout
-// elapses), so the run never begins on mismatched definitions. The run only starts when ALL players
-// are ready, so gating the client's ready gates run start without any host-side coordination.
+// Keep the sync request alive when a client readies, without blocking the vanilla Ready message.
 [HarmonyPatch(typeof(StartRunLobby), nameof(StartRunLobby.SetReady))]
 internal static class CardEditorStartRunLobbySetReadyPatch
 {
@@ -2031,7 +2028,7 @@ internal static class CardEditorStartRunLobbySetReadyPatch
 	}
 }
 
-// Same ready-gate for resumed/loaded multiplayer runs (LoadRunLobby is a separate type).
+// Same non-blocking sync check for resumed/loaded multiplayer runs (a separate lobby type).
 [HarmonyPatch(typeof(LoadRunLobby), nameof(LoadRunLobby.SetReady))]
 internal static class CardEditorLoadRunLobbySetReadyPatch
 {

@@ -1,5 +1,10 @@
 # Card Editor changelog
 
+## 10.1.1 - Result Pile destination fix (2026-08-30)
+
+- Fixed `Card Action -> Result Pile` saving every selected destination as Hand for both base and upgraded card edits.
+- Added regression coverage for the base-card and upgraded-card editor serialization paths.
+
 ## 10.1.0 - Public Beta compatibility and runtime fixes (2026-08-29)
 
 - Retargeted the mod to Slay the Spire 2 public beta `v0.111.0`, including the current networking, hotkey, card-command, and combat APIs.

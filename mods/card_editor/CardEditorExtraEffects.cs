@@ -31217,10 +31217,16 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return;
 		}
 
+		CardPilePosition position = ResolvePilePosition(effect.MoveToPosition);
+
 		// Use vanilla pipelines where possible so discard/exhaust synergies work (history + hooks).
 		if (toPileType == PileType.Discard)
 		{
-			await CardCmd.Discard(choiceContext, selected);
+			using (Hook_AfterCardChangedPiles_CardEditorMovedPileTriggers_Patch.SuppressDispatch())
+			{
+				await CardCmd.Discard(choiceContext, selected);
+			}
+			await RepositionAfterVanillaPilePipeline(choiceContext, owner, selected, toPileType, position);
 			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 			return;
 		}
@@ -31231,15 +31237,18 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			{
 				if (card != null)
 				{
-					await CardCmd.Exhaust(choiceContext, card);
+					using (Hook_AfterCardChangedPiles_CardEditorMovedPileTriggers_Patch.SuppressDispatch())
+					{
+						await CardCmd.Exhaust(choiceContext, card);
+					}
 					exhausted++;
 				}
 			}
+			await RepositionAfterVanillaPilePipeline(choiceContext, owner, selected, toPileType, position);
 			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(exhausted);
 			return;
 		}
 
-		CardPilePosition position = ResolvePilePosition(effect.MoveToPosition);
 		int moved = 0;
 		foreach (CardModel card in selected)
 		{
@@ -31250,6 +31259,41 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 		}
 		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(moved);
+	}
+
+	private static async Task RepositionAfterVanillaPilePipeline(
+		PlayerChoiceContext choiceContext,
+		Player owner,
+		IEnumerable<CardModel> cards,
+		PileType pileType,
+		CardPilePosition position)
+	{
+		CombatState? combatState = owner.Creature.GetConcreteCombatState();
+		foreach (CardModel card in cards)
+		{
+			if (card?.Pile?.Type != pileType)
+			{
+				continue;
+			}
+
+			if (position != CardPilePosition.Bottom)
+			{
+				// Discard and Exhaust intentionally force Bottom. Re-adding within the same pile changes
+				// only ordering: CardPileCmd does not re-fire AfterCardChangedPiles for a same-pile move.
+				await CardPileCmd.Add(card, pileType, position, skipVisuals: true);
+			}
+
+			bool movedToTop = position == CardPilePosition.Top || IsCardAtTopOfPile(card);
+			bool movedToBottom = position == CardPilePosition.Bottom || IsCardAtBottomOfPile(card);
+			if (combatState != null && movedToTop)
+			{
+				await RunAfterCardMovedToTopOfPile(combatState, choiceContext, card);
+			}
+			if (combatState != null && movedToBottom)
+			{
+				await RunAfterCardMovedToBottomOfPile(combatState, choiceContext, card);
+			}
+		}
 	}
 
 	private static async Task DelayedPileAction(PlayerChoiceContext choiceContext, CombatState combatState, Player owner, int threshold, CardExtraEffect effect, CardModel? sourceCard)

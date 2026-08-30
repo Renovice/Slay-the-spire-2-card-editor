@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
@@ -17,9 +18,17 @@ namespace SlayTheSpire2Mod.CardEditor;
 [HarmonyPatch(typeof(Hook), nameof(Hook.AfterCardChangedPiles))]
 internal static class Hook_AfterCardChangedPiles_CardEditorMovedPileTriggers_Patch
 {
+	private static readonly AsyncLocal<int> _suppressionDepth = new();
+
+	internal static IDisposable SuppressDispatch()
+	{
+		_suppressionDepth.Value++;
+		return new DispatchSuppressionScope();
+	}
+
 	public static void Postfix(CombatState? combatState, CardModel card, PileType oldPile)
 	{
-		if (combatState == null || card == null)
+		if (_suppressionDepth.Value > 0 || combatState == null || card == null)
 		{
 			return;
 		}
@@ -79,6 +88,22 @@ internal static class Hook_AfterCardChangedPiles_CardEditorMovedPileTriggers_Pat
 		catch (Exception ex)
 		{
 			Log.Warn($"[CardEditor] AfterCardChangedPiles moved-trigger extra effects failed: {ex}");
+		}
+	}
+
+	private sealed class DispatchSuppressionScope : IDisposable
+	{
+		private bool _disposed;
+
+		public void Dispose()
+		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			_disposed = true;
+			_suppressionDepth.Value = Math.Max(0, _suppressionDepth.Value - 1);
 		}
 	}
 }
