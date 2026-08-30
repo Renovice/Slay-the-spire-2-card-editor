@@ -1,6 +1,6 @@
 # Card Editor Headless Test Harness
 
-This project runs Card Editor regression tests against the installed Slay the Spire 2 beta assemblies without launching Godot or restarting the game.
+This project runs Card Editor regression tests against the repository's tracked Slay the Spire 2 beta assemblies without launching Godot or restarting the game. It falls back to the installed game assemblies only when the tracked references are absent.
 
 Run it from anywhere:
 
@@ -19,6 +19,7 @@ The suite exits `0` only when every test passes. It treats C# warnings as errors
 - Transform cards filtered by vanilla card tag.
 - Trigger This Card cost reduction through every public lifecycle/event dispatcher (24 paths).
 - Store After Death effects on player and enemy power hosts, ignore prevented/unrelated deaths, and dispatch a real death.
+- Reproduce borrowed `Run Effect Source` lifecycle behavior for result piles, multiplayer transfer, draw/exhaust reactions, combat-long source state, cost scaling, return-to-hand thresholds, and auto-play eligibility.
 - Copy Weak stacks from one selected enemy to another enemy.
 - Keep Grant -> Hits All Enemies blocked.
 - Construct the beta `StartRunLobby` with a recording client service and prove Ready updates local state, notifies the UI, and sends `LobbyPlayerSetReadyMessage`.

@@ -3,7 +3,7 @@
   "name": "Card Editor",
   "author": "Renovice",
   "description": "In-game card editor + compendium-style browser. Edit costs, keywords, numbers, enchantments/afflictions, and add extra effects — or build whole effect chains visually on the Chainboard. Includes presets to save/load profiles.",
-  "version": "10.1.3",
+  "version": "10.1.4",
   "min_game_version": "v0.111.0",
   "has_pck": true,
   "has_dll": true,

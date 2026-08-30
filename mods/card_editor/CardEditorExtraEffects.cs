@@ -11011,12 +11011,65 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 	{
 		pileType = PileType.None;
 		position = CardPilePosition.Bottom;
-		if (!TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.ParticleWall>(card, out _))
+		if (card == null)
 		{
 			return false;
 		}
 
-		pileType = PileType.Hand;
+		if (TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.ParticleWall>(card, out _))
+		{
+			pileType = PileType.Hand;
+			return true;
+		}
+
+		if (TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.ShiningStrike>(card, out _))
+		{
+			pileType = PileType.Draw;
+			position = CardPilePosition.Top;
+			return true;
+		}
+
+		return false;
+	}
+
+	internal static bool TryGetBorrowedEffectSourceResultLocationOverride(
+		CardModel? card,
+		CardLocation currentLocation,
+		out CardLocation resultLocation)
+	{
+		resultLocation = currentLocation;
+		if (card == null || currentLocation.pileType != PileType.Discard)
+		{
+			return false;
+		}
+
+		if (TryGetBorrowedEffectSourceResultPileOverride(card, out PileType pileType, out CardPilePosition position))
+		{
+			resultLocation = new CardLocation(currentLocation.player, pileType, position);
+			return true;
+		}
+
+		if (!TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.TheBall>(card, out _))
+		{
+			return false;
+		}
+
+		CombatState? combatState = card.GetConcreteCombatState();
+		List<Player> teammates = combatState?.GetTeammatesOf(card.Owner.Creature)
+			.Where(creature => creature != null && creature.IsAlive && creature.IsPlayer && creature.Player != card.Owner)
+			.Select(creature => creature.Player!)
+			.ToList() ?? new List<Player>();
+		if (teammates.Count == 0)
+		{
+			return false;
+		}
+
+		Player? recipient = card.Owner.RunState.Rng.CombatTargets.NextItem(teammates);
+		if (recipient == null)
+		{
+			return false;
+		}
+		resultLocation = new CardLocation(recipient, PileType.Draw, CardPilePosition.Random);
 		return true;
 	}
 
@@ -11030,30 +11083,160 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return;
 		}
 
+		bool playedCardWasEthereal = CombatManager.Instance.History.CardPlaysFinished
+			.LastOrDefault(entry => ReferenceEquals(entry.CardPlay, cardPlay))?.WasEthereal
+			?? cardPlay.Card.Keywords.Contains(CardKeyword.Ethereal);
+
 		foreach (Player player in combatState.Players)
 		{
-			CardPile? discardPile = player?.PlayerCombatState?.DiscardPile;
-			if (discardPile?.Cards == null || discardPile.Cards.Count == 0)
+			if (player?.PlayerCombatState?.AllPiles == null)
 			{
 				continue;
 			}
 
-			foreach (CardModel card in discardPile.Cards.Where(candidate => candidate != null).ToList())
+			List<CardModel> cards = player.PlayerCombatState.AllPiles
+				.Where(pile => pile?.Cards != null)
+				.SelectMany(pile => pile.Cards)
+				.Where(candidate => candidate != null)
+				.Distinct()
+				.ToList();
+			foreach (CardModel card in cards)
 			{
-				if (!ReferenceEquals(card.Owner, cardPlay.Card.Owner)
-					|| !TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.RightHandHand>(card, out MegaCrit.Sts2.Core.Models.Cards.RightHandHand? sourceCard)
-					|| sourceCard == null)
+				if (!ReferenceEquals(card.Owner, cardPlay.Card.Owner))
 				{
 					continue;
 				}
 
-				int requiredEnergy = Math.Max(0, sourceCard.DynamicVars.Energy.IntValue);
-				if (cardPlay.Resources.EnergyValue >= requiredEnergy)
+				if (card.Pile?.Type == PileType.Discard
+					&& TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.RightHandHand>(card, out MegaCrit.Sts2.Core.Models.Cards.RightHandHand? rightHandSource)
+					&& rightHandSource != null
+					&& cardPlay.Resources.EnergyValue >= Math.Max(0, rightHandSource.DynamicVars.Energy.IntValue))
 				{
 					await CardPileCmd.Add(card, PileType.Hand);
+					continue;
+				}
+
+				if (card.Pile?.Type != PileType.Hand
+					&& cardPlay.Card.Type == CardType.Skill
+					&& TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.MakeItSo>(card, out MegaCrit.Sts2.Core.Models.Cards.MakeItSo? makeItSoSource)
+					&& makeItSoSource != null)
+				{
+					int requiredSkills = Math.Max(1, makeItSoSource.DynamicVars.Cards.IntValue);
+					int skillsPlayed = CombatManager.Instance.History.CardPlaysFinished.Count(entry =>
+						entry.HappenedThisTurn(combatState)
+						&& entry.CardPlay.Card.Type == CardType.Skill
+						&& ReferenceEquals(entry.CardPlay.Player, card.Owner));
+					if (skillsPlayed > 0 && skillsPlayed % requiredSkills == 0)
+					{
+						await CardPileCmd.Add(card, PileType.Hand);
+						continue;
+					}
+				}
+
+				if (playedCardWasEthereal
+					&& TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.BansheesCry>(card, out MegaCrit.Sts2.Core.Models.Cards.BansheesCry? bansheesCrySource)
+					&& bansheesCrySource != null)
+				{
+					card.EnergyCost.AddThisCombat(-Math.Max(0, bansheesCrySource.DynamicVars.Energy.IntValue));
+				}
+
+				if (cardPlay.Card.Type == CardType.Skill
+					&& TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.Pinpoint>(card, out _))
+				{
+					card.EnergyCost.AddThisTurn(-1);
 				}
 			}
 		}
+	}
+
+	internal static async Task RunBorrowedEffectSourceAfterCardDrawn(
+		CombatState combatState,
+		PlayerChoiceContext choiceContext,
+		CardModel card)
+	{
+		if (combatState == null || choiceContext == null || card?.Owner == null)
+		{
+			return;
+		}
+
+		foreach (MegaCrit.Sts2.Core.Models.Cards.KinglyKick _ in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.KinglyKick>(card))
+		{
+			card.EnergyCost.AddThisCombat(-1);
+		}
+
+		foreach (MegaCrit.Sts2.Core.Models.Cards.KinglyPunch source in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.KinglyPunch>(card))
+		{
+			decimal increase = source.DynamicVars["Increase"].BaseValue;
+			source.DynamicVars.Damage.BaseValue += increase;
+		}
+
+		foreach (MegaCrit.Sts2.Core.Models.Cards.Void source in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.Void>(card))
+		{
+			await PlayerCmd.LoseEnergy(source.DynamicVars.Energy.IntValue, card.Owner);
+		}
+	}
+
+	internal static async Task RunBorrowedEffectSourceAfterCardExhausted(
+		CombatState combatState,
+		PlayerChoiceContext choiceContext,
+		CardModel exhaustedCard)
+	{
+		if (combatState == null || choiceContext == null || exhaustedCard?.Owner == null)
+		{
+			return;
+		}
+
+		foreach (MegaCrit.Sts2.Core.Models.Cards.DrumOfBattle source in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.DrumOfBattle>(exhaustedCard))
+		{
+			await PlayerCmd.GainEnergy(source.DynamicVars.Energy.BaseValue, exhaustedCard.Owner);
+		}
+
+		foreach (Player player in combatState.Players)
+		{
+			if (player?.PlayerCombatState?.AllPiles == null)
+			{
+				continue;
+			}
+
+			foreach (CardModel card in player.PlayerCombatState.AllPiles.SelectMany(pile => pile.Cards).Distinct().ToList())
+			{
+				foreach (MegaCrit.Sts2.Core.Models.Cards.Midnight _ in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.Midnight>(card))
+				{
+					card.EnergyCost.AddThisCombat(-1);
+				}
+			}
+		}
+	}
+
+	internal static Task RunBorrowedEffectSourceAfterCardEnteredCombat(CombatState combatState, CardModel card)
+	{
+		if (combatState == null || card == null || card.IsClone)
+		{
+			return Task.CompletedTask;
+		}
+
+		foreach (MegaCrit.Sts2.Core.Models.Cards.BansheesCry source in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.BansheesCry>(card))
+		{
+			int etherealPlays = CombatManager.Instance.History.CardPlaysFinished.Count(entry =>
+				entry.WasEthereal && ReferenceEquals(entry.CardPlay.Player, card.Owner));
+			card.EnergyCost.AddThisCombat(-etherealPlays * Math.Max(0, source.DynamicVars.Energy.IntValue));
+		}
+
+		foreach (MegaCrit.Sts2.Core.Models.Cards.Pinpoint _ in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.Pinpoint>(card))
+		{
+			int skillsPlayed = CombatManager.Instance.History.CardPlaysFinished.Count(entry =>
+				entry.HappenedThisTurn(combatState)
+				&& entry.CardPlay.Card.Type == CardType.Skill
+				&& ReferenceEquals(entry.CardPlay.Player, card.Owner));
+			card.EnergyCost.AddThisTurn(-skillsPlayed);
+		}
+
+		foreach (MegaCrit.Sts2.Core.Models.Cards.Midnight _ in GetActiveBorrowedVanillaSources<MegaCrit.Sts2.Core.Models.Cards.Midnight>(card))
+		{
+			card.EnergyCost.AddThisCombat(-CombatManager.Instance.History.Entries.OfType<CardExhaustedEntry>().Count());
+		}
+
+		return Task.CompletedTask;
 	}
 
 	internal static async Task RunBorrowedEffectSourceAfterAutoPostPlayPhaseEntered(
@@ -11066,12 +11249,33 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return;
 		}
 
-		if (!ShouldAutoPlayBorrowedIAmInvincible(player, out _))
+		if (ShouldAutoPlayBorrowedIAmInvincible(player, out _))
+		{
+			await CardPileCmd.AutoPlayFromDrawPile(choiceContext, player, 1, CardPilePosition.Top, forceExhaust: false);
+		}
+
+		CardPile? exhaustPile = player.PlayerCombatState?.ExhaustPile;
+		if (exhaustPile?.Cards == null || exhaustPile.Cards.Count == 0)
 		{
 			return;
 		}
 
-		await CardPileCmd.AutoPlayFromDrawPile(choiceContext, player, 1, CardPilePosition.Top, forceExhaust: false);
+		foreach (CardModel card in exhaustPile.Cards.Where(candidate => candidate != null).ToList())
+		{
+			if (ShouldAutoPlayBorrowedHowlFromBeyond(player, card))
+			{
+				await CardCmd.AutoPlay(choiceContext, card, null);
+			}
+		}
+	}
+
+	internal static bool ShouldAutoPlayBorrowedHowlFromBeyond(Player? player, CardModel? card)
+	{
+		return player != null
+			&& card != null
+			&& ReferenceEquals(card.Owner, player)
+			&& card.Pile?.Type == PileType.Exhaust
+			&& TryGetActiveBorrowedVanillaSource<MegaCrit.Sts2.Core.Models.Cards.HowlFromBeyond>(card, out _);
 	}
 
 	internal static bool ShouldAutoPlayBorrowedIAmInvincible(Player? player, out CardModel? topCard)
@@ -11085,40 +11289,62 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 	private static bool TryGetActiveBorrowedVanillaSource<TSource>(CardModel? hostCard, out TSource? sourceCard)
 		where TSource : CardModel
 	{
-		sourceCard = null;
+		sourceCard = GetActiveBorrowedVanillaSources<TSource>(hostCard).FirstOrDefault();
+		return sourceCard != null;
+	}
+
+	private static List<TSource> GetActiveBorrowedVanillaSources<TSource>(CardModel? hostCard)
+		where TSource : CardModel
+	{
+		List<TSource> sources = new List<TSource>();
 		if (hostCard == null)
 		{
-			return false;
+			return sources;
 		}
 
+		Dictionary<ModelId, int> sourceOccurrences = new Dictionary<ModelId, int>();
+		Dictionary<ModelId, IReadOnlyList<CardModel>> persistentSources = new Dictionary<ModelId, IReadOnlyList<CardModel>>();
 		foreach (CardExtraEffect effect in GetRuntimeEffectsIncludingBorrowedSources(hostCard.GetConcreteCombatState(), hostCard))
 		{
 			if (effect == null
 				|| effect.Kind != CardExtraEffectKind.RunEffectSourceCard
-				|| effect.GrantToCard
-				|| effect.PayloadOnly
-				|| IsPowerEffect(effect)
-				|| effect.Trigger != CardExtraEffectTrigger.OnPlay
-				|| effect.Timing != CardExtraEffectTiming.Immediate
-				|| !string.IsNullOrWhiteSpace(effect.CustomKeywordName)
 				|| !TryParseSpecificCardId(effect.SpecificCardId ?? string.Empty, out ModelId sourceId))
 			{
 				continue;
 			}
 
-			CardModel? candidate = CardEditorCreatedCardEffectSourceSupport.BuildRuntimeEffectSourceCard(
-				hostCard,
-				sourceId,
-				isUpgradePreview: false,
-				GetRunEffectSourceRuntimeInstanceKey(hostCard, effect));
+			int occurrence = sourceOccurrences.TryGetValue(sourceId, out int seen) ? seen : 0;
+			sourceOccurrences[sourceId] = occurrence + 1;
+			if (effect.GrantToCard
+				|| effect.PayloadOnly
+				|| IsPowerEffect(effect)
+				|| effect.Trigger != CardExtraEffectTrigger.OnPlay
+				|| effect.Timing != CardExtraEffectTiming.Immediate
+				|| !string.IsNullOrWhiteSpace(effect.CustomKeywordName))
+			{
+				continue;
+			}
+
+			if (!persistentSources.TryGetValue(sourceId, out IReadOnlyList<CardModel>? sourceStates))
+			{
+				sourceStates = CardEditorCreatedCardEffectSourceSupport.GetPersistentVanillaEffectSourceCards(hostCard, sourceId);
+				persistentSources[sourceId] = sourceStates;
+			}
+
+			CardModel? candidate = occurrence < sourceStates.Count
+				? sourceStates[occurrence]
+				: CardEditorCreatedCardEffectSourceSupport.BuildRuntimeEffectSourceCard(
+					hostCard,
+					sourceId,
+					isUpgradePreview: false,
+					CardEditorCreatedCardEffectSourceSupport.CreateRuntimeSourceInstanceKey(sourceId, occurrence, "runEffectSource"));
 			if (candidate is TSource typedCandidate)
 			{
-				sourceCard = typedCandidate;
-				return true;
+				sources.Add(typedCandidate);
 			}
 		}
 
-		return false;
+		return sources;
 	}
 
 	internal static void SetOneShotCardPlayResultPileOverride(CardModel? card, PileType pileType, CardPilePosition position)

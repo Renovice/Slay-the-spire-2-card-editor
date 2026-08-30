@@ -71,6 +71,9 @@ internal static class Program
 			new("Reduce Cost -> This Card -> installed Whenever event power", TestTriggeredThisCardCostReductionWheneverPower),
 			new("Resources -> After Death -> player/enemy power hosts", TestAfterDeathPowerTrigger),
 			new("Run Effect Source -> Regent block and Osty cards", TestRunEffectSourceRegentCards),
+			new("Run Effect Source lifecycle -> result locations", TestRunEffectSourceResultLocations),
+			new("Run Effect Source lifecycle -> draw and exhaust", TestRunEffectSourceDrawAndExhaust),
+			new("Run Effect Source lifecycle -> card-play and phase hooks", TestRunEffectSourceCardPlayAndPhaseHooks),
 			new("Copy Debuffs: selected source to another enemy", TestCopyDebuffs),
 			new("Grant -> Hits All Enemies safety block", TestHitsAllGrantIsBlocked),
 			new("Multiplayer client Ready reaches vanilla network dispatch", TestMultiplayerClientReady),
@@ -143,9 +146,9 @@ internal static class Program
 		return false;
 	}
 
-	private static Fixture CreateFixture()
+	private static Fixture CreateFixture(IReadOnlyList<Player>? players = null)
 	{
-		RunState run = RunState.CreateForTest(seed: $"CARD-EDITOR-TEST-{Interlocked.Increment(ref _fixtureNumber)}");
+		RunState run = RunState.CreateForTest(players, seed: $"CARD-EDITOR-TEST-{Interlocked.Increment(ref _fixtureNumber)}");
 		CombatState combat = new(runState: run);
 		foreach (Player player in run.Players)
 		{
@@ -161,6 +164,13 @@ internal static class Program
 		ActivateCombatForHeadlessCommands(combat);
 
 		return new Fixture(run, combat, run.Players[0], new BlockingPlayerChoiceContext());
+	}
+
+	private static Fixture CreateMultiplayerFixture()
+	{
+		Player first = Player.CreateForNewRun<Ironclad>(UnlockState.all, 1);
+		Player second = Player.CreateForNewRun<Silent>(UnlockState.all, 2);
+		return CreateFixture([first, second]);
 	}
 
 	private static void ActivateCombatForHeadlessCommands(CombatState combat)
@@ -185,6 +195,23 @@ internal static class Program
 	{
 		CardModel canonical = ModelDb.AllCards.First(card => card.IsTransformable && card.Type != CardType.Quest);
 		return fixture.Combat.CreateCard(canonical, fixture.Player);
+	}
+
+	private static CardModel CreateCostlyHost(Fixture fixture)
+	{
+		return fixture.Combat.CreateCard(
+			ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.Bludgeon>(), fixture.Player);
+	}
+
+	private static CardExtraEffect GrantEffectSource(Fixture fixture, CardModel host, Type sourceType)
+	{
+		CardModel source = ModelDb.AllCards.Single(card => card.GetType() == sourceType);
+		CardExtraEffect effect = ImmediateOnPlay(CardExtraEffectKind.RunEffectSourceCard);
+		effect.Amount = 0;
+		effect.SpecificCardId = source.Id.ToString();
+		CardEditorTemporaryExtraEffectController.Grant(
+			fixture.Combat, host, effect, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+		return effect;
 	}
 
 	private static CardPlay CreateCardPlay(Fixture fixture, CardModel card, Creature? target = null)
@@ -652,6 +679,147 @@ internal static class Program
 			"IAmInvincible: borrowed auto-post-play hook did not recognize the top Draw Pile card");
 		Assert(ReferenceEquals(invincibleHost, detectedTopCard),
 			"IAmInvincible: borrowed auto-post-play hook selected the wrong Draw Pile card");
+	}
+
+	private static Task TestRunEffectSourceResultLocations()
+	{
+		Fixture shiningFixture = CreateFixture();
+		CardModel shiningHost = CreateSourceCard(shiningFixture);
+		GrantEffectSource(shiningFixture, shiningHost, typeof(MegaCrit.Sts2.Core.Models.Cards.ShiningStrike));
+		CardLocation discard = new(shiningFixture.Player, PileType.Discard, CardPilePosition.Bottom);
+		Assert(CardEditorExtraEffects.TryGetBorrowedEffectSourceResultLocationOverride(shiningHost, discard, out CardLocation shiningResult),
+			"ShiningStrike: borrowed result location was not detected");
+		AssertSame(PileType.Draw, shiningResult.pileType, "ShiningStrike: host did not go to Draw Pile");
+		AssertSame(CardPilePosition.Top, shiningResult.position, "ShiningStrike: host did not go to the top of Draw Pile");
+
+		CardLocation exhaust = new(shiningFixture.Player, PileType.Exhaust, CardPilePosition.Bottom);
+		Assert(!CardEditorExtraEffects.TryGetBorrowedEffectSourceResultLocationOverride(shiningHost, exhaust, out _),
+			"ShiningStrike: borrowed result location incorrectly replaced Exhaust");
+
+		Fixture ballFixture = CreateMultiplayerFixture();
+		CardModel ballHost = CreateSourceCard(ballFixture);
+		GrantEffectSource(ballFixture, ballHost, typeof(MegaCrit.Sts2.Core.Models.Cards.TheBall));
+		CardLocation ballDiscard = new(ballFixture.Player, PileType.Discard, CardPilePosition.Bottom);
+		Assert(CardEditorExtraEffects.TryGetBorrowedEffectSourceResultLocationOverride(ballHost, ballDiscard, out CardLocation ballResult),
+			"TheBall: multiplayer transfer result was not detected");
+		AssertSame(ballFixture.Run.Players[1], ballResult.player, "TheBall: host was not passed to the teammate");
+		AssertSame(PileType.Draw, ballResult.pileType, "TheBall: host did not enter teammate Draw Pile");
+		AssertSame(CardPilePosition.Random, ballResult.position, "TheBall: host did not use random Draw Pile position");
+		return Task.CompletedTask;
+	}
+
+	private static async Task TestRunEffectSourceDrawAndExhaust()
+	{
+		Fixture kickFixture = CreateFixture();
+		CardModel kickHost = CreateCostlyHost(kickFixture);
+		GrantEffectSource(kickFixture, kickHost, typeof(MegaCrit.Sts2.Core.Models.Cards.KinglyKick));
+		int kickCost = kickHost.EnergyCost.GetWithModifiers(CostModifiers.Local);
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardDrawn(kickFixture.Combat, kickFixture.Choices, kickHost);
+		AssertSame(kickCost - 1, kickHost.EnergyCost.GetWithModifiers(CostModifiers.Local),
+			"KinglyKick: drawing the host did not reduce its cost");
+
+		Fixture punchFixture = CreateFixture();
+		CardModel punchHost = CreateSourceCard(punchFixture);
+		Creature punchEnemy = punchFixture.Combat.Enemies.First();
+		CardExtraEffect punchEffect = GrantEffectSource(punchFixture, punchHost, typeof(MegaCrit.Sts2.Core.Models.Cards.KinglyPunch));
+		int beforeFirstPunch = punchEnemy.CurrentHp;
+		await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(
+			punchFixture.Combat, punchFixture.Choices, CreateCardPlay(punchFixture, punchHost, punchEnemy), [punchEffect]);
+		int firstPunchDamage = beforeFirstPunch - punchEnemy.CurrentHp;
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardDrawn(punchFixture.Combat, punchFixture.Choices, punchHost);
+		int beforeSecondPunch = punchEnemy.CurrentHp;
+		await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(
+			punchFixture.Combat, punchFixture.Choices, CreateCardPlay(punchFixture, punchHost, punchEnemy), [punchEffect]);
+		int secondPunchDamage = beforeSecondPunch - punchEnemy.CurrentHp;
+		Assert(secondPunchDamage > firstPunchDamage,
+			$"KinglyPunch: drawing the host did not increase borrowed damage ({firstPunchDamage} -> {secondPunchDamage})");
+
+		Fixture voidFixture = CreateFixture();
+		CardModel voidHost = CreateSourceCard(voidFixture);
+		GrantEffectSource(voidFixture, voidHost, typeof(MegaCrit.Sts2.Core.Models.Cards.Void));
+		await PlayerCmd.GainEnergy(3, voidFixture.Player);
+		int energyBeforeVoid = voidFixture.Player.PlayerCombatState!.Energy;
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardDrawn(voidFixture.Combat, voidFixture.Choices, voidHost);
+		AssertSame(energyBeforeVoid - 1, voidFixture.Player.PlayerCombatState.Energy,
+			"Void: drawing the host did not lose Energy");
+
+		Fixture drumFixture = CreateFixture();
+		CardModel drumHost = CreateSourceCard(drumFixture);
+		GrantEffectSource(drumFixture, drumHost, typeof(MegaCrit.Sts2.Core.Models.Cards.DrumOfBattle));
+		await PutInPile(drumHost, PileType.Exhaust);
+		int energyBeforeDrum = drumFixture.Player.PlayerCombatState!.Energy;
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardExhausted(drumFixture.Combat, drumFixture.Choices, drumHost);
+		AssertSame(energyBeforeDrum + 2, drumFixture.Player.PlayerCombatState.Energy,
+			"DrumOfBattle: exhausting the host did not gain Energy");
+
+		Fixture midnightFixture = CreateFixture();
+		CardModel midnightHost = CreateCostlyHost(midnightFixture);
+		GrantEffectSource(midnightFixture, midnightHost, typeof(MegaCrit.Sts2.Core.Models.Cards.Midnight));
+		await PutInPile(midnightHost, PileType.Draw);
+		Assert(midnightFixture.Player.PlayerCombatState!.AllPiles.SelectMany(pile => pile.Cards).Contains(midnightHost),
+			"Midnight: host was not present in the combat pile snapshot");
+		Assert(CardEditorExtraEffects.CardHasRuntimeEffectKind(midnightHost, CardExtraEffectKind.RunEffectSourceCard),
+			"Midnight: host lost its Run Effect Source row before the exhaust event");
+		CardModel exhausted = CreateSourceCard(midnightFixture);
+		int midnightCost = midnightHost.EnergyCost.GetWithModifiers(CostModifiers.Local);
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardExhausted(midnightFixture.Combat, midnightFixture.Choices, exhausted);
+		AssertSame(midnightCost - 1, midnightHost.EnergyCost.GetWithModifiers(CostModifiers.Local),
+			"Midnight: another exhausted card did not reduce host cost");
+	}
+
+	private static async Task TestRunEffectSourceCardPlayAndPhaseHooks()
+	{
+		Fixture bansheeFixture = CreateFixture();
+		CardModel bansheeHost = CreateCostlyHost(bansheeFixture);
+		GrantEffectSource(bansheeFixture, bansheeHost, typeof(MegaCrit.Sts2.Core.Models.Cards.BansheesCry));
+		await PutInPile(bansheeHost, PileType.Draw);
+		CardModel ethereal = bansheeFixture.Combat.CreateCard(
+			ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.Apparition>(), bansheeFixture.Player);
+		int bansheeCost = bansheeHost.EnergyCost.GetWithModifiers(CostModifiers.Local);
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardPlayedLate(
+			bansheeFixture.Combat, bansheeFixture.Choices, CreateCardPlay(bansheeFixture, ethereal));
+		AssertSame(Math.Max(0, bansheeCost - 2), bansheeHost.EnergyCost.GetWithModifiers(CostModifiers.Local),
+			"BansheesCry: playing an Ethereal card did not reduce host cost");
+
+		Fixture pinpointFixture = CreateFixture();
+		CardModel pinpointHost = CreateCostlyHost(pinpointFixture);
+		GrantEffectSource(pinpointFixture, pinpointHost, typeof(MegaCrit.Sts2.Core.Models.Cards.Pinpoint));
+		await PutInPile(pinpointHost, PileType.Draw);
+		CardModel skill = pinpointFixture.Combat.CreateCard(
+			ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.DefendIronclad>(), pinpointFixture.Player);
+		int pinpointCost = pinpointHost.EnergyCost.GetWithModifiers(CostModifiers.Local);
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardPlayedLate(
+			pinpointFixture.Combat, pinpointFixture.Choices, CreateCardPlay(pinpointFixture, skill));
+		AssertSame(pinpointCost - 1, pinpointHost.EnergyCost.GetWithModifiers(CostModifiers.Local),
+			"Pinpoint: playing a Skill did not reduce host cost");
+
+		Fixture makeItSoFixture = CreateFixture();
+		CardModel makeItSoHost = CreateSourceCard(makeItSoFixture);
+		GrantEffectSource(makeItSoFixture, makeItSoHost, typeof(MegaCrit.Sts2.Core.Models.Cards.MakeItSo));
+		await PutInPile(makeItSoHost, PileType.Discard);
+		CardModel playedSkill = makeItSoFixture.Combat.CreateCard(
+			ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.DefendIronclad>(), makeItSoFixture.Player);
+		CardPlay thirdSkillPlay = CreateCardPlay(makeItSoFixture, playedSkill);
+		CombatManager.Instance.History.CardPlayFinished(makeItSoFixture.Combat, CreateCardPlay(makeItSoFixture, playedSkill));
+		CombatManager.Instance.History.CardPlayFinished(makeItSoFixture.Combat, CreateCardPlay(makeItSoFixture, playedSkill));
+		CombatManager.Instance.History.CardPlayFinished(makeItSoFixture.Combat, thirdSkillPlay);
+		await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardPlayedLate(
+			makeItSoFixture.Combat, makeItSoFixture.Choices, thirdSkillPlay);
+		AssertSame(PileType.Hand, makeItSoHost.Pile?.Type ?? PileType.None,
+			"MakeItSo: third Skill did not return the host to Hand");
+
+		Fixture howlFixture = CreateFixture();
+		CardModel howlHost = howlFixture.Combat.CreateCard(
+			ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.DefendIronclad>(), howlFixture.Player);
+		CardExtraEffect howlEffect = GrantEffectSource(howlFixture, howlHost, typeof(MegaCrit.Sts2.Core.Models.Cards.HowlFromBeyond));
+		Creature howlEnemy = howlFixture.Combat.Enemies.First();
+		int beforeHowl = howlEnemy.CurrentHp;
+		await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(
+			howlFixture.Combat, howlFixture.Choices, CreateCardPlay(howlFixture, howlHost), [howlEffect]);
+		Assert(howlEnemy.CurrentHp < beforeHowl, "HowlFromBeyond: borrowed OnPlay did not damage all enemies");
+		await PutInPile(howlHost, PileType.Exhaust);
+		Assert(CardEditorExtraEffects.ShouldAutoPlayBorrowedHowlFromBeyond(howlFixture.Player, howlHost),
+			"HowlFromBeyond: Exhaust-pile host was not eligible for auto-play");
 	}
 
 	private static async Task TestCopyDebuffs()

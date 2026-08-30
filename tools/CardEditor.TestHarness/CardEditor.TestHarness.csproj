@@ -9,6 +9,8 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Sts2GameDir Condition="'$(Sts2GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2\data_sts2_windows_x86_64</Sts2GameDir>
+    <Sts2BundledReferenceDir>$(MSBuildProjectDirectory)\..\..\mods\card_editor\build\net9.0</Sts2BundledReferenceDir>
+    <Sts2ReferenceDir Condition="'$(Sts2ReferenceDir)' == '' and Exists('$(Sts2BundledReferenceDir)\sts2.dll')">$(Sts2BundledReferenceDir)</Sts2ReferenceDir>
     <Sts2ReferenceDir Condition="'$(Sts2ReferenceDir)' == ''">$(Sts2GameDir)</Sts2ReferenceDir>
   </PropertyGroup>
   <ItemGroup>

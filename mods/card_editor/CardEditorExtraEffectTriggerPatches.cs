@@ -39,12 +39,11 @@ internal static class Hook_ModifyCardPlayResultLocation_CardEditorExtraEffects_P
 			return;
 		}
 
-		// Particle Wall changes only the normal Discard result. Preserve Exhaust, Power/dupe
-		// removal, and any earlier vanilla hook result exactly as the source card does.
-		if (__result.pileType == PileType.Discard
-			&& CardEditorExtraEffects.TryGetBorrowedEffectSourceResultPileOverride(card, out overridePile, out overridePosition))
+		// Borrowed source result behavior changes only the normal Discard result. Preserve
+		// Exhaust, Power/dupe removal, and any earlier vanilla hook result.
+		if (CardEditorExtraEffects.TryGetBorrowedEffectSourceResultLocationOverride(card, __result, out CardLocation borrowedLocation))
 		{
-			__result = new CardLocation(__result.player, overridePile, overridePosition);
+			__result = borrowedLocation;
 		}
 	}
 }
@@ -419,6 +418,14 @@ internal static class Hook_AfterCardEnteredCombat_CardEditorExtraEffects_Patch
 	private static async Task RunAfter(Task original, CombatState combatState, CardModel card)
 	{
 		await original;
+		try
+		{
+			await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardEnteredCombat(combatState, card);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Borrowed effect source combat-entry behavior failed: {ex}");
+		}
 
 		ulong? netId = LocalContext.NetId;
 		if (!netId.HasValue)
@@ -718,6 +725,7 @@ internal static class Hook_AfterCardDrawn_CardEditorExtraEffects_Patch
 		await original;
 		try
 		{
+			await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardDrawn(combatState, choiceContext, card);
 			await CardEditorExtraEffects.RunAfterCardDrawn(combatState, choiceContext, card);
 			await CardEditorQuestEffects.RecordCardDrawn(combatState, card);
 			CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, card.Owner?.Creature, CardExtraEffectCountEvent.Drawn);
@@ -822,6 +830,7 @@ internal static class Hook_AfterCardExhausted_CardEditorExtraEffects_Patch
 		await original;
 		try
 		{
+			await CardEditorExtraEffects.RunBorrowedEffectSourceAfterCardExhausted(combatState, choiceContext, card);
 			await CardEditorExtraEffects.RunAfterCardExhausted(combatState, choiceContext, card);
 			await CardEditorQuestEffects.RecordCardExhausted(combatState, card);
 			CardEditorExtraEffects.RefreshDynamicCardCostAdjustmentsForCountEvent(combatState, card.Owner?.Creature, CardExtraEffectCountEvent.Exhausted);

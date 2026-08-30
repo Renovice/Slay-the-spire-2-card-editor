@@ -1,5 +1,15 @@
 # Card Editor changelog
 
+## 10.1.4 - Run Effect Source lifecycle parity (2026-08-30)
+
+- Fixed borrowed result destinations for `Shining Strike` and multiplayer teammate transfer for `The Ball`.
+- Fixed borrowed draw behavior for `Kingly Kick`, `Kingly Punch`, and `Void`.
+- Fixed borrowed Exhaust behavior for `Drum of Battle` and `Midnight`.
+- Fixed borrowed card-play behavior for `Banshee's Cry`, `Pinpoint`, and `Make It So`.
+- Fixed `Howl From Beyond` hosts not auto-playing from the Exhaust Pile.
+- Preserved persistent borrowed source state so effects such as `Kingly Punch` retain their combat-long damage growth.
+- Expanded the beta regression suite to 18 scenarios and pinned it to the repository's tracked beta assemblies.
+
 ## 10.1.3 - Run Effect Source lifecycle fixes (2026-08-30)
 
 - Fixed `Run Effect Source -> Particle Wall` not returning the host card to Hand after a normal play.

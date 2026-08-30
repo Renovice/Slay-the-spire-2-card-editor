@@ -231,6 +231,23 @@ internal static class CardEditorCreatedCardEffectSourceSupport
 		return BuildEffectSourceCard(createdCard, effectSourceId, isUpgradePreview);
 	}
 
+	internal static IReadOnlyList<CardModel> GetPersistentVanillaEffectSourceCards(CardModel createdCard, ModelId effectSourceId)
+	{
+		if (createdCard == null || effectSourceId == null || effectSourceId == ModelId.none
+			|| !_runtimeVanillaEffectSourceStates.TryGetValue(createdCard, out Dictionary<string, RuntimeVanillaEffectSourceState>? states))
+		{
+			return Array.Empty<CardModel>();
+		}
+
+		CombatState? hostCombatState = createdCard.GetConcreteCombatState() ?? createdCard.TryGetOwnerCreature().GetConcreteCombatState();
+		return states.Values
+			.Where(state => state?.SourceCard != null
+				&& state.SourceCard.Id == effectSourceId
+				&& state.GetConcreteCombatState() == hostCombatState)
+			.Select(state => state.SourceCard)
+			.ToList();
+	}
+
 	internal static IReadOnlySet<CardKeyword> GetEffectSourceKeywords(CardModel createdCard, bool isUpgradePreview = false)
 	{
 		HashSet<CardKeyword> keywords = new HashSet<CardKeyword>();
