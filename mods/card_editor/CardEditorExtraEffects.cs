@@ -1762,6 +1762,17 @@ internal static class CardEditorExtraEffects
 			return CardExtraEffectPowerTriggerFrom.AnyEnemy;
 		}
 
+		// After Death is described as observing a creature death, but old and newly-created
+		// card-owner rows defaulted to Self. That made the effect wait for its player host to die,
+		// which is normally indistinguishable from never firing. Keep Self meaningful for powers
+		// deliberately attached to an enemy/target; only normalize the card-owner default.
+		if (effect.Trigger == CardExtraEffectTrigger.AfterDeath
+			&& GetEffectivePowerHost(effect) == CardExtraEffectPowerHost.CardOwner
+			&& effect.PowerTriggerFrom == CardExtraEffectPowerTriggerFrom.Self)
+		{
+			return CardExtraEffectPowerTriggerFrom.Anyone;
+		}
+
 		return effect.PowerTriggerFrom;
 	}
 
@@ -15257,6 +15268,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		active.Trigger = CardExtraEffectTrigger.OnPlay;
 		active.Timing = CardExtraEffectTiming.Immediate;
 		active.Turns = 1;
+		// The stored trigger may be routed through CardEditorExtraEffectPower. The grant created
+		// after it fires is the resulting passive cost modifier, not another power definition.
+		// Leaving AsPower set makes GetCardCostsLessAdjustment deliberately ignore the grant.
+		active.AsPower = false;
 		active.GrantToCard = false;
 		active.CardCostsLessMode = CardExtraEffectCardCostsLessMode.Passive;
 
@@ -33752,6 +33767,31 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 		return text + suffix;
 	}
 
+	private static bool ContainsLocalizedTemplate(string text, string renderedTemplate, string variableText)
+	{
+		if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(renderedTemplate) || string.IsNullOrEmpty(variableText))
+		{
+			return false;
+		}
+
+		int variableIndex = renderedTemplate.IndexOf(variableText, StringComparison.Ordinal);
+		if (variableIndex < 0)
+		{
+			return text.Contains(renderedTemplate, StringComparison.Ordinal);
+		}
+
+		string prefix = renderedTemplate[..variableIndex];
+		string suffix = renderedTemplate[(variableIndex + variableText.Length)..];
+		int prefixIndex = string.IsNullOrEmpty(prefix) ? 0 : text.IndexOf(prefix, StringComparison.Ordinal);
+		if (prefixIndex < 0)
+		{
+			return false;
+		}
+
+		return string.IsNullOrEmpty(suffix)
+			|| text.IndexOf(suffix, prefixIndex + prefix.Length, StringComparison.Ordinal) >= 0;
+	}
+
 	private static string BuildCostFilteredText(CardModel? card, string text, CardExtraEffect effect)
 	{
 		if (effect == null)
@@ -33769,16 +33809,22 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 				_ when effect.CostFilterMax == 0 => CardEditorLoc.F("cardText.costFilter.inline.zero", $"costing {maxCostText} only", ("Max", maxCostText)),
 				_ => CardEditorLoc.F("cardText.costFilter.inline.max", $"costing {maxCostText} or less", ("Max", maxCostText))
 			};
-			if (!(TryInlineCardQualifier(ref text, "cards", CardEditorLoc.F("cardText.costFilter.inline.cards", $"cards {qualifier}", ("Qualifier", qualifier)))
-				|| TryInlineCardQualifier(ref text, "card", CardEditorLoc.F("cardText.costFilter.inline.card", $"card {qualifier}", ("Qualifier", qualifier)))))
+			string note = effect.CostFilterMode switch
 			{
-				string note = effect.CostFilterMode switch
-				{
-					CardExtraEffectCostFilterMode.AtLeast => CardEditorLoc.F("cardText.costFilter.minOnly", $" (cost {maxCostText} or more)", ("Threshold", maxCostText)),
-					CardExtraEffectCostFilterMode.Exactly => CardEditorLoc.F("cardText.costFilter.exactOnly", $" (cost exactly {maxCostText})", ("Threshold", maxCostText)),
-					_ when effect.CostFilterMax == 0 => CardEditorLoc.F("cardText.costFilter.maxOnlyZeroSymbol", $" ({maxCostText} only)", ("Max", maxCostText)),
-					_ => CardEditorLoc.F("cardText.costFilter.maxOnly", $" (cost {maxCostText} or less)", ("Max", maxCostText))
-				};
+				CardExtraEffectCostFilterMode.AtLeast => CardEditorLoc.F("cardText.costFilter.minOnly", $" (cost {maxCostText} or more)", ("Threshold", maxCostText)),
+				CardExtraEffectCostFilterMode.Exactly => CardEditorLoc.F("cardText.costFilter.exactOnly", $" (cost exactly {maxCostText})", ("Threshold", maxCostText)),
+				_ when effect.CostFilterMax == 0 => CardEditorLoc.F("cardText.costFilter.maxOnlyZeroSymbol", $" ({maxCostText} only)", ("Max", maxCostText)),
+				_ => CardEditorLoc.F("cardText.costFilter.maxOnly", $" (cost {maxCostText} or less)", ("Max", maxCostText))
+			};
+			// BuildCardSelectionDescriptor formats without a card color, then its caller may format
+			// the completed line with the live card color. Compare the localized text around the
+			// energy icons so differently-colored icon markup is still recognized as the same filter.
+			bool alreadyApplied = ContainsLocalizedTemplate(text, qualifier, maxCostText)
+				|| ContainsLocalizedTemplate(text, note, maxCostText);
+			if (!alreadyApplied
+				&& !(TryInlineCardQualifier(ref text, "cards", CardEditorLoc.F("cardText.costFilter.inline.cards", $"cards {qualifier}", ("Qualifier", qualifier)))
+					|| TryInlineCardQualifier(ref text, "card", CardEditorLoc.F("cardText.costFilter.inline.card", $"card {qualifier}", ("Qualifier", qualifier)))))
+			{
 				if (text.EndsWith('.') && text.Length > 1)
 				{
 					text = text[..^1] + note + ".";
@@ -33794,6 +33840,10 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 		if (effect.NameFilterEnabled && nameFilter != null)
 		{
 			string note = CardEditorLoc.F("cardText.nameFilter.note", $" (name contains \"{nameFilter}\")", ("Text", nameFilter));
+			if (text.Contains(note, StringComparison.Ordinal))
+			{
+				return text;
+			}
 			if (text.EndsWith('.') && text.Length > 1)
 			{
 				text = text[..^1] + note + ".";

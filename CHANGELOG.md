@@ -1,5 +1,12 @@
 # Card Editor changelog
 
+## 10.1.2 - Whenever, After Death, and Match Energy fixes (2026-08-30)
+
+- Fixed `Reduce Cost -> This Card -> Whenever (Event)` power triggers creating an ignored power-tagged grant instead of an active passive cost reduction.
+- Fixed card-owner `Resources -> After Death` powers defaulting to the owner's death while their generated text promised any creature death.
+- Fixed card-selection energy-cost qualifiers being rendered twice with differently-colored energy icons.
+- Expanded the headless beta suite to 14 scenarios, including every supported Whenever event and generated rules text.
+
 ## 10.1.1 - Result Pile destination fix (2026-08-30)
 
 - Fixed `Card Action -> Result Pile` saving every selected destination as Hand for both base and upgraded card edits.

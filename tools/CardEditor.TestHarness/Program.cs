@@ -68,12 +68,13 @@ internal static class Program
 			new("Transform cards: type filter", TestTransformByType),
 			new("Transform cards: vanilla tag filter", TestTransformByTag),
 			new("Reduce Cost -> This Card -> all public Whenever dispatches", TestTriggeredThisCardCostReduction),
+			new("Reduce Cost -> This Card -> installed Whenever event power", TestTriggeredThisCardCostReductionWheneverPower),
 			new("Resources -> After Death -> player/enemy power hosts", TestAfterDeathPowerTrigger),
 			new("Copy Debuffs: selected source to another enemy", TestCopyDebuffs),
 			new("Grant -> Hits All Enemies safety block", TestHitsAllGrantIsBlocked),
 			new("Multiplayer client Ready reaches vanilla network dispatch", TestMultiplayerClientReady),
 			new("UI source contract: Result Pile saves selected destination", TestResultPileDestinationIsSerialized),
-			new("UI source contract: Match Energy is defined once", TestMatchEnergyDefinitionIsUnique),
+			new("Generated text: Match Energy qualifier appears once", TestMatchEnergyQualifierIsUnique),
 			new("UI source contract: card description uses auto-size", TestCardDescriptionUsesAutoSize)
 		];
 
@@ -463,6 +464,46 @@ internal static class Program
 			CardExtraEffectTurnBoundarySide.YourTurn);
 	}
 
+	private static async Task TestTriggeredThisCardCostReductionWheneverPower()
+	{
+		foreach (CardExtraEffectCountEvent countEvent in CardEditorExtraEffects.PowerTriggerCountEvents)
+		{
+			Fixture fixture = CreateFixture();
+			CardModel source = CreateSourceCard(fixture);
+			CardExtraEffect effect = ImmediateOnPlay(CardExtraEffectKind.CardCostsLess);
+			effect.Trigger = CardExtraEffectTrigger.OnCountEvent;
+			effect.PowerTriggerCountEvent = countEvent;
+			effect.AsPower = true;
+			effect.CardCostsLessMode = CardExtraEffectCardCostsLessMode.Triggered;
+			effect.CardCostsLessDuration = CardExtraEffectCardCostsLessDuration.ThisCombat;
+			effect.CardCostsLessModifier = CardExtraEffectCostModifier.Reduce;
+			CardEditorTemporaryExtraEffectController.Grant(
+				fixture.Combat, source, effect, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
+
+			await CardEditorExtraEffects.RunAfterCardPlayed(
+				fixture.Combat, fixture.Choices, CreateCardPlay(fixture, source));
+			CardEditorExtraEffectPower? power = fixture.Player.Creature.GetPower<CardEditorExtraEffectPower>();
+			Assert(power != null, $"{countEvent}: playing the source card did not install the Whenever power");
+
+			PowerModel? triggeringPower = null;
+			if (countEvent is CardExtraEffectCountEvent.StatusGained or CardExtraEffectCountEvent.StatusLost)
+			{
+				triggeringPower = await GamePowerCmd.Apply<WeakPower>(
+					fixture.Choices, fixture.Player.Creature, 1, fixture.Player.Creature, source, silent: true);
+			}
+
+			AssertSame(0, CardEditorExtraEffects.GetCardCostsLessReduction(fixture.Combat, source), $"{countEvent}: reduction activated before its Whenever event");
+			await power!.TriggerCountEvent(
+				fixture.Choices,
+				countEvent,
+				triggeringCard: source,
+				triggeringPower: triggeringPower,
+				eventActor: fixture.Player.Creature,
+				amount: 1);
+			AssertSame(1, CardEditorExtraEffects.GetCardCostsLessReduction(fixture.Combat, source), $"{countEvent}: installed Whenever power did not reduce this card's cost");
+		}
+	}
+
 	private static async Task TestAfterDeathPowerTrigger()
 	{
 		Fixture fixture = CreateFixture();
@@ -471,8 +512,12 @@ internal static class Program
 		CardExtraEffect effect = ImmediateOnPlay(CardExtraEffectKind.GainEnergy);
 		effect.Trigger = CardExtraEffectTrigger.AfterDeath;
 		effect.AsPower = true;
-		effect.PowerTriggerFrom = CardExtraEffectPowerTriggerFrom.AnyEnemy;
+		// Reproduce the editor's default: card-owner power + Self. Runtime normalization must
+		// make the generated "sees a creature die" behavior match what the player configured.
+		effect.PowerTriggerFrom = CardExtraEffectPowerTriggerFrom.Self;
 		effect.PowerTargeting = CardExtraEffectPowerTargeting.TriggerTarget;
+		AssertSame(CardExtraEffectPowerTriggerFrom.Anyone, CardEditorExtraEffects.GetEffectivePowerTriggerFrom(effect),
+			"card-owner After Death default did not normalize to watching creature deaths");
 		CardEditorTemporaryExtraEffectController.Grant(
 			fixture.Combat, source, effect, CardExtraEffectCardGrantDuration.ThisCombat, turns: 1);
 
@@ -657,11 +702,21 @@ internal static class Program
 		public void LocalPlayerDisconnected(NetErrorInfo info) { }
 	}
 
-	private static Task TestMatchEnergyDefinitionIsUnique()
+	private static Task TestMatchEnergyQualifierIsUnique()
 	{
-		string root = FindRepoRoot();
-		string popupSource = File.ReadAllText(Path.Combine(root, "mods", "card_editor", "NCardEditorPopup.cs"));
-		AssertSame(1, CountOccurrences(popupSource, "cardCostsLess.kind.matchingCardsEnergy"), "editor popup registers Match Energy more than once");
+		Fixture fixture = CreateFixture();
+		CardModel source = CreateSourceCard(fixture);
+		CardExtraEffect move = ImmediateOnPlay(CardExtraEffectKind.MoveCardsBetweenPiles, amount: 2);
+		move.CardSelectionPile = CardExtraEffectCardPile.DrawPile;
+		move.MoveToPile = CardExtraEffectCardPile.Hand;
+		move.CardSelectionMode = CardExtraEffectCardSelectionMode.Random;
+		move.CostFilterEnabled = true;
+		move.CostFilterMode = CardExtraEffectCostFilterMode.Exactly;
+		move.CostFilterMax = 3;
+
+		Assert(CardEditorExtraEffects.TryFormatLineForAudit(source, move, out string? description),
+			"Match Energy effect did not generate description text");
+		AssertSame(1, CountOccurrences(description!, "costing exactly"), "Match Energy qualifier was rendered more than once");
 		return Task.CompletedTask;
 	}
 

@@ -8,7 +8,7 @@ folder.
 ```powershell
 dotnet run --project .\tools\SteamWorkshopUploader\SteamWorkshopUploader.csproj -- `
   ".\built cfiles" `
-  "Version 10.1.1: fixed Card Action -> Result Pile always resolving to Hand."
+  "Version 10.1.2: fixed This Card Whenever cost reductions, After Death resources, and duplicate Match Energy text."
 ```
 
 The tool reports success only after the `SubmitItemUpdateResult_t` callback returns
