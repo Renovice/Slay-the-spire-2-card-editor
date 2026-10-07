@@ -57,7 +57,7 @@ internal static class CardEditorExtraEffectScheduler
 			return;
 		}
 
-		CardExtraEffect scheduledEffect = CardEditorExtraEffects.CloneForDeferredExecution(sourcePlay, effect);
+		CardExtraEffect scheduledEffect = CardEditorExtraEffects.CloneForNonCardExecution(sourcePlay, effect);
 		if (scheduledEffect.Timing == CardExtraEffectTiming.Immediate
 			|| scheduledEffect.Turns < 0
 			|| !CardEditorExtraEffects.IsValidEffectAmount(scheduledEffect.Kind, scheduledEffect.Amount)

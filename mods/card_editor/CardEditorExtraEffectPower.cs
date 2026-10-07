@@ -115,7 +115,7 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 		try
 		{
 			return Entries.Any(e => e?.Effect != null
-				&& e.Effect.Amount > 0
+				&& CardEditorExtraEffects.IsValidEffectAmount(e.Effect.Kind, e.Effect.Amount)
 				&& !e.Effect.GrantToCard
 				&& e.Effect.AsPower
 				&& e.Effect.Trigger == CardExtraEffectTrigger.OnPlay
@@ -147,7 +147,8 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			normalizedEffect = CardEditorExtraEffects.NormalizeSelfPileAutoEffect(normalizedEffect) ?? normalizedEffect;
 			if (normalizedEffect == null
 				|| !normalizedEffect.AsPower
-				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind))
+				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind)
+				|| normalizedEffect.Trigger == CardExtraEffectTrigger.WhilePowerActive)
 			{
 				continue;
 			}
@@ -217,12 +218,13 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			normalizedEffect = CardEditorExtraEffects.NormalizeSelfPileAutoEffect(normalizedEffect) ?? normalizedEffect;
 			if (normalizedEffect == null
 				|| !normalizedEffect.AsPower
-				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind))
+				|| !CardEditorExtraEffects.SupportsAsPower(normalizedEffect.Kind)
+				|| normalizedEffect.Trigger == CardExtraEffectTrigger.WhilePowerActive)
 			{
 				continue;
 			}
 
-			CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(normalizedEffect);
+			CardExtraEffect stored = CardEditorExtraEffects.CloneForPowerExecution(sourcePlay: null, normalizedEffect);
 			if (!CardEditorExtraEffects.IsValidEffectAmount(stored.Kind, stored.Amount) || stored.RepeatCount < 0)
 			{
 				continue;
@@ -1510,9 +1512,11 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 			}
 
 			Creature? owner = Owner;
-			// AfterDeath must also run for enemy-hosted powers (Effect Host = Trigger Target / Effect Targets,
-			// e.g. Corpse Explosion); vanilla fires Hook.AfterDeath before removing the dying host's powers.
-			bool allowEnemyOwned = trigger is CardExtraEffectTrigger.AfterAttack or CardExtraEffectTrigger.AfterDeath;
+			// Receiver/death triggers must also run for enemy-hosted powers (Effect Host = Trigger
+			// Target / Effect Targets). Vanilla dispatches these hooks while the host power still exists.
+			bool allowEnemyOwned = trigger is CardExtraEffectTrigger.AfterAttack
+				or CardExtraEffectTrigger.BearerHitByAttack
+				or CardExtraEffectTrigger.AfterDeath;
 			if (owner == null || (!owner.IsPlayer && !allowEnemyOwned))
 			{
 				return;
@@ -1680,6 +1684,16 @@ internal sealed class CardEditorExtraEffectPower : PowerModel
 					command.ModelSource as CardModel,
 					command.Attacker,
 					attackTarget);
+				if (attackResults.Any(result => result != null && ReferenceEquals(result.Receiver, owner)))
+				{
+					// Receiver identity, not HP loss, defines a hit. A fully blocked powered attack must
+					// still satisfy Thorns-style "when bearer is hit" behavior.
+					await RunLifecycleTrigger(
+						choiceContext,
+						CardExtraEffectTrigger.BearerHitByAttack,
+						eventActor: owner,
+						target: owner);
+				}
 			}
 
 			Player? ownerPlayer = owner.Player;

@@ -86,32 +86,36 @@ internal static class Hook_AfterEnergySpent_CardEditorPowerCountEvent_Patch
 	}
 }
 
-[HarmonyPatch(typeof(CardModel), "SpendStars", new[] { typeof(int) })]
-internal static class CardModel_SpendStars_CardEditorPowerCountEvent_Patch
+[HarmonyPatch(typeof(Hook), nameof(Hook.AfterStarsSpent))]
+internal static class Hook_AfterStarsSpent_CardEditorPowerCountEvent_Patch
 {
-	public static void Postfix(CardModel __instance, int amount, ref Task __result)
+	public static void Postfix(ICombatState combatState, int amount, Player spender, ref Task __result)
 	{
-		Creature? spenderCreature = __instance?.TryGetOwnerCreature();
-		if (__result == null || __instance == null || spenderCreature == null)
+		Creature? spenderCreature = spender?.Creature;
+		if (__result == null || combatState is not CombatState state || spenderCreature == null)
 		{
 			return;
 		}
 
-		__result = TrackAfter(__result, __instance, spenderCreature, amount);
+		__result = TrackAfter(__result, state, spenderCreature, amount);
 	}
 
-	private static async Task TrackAfter(Task original, CardModel card, Creature creature, int amount)
+	private static async Task TrackAfter(Task original, CombatState combatState, Creature creature, int amount)
 	{
 		await original;
 		try
 		{
 			int delta = Math.Max(0, amount);
-			CombatState? state = creature.GetConcreteCombatState();
-			if (delta > 0 && state != null)
+			if (delta > 0)
 			{
-				CardEditorExtraEffects.RecordResourceCount(state, creature, CardExtraEffectCountEvent.StarsSpent, delta);
-				CardEditorExtraEffects.TriggerPowerCountEvent(state, creature, CardExtraEffectCountEvent.StarsSpent, triggeringCard: card, amount: delta);
-				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.StarsSpent, delta, state);
+				CardEditorExtraEffects.RecordResourceCount(combatState, creature, CardExtraEffectCountEvent.StarsSpent, delta);
+				await CardEditorExtraEffects.TriggerPowerCountEventAsync(
+					combatState,
+					creature,
+					CardExtraEffectCountEvent.StarsSpent,
+					triggeringCard: null,
+					amount: delta);
+				await CardEditorQuestEffects.RecordRunProgress(creature, CardExtraEffectCountEvent.StarsSpent, delta, combatState);
 			}
 		}
 		catch (Exception ex)

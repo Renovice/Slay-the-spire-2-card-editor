@@ -424,6 +424,52 @@ internal static class CardEditorTemporaryExtraEffectController
 		CardEditorRuntimeCacheVersion.Bump();
 	}
 
+	public static bool RemoveCustomKeyword(CombatState combatState, CardModel card, string keywordName)
+	{
+		if (combatState == null || card == null || string.IsNullOrWhiteSpace(keywordName)
+			|| !_schedules.TryGetValue(combatState, out CombatSchedule? schedule))
+		{
+			return false;
+		}
+
+		CardModel key = ResolveScheduleKey(card);
+		if (!schedule.States.TryGetValue(key, out CardState? state))
+		{
+			return false;
+		}
+
+		string normalized = keywordName.Trim();
+		bool removed = false;
+		for (int i = state.Grants.Count - 1; i >= 0; i--)
+		{
+			CardExtraEffect? effect = state.Grants[i]?.Effect;
+			if (effect == null || !string.Equals(effect.CustomKeywordName?.Trim(), normalized, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			state.Grants.RemoveAt(i);
+			state.Effects.RemoveAt(i);
+			removed = true;
+		}
+
+		if (!removed)
+		{
+			return false;
+		}
+
+		if (state.Grants.Count == 0)
+		{
+			schedule.States.Remove(key);
+			if (schedule.States.Count == 0)
+			{
+				_schedules.Remove(combatState);
+			}
+		}
+		CardEditorRuntimeCacheVersion.Bump();
+		return true;
+	}
+
 	public static void Clear(CombatState combatState)
 	{
 		if (combatState == null)

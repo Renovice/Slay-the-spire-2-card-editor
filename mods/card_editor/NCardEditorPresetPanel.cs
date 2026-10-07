@@ -1181,11 +1181,27 @@ public partial class NCardEditorPresetPanel : PanelContainer
 		}
 	}
 
-	private void OnVanillaPressed()
+	private async void OnVanillaPressed()
 	{
 		if (!CardEditorMultiplayerSync.CanEditSharedState())
 		{
 			Log.Info($"[CardEditor][MultiplayerSync] Revert-to-vanilla blocked: {CardEditorMultiplayerSync.GetSharedStateLockReason()}");
+			return;
+		}
+
+		string resetTarget = _isRelicHost
+			? "all relic changes"
+			: _isCreatorMode
+				? "all created cards to their defaults"
+				: "all card and base deck changes";
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Reset requested for {resetTarget}");
+		bool confirmed = await CardEditorConfirmPopup.ShowConfirmation(
+			"Reset Editor Data?",
+			$"Reset {resetTarget}?\n\nThis cannot be undone.");
+		CardEditorMod.VerboseLog($"[CardEditor][ConfirmPopup] Reset confirmation result={confirmed} target='{resetTarget}'");
+		if (!confirmed)
+		{
+			Log.Info($"[CardEditor] Reset cancelled for {resetTarget}");
 			return;
 		}
 

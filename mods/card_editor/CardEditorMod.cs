@@ -1810,6 +1810,7 @@ public static class MainMenu_Ready_Patch
 
 	public static void Postfix(NMainMenu __instance)
 	{
+		CardEditorEngineSelfTest.TryAttach(__instance);
 		TryAddEditorButton(__instance);
 		TryAddCreatorButton(__instance);
 		TryAddRelicButton(__instance);

@@ -1,5 +1,17 @@
 # Card Editor changelog
 
+## 10.1.5 - Vanilla parity and authoring fixes (2026-09-19)
+
+- Fixed `Vanilla: Damage > Source Effect` to read the actual per-target vanilla damage results, including AOE changes such as Vigor, Vulnerable, Block, overkill, and kills.
+- Made Conditional Auto-Play, Auto-Draw, and Auto-Run grantable, including safe transfer of Auto-Run payload rows.
+- Added Card Editor custom keywords to `Card Action -> Grant Keyword` and transfer their behavior package when granted.
+- Kept delayed power, scheduler, countdown, recurring quest, and relic payload damage/Block independent of later Strength/Dexterity changes, matching vanilla power behavior.
+- Added `While Power Active` Strength, Dexterity, and Focus modifiers for custom statuses, including stack changes and full restoration on removal.
+- Unified and audited Selected Row publisher/consumer capabilities so runtime-supported card selections are also authorable in the UI.
+- Fixed nearby current-turn ownership, amountless targeting, Stars Spent hook, and indirect enemy-death trigger parity gaps.
+
+> Testing note: all 40 automated beta-model tests and the real Godot UI/description suite pass. Some live-combat, multiplayer, cleanse/Artifact, and mod-interaction combinations may still be bugged; please report the exact card/effect/preset and attach the game log.
+
 ## 10.1.4 - Run Effect Source lifecycle parity (2026-08-30)
 
 - Fixed borrowed result destinations for `Shining Strike` and multiplayer teammate transfer for `The Ball`.

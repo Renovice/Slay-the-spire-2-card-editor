@@ -195,9 +195,10 @@ internal static class CardEditorRelicEffects
 				PlayCount = 1
 			};
 
+			CardExtraEffect runnable = CardEditorExtraEffects.CloneForNonCardExecution(play, effect);
 			using IDisposable _ = CardEditorEffectSourceContext.PushScoped(proxy);
 			using IDisposable __ = CardEditorPowerExecutionHostContext.PushScoped(ownerCreature);
-			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, effect, 1);
+			await CardEditorExtraEffects.ExecuteEffect(combatState, choiceContext, play, runnable, 1);
 		}
 		catch (Exception ex)
 		{
@@ -556,13 +557,16 @@ internal static class Hook_AfterDeath_CardEditorRelicEffects_Patch
 {
 	public static void Postfix(ICombatState? combatState, Creature creature, ref Task __result)
 	{
-		// "When you kill an enemy": fire for all players when a non-player creature dies.
 		if (__result == null || creature == null || creature.IsPlayer || combatState is not CombatState cs || !CardEditorRelicOverrides.HasAnyOverrides) return;
+		Task wrapped = CardEditorRelicEffects.Wrap(__result, cs, RelicTriggerKind.OnEnemyDied);
 		// Attribute the kill to the player whose lethal hit was captured in AfterDamageGiven; unattributed
 		// deaths (poison/scripted/another enemy) no longer fire, and only the killer's player fires (not all).
 		Creature? killer = CardEditorRelicEffects.ConsumeLethalDealer(creature);
-		if (killer?.Player == null) return;
-		__result = CardEditorRelicEffects.WrapForTarget(__result, cs, killer, RelicTriggerKind.OnEnemyKilled);
+		if (killer?.Player != null)
+		{
+			wrapped = CardEditorRelicEffects.WrapForTarget(wrapped, cs, killer, RelicTriggerKind.OnEnemyKilled);
+		}
+		__result = wrapped;
 	}
 }
 

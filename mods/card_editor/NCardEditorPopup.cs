@@ -13,6 +13,7 @@ using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
@@ -178,6 +179,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 	private Control? _definitionEditorOverlay;
 	private Control? _definitionBehaviorEditorOverlay;
 	private Action? _definitionBehaviorEditorCancel;
+	private bool _definitionBehaviorAllowsPassivePowerModifiers;
 	private Label? _cardNameLabel;
 	private OptionButton _cardTypeSelect = null!;
 	private OptionButton? _targetTypeSelect;
@@ -5154,6 +5156,7 @@ public partial class NCardEditorPopup : Control, IScreenContext
 
 		public Control GrantedKeywordRow { get; init; } = null!;
 		public OptionButton GrantedKeywordSelect { get; init; } = null!;
+		public List<string?> GrantedKeywordCustomNames { get; init; } = new();
 		public KeywordTickbox? GrantedKeywordRemoveTickbox { get; init; }
 
 		public Control MultiplyStatRow { get; init; } = null!;
@@ -13131,7 +13134,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool initialAsPower = effect?.AsPower ?? false;
 		foreach (CardExtraEffectTrigger trigger in Enum.GetValues<CardExtraEffectTrigger>())
 		{
-			if (IsHiddenUnifiedTurnBoundaryTrigger(trigger))
+			if (IsHiddenUnifiedTurnBoundaryTrigger(trigger)
+				|| trigger == CardExtraEffectTrigger.WhilePowerActive)
 			{
 				continue;
 			}
@@ -17365,26 +17369,66 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		StyleInput(grantedKeywordSelect);
 		ConstrainOptionButtonPopup(grantedKeywordSelect);
 		grantedKeywordSelect.TooltipText = CardEditorLoc.T("tooltip.grantedKeyword", "Choose which keyword to grant to the selected cards.");
+		List<string?> grantedKeywordCustomNames = new List<string?>();
 		foreach (CardKeyword kw in Enum.GetValues<CardKeyword>())
 		{
 			if (kw == CardKeyword.None) continue;
 			grantedKeywordSelect.AddItem(CardEditorExtraEffects.GrantedKeywordLabel(kw), (int)kw);
+			grantedKeywordCustomNames.Add(null);
 		}
-		CardKeyword initialGrantedKeyword = effect?.GrantedKeyword ?? CardKeyword.Exhaust;
-		int grantedKeywordId = (int)initialGrantedKeyword;
-		int grantedKeywordIdx = grantedKeywordSelect.GetItemIndex(grantedKeywordId);
+		try
+		{
+			foreach (CardEditorCustomKeywordLibraryEntry entry in CardEditorCustomKeywordLibrary.BuildEntries())
+			{
+				string name = entry.KeywordName?.Trim() ?? string.Empty;
+				if (string.IsNullOrWhiteSpace(name)
+					|| grantedKeywordCustomNames.Any(existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase)))
+				{
+					continue;
+				}
+				grantedKeywordSelect.AddItem(CardEditorLoc.F("grantedKeyword.custom", $"Custom: {name}", ("Keyword", name)), -1000 - grantedKeywordCustomNames.Count);
+				grantedKeywordCustomNames.Add(name);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Failed to populate custom keyword grants: {ex.Message}");
+		}
+		string? initialCustomKeyword = effect?.Kind == CardExtraEffectKind.GrantKeywordToPile
+			? CardEditorPhraseComposer.NormalizeCustomName(effect.CustomKeywordName)
+			: null;
+		int grantedKeywordIdx = initialCustomKeyword == null
+			? grantedKeywordSelect.GetItemIndex((int)(effect?.GrantedKeyword ?? CardKeyword.Exhaust))
+			: grantedKeywordCustomNames.FindIndex(name => string.Equals(name, initialCustomKeyword, StringComparison.OrdinalIgnoreCase));
 		if (grantedKeywordIdx < 0) grantedKeywordIdx = 0;
 		grantedKeywordSelect.Select(grantedKeywordIdx);
-		grantedKeywordSelect.ItemSelected += _ => QueuePreviewUpdate();
 
 		Control grantedKeywordRemoveVisuals = InstantiateTickboxVisuals();
 		Label grantedKeywordRemoveLabel = new Label { Text = CardEditorLoc.T("grantedKeyword.removeMode", "Remove instead") };
 		StyleBodyLabel(grantedKeywordRemoveLabel);
-		KeywordTickbox grantedKeywordRemoveTickbox = new KeywordTickbox(grantedKeywordRemoveVisuals, grantedKeywordRemoveLabel, effect?.GrantedKeywordRemove == true)
+		KeywordTickbox grantedKeywordRemoveTickbox = new KeywordTickbox(grantedKeywordRemoveVisuals, grantedKeywordRemoveLabel, initialCustomKeyword == null && effect?.GrantedKeywordRemove == true)
 		{
 			TooltipText = CardEditorLoc.T("tooltip.grantedKeywordRemove", "Remove the keyword from the selected cards instead of granting it. Removal lasts the rest of the combat, so the grant duration does not apply.")
 		};
 		grantedKeywordRemoveTickbox.Toggled += () => QueuePreviewUpdate();
+		void RefreshGrantedKeywordMode()
+		{
+			int index = grantedKeywordSelect.Selected;
+			bool custom = index >= 0
+				&& index < grantedKeywordCustomNames.Count
+				&& !string.IsNullOrWhiteSpace(grantedKeywordCustomNames[index]);
+			grantedKeywordRemoveTickbox.Visible = !custom;
+			if (custom)
+			{
+				grantedKeywordRemoveTickbox.SetTickedSilent(false);
+			}
+		}
+		grantedKeywordSelect.ItemSelected += _ =>
+		{
+			RefreshGrantedKeywordMode();
+			QueuePreviewUpdate();
+		};
+		RefreshGrantedKeywordMode();
 
 		grantedKeywordRow.AddChild(grantedKeywordLabel);
 		grantedKeywordRow.AddChild(grantedKeywordSelect);
@@ -20322,7 +20366,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = _amountFieldMinSize,
 			Alignment = HorizontalAlignment.Center
 		};
-		triggerMaxFiresField.TooltipText = CardEditorLoc.T("tooltip.triggerMaxFires", "Maximum number of times this effect can trigger before it expires. For Power effects, 0 = unlimited. For non-Power Turn Boundary effects, 0 = once.");
+		triggerMaxFiresField.TooltipText = CardEditorLoc.T("tooltip.triggerMaxFires", "Maximum number of times this Card Editor trigger can run before its listener expires. Effects it already applied, such as Strength or a status, are not reversed. For Power effects, 0 = unlimited. For non-Power Turn Boundary effects, 0 = once.");
 		StyleInput(triggerMaxFiresField);
 		triggerMaxFiresField.TextChanged += _ => QueuePreviewUpdate();
 
@@ -20337,7 +20381,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CustomMinimumSize = _amountFieldMinSize,
 			Alignment = HorizontalAlignment.Center
 		};
-		triggerMaxTurnsField.TooltipText = CardEditorLoc.T("tooltip.triggerMaxTurns", "Power mode only: maximum number of your turns this passive trigger lasts. 0 = unlimited. If both Uses and Power Turns are set, whichever limit is reached first expires it.");
+		triggerMaxTurnsField.TooltipText = CardEditorLoc.T("tooltip.triggerMaxTurns", "Power mode only: maximum number of your turns this Card Editor listener lasts. Expiry stops future triggers but does not reverse effects already applied, such as Strength or a status. 0 = unlimited. If both Uses and Power Turns are set, whichever limit is reached first expires it.");
 		StyleInput(triggerMaxTurnsField);
 		triggerMaxTurnsField.TextChanged += _ => QueuePreviewUpdate();
 
@@ -20430,7 +20474,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		ConstrainOptionButtonPopup(powerStackModeSelect);
 		powerStackModeSelect.TooltipText = CardEditorLoc.T(
 			"tooltip.powerStackMode",
-			"Merge matching power effects into one stacked entry, or keep each application as a separate power entry.");
+			"Merge keeps matching applications in one listener and combines their remaining turn/use limits; each stack still contributes one activation's potency. Separate keeps each application as its own listener.");
 		foreach (CardExtraEffectPowerStackMode mode in Enum.GetValues<CardExtraEffectPowerStackMode>())
 		{
 			powerStackModeSelect.AddItem(CardEditorExtraEffects.PowerStackModeLabel(mode), (int)mode);
@@ -21125,6 +21169,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			CreatureCommandSelect = creatureCommandSelect,
 			GrantedKeywordRow = grantedKeywordRow,
 			GrantedKeywordSelect = grantedKeywordSelect,
+			GrantedKeywordCustomNames = grantedKeywordCustomNames,
 			GrantedKeywordRemoveTickbox = grantedKeywordRemoveTickbox,
 			MultiplyStatRow = multiplyStatRow,
 			MultiplyStatSelect = multiplyStatSelect,
@@ -22989,9 +23034,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				if (sourceRow != null)
 				{
 					CardExtraEffectKind sourceKind = GetCurrentResolvedExtraEffectKind(sourceRow);
-					bool sourcePublishes = CardEditorEffectKindRegistry.Has(sourceKind, EffectCaps.PublishesCardsUi)
-						|| CardEditorEffectKindRegistry.Has(sourceKind, EffectCaps.PublishesCardsRuntime);
-					if (sourcePublishes && CardEditorEffectKindRegistry.Has(pickedDef.Kind, EffectCaps.ConsumesCards))
+					bool sourcePublishes = CardEditorEffectKindRegistry.CanPublishCards(sourceKind);
+					if (sourcePublishes && CardEditorEffectKindRegistry.CanConsumeCards(pickedDef.Kind))
 					{
 						seed.CardSelectionMode = CardExtraEffectCardSelectionMode.SelectedByEffect;
 						seed.CardSelectionSourceEffectId = sourceEffectId;
@@ -24152,8 +24196,19 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			return;
 		}
 
-		bool supportsAmountSource = CardEditorExtraEffects.SupportsAppliedEffectRowAmountSource(kind)
-			|| CardEditorExtraEffects.SupportsValueSourceAmountSource(kind);
+		bool isWhilePowerActive = GetSelectedTrigger(row) == CardExtraEffectTrigger.WhilePowerActive;
+		if (isWhilePowerActive)
+		{
+			row.AmountXTickbox?.SetTickedSilent(false);
+			if (row.AmountSourceModeSelect != null && GodotObject.IsInstanceValid(row.AmountSourceModeSelect))
+			{
+				SelectOptionButtonById(row.AmountSourceModeSelect, (int)CardExtraEffectAmountSourceMode.Fixed);
+			}
+		}
+
+		bool supportsAmountSource = !isWhilePowerActive
+			&& (CardEditorExtraEffects.SupportsAppliedEffectRowAmountSource(kind)
+				|| CardEditorExtraEffects.SupportsValueSourceAmountSource(kind));
 		if (row.AmountSourceModeRow != null && GodotObject.IsInstanceValid(row.AmountSourceModeRow))
 		{
 			row.AmountSourceModeRow.Visible = supportsAmountSource;
@@ -25189,11 +25244,19 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		select.AddItem(CardEditorLoc.T("amountSource.target.none", "Select Amount Source"), -1);
 
 		CardExtraEffectAmountSourceMode sourceMode = GetSelectedAmountSourceMode(targetRow);
-		if (sourceMode == CardExtraEffectAmountSourceMode.AppliedEffectRow && _previewCard?.DynamicVars != null)
+		bool usesVanillaDamageResults = sourceMode is CardExtraEffectAmountSourceMode.AppliedEffectHpDamage
+			or CardExtraEffectAmountSourceMode.AppliedEffectBlockedDamage
+			or CardExtraEffectAmountSourceMode.AppliedEffectTotalDamage
+			or CardExtraEffectAmountSourceMode.AppliedEffectOverkillDamage
+			or CardExtraEffectAmountSourceMode.AppliedEffectTotalAndOverkillDamage
+			or CardExtraEffectAmountSourceMode.AppliedEffectInstances
+			or CardExtraEffectAmountSourceMode.AppliedEffectKills;
+		if ((sourceMode == CardExtraEffectAmountSourceMode.AppliedEffectRow || usesVanillaDamageResults)
+			&& _previewCard?.DynamicVars != null)
 		{
 			foreach ((string key, var dynamicVar) in _previewCard.DynamicVars)
 			{
-				if (string.IsNullOrWhiteSpace(key))
+				if (string.IsNullOrWhiteSpace(key) || (usesVanillaDamageResults && dynamicVar is not DamageVar))
 				{
 					continue;
 				}
@@ -25307,8 +25370,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		// missed - card GENERATORS (add random/specific/copy, play generated, choose-one, linked
 		// action), self-scaling recipients, and the draw variants - so "create X, then act on X"
 		// can finally be wired directly in the editor.
-		return CardEditorEffectKindRegistry.Has(kind, EffectCaps.PublishesCardsUi)
-			|| CardEditorEffectKindRegistry.Has(kind, EffectCaps.PublishesCardsRuntime);
+		return CardEditorEffectKindRegistry.CanPublishCards(kind);
 	}
 
 	private void RefreshCountResultOptions(ExtraEffectRow targetRow, bool branch)
@@ -26226,6 +26288,26 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		bool supportsAsPower = !_isEmbeddedEffectHost && CardEditorExtraEffects.SupportsAsPower(kind) && trigger != CardExtraEffectTrigger.Fatal;
 		row.PowerTickbox.Visible = supportsAsPower;
 		bool asPower = supportsAsPower && row.PowerTickbox.IsTicked;
+		bool supportsWhilePowerActive = _definitionBehaviorAllowsPassivePowerModifiers
+			&& CardEditorExtraEffects.SupportsWhilePowerActive(kind);
+		if (trigger == CardExtraEffectTrigger.WhilePowerActive)
+		{
+			if (supportsAsPower && supportsWhilePowerActive)
+			{
+				row.PowerTickbox.SetTickedSilent(true);
+				asPower = true;
+			}
+			else
+			{
+				int onPlayIndex = row.TriggerSelect.GetItemIndex((int)CardExtraEffectTrigger.OnPlay);
+				if (onPlayIndex >= 0)
+				{
+					row.TriggerSelect.Select(onPlayIndex);
+				}
+				trigger = CardExtraEffectTrigger.OnPlay;
+			}
+		}
+		bool isWhilePowerActiveTrigger = trigger == CardExtraEffectTrigger.WhilePowerActive;
 		UpdateExtraEffectAmountControls(row, definition, kind);
 
 		if (!asPower && trigger == CardExtraEffectTrigger.OnCountEvent)
@@ -26362,10 +26444,10 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		// P4: the redundant per-kind blocks for pile/deck actions are gone - SupportsGrantToCard
 		// (registry-audited) is the single truth for what can be granted.
 		bool canGrantToCard = CardEditorExtraEffects.SupportsGrantToCard(kind)
+			&& !isWhilePowerActiveTrigger
 			&& !isCreatedCardModifier
 			&& !isAutoPlaySelfFromPile
 			&& !isAutoDrawSelfFromPile
-			&& !isConditionalAutoFromPile
 			&& !isResultPileOverride
 			&& !isPassiveBehavior
 			&& !isGrantExtraEffect;
@@ -26407,7 +26489,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (row.RepeatXTickbox != null && GodotObject.IsInstanceValid(row.RepeatXTickbox))
 		{
-			row.RepeatXTickbox.Visible = supportsRepeat;
+			row.RepeatXTickbox.Visible = supportsRepeat && !isWhilePowerActiveTrigger;
+			if (isWhilePowerActiveTrigger)
+			{
+				row.RepeatXTickbox.SetTickedSilent(false);
+			}
 		}
 		if (row.RepeatCountField != null && GodotObject.IsInstanceValid(row.RepeatCountField))
 		{
@@ -26458,15 +26544,15 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			|| showAffectedCardFilters
 			|| showLegacySelectionCardFilters
 			|| showPowerTriggerCardFiltersForCountEvent;
-		row.PowerConditionRow.Visible = asPower || isTimedTrigger || showAffectedCardFilters || showSelectionCardFilters || showActivePowerFilter;
-		row.PowerTimingRow.Visible = asPower || isTimedTrigger;
+		row.PowerConditionRow.Visible = (asPower && !isWhilePowerActiveTrigger) || isTimedTrigger || showAffectedCardFilters || showSelectionCardFilters || showActivePowerFilter;
+		row.PowerTimingRow.Visible = (asPower && !isWhilePowerActiveTrigger) || isTimedTrigger;
 		if (row.PowerStackRow != null && GodotObject.IsInstanceValid(row.PowerStackRow))
 		{
-			row.PowerStackRow.Visible = asPower;
+			row.PowerStackRow.Visible = asPower && !isWhilePowerActiveTrigger;
 		}
 		if (row.PowerPersistenceRow != null && GodotObject.IsInstanceValid(row.PowerPersistenceRow))
 		{
-			row.PowerPersistenceRow.Visible = CardEditorExtraEffects.SupportsPowerPersistence(kind);
+			row.PowerPersistenceRow.Visible = !isWhilePowerActiveTrigger && CardEditorExtraEffects.SupportsPowerPersistence(kind);
 		}
 		row.PowerCountEventRow.Visible = asPower && isCountEventTrigger;
 		row.PowerTriggerAmountRow.Visible = asPower && isCountEventTrigger;
@@ -26877,7 +26963,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 		if (row.ConditionalBonusRow != null && GodotObject.IsInstanceValid(row.ConditionalBonusRow))
 		{
-			bool showRow = !isAmountlessEffect && row.AmountField != null && GodotObject.IsInstanceValid(row.AmountField) && row.AmountField.Visible;
+			bool showRow = !isWhilePowerActiveTrigger
+				&& !isAmountlessEffect
+				&& row.AmountField != null
+				&& GodotObject.IsInstanceValid(row.AmountField)
+				&& row.AmountField.Visible;
 			row.ConditionalBonusRow.Visible = showRow;
 
 			CardExtraEffectBranchConditionType conditionalBonusConditionType = GetSelectedConditionalBonusConditionType(row);
@@ -26953,6 +27043,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 				: CardEditorLoc.T("tooltip.branch", "Optionally run an alternate effect source when the branch condition passes.");
 		}
 
+		if (row.BranchTickbox != null && GodotObject.IsInstanceValid(row.BranchTickbox))
+		{
+			row.BranchTickbox.Visible = !isWhilePowerActiveTrigger;
+			if (isWhilePowerActiveTrigger)
+			{
+				row.BranchTickbox.SetTickedSilent(false);
+			}
+		}
 		bool showBranchRows = row.BranchTickbox != null
 			&& GodotObject.IsInstanceValid(row.BranchTickbox)
 			&& row.BranchTickbox.Visible
@@ -27976,7 +28074,14 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			}
 			CardExtraEffectTrigger trigger = (CardExtraEffectTrigger)id;
 			popup.SetItemText(i, CardEditorExtraEffects.TriggerLabel(trigger, asPower));
-			popup.SetItemDisabled(i, asPower && (trigger == CardExtraEffectTrigger.Fatal || trigger == CardExtraEffectTrigger.OnChosen || IsMovedPileTrigger(trigger)));
+			CardExtraEffectKind kind = GetCurrentResolvedExtraEffectKind(row);
+			bool canUseWhilePowerActive = _definitionBehaviorAllowsPassivePowerModifiers
+				&& asPower
+				&& CardEditorExtraEffects.SupportsWhilePowerActive(kind);
+			bool disabled = trigger == CardExtraEffectTrigger.WhilePowerActive
+				? !canUseWhilePowerActive
+				: asPower && (trigger == CardExtraEffectTrigger.Fatal || trigger == CardExtraEffectTrigger.OnChosen || IsMovedPileTrigger(trigger));
+			popup.SetItemDisabled(i, disabled);
 		}
 	}
 
@@ -27984,12 +28089,18 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 	{
 		int kindIndex = GetSelectedExtraEffectDefinitionIndex(row);
 		CardExtraEffectKind kind = GetResolvedExtraEffectKind(row, CardEditorExtraEffects.Definitions[kindIndex].Kind);
+		bool isWhilePowerActive = GetSelectedTrigger(row) == CardExtraEffectTrigger.WhilePowerActive;
+		if (isWhilePowerActive)
+		{
+			row.ScalingTickbox.SetTickedSilent(false);
+		}
 		bool isScalingStage = kind == CardExtraEffectKind.ScalingStage;
 		bool isQuest = kind == CardExtraEffectKind.Quest;
 		bool isRunProgressQuest = isQuest && GetSelectedQuestMode(row) == CardExtraEffectQuestMode.RunProgress;
 
 		bool isConditionalAutoFromPile = kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects;
-		bool supportsScaling = kind is not CardExtraEffectKind.CreatedCardsCostLess
+		bool supportsScaling = !isWhilePowerActive
+			&& kind is not CardExtraEffectKind.CreatedCardsCostLess
 			and not CardExtraEffectKind.CreatedCardsUpgraded
 			and not CardExtraEffectKind.GeneratedCardsUpgraded
 			and not CardExtraEffectKind.CardsInPileUpgradedAura
@@ -27999,7 +28110,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			and not CardExtraEffectKind.ChooseOneEffectSource
 			and not CardExtraEffectKind.ScalingStage
 			&& !IsPassiveBehaviorKind(kind);
-		bool supportsRepeatScaling = kind != CardExtraEffectKind.RunEffectSourceCard && CardEditorExtraEffects.SupportsRepeat(kind);
+		bool supportsRepeatScaling = !isWhilePowerActive
+			&& kind != CardExtraEffectKind.RunEffectSourceCard
+			&& CardEditorExtraEffects.SupportsRepeat(kind);
 		bool supportsCountLogic = isRunProgressQuest || supportsScaling || supportsRepeatScaling;
 		bool conditionalBonusUsesHistoryCount = row.ConditionalBonusRow != null
 			&& GodotObject.IsInstanceValid(row.ConditionalBonusRow)
@@ -30762,6 +30875,21 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		return (CardKeyword)id;
 	}
 
+	private static string? GetSelectedGrantedCustomKeyword(ExtraEffectRow row)
+	{
+		if (row?.GrantedKeywordSelect == null || !GodotObject.IsInstanceValid(row.GrantedKeywordSelect))
+		{
+			return null;
+		}
+
+		int index = row.GrantedKeywordSelect.Selected;
+		if (index < 0 || index >= row.GrantedKeywordCustomNames.Count)
+		{
+			return null;
+		}
+		return CardEditorPhraseComposer.NormalizeCustomName(row.GrantedKeywordCustomNames[index]);
+	}
+
 	private static CardExtraEffectSelfScalingOperation GetSelectedSelfScalingOperation(ExtraEffectRow row)
 	{
 		if (row.SelfScalingOperationSelect == null || !GodotObject.IsInstanceValid(row.SelfScalingOperationSelect))
@@ -31228,8 +31356,13 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		IReadOnlyList<CardExtraEffectTarget> allowed = gateMultiplayerTargets
 			? def.AllowedTargets
 			: ExpandMultiplayerTargets(def.AllowedTargets);
+		CardExtraEffectTrigger selectedTrigger = GetSelectedTrigger(row);
 		bool supportsEventTarget = SupportsSelectedEventTarget(row) && allowed.Contains(CardExtraEffectTarget.Target);
-		if (GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay)
+		if (selectedTrigger == CardExtraEffectTrigger.WhilePowerActive)
+		{
+			allowed = new[] { CardExtraEffectTarget.Self };
+		}
+		else if (selectedTrigger != CardExtraEffectTrigger.OnPlay)
 		{
 			allowed = allowed.Where(t => t != CardExtraEffectTarget.Target).ToArray();
 			if (supportsEventTarget && !allowed.Contains(CardExtraEffectTarget.EventTarget))
@@ -31292,7 +31425,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		}
 
 		CardExtraEffectTarget wanted = desiredTarget ?? def.DefaultTarget;
-		if ((GetSelectedTrigger(row) != CardExtraEffectTrigger.OnPlay || _isEmbeddedEffectHost) && wanted == CardExtraEffectTarget.Target)
+		if ((selectedTrigger != CardExtraEffectTrigger.OnPlay || _isEmbeddedEffectHost) && wanted == CardExtraEffectTarget.Target)
 		{
 			wanted = row.AllowedTargets.Contains(CardExtraEffectTarget.EventTarget)
 				? CardExtraEffectTarget.EventTarget
@@ -34609,6 +34742,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CreatureCommandId = resolvedKind == CardExtraEffectKind.CreatureCommand ? GetSelectedCreatureCommandId(row) : null,
 					GrantedKeyword = resolvedKind == CardExtraEffectKind.GrantKeywordToPile ? GetSelectedGrantedKeyword(row) : default,
 					GrantedKeywordRemove = resolvedKind == CardExtraEffectKind.GrantKeywordToPile
+						&& GetSelectedGrantedCustomKeyword(row) == null
 						&& row.GrantedKeywordRemoveTickbox != null
 						&& GodotObject.IsInstanceValid(row.GrantedKeywordRemoveTickbox)
 						&& row.GrantedKeywordRemoveTickbox.IsTicked,
@@ -34620,7 +34754,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					MatchVanillaTag = GetSelectedMatchVanillaTag(row),
 					MatchCustomTag = GetSelectedMatchCustomTag(row),
 					MatchCustomKeyword = GetSelectedMatchCustomKeyword(row),
-					CustomKeywordName = row.KeywordGroupField != null && GodotObject.IsInstanceValid(row.KeywordGroupField)
+					CustomKeywordName = resolvedKind == CardExtraEffectKind.GrantKeywordToPile
+						? GetSelectedGrantedCustomKeyword(row)
+						: row.KeywordGroupField != null && GodotObject.IsInstanceValid(row.KeywordGroupField)
 						? (string.IsNullOrWhiteSpace(row.KeywordGroupField.Text) ? null : row.KeywordGroupField.Text.Trim())
 						: row.HydratedCustomKeywordName,
 					SelfScalingOperation = GetSelectedSelfScalingOperation(row),
@@ -36122,6 +36258,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					CreatureCommandId = resolvedKind == CardExtraEffectKind.CreatureCommand ? GetSelectedCreatureCommandId(row) : null,
 					GrantedKeyword = resolvedKind == CardExtraEffectKind.GrantKeywordToPile ? GetSelectedGrantedKeyword(row) : default,
 					GrantedKeywordRemove = resolvedKind == CardExtraEffectKind.GrantKeywordToPile
+						&& GetSelectedGrantedCustomKeyword(row) == null
 						&& row.GrantedKeywordRemoveTickbox != null
 						&& GodotObject.IsInstanceValid(row.GrantedKeywordRemoveTickbox)
 						&& row.GrantedKeywordRemoveTickbox.IsTicked,
@@ -36133,7 +36270,9 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					MatchVanillaTag = GetSelectedMatchVanillaTag(row),
 					MatchCustomTag = GetSelectedMatchCustomTag(row),
 					MatchCustomKeyword = GetSelectedMatchCustomKeyword(row),
-					CustomKeywordName = row.KeywordGroupField != null && GodotObject.IsInstanceValid(row.KeywordGroupField)
+					CustomKeywordName = resolvedKind == CardExtraEffectKind.GrantKeywordToPile
+						? GetSelectedGrantedCustomKeyword(row)
+						: row.KeywordGroupField != null && GodotObject.IsInstanceValid(row.KeywordGroupField)
 						? (string.IsNullOrWhiteSpace(row.KeywordGroupField.Text) ? null : row.KeywordGroupField.Text.Trim())
 						: row.HydratedCustomKeywordName,
 					SelfScalingOperation = GetSelectedSelfScalingOperation(row),
@@ -38918,7 +39057,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 					RefreshPreview();
 				},
 				CardEditorLoc.T("ui.statusEditor.behaviorTitle", "Status Behavior"),
-				CreateStatusSeedEffect);
+				CreateStatusSeedEffect,
+				allowPassivePowerModifiers: true);
 		}
 
 		newButton.Pressed += () =>
@@ -39204,7 +39344,8 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		IEnumerable<CardExtraEffect>? initialEffects,
 		Action<List<CardExtraEffect>> onSaved,
 		string titleText,
-		Func<CardExtraEffect?>? createNewEffect = null)
+		Func<CardExtraEffect?>? createNewEffect = null,
+		bool allowPassivePowerModifiers = false)
 	{
 		EnsurePendingPopupHydrationCompleted();
 		if (onSaved == null || IsDefinitionBehaviorEditorOpen())
@@ -39227,6 +39368,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		ScrollContainer? previousEffectSummaryScroll = _effectSummaryScroll;
 		bool previousSuppressPreviewUpdate = _suppressPreviewUpdate;
 		bool previousBulkInitializing = _bulkInitializingExtraEffectRows;
+		bool previousAllowsPassivePowerModifiers = _definitionBehaviorAllowsPassivePowerModifiers;
 		bool restored = false;
 
 		Control overlay = new Control
@@ -39408,6 +39550,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 			_effectSummaryScroll = previousEffectSummaryScroll;
 			_bulkInitializingExtraEffectRows = previousBulkInitializing;
 			_suppressPreviewUpdate = previousSuppressPreviewUpdate;
+			_definitionBehaviorAllowsPassivePowerModifiers = previousAllowsPassivePowerModifiers;
 			_definitionBehaviorEditorCancel = null;
 			if (_definitionBehaviorEditorOverlay != null && GodotObject.IsInstanceValid(_definitionBehaviorEditorOverlay))
 			{
@@ -39453,6 +39596,7 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		_effectSummaryScroll = summaryScroll;
 		_bulkInitializingExtraEffectRows = false;
 		_suppressPreviewUpdate = true;
+		_definitionBehaviorAllowsPassivePowerModifiers = allowPassivePowerModifiers;
 
 		foreach (CardExtraEffect effect in seedEffects)
 		{

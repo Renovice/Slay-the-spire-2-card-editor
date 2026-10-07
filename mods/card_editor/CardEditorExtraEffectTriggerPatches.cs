@@ -363,12 +363,21 @@ internal static class Hook_AfterAttack_CardEditorExtraEffects_OstyDealDamage_Pat
 				{
 					continue;
 				}
+				bool playerWasHit = attackResults.Any(result =>
+					result != null && ReferenceEquals(result.Receiver, player.Creature));
 
 				await CardEditorExtraEffectTriggerPatchHelpers.RunForEachCombatPileCard(
 					combatState,
 					player,
 					netId.Value,
-					(choiceContext, card) => CardEditorExtraEffects.RunAfterAttack(combatState, choiceContext, card, attackTarget));
+					async (choiceContext, card) =>
+					{
+						await CardEditorExtraEffects.RunAfterAttack(combatState, choiceContext, card, attackTarget);
+						if (playerWasHit)
+						{
+							await CardEditorExtraEffects.RunBearerHitByAttack(combatState, choiceContext, card);
+						}
+					});
 			}
 
 			Player? ostyOwner = null;

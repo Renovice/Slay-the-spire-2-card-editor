@@ -9,6 +9,7 @@ using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
@@ -38,6 +39,9 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 	private string? _iconPowerId;
 	private string? _customPackedIconPath;
 	private string? _customBigIconPath;
+	private int _appliedPassiveStrength;
+	private int _appliedPassiveDexterity;
+	private int _appliedPassiveFocus;
 
 	public string CustomStatusId => _customStatusId;
 
@@ -83,6 +87,32 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 	{
 		ApplyDefinition(_pendingPayload.Value);
 		return Task.CompletedTask;
+	}
+
+	public override async Task AfterPowerAmountChanged(
+		PlayerChoiceContext choiceContext,
+		PowerModel power,
+		decimal amount,
+		Creature? applier,
+		CardModel? cardSource)
+	{
+		if (!ReferenceEquals(power, this) || Owner == null)
+		{
+			return;
+		}
+
+		await SyncPassiveStatModifiers(Owner, Math.Max(0, Amount), applier, cardSource);
+	}
+
+	public override async Task AfterRemoved(Creature oldOwner)
+	{
+		await SyncPassiveStatModifiers(oldOwner, stacks: 0, applier: oldOwner, cardSource: null);
+
+		CardEditorExtraEffectPower? behaviorPower = oldOwner.GetPower<CardEditorExtraEffectPower>();
+		if (behaviorPower != null && !string.IsNullOrWhiteSpace(_customStatusId))
+		{
+			await behaviorPower.RemoveCustomStatusBehaviorEffects(_customStatusId);
+		}
 	}
 
 	protected override void DeepCloneFields()
@@ -162,6 +192,70 @@ internal sealed class CardEditorCustomStatusPower : PowerModel
 		_iconPowerId = string.IsNullOrWhiteSpace(definition.IconPowerId) ? null : definition.IconPowerId.Trim();
 		_customPackedIconPath = string.IsNullOrWhiteSpace(definition.CustomPackedIconPath) ? null : definition.CustomPackedIconPath.Trim();
 		_customBigIconPath = string.IsNullOrWhiteSpace(definition.CustomBigIconPath) ? null : definition.CustomBigIconPath.Trim();
+	}
+
+	private async Task SyncPassiveStatModifiers(Creature owner, int stacks, Creature? applier, CardModel? cardSource)
+	{
+		(int strength, int dexterity, int focus) = GetDesiredPassiveStatModifiers(stacks);
+		await ApplyPassiveStatDelta<StrengthPower>(owner, strength, applier, cardSource, _appliedPassiveStrength);
+		_appliedPassiveStrength = strength;
+		await ApplyPassiveStatDelta<DexterityPower>(owner, dexterity, applier, cardSource, _appliedPassiveDexterity);
+		_appliedPassiveDexterity = dexterity;
+		await ApplyPassiveStatDelta<FocusPower>(owner, focus, applier, cardSource, _appliedPassiveFocus);
+		_appliedPassiveFocus = focus;
+	}
+
+	private (int Strength, int Dexterity, int Focus) GetDesiredPassiveStatModifiers(int stacks)
+	{
+		long strength = 0;
+		long dexterity = 0;
+		long focus = 0;
+		int clampedStacks = Math.Clamp(stacks, 0, 999);
+
+		foreach (CardExtraEffect effect in _behaviorEffects)
+		{
+			if (!CardEditorExtraEffects.TryGetWhilePowerActiveModifier(effect, out CardExtraEffectKind statKind, out int amountPerStack))
+			{
+				continue;
+			}
+
+			long contribution = (long)amountPerStack * clampedStacks;
+			switch (statKind)
+			{
+				case CardExtraEffectKind.GainStrength:
+				case CardExtraEffectKind.LoseStrength:
+					strength += contribution;
+					break;
+				case CardExtraEffectKind.GainDexterity:
+				case CardExtraEffectKind.LoseDexterity:
+					dexterity += contribution;
+					break;
+				case CardExtraEffectKind.GainFocus:
+				case CardExtraEffectKind.LoseFocus:
+					focus += contribution;
+					break;
+			}
+		}
+
+		return (ClampPassiveStat(strength), ClampPassiveStat(dexterity), ClampPassiveStat(focus));
+	}
+
+	private static int ClampPassiveStat(long amount)
+		=> (int)Math.Clamp(amount, -999_999L, 999_999L);
+
+	private static async Task ApplyPassiveStatDelta<TPower>(
+		Creature owner,
+		int desired,
+		Creature? applier,
+		CardModel? cardSource,
+		int applied)
+		where TPower : PowerModel
+	{
+		int delta = desired - applied;
+		if (delta != 0)
+		{
+			await CardEditorPowerCmdCompat.Apply<TPower>(owner, delta, applier ?? owner, cardSource, silent: true);
+		}
 	}
 
 	private string? BuildGeneratedTooltipBody()

@@ -26,8 +26,10 @@ internal static class Hook_ModifyDamageInternal_CardDamageBonus_Patch
 		ValueProp props,
 		CardModel? cardSource)
 	{
-		CardModel? effectiveSource = CardEditorBorrowedEffectSourceDamageHelper.ResolveRuntimePlayedCard(cardSource)
-			?? CardEditorIgnoreEffectHelpers.ResolveEffectiveSource(cardSource);
+		// A damage bonus belongs only to damage that carries an authoritative card source.
+		// Falling back to the ambient card-play context makes cardless retaliation (for
+		// example Thorns) inherit the attacker's currently played card and its modifiers.
+		CardModel? effectiveSource = CardEditorBorrowedEffectSourceDamageHelper.ResolveRuntimePlayedCard(cardSource);
 		CombatState? effectiveCombatState = combatState
 			?? effectiveSource.GetConcreteCombatState()
 			?? dealer.GetConcreteCombatState()

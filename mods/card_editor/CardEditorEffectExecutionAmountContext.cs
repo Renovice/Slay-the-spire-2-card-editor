@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using HarmonyLib;
+using MegaCrit.Sts2.Core.Combat.History;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Powers;
@@ -23,6 +25,12 @@ internal static class CardEditorEffectExecutionAmountContext
 
 	private sealed class FatalTriggerState
 	{
+	}
+
+	private sealed class VanillaCardPlayDamageState
+	{
+		public HashSet<DamageResult> Results { get; } = new(ReferenceEqualityComparer<DamageResult>.Instance);
+		public bool IsSealed { get; set; }
 	}
 
 	private sealed class Session
@@ -249,6 +257,84 @@ internal static class CardEditorEffectExecutionAmountContext
 	private static readonly AsyncLocal<Stack<List<DamageResult>>?> _triggerAttackDamageResults = new();
 	private static readonly ConditionalWeakTable<CardPlay, FatalTriggerState> _fatalTriggeredCardPlays = new();
 	private static readonly object _fatalTriggeredCardPlaysLock = new();
+	private static readonly ConditionalWeakTable<CardPlay, VanillaCardPlayDamageState> _vanillaDamageByCardPlay = new();
+	private static readonly object _vanillaDamageByCardPlayLock = new();
+
+	internal static void ReportVanillaCardDamage(CardModel? cardSource, DamageResult? result)
+	{
+		CardPlay? cardPlay = CardEditorCardPlayContext.Current;
+		if (cardPlay?.Card == null
+			|| cardSource == null
+			|| result == null
+			|| !ReferenceEquals(cardPlay.Card, cardSource))
+		{
+			return;
+		}
+
+		lock (_vanillaDamageByCardPlayLock)
+		{
+			VanillaCardPlayDamageState state = _vanillaDamageByCardPlay.GetOrCreateValue(cardPlay);
+			if (!state.IsSealed)
+			{
+				state.Results.Add(result);
+			}
+		}
+	}
+
+	internal static void SealVanillaCardDamage(CardPlay? cardPlay)
+	{
+		if (cardPlay == null)
+		{
+			return;
+		}
+
+		lock (_vanillaDamageByCardPlayLock)
+		{
+			_vanillaDamageByCardPlay.GetOrCreateValue(cardPlay).IsSealed = true;
+		}
+	}
+
+	internal static bool TryGetVanillaCardDamageMetric(
+		CardPlay? cardPlay,
+		CardExtraEffectAmountSourceMode mode,
+		out int amount)
+	{
+		amount = 0;
+		if (cardPlay == null)
+		{
+			return false;
+		}
+
+		List<DamageResult> results;
+		lock (_vanillaDamageByCardPlayLock)
+		{
+			if (!_vanillaDamageByCardPlay.TryGetValue(cardPlay, out VanillaCardPlayDamageState? state))
+			{
+				return false;
+			}
+
+			results = state.Results.Where(result => result != null).ToList();
+		}
+
+		long value = mode switch
+		{
+			CardExtraEffectAmountSourceMode.AppliedEffectHpDamage => results.Sum(result => (long)Math.Max(0, result.UnblockedDamage)),
+			CardExtraEffectAmountSourceMode.AppliedEffectBlockedDamage => results.Sum(result => (long)Math.Max(0, result.BlockedDamage)),
+			CardExtraEffectAmountSourceMode.AppliedEffectTotalDamage => results.Sum(result => (long)Math.Max(0, result.TotalDamage)),
+			CardExtraEffectAmountSourceMode.AppliedEffectOverkillDamage => results.Sum(result => (long)Math.Max(0, result.OverkillDamage)),
+			CardExtraEffectAmountSourceMode.AppliedEffectTotalAndOverkillDamage => results.Sum(result => (long)Math.Max(0, result.TotalDamage) + Math.Max(0, result.OverkillDamage)),
+			CardExtraEffectAmountSourceMode.AppliedEffectInstances => results.Count(result => result.TotalDamage > 0),
+			CardExtraEffectAmountSourceMode.AppliedEffectKills => results.Count(result => result.WasTargetKilled),
+			_ => -1
+		};
+		if (value < 0)
+		{
+			return false;
+		}
+
+		amount = value >= int.MaxValue ? int.MaxValue : (int)value;
+		return true;
+	}
 
 	public static IDisposable PushSessionScoped()
 	{
@@ -1119,6 +1205,16 @@ internal static class CardEditorEffectExecutionAmountContext
 	private static int ClampNonNegative(int value)
 	{
 		return value <= 0 ? 0 : value;
+	}
+}
+
+[HarmonyPatch(typeof(CombatHistory), nameof(CombatHistory.DamageReceived))]
+internal static class CombatHistory_DamageReceived_CardEditorVanillaDamage_Patch
+{
+	[HarmonyPriority(Priority.Last)]
+	public static void Postfix(DamageResult result, CardModel? cardSource)
+	{
+		CardEditorEffectExecutionAmountContext.ReportVanillaCardDamage(cardSource, result);
 	}
 }
 

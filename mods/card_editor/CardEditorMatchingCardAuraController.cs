@@ -40,6 +40,7 @@ internal static class CardEditorMatchingCardAuraController
 	{
 		public required AuraKind Kind { get; init; }
 		public required CardExtraEffect Effect { get; init; }
+		public required CardExtraEffect MatchEffect { get; init; }
 		public CardModel? SourceCard { get; init; }
 		public int ReplayAmount { get; init; }
 		public CardExtraEffectCardGrantDuration AuraDuration { get; init; }
@@ -181,6 +182,32 @@ internal static class CardEditorMatchingCardAuraController
 		ApplyToCurrentCards(combatState, owner, grant, currentCards);
 	}
 
+	public static void ApplyExtraEffectPackageAura(
+		CombatState combatState,
+		Player owner,
+		CardExtraEffect matchEffect,
+		IReadOnlyList<CardExtraEffect> package,
+		CardModel? sourceCard,
+		IReadOnlyList<CardModel>? currentCards)
+	{
+		if (combatState == null || owner == null || matchEffect == null || package == null || package.Count == 0)
+		{
+			return;
+		}
+
+		foreach (CardExtraEffect effect in package)
+		{
+			if (effect == null)
+			{
+				continue;
+			}
+
+			AuraGrant grant = CreateGrant(AuraKind.ExtraEffect, effect, sourceCard, replayAmount: 0, matchEffect);
+			StoreGrant(combatState, owner, grant);
+			ApplyToCurrentCards(combatState, owner, grant, currentCards);
+		}
+	}
+
 	public static void ApplyKeywordAura(CombatState combatState, Player owner, CardExtraEffect effect, CardModel? sourceCard, IReadOnlyList<CardModel>? currentCards)
 	{
 		if (combatState == null || owner == null || effect == null)
@@ -275,9 +302,15 @@ internal static class CardEditorMatchingCardAuraController
 		TryApplyAurasToCard(combatState, card.Owner, card);
 	}
 
-	private static AuraGrant CreateGrant(AuraKind kind, CardExtraEffect effect, CardModel? sourceCard, int replayAmount)
+	private static AuraGrant CreateGrant(
+		AuraKind kind,
+		CardExtraEffect effect,
+		CardModel? sourceCard,
+		int replayAmount,
+		CardExtraEffect? matchEffect = null)
 	{
 		CardExtraEffect stored = CardEditorExtraEffects.CloneEffect(effect);
+		CardExtraEffect storedMatch = CardEditorExtraEffects.CloneEffect(matchEffect ?? effect);
 		CardExtraEffectCardGrantDuration auraDuration = stored.CardGrantDuration == CardExtraEffectCardGrantDuration.Turns
 			? CardExtraEffectCardGrantDuration.Turns
 			: stored.CardGrantDuration == CardExtraEffectCardGrantDuration.ThisTurn
@@ -295,6 +328,7 @@ internal static class CardEditorMatchingCardAuraController
 		{
 			Kind = kind,
 			Effect = stored,
+			MatchEffect = storedMatch,
 			SourceCard = sourceCard,
 			ReplayAmount = replayAmount,
 			AuraDuration = auraDuration,
@@ -315,7 +349,8 @@ internal static class CardEditorMatchingCardAuraController
 		{
 			if (existing == null
 				|| existing.Kind != grant.Kind
-				|| !CardEditorExtraEffects.IsDuplicateGrantedEffect(existing.Effect, grant.Effect))
+				|| !CardEditorExtraEffects.IsDuplicateGrantedEffect(existing.Effect, grant.Effect)
+				|| !CardEditorExtraEffects.IsDuplicateGrantedEffect(existing.MatchEffect, grant.MatchEffect))
 			{
 				continue;
 			}
@@ -411,15 +446,15 @@ internal static class CardEditorMatchingCardAuraController
 		{
 			return false;
 		}
-		if (!PileMatches(grant.Effect.CardSelectionPile, card.Pile?.Type ?? PileType.None))
+		if (!PileMatches(grant.MatchEffect.CardSelectionPile, card.Pile?.Type ?? PileType.None))
 		{
 			return false;
 		}
-		if (!grant.Effect.IncludeSourceCardInSelection && grant.SourceCard != null && ReferenceEquals(card, grant.SourceCard))
+		if (!grant.MatchEffect.IncludeSourceCardInSelection && grant.SourceCard != null && ReferenceEquals(card, grant.SourceCard))
 		{
 			return false;
 		}
-		if (!CardEditorExtraEffects.MatchesCardSelectionFilters(owner, card, grant.Effect, includeCostFilter: false))
+		if (!CardEditorExtraEffects.MatchesCardSelectionFilters(owner, card, grant.MatchEffect, includeCostFilter: false))
 		{
 			return false;
 		}

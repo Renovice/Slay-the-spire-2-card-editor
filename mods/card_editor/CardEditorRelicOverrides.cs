@@ -52,6 +52,7 @@ public enum RelicTriggerKind
 	OnOrbChanneled = 20,
 	OnStarsGained = 21,
 	OnHandDraw = 22,
+	OnEnemyDied = 23,
 }
 
 // One configured relic effect: a card-editor effect plus the relic trigger that fires it.
@@ -304,6 +305,7 @@ internal static class CardEditorRelicOverrides
 			RelicTriggerKind.OnDamageDealt => "When you deal damage",
 			RelicTriggerKind.OnDamageTaken => "When you take damage",
 			RelicTriggerKind.OnEnemyKilled => "When you kill an enemy",
+			RelicTriggerKind.OnEnemyDied => "When an enemy dies",
 			RelicTriggerKind.OnBlockGained => "When you gain Block",
 			RelicTriggerKind.OnHpLost => "When you lose HP",
 			RelicTriggerKind.OnHeal => "When you heal",

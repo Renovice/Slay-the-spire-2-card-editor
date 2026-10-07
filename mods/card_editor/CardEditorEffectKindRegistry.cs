@@ -58,8 +58,8 @@ internal static class CardEditorEffectKindRegistry
 	private const EffectCaps R = EffectCaps.Repeatable;
 	private const EffectCaps D = EffectCaps.DynamicAmount;
 	private const EffectCaps H = EffectCaps.HistoryScalable;
-	private const EffectCaps S = EffectCaps.PublishesCardsUi;
-	private const EffectCaps s = EffectCaps.PublishesCardsRuntime;
+	// Publishing is one contract: a runtime publisher must also be selectable in the UI.
+	private const EffectCaps S = EffectCaps.PublishesCardsUi | EffectCaps.PublishesCardsRuntime;
 	private const EffectCaps C = EffectCaps.ConsumesCards;
 	private const EffectCaps X = EffectCaps.Passive;
 	private const EffectCaps M = EffectCaps.MetaWrapper;
@@ -77,6 +77,12 @@ internal static class CardEditorEffectKindRegistry
 
 	public static bool Has(CardExtraEffectKind kind, EffectCaps caps)
 		=> (Get(kind).Caps & caps) == caps;
+
+	public static bool CanPublishCards(CardExtraEffectKind kind)
+		=> Has(kind, EffectCaps.PublishesCardsUi | EffectCaps.PublishesCardsRuntime);
+
+	public static bool CanConsumeCards(CardExtraEffectKind kind)
+		=> Has(kind, EffectCaps.ConsumesCards);
 
 	public static EffectTargetSemantics TargetSemanticsOf(CardExtraEffectKind kind)
 		=> Get(kind).Targets;
@@ -148,10 +154,10 @@ internal static class CardEditorEffectKindRegistry
 
 		// Player-resolved resource/draw effects.
 		// ConsumesCards since P2: DrawMatchingCards has a SelectedByEffect path ("draw THOSE cards").
-		Add(CardExtraEffectKind.DrawCards, G | P | R | D | H | S | s | C, Players);
-		Add(CardExtraEffectKind.DrawCardsThatCostLess, G | D | S | s | C, Players);
-		Add(CardExtraEffectKind.DrawUntilHandSize, G | P | R | D | H | s, Players);
-		Add(CardExtraEffectKind.DrawAndCheck, G | P | R | D | H | s, Players);
+		Add(CardExtraEffectKind.DrawCards, G | P | R | D | H | S | C, Players);
+		Add(CardExtraEffectKind.DrawCardsThatCostLess, G | D | S | C, Players);
+		Add(CardExtraEffectKind.DrawUntilHandSize, G | P | R | D | H | S, Players);
+		Add(CardExtraEffectKind.DrawAndCheck, G | P | R | D | H | S, Players);
 		Add(CardExtraEffectKind.GainEnergy, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.LoseEnergy, G | P | R | D | H, Players);
 		Add(CardExtraEffectKind.GainStars, G | P | R | D | H, Players);
@@ -183,15 +189,15 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.OrbAction, G | P | R | H, Ignores);
 		Add(CardExtraEffectKind.EvokeOrbs, G | P | R | D | H, Ignores);
 
-		// Card generation (runtime publishers - the UI does not offer them as sources yet; P2).
-		Add(CardExtraEffectKind.AddRandomCardToHand, G | P | D | H | s, Ignores);
-		Add(CardExtraEffectKind.ChooseOneOfThreeCardsToHand, G | P | D | H | s, Ignores);
-		Add(CardExtraEffectKind.AddSpecificCardToHand, G | P | D | H | s, Ignores);
-		Add(CardExtraEffectKind.AddCopyOfThisCard, G | P | D | H | s, Ignores);
-		Add(CardExtraEffectKind.AddExactCopyOfThisCardToDeck, G | P | R | D | H | s, Ignores);
-		Add(CardExtraEffectKind.PlayRandomGeneratedCard, G | P | D | H | s, Ignores);
+		// Card generation (selection publishers in both runtime chains and the editor UI).
+		Add(CardExtraEffectKind.AddRandomCardToHand, G | P | D | H | S, Ignores);
+		Add(CardExtraEffectKind.ChooseOneOfThreeCardsToHand, G | P | D | H | S, Ignores);
+		Add(CardExtraEffectKind.AddSpecificCardToHand, G | P | D | H | S, Ignores);
+		Add(CardExtraEffectKind.AddCopyOfThisCard, G | P | D | H | S, Ignores);
+		Add(CardExtraEffectKind.AddExactCopyOfThisCardToDeck, G | P | R | D | H | S, Ignores);
+		Add(CardExtraEffectKind.PlayRandomGeneratedCard, G | P | D | H | S, Ignores);
 		Add(CardExtraEffectKind.FetchSpecificCardToHand, G | P | D | H | S, Ignores);
-		Add(CardExtraEffectKind.LinkedCardAction, P | D | H | s, Ignores);
+		Add(CardExtraEffectKind.LinkedCardAction, P | D | H | S, Ignores);
 
 		// Pile / card actions (selection publishers + consumers; grantable since P4).
 		Add(CardExtraEffectKind.MoveCardsBetweenPiles, G | P | D | H | S | C, Ignores);
@@ -240,8 +246,8 @@ internal static class CardEditorEffectKindRegistry
 		Add(CardExtraEffectKind.DisplayNumber, H | X, Ignores);
 
 		// Self-scaling / mutation family.
-		Add(CardExtraEffectKind.SelfScaling, G | P | D | H | s, Ignores);
-		Add(CardExtraEffectKind.PersistentSelfScaling, G | P | D | H | s, Ignores);
+		Add(CardExtraEffectKind.SelfScaling, G | P | D | H | S, Ignores);
+		Add(CardExtraEffectKind.PersistentSelfScaling, G | P | D | H | S, Ignores);
 		Add(CardExtraEffectKind.TargetCardMutation, G | P | D | H | S | C, Ignores);
 		Add(CardExtraEffectKind.PersistentTargetCardMutation, G | P | D | H | S | C, Ignores);
 		Add(CardExtraEffectKind.StatefulTransform, G | P | H, Ignores);
@@ -250,19 +256,19 @@ internal static class CardEditorEffectKindRegistry
 		// Auto-actions + meta wrappers.
 		Add(CardExtraEffectKind.AutoPlaySelfFromPile, P | D, Ignores);
 		Add(CardExtraEffectKind.AutoDrawSelfFromPile, P | D, Ignores);
-		Add(CardExtraEffectKind.ConditionalAutoPlayFromPile, P | D, Ignores);
-		Add(CardExtraEffectKind.ConditionalAutoDrawFromPile, P | D, Ignores);
-		Add(CardExtraEffectKind.ConditionalAutoRunEffects, P | D | M, Ignores);
+		Add(CardExtraEffectKind.ConditionalAutoPlayFromPile, G | P | D, Ignores);
+		Add(CardExtraEffectKind.ConditionalAutoDrawFromPile, G | P | D, Ignores);
+		Add(CardExtraEffectKind.ConditionalAutoRunEffects, G | P | D | M, Ignores);
 		Add(CardExtraEffectKind.EffectLimit, M, Ignores);
 		Add(CardExtraEffectKind.CountdownEffect, R | M, Ignores);
 		Add(CardExtraEffectKind.RunEffectSourceCard, G | P | R | H | S, Ignores);
-		Add(CardExtraEffectKind.ChooseOneEffectSource, G | P | H | S | s | C, Ignores);
+		Add(CardExtraEffectKind.ChooseOneEffectSource, G | P | H | S | C, Ignores);
 
 		return table;
 	}
 
 	// Boot audits: coverage (every enum member has a profile) + parity (registry flags agree with
-	// the live legacy predicates for the five mechanically-checkable capabilities).
+	// the live predicates, including the independent selection publisher/consumer contracts).
 	public static int RunAudits()
 	{
 		int issues = 0;
@@ -282,6 +288,15 @@ internal static class CardEditorEffectKindRegistry
 			CheckParity(kind, EffectCaps.Repeatable, CardEditorExtraEffects.SupportsRepeat(kind), mismatches);
 			CheckParity(kind, EffectCaps.DynamicAmount, CardEditorExtraEffects.SupportsAppliedEffectRowAmountSource(kind), mismatches);
 			CheckParity(kind, EffectCaps.HistoryScalable, CardEditorExtraEffects.SupportsHistoryScaling(kind), mismatches);
+			CheckParity(kind, EffectCaps.PublishesCardsRuntime, CardEditorExtraEffects.SupportsCardSelectionPublishingAtRuntime(kind), mismatches);
+			CheckParity(kind, EffectCaps.ConsumesCards, CardEditorExtraEffects.SupportsSelectedByEffectAtRuntime(kind), mismatches);
+
+			bool publishesInUi = Has(kind, EffectCaps.PublishesCardsUi);
+			bool publishesAtRuntime = Has(kind, EffectCaps.PublishesCardsRuntime);
+			if (publishesInUi != publishesAtRuntime)
+			{
+				mismatches.Add($"{kind}.CardSelectionPublisher: ui={publishesInUi} runtime={publishesAtRuntime}");
+			}
 		}
 
 		if (missing.Count > 0)

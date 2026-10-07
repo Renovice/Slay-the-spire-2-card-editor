@@ -3,12 +3,16 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Godot;
+using HarmonyLib;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
+using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Vfx;
@@ -222,10 +226,182 @@ internal static class CardEditorCosmetics
 			await TryPlayAnimationPreset(card, owner!, ownerCreature, animationPreset, cardPlay!);
 		}
 
-		if (preset != CardEditorCosmeticVfxPreset.None)
+		if (preset != CardEditorCosmeticVfxPreset.None
+			&& !ShouldBindVfxToAttack(card, overrideData, preset, attach))
 		{
 			await TryPlayVfxPreset(combatState, cardPlay!, owner!, ownerCreature, preset, attach);
 		}
+	}
+
+	// AttackCommand owns the authoritative per-hit loop. Binding target VFX here makes vanilla
+	// multi-hit attacks and Card Editor damage rows use the same hit timing instead of replaying a
+	// cosmetic on a guessed timer.
+	internal static void ConfigureAttackHitVfx(AttackCommand attack)
+	{
+		if (attack == null)
+		{
+			return;
+		}
+
+		CardModel? card = attack.CardPlay?.Card ?? attack.ModelSource as CardModel;
+		if (card == null
+			|| !TryResolveVfxSettings(card, out CardEditorCosmeticVfxPreset preset, out CardEditorCosmeticAttach attach)
+			|| attach == CardEditorCosmeticAttach.Self
+			|| !TryGetHitVfxPath(preset, out string vfxPath))
+		{
+			return;
+		}
+		if (attach == CardEditorCosmeticAttach.AllEnemies
+			&& (!attack.IsMultiTargeted || attack.IsRandomlyTargeted))
+		{
+			return;
+		}
+
+		attack.WithHitFx(vfx: vfxPath);
+		if (attack.IsMultiTargeted)
+		{
+			attack.SpawningHitVfxOnEachCreature();
+		}
+	}
+
+	// Some Card Editor damage rows share an AttackContext and call CreatureCmd.Damage directly so
+	// multiple rows consume Vigor/Gigantification as one attack. Those rows still have a real
+	// per-hit seam; play the same configured preset there immediately before the damage command.
+	internal static void PlayConfiguredHitVfx(CardModel card, IEnumerable<Creature> hitTargets)
+	{
+		if (card == null
+			|| hitTargets == null
+			|| !TryResolveVfxSettings(card, out CardEditorCosmeticVfxPreset preset, out CardEditorCosmeticAttach attach)
+			|| attach == CardEditorCosmeticAttach.Self
+			|| !TryGetHitVfxPath(preset, out string vfxPath))
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (Creature target in hitTargets.Where(target => target != null).Distinct())
+			{
+				VfxCmd.PlayOnCreatureCenter(target, vfxPath);
+			}
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Could not play configured damage-row hit VFX: {ex}");
+		}
+	}
+
+	private static bool TryResolveVfxSettings(
+		CardModel card,
+		out CardEditorCosmeticVfxPreset preset,
+		out CardEditorCosmeticAttach attach)
+	{
+		preset = CardEditorCosmeticVfxPreset.None;
+		attach = CardEditorCosmeticAttach.Target;
+		CardOverride? overrideData = null;
+		if (CardEditorUiState.TryGetDraftOverride(card.Id, out CardOverride draftOverride))
+		{
+			overrideData = draftOverride;
+		}
+		else if (CardEditorOverrides.TryGet(card, out CardOverride storedOverride))
+		{
+			overrideData = storedOverride;
+		}
+
+		if (overrideData == null)
+		{
+			return false;
+		}
+
+		preset = overrideData.CosmeticVfxPreset ?? CardEditorCosmeticVfxPreset.None;
+		attach = overrideData.CosmeticVfxAttach ?? CardEditorCosmeticAttach.Target;
+		if (overrideData.CosmeticStylePreset is CardEditorCosmeticStylePreset stylePreset
+			&& stylePreset != CardEditorCosmeticStylePreset.None
+			&& TryGetStyleDefaults(stylePreset, out _, out CardEditorCosmeticVfxPreset styleVfx, out CardEditorCosmeticAttach styleAttach))
+		{
+			if (overrideData.CosmeticVfxPreset == null)
+			{
+				preset = styleVfx;
+			}
+			if (overrideData.CosmeticVfxAttach == null)
+			{
+				attach = styleAttach;
+			}
+		}
+
+		return preset != CardEditorCosmeticVfxPreset.None;
+	}
+
+	internal static bool ShouldBindVfxToAttack(
+		CardModel card,
+		CardOverride overrideData,
+		CardEditorCosmeticVfxPreset preset,
+		CardEditorCosmeticAttach attach)
+	{
+		if (attach == CardEditorCosmeticAttach.Self || !TryGetHitVfxPath(preset, out _))
+		{
+			return false;
+		}
+
+		bool hasVanillaDamage = card.Type == CardType.Attack
+			&& card.DynamicVars.Values.Any(dynamicVar => dynamicVar is DamageVar or CalculatedDamageVar or OstyDamageVar);
+		bool hasImmediateEditorDamage = overrideData.ExtraEffects?.Any(effect =>
+			effect != null
+			&& effect.Kind == CardExtraEffectKind.DealDamage
+			&& !effect.GrantToCard
+			&& !effect.AsPower
+			&& !effect.PayloadOnly
+			&& effect.Trigger == CardExtraEffectTrigger.OnPlay) == true;
+		if (attach == CardEditorCosmeticAttach.AllEnemies)
+		{
+			hasVanillaDamage = hasVanillaDamage && card.TargetType == TargetType.AllEnemies;
+			hasImmediateEditorDamage = overrideData.ExtraEffects?.Any(effect =>
+				effect != null
+				&& effect.Kind == CardExtraEffectKind.DealDamage
+				&& !effect.GrantToCard
+				&& !effect.AsPower
+				&& !effect.PayloadOnly
+				&& effect.Trigger == CardExtraEffectTrigger.OnPlay
+				&& effect.Target == CardExtraEffectTarget.AllEnemies) == true;
+		}
+		return hasVanillaDamage || hasImmediateEditorDamage;
+	}
+
+	private static bool TryGetHitVfxPath(CardEditorCosmeticVfxPreset preset, out string path)
+	{
+		path = preset switch
+		{
+			CardEditorCosmeticVfxPreset.StarryImpact => "vfx/vfx_starry_impact",
+			CardEditorCosmeticVfxPreset.AttackSlash => VfxCmd.slashPath,
+			CardEditorCosmeticVfxPreset.AttackBlunt => VfxCmd.bluntPath,
+			CardEditorCosmeticVfxPreset.AttackLightning => VfxCmd.lightningPath,
+			CardEditorCosmeticVfxPreset.DaggerThrow => VfxCmd.daggerThrowPath,
+			CardEditorCosmeticVfxPreset.DaggerSpray => VfxCmd.daggerSprayPath,
+			CardEditorCosmeticVfxPreset.GiantHorizontalSlash => VfxCmd.giantHorizontalSlashPath,
+			CardEditorCosmeticVfxPreset.Scratch => VfxCmd.scratchPath,
+			CardEditorCosmeticVfxPreset.Thrash => VfxCmd.thrashPath,
+			CardEditorCosmeticVfxPreset.Bite => VfxCmd.bitePath,
+			CardEditorCosmeticVfxPreset.Chain => VfxCmd.chainPath,
+			CardEditorCosmeticVfxPreset.Heal => VfxCmd.healPath,
+			CardEditorCosmeticVfxPreset.Block => VfxCmd.blockPath,
+			CardEditorCosmeticVfxPreset.Scream => VfxCmd.screamVfx,
+			CardEditorCosmeticVfxPreset.SpookyScream => VfxCmd.spookyScreamVfx,
+			CardEditorCosmeticVfxPreset.HeavyBlunt => VfxCmd.heavyBluntPath,
+			CardEditorCosmeticVfxPreset.FlyingSlash => VfxCmd.flyingSlashPath,
+			CardEditorCosmeticVfxPreset.BloodyImpact => "vfx/vfx_bloody_impact",
+			CardEditorCosmeticVfxPreset.RockShatter => "vfx/vfx_rock_shatter",
+			CardEditorCosmeticVfxPreset.SandyImpact => "vfx/vfx_sandy_impact",
+			CardEditorCosmeticVfxPreset.DramaticStab => "vfx/vfx_dramatic_stab",
+			CardEditorCosmeticVfxPreset.SlimeImpact => "vfx/vfx_slime_impact",
+			CardEditorCosmeticVfxPreset.Gaze => "vfx/vfx_gaze",
+			CardEditorCosmeticVfxPreset.CoinExplosionSmall => "vfx/vfx_coin_explosion_small",
+			CardEditorCosmeticVfxPreset.CoinExplosionRegular => "vfx/vfx_coin_explosion_regular",
+			CardEditorCosmeticVfxPreset.CoinExplosionJumbo => "vfx/vfx_coin_explosion_jumbo",
+			CardEditorCosmeticVfxPreset.Adrenaline => "vfx/vfx_adrenaline",
+			CardEditorCosmeticVfxPreset.HellraiserSword => VfxCmd.hellraiserSwordVfxPath,
+			_ => string.Empty
+		};
+		return !string.IsNullOrWhiteSpace(path);
 	}
 
 	private static void ResolveStylePreset(
@@ -623,5 +799,21 @@ internal static class CardEditorCosmetics
 		}
 
 		return null;
+	}
+}
+
+[HarmonyPatch(typeof(AttackCommand), nameof(AttackCommand.Execute))]
+internal static class AttackCommand_Execute_CardEditorHitVfx_Patch
+{
+	public static void Prefix(AttackCommand __instance)
+	{
+		try
+		{
+			CardEditorCosmetics.ConfigureAttackHitVfx(__instance);
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] Could not bind cosmetic VFX to attack hits: {ex}");
+		}
 	}
 }

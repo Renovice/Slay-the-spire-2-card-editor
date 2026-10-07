@@ -718,7 +718,7 @@ internal static class CardEditorQuestEffects
 
 				// The installed row keeps its recurring trigger for matching; flatten a per-fire clone
 				// so ExecuteEffect treats it as an immediate effect.
-				CardExtraEffect fired = CardEditorExtraEffects.CloneEffect(install.RewardRow);
+				CardExtraEffect fired = CardEditorExtraEffects.CloneForNonCardExecution(syntheticPlay, install.RewardRow);
 				fired.Trigger = CardExtraEffectTrigger.OnPlay;
 				fired.Timing = CardExtraEffectTiming.Immediate;
 				fired.Turns = 0;

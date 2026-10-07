@@ -848,6 +848,7 @@ internal static class CombatHistory_CardPlayFinished_CardEditorContext_Patch
 {
 	public static void Prefix(CardPlay cardPlay)
 	{
+		CardEditorEffectExecutionAmountContext.SealVanillaCardDamage(cardPlay);
 		CardEditorCardPlayContext.Pop(cardPlay);
 	}
 }

@@ -775,7 +775,10 @@ public enum CardExtraEffectTrigger
 	AfterAttack = 22,
 	AfterDeath = 23,
 	AfterCombatEnd = 24,
-	OnChosen = 25
+	OnChosen = 25,
+	BearerHitByAttack = 26,
+	// Appended for serialized compatibility. Existing preset values must not move.
+	WhilePowerActive = 27
 }
 
 public enum CardExtraEffectTurnBoundary
@@ -3451,9 +3454,11 @@ internal static class CardEditorExtraEffects
 			CardExtraEffectTrigger.AfterCardEnteredCombat => "Card Enters Combat",
 			CardExtraEffectTrigger.BeforeHandDraw => "Before Hand Draw",
 			CardExtraEffectTrigger.AfterAttack => "After Attack",
+			CardExtraEffectTrigger.BearerHitByAttack => "Bearer Hit by Attack",
 			CardExtraEffectTrigger.AfterDeath => "After Death",
 			CardExtraEffectTrigger.AfterCombatEnd => "After Combat End",
 			CardExtraEffectTrigger.OnChosen => "On Chosen",
+			CardExtraEffectTrigger.WhilePowerActive => "While Power Active",
 			_ => trigger.ToString()
 		};
 		return CardEditorLoc.Enum("extraEffectTrigger", trigger, fallback);
@@ -5558,6 +5563,118 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			or CardExtraEffectKind.ApplyConstrict;
 	}
 
+	internal static bool SupportsWhilePowerActive(CardExtraEffectKind kind)
+	{
+		return kind is CardExtraEffectKind.GainStrength
+			or CardExtraEffectKind.LoseStrength
+			or CardExtraEffectKind.GainDexterity
+			or CardExtraEffectKind.LoseDexterity
+			or CardExtraEffectKind.GainFocus
+			or CardExtraEffectKind.LoseFocus;
+	}
+
+	internal static bool TryGetWhilePowerActiveModifier(CardExtraEffect? effect, out CardExtraEffectKind statKind, out int amountPerStack)
+	{
+		statKind = default;
+		amountPerStack = 0;
+		if (effect == null
+			|| !effect.AsPower
+			|| effect.Trigger != CardExtraEffectTrigger.WhilePowerActive)
+		{
+			return false;
+		}
+
+		CardExtraEffect normalized = NormalizeSignedEffectAmount(effect) ?? effect;
+		if (!SupportsWhilePowerActive(normalized.Kind)
+			|| normalized.AmountIsX
+			|| normalized.AmountSourceMode != CardExtraEffectAmountSourceMode.Fixed)
+		{
+			return false;
+		}
+
+		int repeatCount = normalized.RepeatIsX
+			? 1
+			: Math.Clamp(normalized.RepeatCount <= 0 ? 1 : normalized.RepeatCount, 1, 99);
+		long magnitude = Math.Abs((long)normalized.Amount) * repeatCount;
+		magnitude = Math.Clamp(magnitude, 0L, 999_999L);
+		if (magnitude == 0)
+		{
+			return false;
+		}
+
+		statKind = normalized.Kind;
+		amountPerStack = normalized.Kind is CardExtraEffectKind.LoseStrength
+			or CardExtraEffectKind.LoseDexterity
+			or CardExtraEffectKind.LoseFocus
+			? -(int)magnitude
+			: (int)magnitude;
+		return true;
+	}
+
+	// Independent runtime contracts used by CardEditorEffectKindRegistry.RunAudits. Keep these
+	// beside the executor rather than deriving them from the registry, so a registry edit cannot
+	// silently expose a Selected Row link that the runtime does not publish or consume.
+	internal static bool SupportsCardSelectionPublishingAtRuntime(CardExtraEffectKind kind)
+	{
+		return kind is CardExtraEffectKind.DrawCards
+			or CardExtraEffectKind.DrawCardsThatCostLess
+			or CardExtraEffectKind.DrawUntilHandSize
+			or CardExtraEffectKind.DrawAndCheck
+			or CardExtraEffectKind.GrantKeywordToPile
+			or CardExtraEffectKind.AddRandomCardToHand
+			or CardExtraEffectKind.ChooseOneOfThreeCardsToHand
+			or CardExtraEffectKind.AddSpecificCardToHand
+			or CardExtraEffectKind.AddCopyOfThisCard
+			or CardExtraEffectKind.AddExactCopyOfThisCardToDeck
+			or CardExtraEffectKind.PlayRandomGeneratedCard
+			or CardExtraEffectKind.FetchSpecificCardToHand
+			or CardExtraEffectKind.LinkedCardAction
+			or CardExtraEffectKind.MoveCardsBetweenPiles
+			or CardExtraEffectKind.PlayCardFromPile
+			or CardExtraEffectKind.DiscardCards
+			or CardExtraEffectKind.ExhaustCards
+			or CardExtraEffectKind.UpgradeCardsInPile
+			or CardExtraEffectKind.SelectCardsFromPile
+			or CardExtraEffectKind.ConsumeCardValue
+			or CardExtraEffectKind.DelayedPileAction
+			or CardExtraEffectKind.TransformCards
+			or CardExtraEffectKind.CopyCardsFromPileToDeck
+			or CardExtraEffectKind.CopyExactCardsFromPileToDeck
+			or CardExtraEffectKind.RemoveCardsFromDeck
+			or CardExtraEffectKind.UpgradeDeckCards
+			or CardExtraEffectKind.GrantReplay
+			or CardExtraEffectKind.EnchantCard
+			or CardExtraEffectKind.SelfScaling
+			or CardExtraEffectKind.PersistentSelfScaling
+			or CardExtraEffectKind.TargetCardMutation
+			or CardExtraEffectKind.PersistentTargetCardMutation
+			or CardExtraEffectKind.RunEffectSourceCard
+			or CardExtraEffectKind.ChooseOneEffectSource;
+	}
+
+	internal static bool SupportsSelectedByEffectAtRuntime(CardExtraEffectKind kind)
+	{
+		return kind is CardExtraEffectKind.DrawCards
+			or CardExtraEffectKind.DrawCardsThatCostLess
+			or CardExtraEffectKind.GrantKeywordToPile
+			or CardExtraEffectKind.MoveCardsBetweenPiles
+			or CardExtraEffectKind.PlayCardFromPile
+			or CardExtraEffectKind.DiscardCards
+			or CardExtraEffectKind.ExhaustCards
+			or CardExtraEffectKind.UpgradeCardsInPile
+			or CardExtraEffectKind.SelectCardsFromPile
+			or CardExtraEffectKind.ConsumeCardValue
+			or CardExtraEffectKind.DelayedPileAction
+			or CardExtraEffectKind.TransformCards
+			or CardExtraEffectKind.CopyCardsFromPileToDeck
+			or CardExtraEffectKind.CopyExactCardsFromPileToDeck
+			or CardExtraEffectKind.RemoveCardsFromDeck
+			or CardExtraEffectKind.GrantReplay
+			or CardExtraEffectKind.TargetCardMutation
+			or CardExtraEffectKind.PersistentTargetCardMutation
+			or CardExtraEffectKind.ChooseOneEffectSource;
+	}
+
 	public static bool SupportsPowerPersistence(CardExtraEffectKind kind)
 	{
 		return SupportsDuration(kind);
@@ -5638,8 +5755,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		// played, discard 1"). Their granted rows execute through the recipient's real play
 		// pipeline exactly like native rows (verified per kind); their authored selection filters
 		// are preserved by NormalizeGrantedPayloadSelection. Still excluded: created-card
-		// modifiers and auras (patch-driven, no play execution), self-pile auto-actions and meta
-		// wrappers (run through dedicated trigger machinery, inert as plain rows), passives
+		// modifiers and auras (patch-driven, no play execution), passives
 		// (hook/render-evaluated), LinkedCardAction, and HitsAllEnemies (see comment below).
 		return kind is not CardExtraEffectKind.CreatedCardsCostLess
 			and not CardExtraEffectKind.CreatedCardsUpgraded
@@ -5647,9 +5763,6 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			and not CardExtraEffectKind.CardsInPileUpgradedAura
 			and not CardExtraEffectKind.AutoPlaySelfFromPile
 			and not CardExtraEffectKind.AutoDrawSelfFromPile
-			and not CardExtraEffectKind.ConditionalAutoPlayFromPile
-			and not CardExtraEffectKind.ConditionalAutoDrawFromPile
-			and not CardExtraEffectKind.ConditionalAutoRunEffects
 			and not CardExtraEffectKind.EffectLimit
 			and not CardExtraEffectKind.CountdownEffect
 			and not CardExtraEffectKind.ResultPileOverride
@@ -13447,6 +13560,10 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		}
 		bool immediateRowsPhase = phase != CardPlayHookPhase.AfterPlayReactions;
 		bool reactionsPhase = phase != CardPlayHookPhase.ImmediateRowsOnly;
+		if (immediateRowsPhase)
+		{
+			CardEditorEffectExecutionAmountContext.SealVanillaCardDamage(cardPlay);
+		}
 		using IDisposable _ = CardEditorCardPlayContext.PushScoped(cardPlay);
 		// Split-pipeline session continuity: the immediate phase's session is stashed per
 		// CardPlay and re-adopted by the reactions phase, so reaction-time consumers (deferred
@@ -13706,6 +13823,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			return;
 		}
 		CardModel card = cardPlay.Card;
+		CardEditorEffectExecutionAmountContext.SealVanillaCardDamage(cardPlay);
 
 		Creature? ownerCreature = card.TryGetOwnerCreature();
 		VigorPreserver? vigor = null;
@@ -14087,6 +14205,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			// CreateAsync / AttackCommand.Execute), so this preserves Vigor/Gigantification
 			// ModifyDamage on this very hit while all-fizzle plays never latch at all.
 			AttackContext attackContext = holder.Context ??= await AttackCommand.CreateContextAsync(combatState, choiceContext, cardPlay);
+			CardEditorCosmetics.PlayConfiguredHitVfx(cardPlay.Card, targets);
 			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 			if (results.Count == 0)
@@ -14373,6 +14492,16 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		return RunForTrigger(combatState, choiceContext, card, CardExtraEffectTrigger.AfterAttack, attackTarget);
 	}
 
+	public static Task RunBearerHitByAttack(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card)
+	{
+		return RunForTrigger(
+			combatState,
+			choiceContext,
+			card,
+			CardExtraEffectTrigger.BearerHitByAttack,
+			card?.Owner?.Creature);
+	}
+
 	public static Task RunAfterDeath(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, Creature? deadCreature)
 	{
 		return RunForTrigger(combatState, choiceContext, card, CardExtraEffectTrigger.AfterDeath, deadCreature);
@@ -14436,7 +14565,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				}
 
 				CardExtraEffect? normalizedSelfPileAuto = NormalizeSelfPileAutoEffect(effect);
-				if (normalizedSelfPileAuto?.Kind is CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects)
+				if (!effect.GrantToCard
+					&& normalizedSelfPileAuto?.Kind is (CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects))
 				{
 					if (await TryRunSelfPileAutoEffect(combatState, choiceContext, card, normalizedSelfPileAuto))
 					{
@@ -14819,7 +14949,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		{
 			// Power-hosted auto rows (Whenever and other power triggers) execute through the
 			// power pipeline; sweeping them here too would double-fire them.
-			if (IsPowerEffect(e))
+			if (IsPowerEffect(e) || e.GrantToCard)
 			{
 				continue;
 			}
@@ -14890,7 +15020,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
 			// Power-hosted auto rows execute through the power pipeline (no double-fire).
-			if (IsPowerEffect(e))
+			if (IsPowerEffect(e) || e.GrantToCard)
 			{
 				continue;
 			}
@@ -14933,7 +15063,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
 			// Power-hosted auto rows execute through the power pipeline (no double-fire).
-			if (IsPowerEffect(e))
+			if (IsPowerEffect(e) || e.GrantToCard)
 			{
 				continue;
 			}
@@ -14961,7 +15091,8 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 	private static async Task<bool> TryRunSelfPileAutoEffect(CombatState combatState, PlayerChoiceContext choiceContext, CardModel card, CardExtraEffect effect)
 	{
 		CardExtraEffect? normalized = NormalizeSelfPileAutoEffect(effect);
-		if (normalized?.Kind is not (CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects))
+		if (normalized?.GrantToCard == true
+			|| normalized?.Kind is not (CardExtraEffectKind.ConditionalAutoPlayFromPile or CardExtraEffectKind.ConditionalAutoDrawFromPile or CardExtraEffectKind.ConditionalAutoRunEffects))
 		{
 			return false;
 		}
@@ -15264,7 +15395,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 		foreach (CardExtraEffect e in GetRuntimeEffectsIncludingBorrowedSources(combatState, card))
 		{
 			// Power-hosted auto rows execute through the power pipeline (no double-fire).
-			if (IsPowerEffect(e))
+			if (IsPowerEffect(e) || e.GrantToCard)
 			{
 				continue;
 			}
@@ -17517,6 +17648,31 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 
 	private static string ApplyPowerTriggerPrefix(string line, CardExtraEffect effect, CardModel? card = null)
 	{
+		if (TryGetWhilePowerActiveModifier(effect, out CardExtraEffectKind statKind, out int signedAmount))
+		{
+			string statName = statKind switch
+			{
+				CardExtraEffectKind.GainDexterity or CardExtraEffectKind.LoseDexterity => "Dexterity",
+				CardExtraEffectKind.GainFocus or CardExtraEffectKind.LoseFocus => "Focus",
+				_ => "Strength"
+			};
+			string signedText = signedAmount > 0
+				? $"+{signedAmount.ToString(CultureInfo.InvariantCulture)}"
+				: signedAmount.ToString(CultureInfo.InvariantCulture);
+			return CardEditorLoc.F(
+				"cardText.powerTrigger.whileActiveStat",
+				$"The bearer has {signedText} {statName} while this Power is active.",
+				("Amount", signedText),
+				("Stat", statName));
+		}
+		if (effect.Trigger == CardExtraEffectTrigger.WhilePowerActive)
+		{
+			return CardEditorLoc.F(
+				"cardText.powerTrigger.whileActive",
+				$"While this Power is active, {LowercaseFirst(line)}",
+				("Payload", line));
+		}
+
 		string payload = LowercaseFirst(line);
 
 		bool allowDelay = effect.Timing != CardExtraEffectTiming.Immediate
@@ -17531,6 +17687,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 				or CardExtraEffectTrigger.AfterCardEnteredCombat
 				or CardExtraEffectTrigger.BeforeHandDraw
 				or CardExtraEffectTrigger.AfterAttack
+				or CardExtraEffectTrigger.BearerHitByAttack
 				or CardExtraEffectTrigger.AfterDeath
 				or CardExtraEffectTrigger.AfterCombatEnd
 				or CardExtraEffectTrigger.OnChannel
@@ -17554,6 +17711,7 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			CardExtraEffectTrigger.AfterCardEnteredCombat => CardEditorLoc.F("cardText.powerTrigger.prefix", $"{when}, {payload}", ("When", when), ("Payload", payload)),
 			CardExtraEffectTrigger.BeforeHandDraw => CardEditorLoc.F("cardText.powerTrigger.prefix", $"{when}, {payload}", ("When", when), ("Payload", payload)),
 			CardExtraEffectTrigger.AfterAttack => CardEditorLoc.F("cardText.powerTrigger.prefix", $"{when}, {payload}", ("When", when), ("Payload", payload)),
+			CardExtraEffectTrigger.BearerHitByAttack => CardEditorLoc.F("cardText.powerTrigger.prefix", $"{when}, {payload}", ("When", when), ("Payload", payload)),
 			CardExtraEffectTrigger.AfterDeath => CardEditorLoc.F("cardText.powerTrigger.prefix", $"{when}, {payload}", ("When", when), ("Payload", payload)),
 			CardExtraEffectTrigger.AfterCombatEnd => CardEditorLoc.F("cardText.powerTrigger.prefix", $"{when}, {payload}", ("When", when), ("Payload", payload)),
 			CardExtraEffectTrigger.OnChannel => CardEditorLoc.F("cardText.powerTrigger.prefix", $"{when}, {payload}", ("When", when), ("Payload", payload)),
@@ -17672,6 +17830,16 @@ private static bool ShouldPreserveSelfProtectedPower(CardPlay? cardPlay, Creatur
 			or CardExtraEffectTrigger.EndOfEnemyTurn)
 		{
 			return BuildPowerTurnTriggerWhenClause(effect);
+		}
+		if (effect.Trigger == CardExtraEffectTrigger.BearerHitByAttack)
+		{
+			int bearerHitEveryN = Math.Max(1, effect.TriggerEveryN);
+			return bearerHitEveryN >= 2
+				? CardEditorLoc.F(
+					"cardText.powerTrigger.everyNBearerHitByAttack",
+					$"Every {bearerHitEveryN} times the bearer is hit by an attack",
+					("N", bearerHitEveryN))
+				: CardEditorLoc.T("cardText.powerTrigger.whenBearerHitByAttack", "Whenever the bearer is hit by an attack");
 		}
 
 		string descriptor = BuildPowerTriggerCardDescriptor(effect);
@@ -20235,6 +20403,7 @@ private static string BuildCountAmountMetricLabel(CardExtraEffect effect, bool p
 			CardExtraEffectTrigger.AfterCardEnteredCombat => "When this card enters combat: ",
 			CardExtraEffectTrigger.BeforeHandDraw => "Before your hand is drawn: ",
 			CardExtraEffectTrigger.AfterAttack => "After an attack: ",
+			CardExtraEffectTrigger.BearerHitByAttack => "When the bearer is hit by an attack: ",
 			CardExtraEffectTrigger.AfterDeath => "After a creature dies: ",
 			CardExtraEffectTrigger.AfterCombatEnd => "After combat ends: ",
 			CardExtraEffectTrigger.OnChosen => "When chosen: ",
@@ -21460,7 +21629,8 @@ private static string? FormatChooseOneEffectSource(CardModel card, Creature? tar
 
 	private static string FormatGrantKeywordToPile(CardExtraEffect effect, int amount, string amountText)
 	{
-		string keyword = GrantedKeywordLabel(effect.GrantedKeyword);
+		string keyword = NormalizeCustomKeywordName(effect.CustomKeywordName)
+			?? GrantedKeywordLabel(effect.GrantedKeyword);
 		string pile = GetCardPileLocationForTarget(effect.CardSelectionPile, effect.Target);
 		string durationText = GetCardGrantDurationText(effect);
 		string futureText = effect.FutureMatchingCards
@@ -27692,7 +27862,7 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 				continue;
 			}
 
-			CardExtraEffect runnable = CloneForDeferredExecution(cardPlay, payload);
+			CardExtraEffect runnable = CloneForNonCardExecution(cardPlay, payload);
 			runnable.Trigger = CardExtraEffectTrigger.OnPlay;
 			runnable.AsPower = false;
 			runnable.Timing = CardExtraEffectTiming.Immediate;
@@ -27948,8 +28118,21 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 		CardModel? cardSource,
 		int stacks = 1)
 	{
-		if (target == null || definition == null || definition.BehaviorEffects.Count == 0)
+		if (target == null || definition == null)
 		{
+			return;
+		}
+
+		IReadOnlyList<CardExtraEffect> triggeredEffects = definition.BehaviorEffects
+			.Where(effect => effect != null && effect.Trigger != CardExtraEffectTrigger.WhilePowerActive)
+			.ToList();
+		CardEditorExtraEffectPower? behaviorPower = target.GetPower<CardEditorExtraEffectPower>();
+		if (triggeredEffects.Count == 0)
+		{
+			if (behaviorPower != null)
+			{
+				await behaviorPower.RemoveCustomStatusBehaviorEffects(definition.Id);
+			}
 			return;
 		}
 
@@ -27959,14 +28142,13 @@ private static string GetConfiguredMultiplierSourceLabel(CardExtraEffect? effect
 			return;
 		}
 
-		CardEditorExtraEffectPower? behaviorPower = target.GetPower<CardEditorExtraEffectPower>();
 		if (behaviorPower == null)
 		{
 			behaviorPower = await PowerCmd.Apply<CardEditorExtraEffectPower>(target, 1, target, behaviorSourceCard, silent: true);
 		}
 		if (behaviorPower != null)
 		{
-			await behaviorPower.AddCustomStatusBehaviorEffects(behaviorSourceCard, definition.Id, definition.BehaviorEffects, stacks);
+			await behaviorPower.AddCustomStatusBehaviorEffects(behaviorSourceCard, definition.Id, triggeredEffects, stacks);
 		}
 	}
 
@@ -28143,7 +28325,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		// and the other power triggers); non-power rows run via their dedicated card-hosted
 		// runners and reaching here was a silent no-op — return BEFORE the Use Limit consumption
 		// below, which used to double-consume for limit-bearing rows.
-		if (IsSelfPileAutoEffectKind(effect.Kind) && !IsPowerEffect(effect))
+		if (IsSelfPileAutoEffectKind(effect.Kind) && !effect.GrantToCard && !IsPowerEffect(effect))
 		{
 			return;
 		}
@@ -28159,7 +28341,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		// During an EachTarget fan-out the per-target re-runs (_eachTargetCurrent != null) must NOT re-consume
 		// the use limit: the outer call already consumed one use for the whole effect.
 		if (_eachTargetCurrent == null
-			&& !IsSelfPileAutoEffectKind(effect.Kind)
+			&& (!IsSelfPileAutoEffectKind(effect.Kind) || effect.GrantToCard)
 			&& !CardEditorAutoPlayLoopGuard.TryConsumeEffectUseLimit(combatState, limitOwner, limitSourceCard, effect))
 		{
 			return;
@@ -28388,6 +28570,11 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 	{
 		if (UsesAppliedEffectRowAmountSource(effect))
 		{
+			if (TryResolveVanillaDamageResultAmount(cardPlay, effect, out int vanillaDamageResultAmount))
+			{
+				return ScaleAmountSourceAmount(vanillaDamageResultAmount, effect);
+			}
+
 			if (effect.AmountSourceMode == CardExtraEffectAmountSourceMode.AppliedEffectRow
 				&& TryResolveVanillaDynamicAmountSource(combatState, ownerCreature, cardPlay, effect.AmountSourceEffectId, out int vanillaAmount))
 			{
@@ -28436,6 +28623,27 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		return effect.AmountIsX
 			? ResolveXAmountWithPlus(cardPlay, effect.AmountXPlus)
 			: effect.Amount;
+	}
+
+	private static bool TryResolveVanillaDamageResultAmount(
+		CardPlay? cardPlay,
+		CardExtraEffect effect,
+		out int amount)
+	{
+		amount = 0;
+		CardModel? card = cardPlay?.Card;
+		if (card?.DynamicVars == null
+			|| effect == null
+			|| !TryDecodeVanillaDynamicAmountSource(effect.AmountSourceEffectId, out string key)
+			|| !card.DynamicVars.Any(pair => string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase) && pair.Value is DamageVar))
+		{
+			return false;
+		}
+
+		return CardEditorEffectExecutionAmountContext.TryGetVanillaCardDamageMetric(
+			cardPlay,
+			effect.AmountSourceMode,
+			out amount);
 	}
 
 	private static int ResolveTotalAndOverkillDamageAmount(string? effectId)
@@ -28847,6 +29055,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 
 			AttackContext attackContext = await attackContextLease.Ensure();
+			CardEditorCosmetics.PlayConfiguredHitVfx(cardPlay.Card, targets);
 			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 			if (results.Count <= 0)
@@ -28923,6 +29132,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 
 			AttackContext attackContext = await attackContextLease.Ensure();
+			CardEditorCosmetics.PlayConfiguredHitVfx(cardPlay.Card, targets);
 			IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, targets, amount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 			List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 			if (results.Count <= 0)
@@ -29019,6 +29229,7 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				}
 
 				AttackContext attackContext = await attackContextLease.Ensure();
+				CardEditorCosmetics.PlayConfiguredHitVfx(cardPlay.Card, [target]);
 				IEnumerable<DamageResult> rawResults = await CreatureCmd.Damage(choiceContext, target, targetAmount, damageProps, ownerCreature, cardPlay.Card, cardPlay);
 				List<DamageResult> results = rawResults?.Where(r => r != null).ToList() ?? new List<DamageResult>();
 				if (results.Count <= 0)
@@ -29058,22 +29269,6 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return;
 		}
 
-		// Power-hosted auto-action rows (Whenever and other power triggers) dispatch to the same
-		// shared runner the card-hosted triggers use — all 3 unified variants identically.
-		// cardPlay.Card is already the HOST card (UsesSourceCardForImmediatePowerExecution); the
-		// EffectSourceContext fallback covers scheduler entries executing against a snapshot
-		// clone (the live host instance is pushed when the scheduled entry runs).
-		if (IsSelfPileAutoEffectKind(effect.Kind))
-		{
-			CardExtraEffect? selfPileAuto = NormalizeSelfPileAutoEffect(effect);
-			if (selfPileAuto != null)
-			{
-				CardModel autoHost = CardEditorEffectSourceContext.Current ?? card;
-				await TryRunSelfPileAutoEffect(combatState, choiceContext, autoHost, selfPileAuto);
-			}
-			return;
-		}
-
 		if (effect.GrantToCard)
 		{
 			if (effect.Kind == CardExtraEffectKind.EnchantCard)
@@ -29089,6 +29284,21 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 
 			await GrantEffectToCard(combatState, choiceContext, cardPlay, effect);
+			return;
+		}
+
+		// Power-hosted auto-action rows (Whenever and other power triggers) dispatch to the same
+		// shared runner the card-hosted triggers use — all 3 unified variants identically.
+		// Grant rows must be handled above this branch so they transfer the behavior rather than
+		// firing the source card's auto action immediately.
+		if (IsSelfPileAutoEffectKind(effect.Kind))
+		{
+			CardExtraEffect? selfPileAuto = NormalizeSelfPileAutoEffect(effect);
+			if (selfPileAuto != null)
+			{
+				CardModel autoHost = CardEditorEffectSourceContext.Current ?? card;
+				await TryRunSelfPileAutoEffect(combatState, choiceContext, autoHost, selfPileAuto);
+			}
 			return;
 		}
 
@@ -30954,9 +31164,15 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return;
 		}
 
+		IReadOnlyList<CardExtraEffect> grantPackage = BuildGrantedEffectPackage(combatState, sourceCard, effect);
+		if (grantPackage.Count == 0)
+		{
+			return;
+		}
+
 		if (useFutureAura)
 		{
-			CardEditorMatchingCardAuraController.ApplyExtraEffectAura(combatState, owner, effect, sourceCard, selected);
+			CardEditorMatchingCardAuraController.ApplyExtraEffectPackageAura(combatState, owner, effect, grantPackage, sourceCard, selected);
 			return;
 		}
 
@@ -30967,24 +31183,26 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 				continue;
 			}
 
-			CardExtraEffect effectToGrant = CloneEffectForGrantPayload(effect);
-			EnsureGrantPackageKey(effectToGrant);
-			if (ShouldSkipKeywordPackageGrantToCard(card, effectToGrant))
+			if (grantPackage.Count == 1 && ShouldSkipKeywordPackageGrantToCard(card, grantPackage[0]))
 			{
-				CardEditorMod.VerboseLog($"[CardEditor][TempEffectGrant] keyword package duplicate ignored card={card.Id} package={GetCanonicalGrantPackageKey(effectToGrant)}");
+				CardEditorMod.VerboseLog($"[CardEditor][TempEffectGrant] keyword package duplicate ignored card={card.Id} package={GetCanonicalGrantPackageKey(grantPackage[0])}");
 				continue;
 			}
 
-			if (IsSelfScalingKind(effect.Kind))
+			foreach (CardExtraEffect effectToGrant in grantPackage)
 			{
-				effectToGrant.SelfScalingRecipientMode = CardExtraEffectSelfScalingRecipientMode.ThisCard;
+				CardExtraEffect stored = CloneEffect(effectToGrant);
+				if (IsSelfScalingKind(stored.Kind))
+				{
+					stored.SelfScalingRecipientMode = CardExtraEffectSelfScalingRecipientMode.ThisCard;
+				}
+				CardEditorTemporaryExtraEffectController.Grant(
+					combatState,
+					card,
+					stored,
+					effect.CardGrantDuration,
+					effect.CardGrantTurns);
 			}
-			CardEditorTemporaryExtraEffectController.Grant(
-				combatState,
-				card,
-				effectToGrant,
-				effect.CardGrantDuration,
-				effect.CardGrantTurns);
 			try
 			{
 				card.InvokeEnergyCostChanged();
@@ -31015,6 +31233,122 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		payload.GrantToCard = false;
 		NormalizeGrantedPayloadSelection(payload);
 		return payload;
+	}
+
+	internal static IReadOnlyList<CardExtraEffect> BuildGrantedEffectPackage(CombatState combatState, CardModel sourceCard, CardExtraEffect source)
+	{
+		if (source.Kind != CardExtraEffectKind.ConditionalAutoRunEffects)
+		{
+			CardExtraEffect payload = CloneEffectForGrantPayload(source);
+			EnsureGrantPackageKey(payload);
+			return new[] { payload };
+		}
+
+		List<CardExtraEffect> sourceRows = new List<CardExtraEffect> { source };
+		Dictionary<string, CardExtraEffect> runtimeEffectsById = GetRuntimeEffectsIncludingBorrowedSources(combatState, sourceCard)
+			.Where(effect => effect != null && !string.IsNullOrWhiteSpace(effect.EffectId))
+			.GroupBy(effect => effect.EffectId!, StringComparer.Ordinal)
+			.ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+		foreach (string id in ParseAutoActionEffectIds(source))
+		{
+			if (string.Equals(id, AutoActionVanillaOnPlayTargetId, StringComparison.Ordinal)
+				|| string.Equals(id, source.EffectId ?? string.Empty, StringComparison.Ordinal)
+				|| !runtimeEffectsById.TryGetValue(id, out CardExtraEffect? payload)
+				|| sourceRows.Contains(payload))
+			{
+				continue;
+			}
+			sourceRows.Add(payload);
+		}
+
+		List<CardExtraEffect> package = CloneEffectPackageWithFreshIds(sourceRows);
+		string sourceId = sourceCard.Id?.ToString() ?? "unknown-card";
+		string effectIdentity = string.IsNullOrWhiteSpace(source.EffectId)
+			? $"{(int)source.Kind}:{source.AutoActionEffectIds}:{source.CountEvent}:{source.Trigger}"
+			: source.EffectId.Trim();
+		for (int i = 0; i < package.Count; i++)
+		{
+			CardExtraEffect payload = package[i];
+			payload.GrantToCard = false;
+			payload.CardGrantDuration = source.CardGrantDuration;
+			payload.CardGrantTurns = source.CardGrantTurns;
+			payload.GrantPackageKey = $"auto-action:{sourceId}:{effectIdentity}:{i}";
+			if (i == 0)
+			{
+				NormalizeGrantedPayloadSelection(payload);
+			}
+			else
+			{
+				payload.PayloadOnly = true;
+			}
+		}
+		return package;
+	}
+
+	private static List<CardExtraEffect> CloneEffectPackageWithFreshIds(IEnumerable<CardExtraEffect> effects)
+	{
+		List<CardExtraEffect> clones = effects
+			.Where(effect => effect != null)
+			.Select(CloneEffect)
+			.ToList();
+		Dictionary<string, string> idMap = new Dictionary<string, string>(StringComparer.Ordinal);
+		foreach (CardExtraEffect clone in clones)
+		{
+			if (!string.IsNullOrWhiteSpace(clone.EffectId))
+			{
+				idMap[clone.EffectId.Trim()] = Guid.NewGuid().ToString("N");
+			}
+		}
+
+		foreach (CardExtraEffect clone in clones)
+		{
+			RemapEffectPackageReferences(clone, idMap);
+		}
+		return clones;
+	}
+
+	private static void RemapEffectPackageReferences(CardExtraEffect? effect, IReadOnlyDictionary<string, string> idMap)
+	{
+		if (effect == null || idMap.Count == 0)
+		{
+			return;
+		}
+
+		effect.EffectId = RemapEffectPackageId(effect.EffectId, idMap);
+		effect.AmountSourceEffectId = RemapEffectPackageId(effect.AmountSourceEffectId, idMap);
+		effect.CardSelectionSourceEffectId = RemapEffectPackageId(effect.CardSelectionSourceEffectId, idMap);
+		effect.CountResultEffectId = RemapEffectPackageId(effect.CountResultEffectId, idMap);
+		effect.BranchCountResultEffectId = RemapEffectPackageId(effect.BranchCountResultEffectId, idMap);
+		effect.SelfScalingTargetEffectId = RemapEffectPackageId(effect.SelfScalingTargetEffectId, idMap);
+		effect.AutoActionEffectIds = RemapEffectPackageIds(effect.AutoActionEffectIds, idMap);
+		effect.EffectLimitTargetEffectIds = RemapEffectPackageIds(effect.EffectLimitTargetEffectIds, idMap);
+		RemapEffectPackageReferences(effect.BranchEffect, idMap);
+	}
+
+	private static string? RemapEffectPackageId(string? effectId, IReadOnlyDictionary<string, string> idMap)
+	{
+		if (string.IsNullOrWhiteSpace(effectId))
+		{
+			return effectId;
+		}
+
+		string trimmed = effectId.Trim();
+		return idMap.TryGetValue(trimmed, out string? remapped) ? remapped : trimmed;
+	}
+
+	private static string? RemapEffectPackageIds(string? effectIds, IReadOnlyDictionary<string, string> idMap)
+	{
+		if (string.IsNullOrWhiteSpace(effectIds))
+		{
+			return effectIds;
+		}
+
+		List<string> remapped = ParseDelimitedEffectIds(effectIds)
+			.Select(id => RemapEffectPackageId(id, idMap))
+			.Where(id => !string.IsNullOrWhiteSpace(id))
+			.Select(id => id!)
+			.ToList();
+		return remapped.Count == 0 ? null : string.Join(";", remapped);
 	}
 
 	// P4: pile/deck-action payloads KEEP their authored selection filters when granted - the old
@@ -32182,7 +32516,17 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			return;
 		}
 
+		string? customKeywordName = NormalizeCustomKeywordName(effect.CustomKeywordName);
+		bool grantsCustomKeyword = customKeywordName != null;
 		bool useFutureAura = !effect.GrantedKeywordRemove && effect.FutureMatchingCards && effect.CardSelectionMode == CardExtraEffectCardSelectionMode.All;
+		IReadOnlyList<CardExtraEffect> customKeywordPackage = grantsCustomKeyword
+			? BuildCustomKeywordGrantPackage(customKeywordName!, effect)
+			: Array.Empty<CardExtraEffect>();
+		if (grantsCustomKeyword && customKeywordPackage.Count == 0)
+		{
+			Log.Warn($"[CardEditor] Custom keyword grant could not resolve '{customKeywordName}'.");
+			return;
+		}
 
 		static bool IsPlayerEndBoundary(CombatState combatState, CardExtraEffect effect)
 		{
@@ -32238,7 +32582,14 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 
 		if (useFutureAura)
 		{
-			CardEditorMatchingCardAuraController.ApplyKeywordAura(combatState, owner, effect, sourceCard, selected);
+			if (grantsCustomKeyword)
+			{
+				CardEditorMatchingCardAuraController.ApplyExtraEffectPackageAura(combatState, owner, effect, customKeywordPackage, sourceCard, selected);
+			}
+			else
+			{
+				CardEditorMatchingCardAuraController.ApplyKeywordAura(combatState, owner, effect, sourceCard, selected);
+			}
 			CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(selected.Count);
 			return;
 		}
@@ -32250,6 +32601,34 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 		{
 			if (card != null)
 			{
+				if (grantsCustomKeyword)
+				{
+					if (effect.GrantedKeywordRemove)
+					{
+						if (CardEditorTemporaryExtraEffectController.RemoveCustomKeyword(combatState, card, customKeywordName!))
+						{
+							granted++;
+						}
+						continue;
+					}
+
+					if (CardHasCustomKeyword(card, customKeywordName!))
+					{
+						continue;
+					}
+					foreach (CardExtraEffect payload in customKeywordPackage)
+					{
+						CardEditorTemporaryExtraEffectController.Grant(
+							combatState,
+							card,
+							payload,
+							effect.CardGrantDuration,
+							effect.CardGrantTurns);
+					}
+					granted++;
+					continue;
+				}
+
 				if (effect.GrantedKeywordRemove)
 				{
 					CardCmd.RemoveKeyword(card, effect.GrantedKeyword);
@@ -32284,6 +32663,28 @@ private static async Task GainStatusEqualToStatus(CombatState combatState, Creat
 			}
 		}
 		CardEditorEffectExecutionAmountContext.ReportCurrentAppliedCount(granted);
+	}
+
+	internal static IReadOnlyList<CardExtraEffect> BuildCustomKeywordGrantPackage(string keywordName, CardExtraEffect grantEffect)
+	{
+		CardEditorCustomKeywordLibraryEntry? entry = CardEditorCustomKeywordLibrary.FindByName(keywordName);
+		if (entry?.Effects == null || entry.Effects.Count == 0)
+		{
+			return Array.Empty<CardExtraEffect>();
+		}
+
+		List<CardExtraEffect> package = CloneEffectPackageWithFreshIds(entry.Effects);
+		string packagePrefix = "custom-keyword:" + keywordName.ToUpperInvariant();
+		for (int i = 0; i < package.Count; i++)
+		{
+			CardExtraEffect payload = package[i];
+			payload.GrantToCard = false;
+			payload.CustomKeywordName = keywordName;
+			payload.CardGrantDuration = grantEffect.CardGrantDuration;
+			payload.CardGrantTurns = grantEffect.CardGrantTurns;
+			payload.GrantPackageKey = $"{packagePrefix}:{i}";
+		}
+		return package;
 	}
 
 	internal static async Task UpgradeDeckCards(Player owner, int amount, CardExtraEffect effect)
@@ -35756,7 +36157,7 @@ internal static bool MatchesCardSelectionFilters(Player owner, CardModel card, C
 
 			if (effect.CountEvent == CardExtraEffectCountEvent.CurrentTurnNumber)
 			{
-				return combatState?.RoundNumber ?? 0;
+				return owner.PlayerCombatState?.TurnNumber ?? combatState?.RoundNumber ?? 0;
 			}
 
 			if (effect.CountEvent == CardExtraEffectCountEvent.NumberOfEnemies)
@@ -40784,9 +41185,29 @@ private static List<int> PickRandomDistinctIndices(int availableCount, int count
 
 	internal static CardExtraEffect CloneForPowerExecution(CardPlay? sourcePlay, CardExtraEffect source)
 	{
+		return CloneForNonCardExecution(sourcePlay, source);
+	}
+
+	internal static CardExtraEffect CloneForNonCardExecution(CardPlay? sourcePlay, CardExtraEffect source)
+	{
 		CardExtraEffect clone = CloneForDeferredExecution(sourcePlay, source);
-		clone.DeferredPowerAmountIsUnpowered = clone.Kind is CardExtraEffectKind.DealDamage or CardExtraEffectKind.GainBlock;
+		MarkDeferredPowerDamageAndBlockUnpowered(clone);
 		return clone;
+	}
+
+	private static void MarkDeferredPowerDamageAndBlockUnpowered(CardExtraEffect? effect)
+	{
+		if (effect == null)
+		{
+			return;
+		}
+
+		if (effect.Kind is CardExtraEffectKind.DealDamage or CardExtraEffectKind.GainBlock)
+		{
+			effect.DeferredPowerAmountIsUnpowered = true;
+		}
+
+		MarkDeferredPowerDamageAndBlockUnpowered(effect.BranchEffect);
 	}
 
 	private static void CaptureDeferredXValues(CardPlay? sourcePlay, CardExtraEffect? effect)

@@ -22,6 +22,37 @@ internal sealed class CardEditorCustomKeywordLibraryEntry
 
 internal static class CardEditorCustomKeywordLibrary
 {
+	public static CardEditorCustomKeywordLibraryEntry? FindByName(string? keywordName)
+	{
+		string requested = keywordName?.Trim() ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(requested))
+		{
+			return null;
+		}
+
+		CardEditorCustomKeywordDefinition? explicitDefinition = CardEditorDefinitionStore.GetKeywordDefinitions()
+			.FirstOrDefault(definition => string.Equals(definition.Name?.Trim(), requested, StringComparison.OrdinalIgnoreCase));
+		if (explicitDefinition != null)
+		{
+			string description = explicitDefinition.Description?.Trim() ?? string.Empty;
+			return new CardEditorCustomKeywordLibraryEntry
+			{
+				DefinitionId = explicitDefinition.Id,
+				KeywordName = explicitDefinition.Name.Trim(),
+				Description = description,
+				PlainDescription = StripMarkup(description),
+				SourceCardId = ModelId.none,
+				SourceCardTitle = "Keyword Definition",
+				SearchText = string.Join('\n', new[] { explicitDefinition.Name, "Keyword Definition", description, explicitDefinition.Id }),
+				Effects = explicitDefinition.Effects.Select(CardEditorExtraEffects.CloneEffect).ToList(),
+				IsExplicitDefinition = true
+			};
+		}
+
+		return BuildEntries().FirstOrDefault(entry =>
+			string.Equals(entry.KeywordName?.Trim(), requested, StringComparison.OrdinalIgnoreCase));
+	}
+
 	public static IReadOnlyList<CardEditorCustomKeywordLibraryEntry> BuildEntries()
 	{
 		List<CardEditorCustomKeywordLibraryEntry> entries = new List<CardEditorCustomKeywordLibraryEntry>();

@@ -38,7 +38,8 @@ internal sealed class CardEditorMultiplayerStateDto
 	// v3: Quest reward persistence - QuestRewardStyle keeps recurring reward triggers installed
 	// per combat/run instead of flattening them to a one-shot at completion. Old DLLs drop the
 	// field and fire rewards once, so mixed builds must refuse to sync.
-	public const int SyncProtocolVersion = 3;
+	// v4: BearerHitByAttack is a new serialized trigger with receiver-specific semantics.
+	public const int SyncProtocolVersion = 4;
 
 	public int Version { get; set; } = SyncProtocolVersion;
 	public string? ModVersion { get; set; }
@@ -208,10 +209,8 @@ internal static class CardEditorMultiplayerSync
 	// L1/L4: client lobby-ready gate + snapshot request retry.
 	private static bool _pendingClientReady;
 	private static Action? _pendingReadyAction;
-	private static ulong _pendingReadyStartMs;
-	private static ulong _lastSyncRequestMs;
+	private static long _lastSyncRequestMs;
 	private static bool _runnerAddQueued;
-	private const double ReadyGateTimeoutSeconds = 3.0;
 	private const double SyncRequestRetrySeconds = 2.0;
 
 	public static bool IsBoundToMultiplayerSession => _netService != null && _netService.Type.IsMultiplayer();
@@ -293,8 +292,8 @@ internal static class CardEditorMultiplayerSync
 		return _lastAppliedSequence > 0;
 	}
 
-	// Never suppress the vanilla Ready call. If the initial snapshot is missing, re-arm its request
-	// while allowing StartRunLobby/LoadRunLobby to update local state and send the Ready message.
+	// Keep the user's Ready action until the authoritative host snapshot has been applied. The
+	// callback is the original lobby SetReady(true), replayed exactly once after synchronization.
 	internal static bool AllowClientReady(Action fireReadyTrue, bool ready)
 	{
 		// An explicit un-ready always passes through, and cancels any deferred ready so the player is
@@ -305,29 +304,19 @@ internal static class CardEditorMultiplayerSync
 			return true;
 		}
 
-		// NEVER block the ready click. Blocking suppressed the game's own SetReady, which is what sends
-		// LobbyPlayerSetReadyMessage - so the HOST never learned this client was ready and the run could
-		// never start. Any hole in the deferred re-fire (a transient net-service rebind clearing the
-		// pending action, a pump that stopped ticking on a scene change) ate the click permanently, with
-		// no UI feedback: exactly the reported "can't click ready" symptom.
-		//
-		// The old hold also failed open after ReadyGateTimeoutSeconds REGARDLESS of sync state, so it only
-		// ever DELAYED an unsynced ready rather than preventing one - near-zero safety for a catastrophic
-		// downside. We now always pass the ready through and just make sure the snapshot request is in
-		// flight; a late snapshot still applies normally.
-		ClearPendingReady();
-
 		if (_netService != null
 			&& (_netService.Type == NetGameType.Client || ForceClientReadyGateForTesting)
 			&& CardEditorMultiplayerSettings.MultiplayerSyncEnabled
 			&& !IsClientSnapshotApplied())
 		{
-			// Re-arm the request so Update() asks the host again on its next tick.
-			_requestedInitialSync = false;
-			Log.Warn("[CardEditor][MultiplayerSync] Readying before the host card-editor snapshot has been applied; "
-				+ "requesting it now. Card/relic definitions may differ until it lands.");
+			_pendingClientReady = true;
+			_pendingReadyAction = fireReadyTrue;
+			RequestAuthoritativeSnapshotNow();
+			Log.Info("[CardEditor][MultiplayerSync] Holding Ready until the authoritative host snapshot is applied.");
+			return false;
 		}
 
+		ClearPendingReady();
 		return true;
 	}
 
@@ -335,7 +324,6 @@ internal static class CardEditorMultiplayerSync
 	{
 		_pendingClientReady = false;
 		_pendingReadyAction = null;
-		_pendingReadyStartMs = 0;
 	}
 
 	private static void FirePendingReadyIfNeeded()
@@ -352,23 +340,12 @@ internal static class CardEditorMultiplayerSync
 			return;
 		}
 
-		bool applied = IsClientSnapshotApplied();
-		bool timedOut = _pendingReadyStartMs != 0
-			&& (Time.GetTicksMsec() - _pendingReadyStartMs) >= (ulong)(ReadyGateTimeoutSeconds * 1000.0);
-		if (!applied && !timedOut)
+		if (!IsClientSnapshotApplied())
 		{
 			return;
 		}
 
-		if (!applied)
-		{
-			Log.Warn("[CardEditor][MultiplayerSync] Readying WITHOUT a confirmed card-editor sync "
-				+ "(host may have sync disabled or lack the mod). Card/relic mismatches may still desync.");
-		}
-		else
-		{
-			Log.Info("[CardEditor][MultiplayerSync] Host snapshot applied; sending the held lobby ready.");
-		}
+		Log.Info("[CardEditor][MultiplayerSync] Host snapshot applied; sending the held lobby ready.");
 
 		Action? fire = _pendingReadyAction;
 		ClearPendingReady();
@@ -385,6 +362,19 @@ internal static class CardEditorMultiplayerSync
 		{
 			Log.Warn($"[CardEditor][MultiplayerSync] Failed firing deferred lobby ready: {ex}");
 		}
+	}
+
+	private static void RequestAuthoritativeSnapshotNow()
+	{
+		if (_netService == null || !_netService.IsConnected || _netService.Type != NetGameType.Client)
+		{
+			return;
+		}
+
+		_requestedInitialSync = true;
+		_lastSyncRequestMs = System.Environment.TickCount64;
+		_netService.SendMessage(new CardEditorMultiplayerSyncRequestMessage());
+		CardEditorMod.VerboseLog("[CardEditor][MultiplayerSync] Requested authoritative host snapshot immediately for Ready.");
 	}
 
 	public static void BindToNetService(INetGameService? netService)
@@ -474,8 +464,9 @@ internal static class CardEditorMultiplayerSync
 
 	public static void Update()
 	{
-		// Fire first so a held lobby ready can never be eaten by a service that looks disconnected -
-		// the timeout inside fails open for sessions that never sync.
+		// Complete a held lobby Ready as soon as the authoritative snapshot has been applied. There is
+		// intentionally no timeout/fail-open path: entering a lockstep run with different editor data is
+		// worse than keeping Ready blocked while the client retries its snapshot request.
 		FirePendingReadyIfNeeded();
 
 		if (_netService == null || !_netService.IsConnected)
@@ -489,8 +480,8 @@ internal static class CardEditorMultiplayerSync
 			// host that enables sync after we first asked).
 			if (!IsClientSnapshotApplied())
 			{
-				ulong now = Time.GetTicksMsec();
-				if (!_requestedInitialSync || (now - _lastSyncRequestMs) >= (ulong)(SyncRequestRetrySeconds * 1000.0))
+				long now = System.Environment.TickCount64;
+				if (!_requestedInitialSync || (now - _lastSyncRequestMs) >= (long)(SyncRequestRetrySeconds * 1000.0))
 				{
 					_requestedInitialSync = true;
 					_lastSyncRequestMs = now;
@@ -1231,6 +1222,7 @@ internal static class CardEditorMultiplayerSync
 		_remoteAuthorityMode = state.AuthorityMode;
 		_remoteSyncActive = true;
 		_lastAppliedSequence = message.Sequence;
+		FirePendingReadyIfNeeded();
 	}
 
 	private static void OnEditRequestReceived(CardEditorMultiplayerEditRequestMessage message, ulong senderId)

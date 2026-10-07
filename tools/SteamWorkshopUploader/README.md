@@ -8,7 +8,7 @@ folder.
 ```powershell
 dotnet run --project .\tools\SteamWorkshopUploader\SteamWorkshopUploader.csproj -- `
   ".\built cfiles" `
-  "Version 10.1.4: fixed remaining audited Run Effect Source lifecycle behavior and persistent source scaling."
+  "Version 10.1.5: vanilla parity and authoring fixes. Automated suites pass; some live-combat and multiplayer combinations may still be bugged."
 ```
 
 The tool reports success only after the `SubmitItemUpdateResult_t` callback returns

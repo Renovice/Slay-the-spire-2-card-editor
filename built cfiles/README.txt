@@ -49,6 +49,7 @@ NOTES
 - Logs: user://logs/godot.log (search for [CardEditor])
 
 CHANGELOG (high level)
+- v10.1.5: Added vanilla-result Source Effect parity, grantable Auto Actions and custom keywords, vanilla-style delayed power stat isolation, passive custom-status stats, and audited Selected Row capabilities. Automated beta-model and real-engine UI tests pass, but some live-combat, multiplayer, cleanse/Artifact, and mod-interaction combinations may still be bugged.
 - v10.1.4: Fixed the remaining audited Run Effect Source lifecycle cards, including draw/exhaust reactions, result piles, scaling state, and multiplayer transfer.
 - v10.1.3: Fixed Particle Wall, Right Hand Hand, and I Am Invincible lifecycle behavior through Run Effect Source.
 - v10.1.2: Fixed This Card Whenever cost reductions, After Death resources, and duplicate Match Energy text.
