@@ -8411,6 +8411,12 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		{
 			return CardExtraEffectCardCostsLessDuration.Permanent;
 		}
+		// Consume Card Value always saved an explicit duration (new rows default to This Combat),
+		// so a stored Permanent is a real user choice, not the legacy enum default.
+		if (effect.Kind == CardExtraEffectKind.ConsumeCardValue)
+		{
+			return effect.CardCostsLessDuration;
+		}
 
 		// Older presets stored Self Scaling before the duration dropdown existed. The default enum value is
 		// Permanent, but the old non-persistent behavior was "this combat", so preserve that compatibility.
@@ -9211,6 +9217,26 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 		return Finish();
 	}
 
+	// This Combat / timed mutations must only touch combat copies. A pick from the Deck pile is the run-level
+	// card, which outlives the combat (nothing reverts This Combat), so redirect it to its live combat copy,
+	// or skip it when that deck card has no copy in this combat.
+	private static List<CardModel> ResolveTemporaryMutationRecipients(IEnumerable<CardModel> recipients)
+	{
+		List<CardModel> resolved = new List<CardModel>();
+		HashSet<CardModel> seen = new HashSet<CardModel>(ReferenceEqualityComparer<CardModel>.Instance);
+		foreach (CardModel recipient in recipients)
+		{
+			CardModel? target = recipient.Pile?.Type == PileType.Deck
+				? recipient.Owner?.PlayerCombatState?.AllCards.FirstOrDefault(card => ReferenceEquals(card.DeckVersion, recipient))
+				: recipient;
+			if (target != null && target.IsMutable && seen.Add(target))
+			{
+				resolved.Add(target);
+			}
+		}
+		return resolved;
+	}
+
 	private static async Task<bool> ApplySelfScalingMutation(CombatState combatState, PlayerChoiceContext choiceContext, CardPlay cardPlay, CardExtraEffect effect, int triggerEventAmount)
 	{
 		if (cardPlay == null || cardPlay.Card == null)
@@ -9236,7 +9262,7 @@ private static bool UsesCountCardEffectAmount(CardExtraEffect effect)
 			return mutated;
 		}
 
-		foreach (CardModel recipient in recipients)
+		foreach (CardModel recipient in ResolveTemporaryMutationRecipients(recipients))
 		{
 			mutated |= duration == CardExtraEffectCardCostsLessDuration.ThisCombat
 				? ApplySelfScalingMutationToCard(recipient, effect, delta)
@@ -33478,6 +33504,10 @@ private static async Task PlayCardsFromPile(CombatState? combatState, PlayerChoi
 		if (recipients.Count > 0)
 		{
 			CardExtraEffectCardCostsLessDuration duration = GetEffectiveSelfScalingDuration(effect);
+			if (duration != CardExtraEffectCardCostsLessDuration.Permanent)
+			{
+				recipients = ResolveTemporaryMutationRecipients(recipients);
+			}
 			foreach (CardModel consumed in selected)
 			{
 				int value = ResolveConsumedCardValue(consumed, effect);

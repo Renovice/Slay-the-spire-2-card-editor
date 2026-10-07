@@ -30044,6 +30044,11 @@ private HBoxContainer CreateEffectAlignedTickboxSlot(KeywordTickbox tickbox)
 		{
 			return CardExtraEffectCardCostsLessDuration.ThisCombat;
 		}
+		// Consume Card Value always saved an explicit duration, so Permanent is a real choice here.
+		if (effect.Kind == CardExtraEffectKind.ConsumeCardValue)
+		{
+			return effect.CardCostsLessDuration;
+		}
 
 		// Legacy non-persistent self-scaling rows predate this duration field, so their default enum value
 		// (Permanent) should still load as the old behavior: this combat only.

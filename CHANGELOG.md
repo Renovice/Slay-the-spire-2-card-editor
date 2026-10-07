@@ -1,5 +1,10 @@
 # Card Editor changelog
 
+## 10.1.6 - Persistence and combat-mutation fixes (2026-10-08)
+
+- Fixed `Consume Card Value` with Persistence set to `Permanent` reverting to `This Combat`: the editor no longer flips it when switching between Edit Base and Edit Upgrade, and the absorbed value now lasts for the rest of the run. Cards saved while the bug showed `This Combat` need Permanent re-selected once.
+- Fixed `This Combat` (and timed) card mutations that target the Deck or All Piles permanently changing the deck card until the game was restarted (reported with Claw). They now change only the card's copy in the current combat.
+
 ## 10.1.5 - Vanilla parity and authoring fixes (2026-09-19)
 
 - Fixed `Vanilla: Damage > Source Effect` to read the actual per-target vanilla damage results, including AOE changes such as Vigor, Vulnerable, Block, overkill, and kills.
