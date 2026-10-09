@@ -1,5 +1,10 @@
 # Card Editor changelog
 
+## 10.1.8 - Multiplayer sync update loop (2026-10-10)
+
+- Fixed the multiplayer sync update loop never running: a mod node's `_Process` override is never dispatched because the mod builds without Godot's C# source generators. It now runs from `SceneTree.ProcessFrame`, so a client retries a lost host snapshot request instead of staying stuck on Ready, and the host re-sends lobby edits to connected players.
+- The debug dummy lobby pump and F9 join key use the same frame hook. No UI behavior changed.
+
 ## 10.1.7 - Animated GIF art and vanilla damage source fixes (2026-10-10)
 
 - Fixed animated `.gif` custom card art showing only its first frame. The mod builds without Godot's C# source generators, so Godot never called the per-card animator's `_Process`; GIF portraits now advance from one shared `SceneTree.ProcessFrame` ticker that skips hidden cards and disconnects when no GIF is on screen.

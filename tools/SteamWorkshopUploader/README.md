@@ -8,7 +8,7 @@ folder.
 ```powershell
 dotnet run --project .\tools\SteamWorkshopUploader\SteamWorkshopUploader.csproj -- `
   ".\built cfiles" `
-  "Version 10.1.7: animated GIF card art now plays, and Applied Effect on Vanilla: Damage includes Vigor, Vulnerable, and other per-hit changes."
+  "Version 10.1.8: multiplayer sync now retries the host snapshot request and re-sends host lobby edits."
 ```
 
 The tool reports success only after the `SubmitItemUpdateResult_t` callback returns

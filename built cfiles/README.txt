@@ -50,6 +50,7 @@ NOTES
 - Logs: user://logs/godot.log (search for [CardEditor])
 
 CHANGELOG (high level)
+- v10.1.8: Multiplayer sync now retries the host snapshot request if it is lost and re-sends the host's lobby edits to other players. No UI changes.
 - v10.1.7: Animated GIF card art now plays on cards instead of showing only the first frame. Applied Effect on Vanilla: Damage now uses the hits that actually landed, so Vigor, Vulnerable, and other per-hit changes are included.
 - v10.1.6: Fixed Consume Card Value set to Permanent reverting to This Combat (editor and in game), and This Combat card mutations that target the Deck pile staying on the card after combat.
 - v10.1.5: Added vanilla-result Source Effect parity, grantable Auto Actions and custom keywords, vanilla-style delayed power stat isolation, passive custom-status stats, and audited Selected Row capabilities. Automated beta-model and real-engine UI tests pass, but some live-combat, multiplayer, cleanse/Artifact, and mod-interaction combinations may still be bugged.
