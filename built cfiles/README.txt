@@ -30,7 +30,8 @@ If you use the Creator and want to pick your own portrait art:
    ...\mods\card_editor\card art\
    (also supported: ...\mods\card_editor\card_art\)
 2) Drop images in that folder:
-   - Supported: .png / .jpg / .jpeg / .webp
+   - Supported: .png / .jpg / .jpeg / .webp / .gif (animated GIFs play on the card)
+   - GIF tip: keep animated GIFs small (around 500x380, under ~60 frames); every frame is kept in video memory.
    - Recommended portrait size: 1000x760 (same as base game portraits) or higher.
 3) In Creator -> Art dropdown, pick: "Custom: <filename>"
 
@@ -49,6 +50,7 @@ NOTES
 - Logs: user://logs/godot.log (search for [CardEditor])
 
 CHANGELOG (high level)
+- v10.1.7: Animated GIF card art now plays on cards instead of showing only the first frame. Applied Effect on Vanilla: Damage now uses the hits that actually landed, so Vigor, Vulnerable, and other per-hit changes are included.
 - v10.1.6: Fixed Consume Card Value set to Permanent reverting to This Combat (editor and in game), and This Combat card mutations that target the Deck pile staying on the card after combat.
 - v10.1.5: Added vanilla-result Source Effect parity, grantable Auto Actions and custom keywords, vanilla-style delayed power stat isolation, passive custom-status stats, and audited Selected Row capabilities. Automated beta-model and real-engine UI tests pass, but some live-combat, multiplayer, cleanse/Artifact, and mod-interaction combinations may still be bugged.
 - v10.1.4: Fixed the remaining audited Run Effect Source lifecycle cards, including draw/exhaust reactions, result piles, scaling state, and multiplayer transfer.

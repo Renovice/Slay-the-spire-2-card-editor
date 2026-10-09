@@ -325,6 +325,12 @@ internal static class CardEditorEffectExecutionAmountContext
 			CardExtraEffectAmountSourceMode.AppliedEffectTotalAndOverkillDamage => results.Sum(result => (long)Math.Max(0, result.TotalDamage) + Math.Max(0, result.OverkillDamage)),
 			CardExtraEffectAmountSourceMode.AppliedEffectInstances => results.Count(result => result.TotalDamage > 0),
 			CardExtraEffectAmountSourceMode.AppliedEffectKills => results.Count(result => result.WasTargetKilled),
+			// "Applied Effect" on a vanilla damage value means the damage the attack carried. Read it from the
+			// landed hits (blocked + unblocked + overkill) so cast-time Vigor and per-target Vulnerable are
+			// included; recomputing after the play misses both. No captured hits -> caller falls back.
+			CardExtraEffectAmountSourceMode.AppliedEffectRow => results.Count == 0
+				? -1
+				: results.Sum(result => (long)Math.Max(0, result.TotalDamage) + Math.Max(0, result.OverkillDamage)),
 			_ => -1
 		};
 		if (value < 0)

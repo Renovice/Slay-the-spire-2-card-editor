@@ -722,13 +722,33 @@ internal sealed class CardEditorGifAnimation
 	}
 }
 
-internal partial class CardEditorGifPortraitAnimator : Node
+// Drives GIF portraits from SceneTree.ProcessFrame instead of a per-card Node._Process override.
+// card_editor builds without Godot's C# source generators, so Godot never dispatches _Process (or other
+// engine virtuals) to mod Node subclasses: Node.InvokeGodotClassMethod gates the call on the generated
+// HasGodotClassMethod, which only exists when the generators run. Signal-connected delegate Callables
+// do work, so one shared ticker advances every live portrait and disconnects itself when none are left.
+internal static class CardEditorGifPortraitAnimator
 {
-	private const string AnimatorName = "__card_editor_gif_portrait_animator";
-	private TextureRect? _target;
-	private CardEditorGifAnimation? _animation;
-	private int _frameIndex;
-	private double _elapsed;
+	private sealed class PortraitState
+	{
+		public PortraitState(CardEditorGifAnimation animation)
+		{
+			Animation = animation;
+		}
+
+		public CardEditorGifAnimation Animation { get; }
+		public int FrameIndex { get; set; }
+		public double Elapsed { get; set; }
+	}
+
+	// A long hitch (loading, alt-tab) should not fast-forward through many frames on the next tick.
+	private const double MaxTickSeconds = 0.25;
+
+	private static readonly Dictionary<TextureRect, PortraitState> _portraits = new(ReferenceEqualityComparer.Instance);
+	private static readonly List<TextureRect> _expired = new();
+	private static Callable? _tickCallable;
+	private static SceneTree? _connectedTree;
+	private static ulong _lastTickUsec;
 
 	public static void Sync(TextureRect? target, CardEditorGifAnimation? animation)
 	{
@@ -737,63 +757,104 @@ internal partial class CardEditorGifPortraitAnimator : Node
 			return;
 		}
 
-		CardEditorGifPortraitAnimator? animator = target.GetNodeOrNull<CardEditorGifPortraitAnimator>(AnimatorName);
 		if (animation == null || animation.FrameCount <= 1)
 		{
-			if (animator != null && GodotObject.IsInstanceValid(animator))
+			_portraits.Remove(target);
+			DisconnectIfIdle();
+			return;
+		}
+
+		if (!_portraits.TryGetValue(target, out PortraitState? state) || !ReferenceEquals(state.Animation, animation))
+		{
+			state = new PortraitState(animation);
+			_portraits[target] = state;
+		}
+
+		target.Texture = animation.GetFrame(state.FrameIndex);
+		EnsureConnected();
+	}
+
+	private static void EnsureConnected()
+	{
+		if (Engine.GetMainLoop() is not SceneTree tree)
+		{
+			return;
+		}
+
+		_tickCallable ??= Callable.From(Tick);
+		if (ReferenceEquals(_connectedTree, tree) && tree.IsConnected(SceneTree.SignalName.ProcessFrame, _tickCallable.Value))
+		{
+			return;
+		}
+
+		tree.Connect(SceneTree.SignalName.ProcessFrame, _tickCallable.Value);
+		_connectedTree = tree;
+		_lastTickUsec = Time.GetTicksUsec();
+	}
+
+	private static void DisconnectIfIdle()
+	{
+		if (_portraits.Count > 0 || _connectedTree == null || _tickCallable == null)
+		{
+			return;
+		}
+
+		if (GodotObject.IsInstanceValid(_connectedTree)
+			&& _connectedTree.IsConnected(SceneTree.SignalName.ProcessFrame, _tickCallable.Value))
+		{
+			_connectedTree.Disconnect(SceneTree.SignalName.ProcessFrame, _tickCallable.Value);
+		}
+		_connectedTree = null;
+	}
+
+	private static void Tick()
+	{
+		ulong now = Time.GetTicksUsec();
+		double delta = Math.Min(MaxTickSeconds, (now - _lastTickUsec) / 1_000_000.0);
+		_lastTickUsec = now;
+
+		try
+		{
+			foreach ((TextureRect target, PortraitState state) in _portraits)
 			{
-				animator.QueueFree();
+				if (!GodotObject.IsInstanceValid(target) || target.IsQueuedForDeletion())
+				{
+					_expired.Add(target);
+					continue;
+				}
+
+				// Hidden or detached portraits (pooled cards, closed screens) hold their frame for free.
+				if (!target.IsInsideTree() || !target.IsVisibleInTree())
+				{
+					continue;
+				}
+
+				state.Elapsed += delta;
+				float duration = Math.Max(0.02f, state.Animation.GetDuration(state.FrameIndex));
+				if (state.Elapsed < duration)
+				{
+					continue;
+				}
+
+				state.Elapsed %= duration;
+				state.FrameIndex = (state.FrameIndex + 1) % state.Animation.FrameCount;
+				target.Texture = state.Animation.GetFrame(state.FrameIndex);
 			}
-			return;
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor] GIF portrait tick failed: {ex.GetType().Name}: {ex.Message}");
 		}
 
-		if (animator == null || !GodotObject.IsInstanceValid(animator))
+		if (_expired.Count > 0)
 		{
-			animator = new CardEditorGifPortraitAnimator
+			foreach (TextureRect target in _expired)
 			{
-				Name = AnimatorName
-			};
-			target.AddChild(animator);
+				_portraits.Remove(target);
+			}
+			_expired.Clear();
+			DisconnectIfIdle();
 		}
-
-		animator.Configure(target, animation);
-	}
-
-	private void Configure(TextureRect target, CardEditorGifAnimation animation)
-	{
-		if (!ReferenceEquals(_target, target) || !ReferenceEquals(_animation, animation))
-		{
-			_frameIndex = 0;
-			_elapsed = 0;
-		}
-
-		_target = target;
-		_animation = animation;
-		_target.Texture = animation.FirstFrame;
-		SetProcess(true);
-	}
-
-	public override void _Process(double delta)
-	{
-		if (_target == null
-			|| _animation == null
-			|| _animation.FrameCount <= 1
-			|| !GodotObject.IsInstanceValid(_target))
-		{
-			QueueFree();
-			return;
-		}
-
-		_elapsed += Math.Max(0, delta);
-		float duration = _animation.GetDuration(_frameIndex);
-		if (_elapsed < duration)
-		{
-			return;
-		}
-
-		_elapsed %= Math.Max(0.02f, duration);
-		_frameIndex = (_frameIndex + 1) % _animation.FrameCount;
-		_target.Texture = _animation.GetFrame(_frameIndex);
 	}
 }
 

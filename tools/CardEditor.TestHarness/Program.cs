@@ -1210,6 +1210,17 @@ internal static class Program
 			actualVanillaTotal,
 			fixture.Player.Creature.Block - blockBefore,
 			"Total Damage did not use the completed vanilla AoE results, or included a later extra-effect hit");
+
+		CardExtraEffect appliedBlock = ImmediateOnPlay(CardExtraEffectKind.GainBlock);
+		appliedBlock.AmountSourceMode = CardExtraEffectAmountSourceMode.AppliedEffectRow;
+		appliedBlock.AmountSourceEffectId = CardEditorExtraEffects.EncodeVanillaDynamicAmountSource("Damage");
+		blockBefore = fixture.Player.Creature.Block;
+		await CardEditorExtraEffects.RunResolvedOnPlayEffectsDuringCardPlay(
+			fixture.Combat, fixture.Choices, cardPlay, [appliedBlock]);
+		AssertSame(
+			actualVanillaTotal,
+			fixture.Player.Creature.Block - blockBefore,
+			"Applied Effect on Vanilla: Damage recomputed the value instead of using the landed Vigor/Vulnerable hits");
 	}
 
 	private static async Task TestPowerExpiryAndCleanReapply()

@@ -1,5 +1,10 @@
 # Card Editor changelog
 
+## 10.1.7 - Animated GIF art and vanilla damage source fixes (2026-10-10)
+
+- Fixed animated `.gif` custom card art showing only its first frame. The mod builds without Godot's C# source generators, so Godot never called the per-card animator's `_Process`; GIF portraits now advance from one shared `SceneTree.ProcessFrame` ticker that skips hidden cards and disconnects when no GIF is on screen.
+- Fixed `Applied Effect` with `Vanilla: Damage` as the Source Effect ignoring Vigor, Vulnerable, and other per-hit changes. It now reads the vanilla attack's landed hits (blocked + unblocked + overkill), summed across hits and targets, and only falls back to recalculating the card value when no hit was captured.
+
 ## 10.1.6 - Persistence and combat-mutation fixes (2026-10-08)
 
 - Fixed `Consume Card Value` with Persistence set to `Permanent` reverting to `This Combat`: the editor no longer flips it when switching between Edit Base and Edit Upgrade, and the absorbed value now lasts for the rest of the run. Cards saved while the bug showed `This Combat` need Permanent re-selected once.

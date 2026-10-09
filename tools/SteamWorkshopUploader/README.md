@@ -8,7 +8,7 @@ folder.
 ```powershell
 dotnet run --project .\tools\SteamWorkshopUploader\SteamWorkshopUploader.csproj -- `
   ".\built cfiles" `
-  "Version 10.1.6: fixed Permanent Consume Card Value reverting to This Combat, and This Combat card mutations leaking into the deck."
+  "Version 10.1.7: animated GIF card art now plays, and Applied Effect on Vanilla: Damage includes Vigor, Vulnerable, and other per-hit changes."
 ```
 
 The tool reports success only after the `SubmitItemUpdateResult_t` callback returns
