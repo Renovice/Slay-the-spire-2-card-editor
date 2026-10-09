@@ -76,7 +76,8 @@ internal static class CardEditorDebugDummyLobby
 	private static bool _dummyClientConnected;
 	private static NetHostGameService? _dummyHost;
 	private static StartRunLobby? _dummyLobby;
-	private static CardEditorDebugDummyLobbyPump? _pump;
+	private static CardEditorFrameTick? _pump;
+	private static bool _joinKeyWasDown;
 
 	// The character the dummy host picked at startup, captured so it can be re-affirmed (re-broadcast) when a
 	// real client actually connects. See OnDummyLobbyPlayerConnected for why re-affirming is needed.
@@ -181,8 +182,10 @@ internal static class CardEditorDebugDummyLobby
 
 			// Dedicated mod-owned pump node: only ever created on this enabled path, so with the const
 			// false there is genuinely no extra node in the tree.
-			_pump = new CardEditorDebugDummyLobbyPump();
-			tree.Root.CallDeferred(Node.MethodName.AddChild, _pump);
+			// Pumped from SceneTree.ProcessFrame: a mod Node's _Process/_UnhandledInput overrides are never
+			// dispatched (see CardEditorFrameTick). The signal also fires while paused.
+			_pump = new CardEditorFrameTick(_ => PumpFrame());
+			_pump.Start();
 
 			// One-click join: since the dummy host started, the ShowFriends postfix patch injects a fake
 			// "Dummy Host [debug]" entry into the game's own "Choose Friend to Join" list (NJoinFriendScreen).
@@ -200,7 +203,34 @@ internal static class CardEditorDebugDummyLobby
 	}
 
 	/// <summary>
-	/// Pumps the dummy host once per frame. Called from <see cref="CardEditorDebugDummyLobbyPump"/>.
+	/// Per-frame work for the dummy host: pumps it and polls the F9 join fallback (pressing F9 fires the same
+	/// real join flow as the fake friend-list entry, in case the "Join Friend" screen isn't open). Fully
+	/// guarded; a debug key must never crash the game.
+	/// </summary>
+	private static void PumpFrame()
+	{
+		PumpDummyHost();
+
+		bool joinKeyDown = Input.IsKeyPressed(Key.F9);
+		bool joinKeyPressed = joinKeyDown && !_joinKeyWasDown;
+		_joinKeyWasDown = joinKeyDown;
+		if (!joinKeyPressed)
+		{
+			return;
+		}
+
+		try
+		{
+			JoinDummyHost("key");
+		}
+		catch (Exception ex)
+		{
+			Log.Warn($"[CardEditor][DummyLobby] Dummy host key fallback failed: {ex}");
+		}
+	}
+
+	/// <summary>
+	/// Pumps the dummy host once per frame. Called from <see cref="PumpFrame"/>.
 	/// </summary>
 	internal static void PumpDummyHost()
 	{
@@ -298,7 +328,7 @@ internal static class CardEditorDebugDummyLobby
 	/// (<see cref="DummyHostIp"/>:<see cref="DummyHostPort"/>). Routed through
 	/// <see cref="TaskHelper.RunSafely"/> so the async task's exceptions are logged, and fully try/catch
 	/// guarded so it can never crash the game. Invoked by the F9 key fallback in
-	/// <see cref="CardEditorDebugDummyLobbyPump"/> (the primary path is the fake friend-list entry, which
+	/// <see cref="PumpFrame"/> (the primary path is the fake friend-list entry, which
 	/// drives NJoinFriendScreen's own JoinGame instead).
 	/// </summary>
 	/// <param name="source">Where the join was triggered from ("key"), for the log line.</param>
@@ -421,45 +451,6 @@ internal static class CardEditorDebugDummyLobby
 		public void LocalPlayerDisconnected(NetErrorInfo info)
 		{
 			Log.Info($"[CardEditor][DummyLobby] Local player disconnected: {info}");
-		}
-	}
-}
-
-/// <summary>
-/// Dedicated mod-owned pump node for the DEBUG dummy host. Only ever instantiated when
-/// <see cref="CardEditorDebugDummyLobby.SimulateDummyHost"/> is enabled; on the shipping path it is
-/// never created, so it adds nothing to the scene tree.
-/// </summary>
-internal sealed partial class CardEditorDebugDummyLobbyPump : Node
-{
-	public override void _Ready()
-	{
-		Name = "CardEditorDebugDummyLobbyPump";
-		ProcessMode = ProcessModeEnum.Always;
-	}
-
-	public override void _Process(double delta)
-	{
-		CardEditorDebugDummyLobby.PumpDummyHost();
-	}
-
-	/// <summary>
-	/// Key fallback for the one-click join: pressing F9 fires the same real join flow as the fake
-	/// friend-list entry, in case the "Join Friend" screen isn't open. Fully guarded; a debug key must
-	/// never crash the game.
-	/// </summary>
-	public override void _UnhandledInput(InputEvent @event)
-	{
-		try
-		{
-			if (@event is InputEventKey { Pressed: true, Echo: false, Keycode: Key.F9 })
-			{
-				CardEditorDebugDummyLobby.JoinDummyHost("key");
-			}
-		}
-		catch (Exception ex)
-		{
-			Log.Warn($"[CardEditor][DummyLobby] Dummy host key fallback failed: {ex}");
 		}
 	}
 }

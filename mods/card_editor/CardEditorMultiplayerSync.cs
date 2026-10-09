@@ -122,21 +122,6 @@ internal sealed class CardEditorMultiplayerLocalBackup
 	public required Dictionary<ModelId, RelicOverride> RelicOverrides { get; init; }
 }
 
-internal partial class CardEditorMultiplayerSyncRunner : Node
-{
-	public override void _Ready()
-	{
-		Name = "CardEditorMultiplayerSyncRunner";
-		ProcessMode = ProcessModeEnum.Always;
-		CardEditorMultiplayerSync.NotifyRunnerEnteredTree();
-	}
-
-	public override void _Process(double delta)
-	{
-		CardEditorMultiplayerSync.Update();
-	}
-}
-
 internal static class CardEditorMultiplayerSync
 {
 	private const string TickboxTemplateLineName = "LimitFpsInBackground";
@@ -183,7 +168,7 @@ internal static class CardEditorMultiplayerSync
 	private static readonly MessageHandlerDelegate<CardEditorMultiplayerEditRequestMessage> _editRequestHandler = OnEditRequestReceived;
 
 	private static INetGameService? _netService;
-	private static CardEditorMultiplayerSyncRunner? _runner;
+	private static CardEditorFrameTick? _updateTick;
 	private static CardEditorMultiplayerLocalBackup? _localBackup;
 	private static bool _requestedInitialSync;
 	private static bool _forceImmediateBroadcast;
@@ -210,7 +195,6 @@ internal static class CardEditorMultiplayerSync
 	private static bool _pendingClientReady;
 	private static Action? _pendingReadyAction;
 	private static long _lastSyncRequestMs;
-	private static bool _runnerAddQueued;
 	private const double SyncRequestRetrySeconds = 2.0;
 
 	public static bool IsBoundToMultiplayerSession => _netService != null && _netService.Type.IsMultiplayer();
@@ -1104,39 +1088,13 @@ internal static class CardEditorMultiplayerSync
 			$"parent={(control.GetParent()?.Name.ToString() ?? "<null>")}";
 	}
 
-	internal static void NotifyRunnerEnteredTree()
-	{
-		_runnerAddQueued = false;
-	}
-
 	private static void EnsureRunner()
 	{
-		// A runner instance that never entered the tree (AddChild raced scene setup) has a dead
-		// _Process - treat it like a missing runner and retry, instead of trusting IsInstanceValid.
-		if (_runner != null && GodotObject.IsInstanceValid(_runner) && _runner.IsInsideTree())
-		{
-			return;
-		}
-
-		if (_runnerAddQueued)
-		{
-			return;
-		}
-
-		if (Engine.GetMainLoop() is not SceneTree sceneTree || sceneTree.Root == null)
-		{
-			return;
-		}
-
-		if (_runner == null || !GodotObject.IsInstanceValid(_runner))
-		{
-			_runner = new CardEditorMultiplayerSyncRunner();
-		}
-
-		// Deferred add: BindToNetService runs from Harmony postfixes that can fire mid scene setup,
-		// where a synchronous AddChild on a busy parent is rejected.
-		_runnerAddQueued = true;
-		sceneTree.Root.CallDeferred(Node.MethodName.AddChild, _runner);
+		// Update() is pumped from SceneTree.ProcessFrame: a mod Node's _Process override is never
+		// dispatched (see CardEditorFrameTick), which left snapshot retries and host broadcasts dead.
+		// The signal also fires while the tree is paused, like the old ProcessMode.Always runner.
+		_updateTick ??= new CardEditorFrameTick(_ => Update());
+		_updateTick.Start();
 	}
 
 	private static void DetachCurrentService(bool restoreLocalState)
